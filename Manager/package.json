@@ -1,0 +1,25 @@
+{
+  "name": "com.babylon.toolkit",
+  "main": "",
+  "repository": {
+    "url": "https://github.com/MackeyK24/CanvasTools"
+  },
+  "license": "(Apache-2.0)",
+  "devDependencies": {
+    "gulp": "^3.8.11",
+    "gulp-uglify": "~1.5.3",
+    "gulp-sourcemaps": "~1.9.1",
+    "typescript": "^3.2.4",
+    "gulp-typescript": "~2.13.0",
+    "through2": "~0.6.5",
+    "gulp-util": "~3.0.4",
+    "gulp-concat": "~2.5.2",
+    "merge2": "~0.3.5"
+  },
+  "scripts": {
+    "install": "gulp"
+  },
+  "dependencies": {
+    "systemjs": "^0.21.4"
+  }
+}

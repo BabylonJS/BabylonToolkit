@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+        "target": "ES5",
+        "module": "system",
+        "lib": ["es5", "es2015", "dom"],
+        "experimentalDecorators": true
+    },
+    "include": [
+        "types/**/*",
+        "src/**/*"
+    ] 
+}
