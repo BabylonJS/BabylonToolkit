@@ -902,9 +902,10 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _physicsList;
     private _shadowList;
     private _scriptList;
+    private _sceneLoaded;
     private _disposeRoot;
     private _leftHanded;
-    private _sceneLoaded;
+    private _parseScene;
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader);
     /** @hidden */
@@ -916,18 +917,15 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     /** @hidden */
     loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
     /** @hidden */
-    private _loadScenePropertiesAsync;
-    /** @hidden */
     loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
-    /** @hidden */
-    createMaterial(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
     /** @hidden */
     loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
     /** @hidden */
+    createMaterial(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
+    private _loadScenePropertiesAsync;
+    /** @hidden */
     private _loadDefaultMaterialPropertiesAsync;
-    /** @hidden */
     private _loadStandardMaterialPropertiesAsync;
-    /** @hidden */
     private _loadShaderMaterialPropertiesAsync;
 }
 /**
