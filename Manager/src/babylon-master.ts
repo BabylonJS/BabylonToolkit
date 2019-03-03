@@ -6,7 +6,7 @@ module BABYLON {
      */
     export class SceneManager {
         /** Gets the toolkit framework version number */
-        public static get VERSION_NUMBER():string { return  "4.0.1"; }
+        public static get VERSION_NUMBER():string { return  "4.0.0"; }
         /** Enable scene physics system debug tracing */
         public static DEBUG_PHYSICS:boolean = false;
         /** Forces scene loader into right hand mode */
