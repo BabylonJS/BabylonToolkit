@@ -1,7 +1,7 @@
 
-The BabylonJS Managed Scene Component API uses a component object model to create and manage a scene component's life-cycle. To compile the project just run *npm install* and *gulp* in the folder. 
+The Managed Scene Component API uses a component object model to create and manage a scene component's life-cycle. 
 
-All extended scene functionallity is exposed via the BABYLON.SceneManager static helper class and BABYLON.ScriptComponent subclass instances that can be attached to game objects in the editor toolkit.
+Extended scene functionallity is provided via the **BABYLON.SceneManager** static helper class and **BABYLON.ScriptComponent** subclass instances that can be attached to game objects in the editor toolkit.
 
 ```
 /**
@@ -30,5 +30,7 @@ class MyScriptComponent extends BABYLON.ScriptComponent {
     }
 }
 ```
+
+To compile the project just run **npm install** and **gulp** in the scene manager folder. 
 
 .

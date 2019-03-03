@@ -2920,7 +2920,6 @@ module BABYLON {
      * @class ScriptComponent
      */
     export abstract class ScriptComponent {
-        protected ready(): void { }
         protected start(): void { }
         protected update(): void { }
         protected after(): void { }
@@ -2951,7 +2950,6 @@ module BABYLON {
             if (!instance.registerComponentInstance || !instance.destroyComponentInstance) {
                 BABYLON.Tools.Warn("Invalid component registration handlers for: " + this._entity.name);
             }
-            instance.ready();
         }
         /** TODO */
         public setProperty(name: string, propertyValue: any): void {
