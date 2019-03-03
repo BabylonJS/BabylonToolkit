@@ -438,7 +438,6 @@ declare module BABYLON {
      * @class ScriptComponent
      */
     abstract class ScriptComponent {
-        protected ready(): void;
         protected start(): void;
         protected update(): void;
         protected after(): void;
