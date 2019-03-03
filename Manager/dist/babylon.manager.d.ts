@@ -926,7 +926,7 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _parseSceneProperties;
     private _parseCommonConstantProperties;
     private _parseDefaultMaterialPropertiesAsync;
-    private _parseStandardMaterialPropertiesAsync;
+    private _parseCustomMaterialPropertiesAsync;
 }
 /**
  * Babylon Editor Toolkit - Loader Class
