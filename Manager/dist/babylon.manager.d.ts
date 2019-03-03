@@ -4,10 +4,12 @@ declare module BABYLON {
      * @class SceneManager
      */
     class SceneManager {
-        /** Forces scene loader into right hand mode */
-        static ForceRightHanded: boolean;
+        /** Gets the toolkit framework version number */
+        static readonly VERSION_NUMBER: string;
         /** Enable scene physics system debug tracing */
-        static DebugPhysics: boolean;
+        static DEBUG_PHYSICS: boolean;
+        /** Forces scene loader into right hand mode */
+        static FORCE_RIGHT_HANDED: boolean;
         /** Are unversial windows platform services available. */
         static IsWindows(): boolean;
         /** Are mobile cordova platform services available. */

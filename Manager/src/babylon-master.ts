@@ -5,10 +5,12 @@ module BABYLON {
      * @class SceneManager
      */
     export class SceneManager {
-        /** Forces scene loader into right hand mode */
-        public static ForceRightHanded:boolean = false;
+        /** Gets the toolkit framework version number */
+        public static get VERSION_NUMBER():string { return  "4.0.1"; }
         /** Enable scene physics system debug tracing */
-        public static DebugPhysics:boolean = false;
+        public static DEBUG_PHYSICS:boolean = false;
+        /** Forces scene loader into right hand mode */
+        public static FORCE_RIGHT_HANDED:boolean = false;
 
         // ********************************** //
         // * Babylon Scene Manager Platforms * //
@@ -1623,7 +1625,7 @@ module BABYLON {
         private static SetupPhysicsComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, metadata: any): void {
             if (metadata.rigidbody != null) {
                 entity.checkCollisions = false;
-                if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Initialize rigidbody physics for: " + entity.name);
+                if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Initialize rigidbody physics for: " + entity.name);
                 const mass:number = (metadata.rigidbody.mass != null) ? metadata.rigidbody.mass : 0;
                 const center:BABYLON.Vector3 = (metadata.rigidbody.center != null) ? BABYLON.Utilities.ParseVector3(metadata.rigidbody.center, BABYLON.Vector3.Zero()) : BABYLON.Vector3.Zero();
                 if (metadata.collision != null && metadata.collision.type != null && metadata.collision.type === "MeshCollider") {
@@ -1643,7 +1645,7 @@ module BABYLON {
                     else if (impersonatemesh === "SphereImpostor") impostortype = BABYLON.PhysicsImpostor.SphereImpostor;
                     else if (impersonatemesh === "CylinderImpostor") impostortype = BABYLON.PhysicsImpostor.CylinderImpostor;
                     else impostortype = (convexmesh === true) ? BABYLON.PhysicsImpostor.ConvexHullImpostor : BABYLON.PhysicsImpostor.MeshImpostor;
-                    if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(impostortype).toLowerCase() + " entity imposter for: " + entity.name);
+                    if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(impostortype).toLowerCase() + " entity imposter for: " + entity.name);
                     BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, entity, impostortype, { mass: mass, friction: dynamicfriction, restitution: restitution });
                     BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, entity, false, istrigger, metadata.rigidbody, debugging);
                 } else {
@@ -1692,7 +1694,7 @@ module BABYLON {
                                     if (crestitution > frestitution) frestitution = crestitution;
                                     if (cdebugging === true) fdebugging = 1;
                                     if (cistrigger == true) ftrigger = true;
-                                    if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(cimpostortype).toLowerCase() + " child imposter for: " + childnode.name);
+                                    if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(cimpostortype).toLowerCase() + " child imposter for: " + childnode.name);
                                     BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, childnode, cimpostortype, { mass: 0, friction: 0, restitution: 0 });
                                     BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, childnode, true, false, metadata.rigidbody, cdebugging);
                                     fcount++;
@@ -1701,7 +1703,7 @@ module BABYLON {
                         });
                     }
                     if (fcount > 0) {
-                        if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup physics root no imposter for: " + entity.name);
+                        if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup physics root no imposter for: " + entity.name);
                         BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, entity, BABYLON.PhysicsImpostor.NoImpostor, { mass: mass, friction: fdynamicfriction, restitution: frestitution });
                         BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, entity, false, ftrigger, metadata.rigidbody, (fdebugging === 1));
                     }

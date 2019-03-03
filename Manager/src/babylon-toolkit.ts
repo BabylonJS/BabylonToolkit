@@ -595,7 +595,7 @@ BABYLON.GLTF2.GLTFLoader.RegisterExtension(CVTOOLS_NAME, (loader) => new CVTOOLS
 BABYLON.GLTF2.GLTFLoader.RegisterExtension(CVTOOLS_HAND, (loader) => new CVTOOLS_left_handedness(loader));
 BABYLON.SceneLoader.OnPluginActivatedObservable.add(function (loader) {
     if (loader.name === "gltf") {
-        if (BABYLON.SceneManager.ForceRightHanded === true) {
+        if (BABYLON.SceneManager.FORCE_RIGHT_HANDED === true) {
             (<any>loader).coordinateSystemMode = BABYLON.GLTFLoaderCoordinateSystemMode.FORCE_RIGHT_HANDED;
         }
         (<any>loader).dispose();
