@@ -921,11 +921,10 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
     /** @hidden */
     createMaterial(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
-    private _loadScenePropertiesAsync;
-    /** @hidden */
-    private _loadDefaultMaterialPropertiesAsync;
-    private _loadStandardMaterialPropertiesAsync;
-    private _loadShaderMaterialPropertiesAsync;
+    private _parseSceneProperties;
+    private _parseCommonConstantProperties;
+    private _parseDefaultMaterialPropertiesAsync;
+    private _parseStandardMaterialPropertiesAsync;
 }
 /**
  * Babylon Editor Toolkit - Loader Class
