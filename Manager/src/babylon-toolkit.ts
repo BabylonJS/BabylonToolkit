@@ -203,7 +203,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                                 defaultUniforms = shaderMaterial.defaultUniforms;
                             }
                             if (defaultAttributes == null || defaultAttributes.length <= 0) {
-                                defaultAttributes = ["position", "normal", "uv"];
+                                defaultAttributes = ["position", "normal", "uv", "uv2", "color"];
                             }
                             if (defaultUniforms == null || defaultUniforms.length <= 0) {
                                 defaultUniforms = ["world", "worldView", "worldViewProjection", "view", "projection"];

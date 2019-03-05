@@ -387,7 +387,7 @@ module BABYLON {
         // * Public Shader Material Support  * //
         // *********************************** //
 
-        public static SetupShaderMaterial(material:BABYLON.ShaderMaterial, program: string, blending:boolean = false, testing:boolean = false, defaultAttributes:string[] = ["position", "normal", "uv"], defaultUniforms:string[] = ["world", "worldView", "worldViewProjection", "view", "projection"]):void {
+        public static SetupShaderMaterial(material:BABYLON.ShaderMaterial, program: string, blending:boolean = false, testing:boolean = false, defaultAttributes:string[] = ["position", "normal", "uv", "uv2", "color"], defaultUniforms:string[] = ["world", "worldView", "worldViewProjection", "view", "projection"]):void {
             const shaderProgram:any = { vertex: program, fragment: program };
             const shaderOptions:BABYLON.IShaderMaterialOptions = {
                 needAlphaBlending: blending,
