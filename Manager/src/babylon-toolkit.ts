@@ -547,6 +547,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         // ..
         if (commonConstant.lightmapTexture) {
             promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
+                texture.name = `${sourceMaterial.name} (Light Map)`;
                 babylonMaterial.setTexture("lightmapTexture", texture as BABYLON.Texture);
                 //babylonMaterial.useLightmapAsShadowmap = true;
             }));
@@ -559,6 +560,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 const tvalue = commonConstant.customTextures[tkey];
                 if (tvalue != null) {
                     promises.push(this._loader.loadTextureInfoAsync(context + "/" + tkey, tvalue, (texture) => {
+                        texture.name = `${sourceMaterial.name} (Diffuse)`;
                         babylonMaterial.setTexture(tkey, texture as BABYLON.Texture);
                     }));
                 }
@@ -753,6 +755,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "lightmapTexture")) {
                 if (commonConstant.lightmapTexture) {
                     promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
+                        texture.name = `${sourceMaterial.name} (Light Map)`;
                         commonMaterial.lightmapTexture = texture;
                         commonMaterial.useLightmapAsShadowmap = true;
                     }));
@@ -766,6 +769,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     const tvalue = commonConstant.customTextures[tkey];
                     if (tvalue != null && BABYLON.Utilities.HasOwnProperty(commonMaterial, tkey)) {
                         promises.push(this._loader.loadTextureInfoAsync(context + "/" + tkey, tvalue, (texture) => {
+                            texture.name = `${sourceMaterial.name} (Diffuse)`;
                             commonMaterial[tkey] = texture;
                         }));
                     }
