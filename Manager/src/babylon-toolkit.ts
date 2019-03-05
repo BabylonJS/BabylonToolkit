@@ -54,8 +54,8 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
 
     /** @hidden */
     public onLoading(): void {
-        this._parseScene = (this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf("CVTOOLS_unity_metadata") >= 0);
-        this._leftHanded = (this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf("CVTOOLS_left_handedness") >= 0);
+        this._parseScene = (this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf(CVTOOLS_NAME) >= 0);
+        this._leftHanded = (this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf(CVTOOLS_HAND) >= 0);
         if (this._parseScene === true) {
             //console.warn("CVTOOLS: OnLoading");
             this._physicsList = [];
@@ -164,6 +164,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         if (this._parseScene === true) {
              //console.warn("CVTOOLS: LoadMaterialPropertiesAsync: " + material.name);
             if (babylonMaterial instanceof BABYLON.PBRMaterial) return this._parseDefaultMaterialPropertiesAsync(context, material, babylonMaterial);
+            else if (babylonMaterial instanceof BABYLON.ShaderMaterial) return this._parseShaderMaterialPropertiesAsync(context, material, babylonMaterial);
             else return this._parseCustomMaterialPropertiesAsync(context, material, babylonMaterial)
         } else {
             return null; // Not Handled
@@ -183,6 +184,49 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 if (customMaterial != null) {
                     const ismaterial:boolean = (customMaterial instanceof BABYLON.Material);
                     if (ismaterial === true) {
+                        if (customMaterial instanceof BABYLON.ShaderMaterial) {
+                            const shaderMaterial:any = customMaterial;
+                            let shaderProgram:string = null, alphaBlending:boolean = false, alphaTesting:boolean = false, defaultAttributes:string[] = null, defaultUniforms:string[] = null;
+                            if (BABYLON.Utilities.HasOwnProperty(shaderMaterial, "shaderProgram")) {
+                                shaderProgram = shaderMaterial.shaderProgram;
+                            }
+                            if (BABYLON.Utilities.HasOwnProperty(shaderMaterial, "alphaBlending")) {
+                                alphaBlending = shaderMaterial.alphaBlending;
+                            }
+                            if (BABYLON.Utilities.HasOwnProperty(shaderMaterial, "alphaTesting")) {
+                                alphaTesting = shaderMaterial.alphaTesting;
+                            }
+                            if (BABYLON.Utilities.HasOwnProperty(shaderMaterial, "defaultAttributes")) {
+                                defaultAttributes = shaderMaterial.defaultAttributes;
+                            }
+                            if (BABYLON.Utilities.HasOwnProperty(shaderMaterial, "defaultUniforms")) {
+                                defaultUniforms = shaderMaterial.defaultUniforms;
+                            }
+                            if (defaultAttributes == null || defaultAttributes.length <= 0) {
+                                defaultAttributes = ["position", "normal", "uv"];
+                            }
+                            if (defaultUniforms == null || defaultUniforms.length <= 0) {
+                                defaultUniforms = ["world", "worldView", "worldViewProjection", "view", "projection"];
+                            }
+                            if (defaultUniforms.indexOf("diffuseColor") === -1) defaultUniforms.push("diffuseColor");
+                            if (defaultUniforms.indexOf("emissiveColor") === -1) defaultUniforms.push("emissiveColor");
+                            if (commonConstant.customVectors) {
+                                for(const vkey in commonConstant.customVectors) {
+                                    if (defaultUniforms.indexOf(vkey) === -1) defaultUniforms.push(vkey);
+                                } 
+                            }
+                            if (commonConstant.customColors) {
+                                for(const ckey in commonConstant.customColors) {
+                                    if (defaultUniforms.indexOf(ckey) === -1) defaultUniforms.push(ckey);
+                                } 
+                            }
+                            if (commonConstant.customFloats) {
+                                for(const fkey in commonConstant.customFloats) {
+                                    if (defaultUniforms.indexOf(fkey) === -1) defaultUniforms.push(fkey);
+                                } 
+                            }
+                            BABYLON.Utilities.SetupShaderMaterial(shaderMaterial, shaderProgram, alphaBlending, alphaTesting, defaultAttributes, defaultUniforms);
+                        }
                         babylonMaterial = customMaterial;
                         babylonMaterial.fillMode = babylonDrawMode;
                         babylonMaterial.sideOrientation = this._loader.babylonScene.useRightHandedSystem ? BABYLON.Material.CounterClockWiseSideOrientation : BABYLON.Material.ClockWiseSideOrientation;
@@ -394,73 +438,6 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         this._sceneLoaded = true;
     }
 
-    private _parseCommonConstantProperties(promises:Array<Promise<any>>, context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): void {
-        const commonConstant:any = (material.extras != null && material.extras.metadata != null) ? material.extras.metadata : null;
-        if (commonConstant != null) {
-            //console.warn("CVTOOLS: ParseCommonConstantMaterialProperties: " + material.name);
-            const commonMaterial:any = babylonMaterial;
-            // ..
-            // PBR PROPERTIES
-            // ..
-            if (babylonMaterial instanceof BABYLON.PBRMaterial) {
-                const pbrMaterial:BABYLON.PBRMaterial = babylonMaterial as BABYLON.PBRMaterial;
-                pbrMaterial.directIntensity = (commonConstant.directIntensity != null) ? commonConstant.directIntensity : 1.0;
-                pbrMaterial.specularIntensity = (commonConstant.specularIntensity != null) ? commonConstant.specularIntensity : 1.0;
-                pbrMaterial.emissiveIntensity = (commonConstant.emissiveIntensity != null) ? commonConstant.emissiveIntensity : 1.0;
-                pbrMaterial.environmentIntensity = (commonConstant.environmentIntensity != null) ? commonConstant.environmentIntensity : 1.0;
-            }
-            // ..
-            // LIGHTMAP PROPERTIES
-            // ..
-            if (commonConstant.lightmapTexture) {
-                promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
-                    commonMaterial.lightmapTexture = texture;
-                    commonMaterial.useLightmapAsShadowmap = true;
-                }));
-            }
-            // ..
-            // CUSTOM PROPERTIES
-            // ..
-            if (commonConstant.customTextures) {
-                for(const tkey in commonConstant.customTextures) {
-                    const tvalue = commonConstant.customTextures[tkey];
-                    if (tvalue != null) {
-                        promises.push(this._loader.loadTextureInfoAsync(context + "/" + tkey, tvalue, (texture) => {
-                            commonMaterial[tkey] = texture;
-                        }));
-                    }
-                } 
-            }
-            if (commonConstant.customVectors) {
-                for(const vkey in commonConstant.customVectors) {
-                    const vvalue = commonConstant.customVectors[vkey];
-                    if (vvalue != null) {
-                        commonMaterial[vkey] = BABYLON.Vector4.FromArray(vvalue);
-                    }
-                } 
-            }
-            if (commonConstant.customColors) {
-                for(const ckey in commonConstant.customColors) {
-                    const cvalue = commonConstant.customColors[ckey];
-                    if (cvalue != null) {
-                        commonMaterial[ckey] = BABYLON.Color3.FromArray(cvalue);
-                    }
-                } 
-            }
-            if (commonConstant.customFloats) {
-                for(const fkey in commonConstant.customFloats) {
-                    const fvalue = commonConstant.customFloats[fkey];
-                    // Note: Must be detectable boolean property
-                    if (commonMaterial[fkey] instanceof Boolean) {
-                        commonMaterial[fkey] = (fvalue > 0);
-                    } else {
-                        commonMaterial[fkey] = fvalue;
-                    }
-                } 
-            }
-        }
-    }
-
     private _parseDefaultMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, sourceMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>> {
         //console.warn("CVTOOLS: ParseDefaultMaterialPropertiesAsync: " + material.name);
         const promises = new Array<Promise<any>>();
@@ -468,22 +445,20 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         this._parseCommonConstantProperties(promises, context, material, sourceMaterial);
         return Promise.all(promises).then(() => { });
     }
-    
-    private _parseCustomMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, sourceMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>> {
-        //console.warn("CVTOOLS: ParseCustomMaterialPropertiesAsync: " + material.name);
-        const babylonMaterial:any = sourceMaterial;
+
+    private _parseShaderMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, sourceMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>> {
+        //console.warn("CVTOOLS: ParseShaderMaterialPropertiesAsync: " + material.name);
+        const commonConstant:any = (material.extras != null && material.extras.metadata != null) ? material.extras.metadata : null;
+        const babylonMaterial:BABYLON.ShaderMaterial = sourceMaterial as BABYLON.ShaderMaterial;
         const promises = new Array<Promise<any>>();
         // ..
-        // STANDARD PROPERTIES
+        // SHADER PROPERTIES
         // ..
-        if (sourceMaterial instanceof BABYLON.StandardMaterial) {
-            const standardMaterial:BABYLON.StandardMaterial = sourceMaterial as BABYLON.StandardMaterial;
-            standardMaterial.specularColor = BABYLON.Color3.Black();
-            if (this._loader.babylonScene.ambientColor) standardMaterial.ambientColor = this._loader.babylonScene.ambientColor.clone();
-            if (material.doubleSided) {
-                standardMaterial.backFaceCulling = false;
-                standardMaterial.twoSidedLighting = true;
-            }
+        //babylonMaterial.specularColor = BABYLON.Color3.Black();
+        //if (this._loader.babylonScene.ambientColor) babylonMaterial.ambientColor = this._loader.babylonScene.ambientColor.clone();
+        if (material.doubleSided) {
+            babylonMaterial.backFaceCulling = false;
+            //babylonMaterial.twoSidedLighting = true;
         }
         // ..
         // GENERAL PROPERTIES
@@ -493,16 +468,18 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             const properties = material.pbrMetallicRoughness;
             if (properties) {
                 if (properties.baseColorFactor) {
-                    const linearBaseColor:BABYLON.Color3 = BABYLON.Color3.FromArray(properties.baseColorFactor);
-                    babylonMaterial.diffuseColor = new BABYLON.Color3(Math.pow(linearBaseColor.r, 1 / 2.2), Math.pow(linearBaseColor.g, 1 / 2.2), Math.pow(linearBaseColor.b, 1 / 2.2));
-                    baseColorAlpha = properties.baseColorFactor[3];
+                    const linearBaseColor:BABYLON.Color4 = BABYLON.Color4.FromArray(properties.baseColorFactor);
+                    babylonMaterial.setColor3("diffuseColor", new BABYLON.Color3(Math.pow(linearBaseColor.r, 1 / 2.2), Math.pow(linearBaseColor.g, 1 / 2.2), Math.pow(linearBaseColor.b, 1 / 2.2)));
+                    baseColorAlpha = linearBaseColor.a;
                 } else {
-                    babylonMaterial.diffuseColor = BABYLON.Color3.White();
+                    babylonMaterial.setColor3("diffuseColor", new BABYLON.Color3(1.0, 1.0, 1.0));
                 }
                 if (properties.baseColorTexture) {
                     promises.push(this._loader.loadTextureInfoAsync(`${context}/baseColorTexture`, properties.baseColorTexture, (texture) => {
                         texture.name = `${sourceMaterial.name} (Base Color)`;
-                        babylonMaterial.diffuseTexture = texture;
+                        const diffuseTexture:BABYLON.Texture = texture as BABYLON.Texture;
+                        if (commonConstant != null) diffuseTexture.level = (commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1.0;
+                        babylonMaterial.setTexture("diffuseTexture", diffuseTexture);
                     }));
                 }
             }
@@ -510,30 +487,29 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         if (material.normalTexture) {
             promises.push(this._loader.loadTextureInfoAsync(`${context}/normalTexture`, material.normalTexture, (texture) => {
                 texture.name = `${sourceMaterial.name} (Normal)`;
-                babylonMaterial.bumpTexture = texture;
-                if (material.normalTexture.scale != undefined) {
-                    babylonMaterial.bumpTexture.level = material.normalTexture.scale;
-                }
+                const bumpTexture:BABYLON.Texture = texture as BABYLON.Texture;
+                if (material.normalTexture.scale != undefined) bumpTexture.level = material.normalTexture.scale;
+                babylonMaterial.setTexture("bumpTexture", bumpTexture);
             }));
-            babylonMaterial.invertNormalMapX = !this._loader.babylonScene.useRightHandedSystem;
-            babylonMaterial.invertNormalMapY = this._loader.babylonScene.useRightHandedSystem;
+            //babylonMaterial.invertNormalMapX = !this._loader.babylonScene.useRightHandedSystem;
+            //babylonMaterial.invertNormalMapY = this._loader.babylonScene.useRightHandedSystem;
         }
         if (material.occlusionTexture) {
             promises.push(this._loader.loadTextureInfoAsync(`${context}/occlusionTexture`, material.occlusionTexture, (texture) => {
                 texture.name = `${sourceMaterial.name} (Occlusion)`;
-                babylonMaterial.ambientTexture = texture;
-                if (material.occlusionTexture.strength != undefined) {
-                    babylonMaterial.ambientTexture.level = material.occlusionTexture.strength;
-                }
+                const ambientTexture:BABYLON.Texture = texture as BABYLON.Texture;
+                if (material.occlusionTexture.strength != undefined) ambientTexture.level = material.occlusionTexture.strength;
+                babylonMaterial.setTexture("ambientTexture", ambientTexture);
             }));
         }
-        const linearEmmisveColor:BABYLON.Color3 = material.emissiveFactor ? BABYLON.Color3.FromArray(material.emissiveFactor) : new BABYLON.Color3(0, 0, 0);
-        babylonMaterial.emissiveColor = new BABYLON.Color3(Math.pow(linearEmmisveColor.r, 1 / 2.2), Math.pow(linearEmmisveColor.g, 1 / 2.2), Math.pow(linearEmmisveColor.b, 1 / 2.2));
+        const linearEmmisveColor:BABYLON.Color4 = material.emissiveFactor ? BABYLON.Color4.FromArray(material.emissiveFactor) : new BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
+        babylonMaterial.setColor3("emissiveColor", new BABYLON.Color3(Math.pow(linearEmmisveColor.r, 1 / 2.2), Math.pow(linearEmmisveColor.g, 1 / 2.2), Math.pow(linearEmmisveColor.b, 1 / 2.2)));
         if (material.emissiveTexture) {
             promises.push(this._loader.loadTextureInfoAsync(`${context}/emissiveTexture`, material.emissiveTexture, (texture) => {
                 texture.name = `${sourceMaterial.name} (Emissive)`;
-                babylonMaterial.emissiveTexture = texture;
-                babylonMaterial.useEmissiveAsIllumination = true;
+                const emissiveTexture:BABYLON.Texture = texture as BABYLON.Texture;
+                babylonMaterial.setTexture("emissiveTexture", emissiveTexture);
+                //babylonMaterial.useEmissiveAsIllumination = true;
             }));
         }
         // ..
@@ -547,18 +523,199 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 break;
             }
             case BABYLON.GLTF2.MaterialAlphaMode.MASK: {    // Note: Transparency-Cutout (ALPHATEST)
+                //babylonMaterial.alphaCutOff = (material.alphaCutoff == undefined ? 0.5 : material.alphaCutoff);
+                //if (babylonMaterial.diffuseTexture) {
+                //    babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
+                //    babylonMaterial.diffuseTexture.hasAlpha = true;
+                //}
+                break;
+            }
+            case BABYLON.GLTF2.MaterialAlphaMode.BLEND: {   // Note: Transparency (ALPHABLEND)
+                //if (babylonMaterial.diffuseTexture) {
+                //    babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
+                //    babylonMaterial.diffuseTexture.hasAlpha = true;
+                //    //babylonMaterial.useAlphaFromDiffuseTexture = true;
+                //}
+                break;
+            }
+            default: {
+                throw new Error(`${context}/alphaMode: Invalid value (${material.alphaMode})`);
+            }
+        }
+        // ..
+        // LIGHTMAP PROPERTIES
+        // ..
+        if (commonConstant.lightmapTexture) {
+            promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
+                babylonMaterial.setTexture("lightmapTexture", texture as BABYLON.Texture);
+                //babylonMaterial.useLightmapAsShadowmap = true;
+            }));
+        }
+        // ..
+        // CUSTOM PROPERTIES
+        // ..
+        if (commonConstant.customTextures) {
+            for(const tkey in commonConstant.customTextures) {
+                const tvalue = commonConstant.customTextures[tkey];
+                if (tvalue != null) {
+                    promises.push(this._loader.loadTextureInfoAsync(context + "/" + tkey, tvalue, (texture) => {
+                        babylonMaterial.setTexture(tkey, texture as BABYLON.Texture);
+                    }));
+                }
+            } 
+        }
+        if (commonConstant.customVectors) {
+            for(const vkey in commonConstant.customVectors) {
+                const vvalue = commonConstant.customVectors[vkey];
+                if (vvalue != null) {
+                    babylonMaterial.setVector4(vkey, BABYLON.Vector4.FromArray(vvalue));
+                }
+            } 
+        }
+        if (commonConstant.customColors) {
+            for(const ckey in commonConstant.customColors) {
+                const cvalue = commonConstant.customColors[ckey];
+                if (cvalue != null) {
+                    babylonMaterial.setColor4(ckey, BABYLON.Color4.FromArray(cvalue));
+                }
+            } 
+        }
+        if (commonConstant.customFloats) {
+            for(const fkey in commonConstant.customFloats) {
+                const fvalue = commonConstant.customFloats[fkey];
+                if (fvalue != null) {
+                    babylonMaterial.setFloat(fkey, fvalue);
+                }
+            } 
+        }
+        return Promise.all(promises).then(() => { });
+    }
+    
+    private _parseCustomMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, sourceMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>> {
+        //console.warn("CVTOOLS: ParseCustomMaterialPropertiesAsync: " + material.name);
+        const babylonMaterial:any = sourceMaterial;
+        const promises = new Array<Promise<any>>();
+        // ..
+        // STANDARD PROPERTIES
+        // ..
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "specularColor")) {
+            babylonMaterial.specularColor = BABYLON.Color3.Black();
+        }
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "ambientColor")) {
+            if (this._loader.babylonScene.ambientColor) babylonMaterial.ambientColor = this._loader.babylonScene.ambientColor.clone();
+        }
+        if (material.doubleSided) {
+            if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "backFaceCulling")) {
+                babylonMaterial.backFaceCulling = false;
+            }
+            if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "twoSidedLighting")) {
+                babylonMaterial.twoSidedLighting = true;
+            }
+        }
+        // ..
+        // GENERAL PROPERTIES
+        // ..
+        let baseColorAlpha:number = 1.0;
+        if (material.pbrMetallicRoughness) {
+            const properties = material.pbrMetallicRoughness;
+            if (properties) {
+                if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseColor")) {
+                    if (properties.baseColorFactor) {
+                        const linearBaseColor:BABYLON.Color4 = BABYLON.Color4.FromArray(properties.baseColorFactor);
+                        babylonMaterial.diffuseColor = new BABYLON.Color3(Math.pow(linearBaseColor.r, 1 / 2.2), Math.pow(linearBaseColor.g, 1 / 2.2), Math.pow(linearBaseColor.b, 1 / 2.2));
+                        baseColorAlpha = linearBaseColor.a;
+                    } else {
+                        babylonMaterial.diffuseColor = BABYLON.Color3.White();
+                    }
+                }
+                if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseTexture")) {
+                    if (properties.baseColorTexture) {
+                        promises.push(this._loader.loadTextureInfoAsync(`${context}/baseColorTexture`, properties.baseColorTexture, (texture) => {
+                            texture.name = `${sourceMaterial.name} (Base Color)`;
+                            babylonMaterial.diffuseTexture = texture;
+                            const commonConstant:any = (material.extras != null && material.extras.metadata != null) ? material.extras.metadata : null;
+                            if (commonConstant != null) babylonMaterial.diffuseTexture.level = (commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1.0;
+                        }));
+                    }
+                }
+            }
+        }
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "bumpTexture")) {
+            if (material.normalTexture) {
+                promises.push(this._loader.loadTextureInfoAsync(`${context}/normalTexture`, material.normalTexture, (texture) => {
+                    texture.name = `${sourceMaterial.name} (Normal)`;
+                    babylonMaterial.bumpTexture = texture;
+                    if (material.normalTexture.scale != undefined) babylonMaterial.bumpTexture.level = material.normalTexture.scale;
+                }));
+                if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "invertNormalMapX")) {
+                    babylonMaterial.invertNormalMapX = !this._loader.babylonScene.useRightHandedSystem;
+                }
+                if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "invertNormalMapY")) {
+                    babylonMaterial.invertNormalMapY = this._loader.babylonScene.useRightHandedSystem;
+                }
+            }
+        }
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "ambientTexture")) {
+            if (material.occlusionTexture) {
+                promises.push(this._loader.loadTextureInfoAsync(`${context}/occlusionTexture`, material.occlusionTexture, (texture) => {
+                    texture.name = `${sourceMaterial.name} (Occlusion)`;
+                    babylonMaterial.ambientTexture = texture;
+                    if (material.occlusionTexture.strength != undefined) babylonMaterial.ambientTexture.level = material.occlusionTexture.strength;
+                }));
+            }
+        }
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "emissiveColor")) {
+            const linearEmmisveColor:BABYLON.Color4 = material.emissiveFactor ? BABYLON.Color4.FromArray(material.emissiveFactor) : new BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
+            babylonMaterial.emissiveColor = new BABYLON.Color3(Math.pow(linearEmmisveColor.r, 1 / 2.2), Math.pow(linearEmmisveColor.g, 1 / 2.2), Math.pow(linearEmmisveColor.b, 1 / 2.2));
+        }
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "emissiveTexture")) {
+            if (material.emissiveTexture) {
+                promises.push(this._loader.loadTextureInfoAsync(`${context}/emissiveTexture`, material.emissiveTexture, (texture) => {
+                    texture.name = `${sourceMaterial.name} (Emissive)`;
+                    babylonMaterial.emissiveTexture = texture;
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "useEmissiveAsIllumination")) {
+                        babylonMaterial.useEmissiveAsIllumination = true;
+                    }
+                }));
+            }
+        }
+        // ..
+        // ALPHA PROPERTIES
+        // ..
+        if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "alpha")) {
+            babylonMaterial.alpha = baseColorAlpha;             // Note: Default Base Color Alpha
+        }
+        const alphaMode = material.alphaMode || BABYLON.GLTF2.MaterialAlphaMode.OPAQUE;
+        switch (alphaMode) {
+            case BABYLON.GLTF2.MaterialAlphaMode.OPAQUE: {  // Note: Normal-Mode (OPAQUE)
+                if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "alpha")) {
+                    babylonMaterial.alpha = 1.0;                // Note: Reset Alpha To Opaque
+                }
+                break;
+            }
+            case BABYLON.GLTF2.MaterialAlphaMode.MASK: {    // Note: Transparency-Cutout (ALPHATEST)
                 babylonMaterial.alphaCutOff = (material.alphaCutoff == undefined ? 0.5 : material.alphaCutoff);
                 if (babylonMaterial.diffuseTexture) {
-                    babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
-                    babylonMaterial.diffuseTexture.hasAlpha = true;
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "alpha")) {
+                        babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
+                    }
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseTexture")) {
+                        babylonMaterial.diffuseTexture.hasAlpha = true;
+                    }
                 }
                 break;
             }
             case BABYLON.GLTF2.MaterialAlphaMode.BLEND: {   // Note: Transparency (ALPHABLEND)
                 if (babylonMaterial.diffuseTexture) {
-                    babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
-                    babylonMaterial.diffuseTexture.hasAlpha = true;
-                    babylonMaterial.useAlphaFromDiffuseTexture = true;
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "alpha")) {
+                        babylonMaterial.alpha = 1.0;            // Note: Use Alpha From Texture
+                    }
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseTexture")) {
+                        babylonMaterial.diffuseTexture.hasAlpha = true;
+                    }
+                    if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "useAlphaFromDiffuseTexture")) {
+                        babylonMaterial.useAlphaFromDiffuseTexture = true;
+                    }
                 }
                 break;
             }
@@ -568,6 +725,82 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         }
         this._parseCommonConstantProperties(promises, context, material, sourceMaterial);
         return Promise.all(promises).then(() => { });
+    }
+
+    private _parseCommonConstantProperties(promises:Array<Promise<any>>, context: string, material: BABYLON.GLTF2.Loader.IMaterial, sourceMaterial: BABYLON.Material): void {
+        const commonConstant:any = (material.extras != null && material.extras.metadata != null) ? material.extras.metadata : null;
+        if (commonConstant != null) {
+            //console.warn("CVTOOLS: ParseCommonConstantMaterialProperties: " + material.name);
+            const commonMaterial:any = sourceMaterial;
+            // ..
+            // PBR PROPERTIES
+            // ..
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "directIntensity")) {
+                commonMaterial.directIntensity = (commonConstant.directIntensity != null) ? commonConstant.directIntensity : 1.0;
+            }
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "specularIntensity")) {
+                commonMaterial.specularIntensity = (commonConstant.specularIntensity != null) ? commonConstant.specularIntensity : 1.0;
+            }
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "emissiveIntensity")) {
+                commonMaterial.emissiveIntensity = (commonConstant.emissiveIntensity != null) ? commonConstant.emissiveIntensity : 1.0;
+            }
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "environmentIntensity")) {
+                commonMaterial.environmentIntensity = (commonConstant.environmentIntensity != null) ? commonConstant.environmentIntensity : 1.0;
+            }
+            // ..
+            // LIGHTMAP PROPERTIES
+            // ..
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "lightmapTexture")) {
+                if (commonConstant.lightmapTexture) {
+                    promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
+                        commonMaterial.lightmapTexture = texture;
+                        commonMaterial.useLightmapAsShadowmap = true;
+                    }));
+                }
+            }
+            // ..
+            // CUSTOM PROPERTIES
+            // ..
+            if (commonConstant.customTextures) {
+                for(const tkey in commonConstant.customTextures) {
+                    const tvalue = commonConstant.customTextures[tkey];
+                    if (tvalue != null && BABYLON.Utilities.HasOwnProperty(commonMaterial, tkey)) {
+                        promises.push(this._loader.loadTextureInfoAsync(context + "/" + tkey, tvalue, (texture) => {
+                            commonMaterial[tkey] = texture;
+                        }));
+                    }
+                } 
+            }
+            if (commonConstant.customVectors) {
+                for(const vkey in commonConstant.customVectors) {
+                    const vvalue = commonConstant.customVectors[vkey];
+                    if (vvalue != null && BABYLON.Utilities.HasOwnProperty(commonMaterial, vkey)) {
+                        commonMaterial[vkey] = BABYLON.Vector4.FromArray(vvalue);
+                    }
+                } 
+            }
+            if (commonConstant.customColors) {
+                for(const ckey in commonConstant.customColors) {
+                    const cvalue = commonConstant.customColors[ckey];
+                    if (cvalue != null && BABYLON.Utilities.HasOwnProperty(commonMaterial, ckey)) {
+                        commonMaterial[ckey] = BABYLON.Color4.FromArray(cvalue);
+                    }
+                } 
+            }
+            if (commonConstant.customFloats) {
+                for(const fkey in commonConstant.customFloats) {
+                    const fvalue = commonConstant.customFloats[fkey];
+                    if (fvalue != null && BABYLON.Utilities.HasOwnProperty(commonMaterial, fkey)) {
+                        // Note: Must be detectable boolean property
+                        if (commonMaterial[fkey] instanceof Boolean) {
+                            commonMaterial[fkey] = (fvalue > 0);
+                        } else {
+                            commonMaterial[fkey] = fvalue;
+                        }
+                    }
+                } 
+            }
+        }
     }
 }
 /**

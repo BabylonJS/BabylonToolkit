@@ -797,8 +797,10 @@ declare module BABYLON {
         static LookRotationToRef(position: BABYLON.Vector3, result: BABYLON.Quaternion): void;
         /** TODO */
         static DownloadEnvironment(cubemap: BABYLON.CubeTexture, success?: () => void, failure?: () => void): void;
+        static HasOwnProperty(object: any, property: string): boolean;
         /** TODO */
         static PrintToScreen(text: string, color?: string): void;
+        static SetupShaderMaterial(material: BABYLON.ShaderMaterial, program: string, blending?: boolean, testing?: boolean, defaultAttributes?: string[], defaultUniforms?: string[]): void;
         /** TODO */
         static StartsWith(source: string, word: string): boolean;
         /** TODO */
@@ -924,9 +926,10 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     /** @hidden */
     createMaterial(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
     private _parseSceneProperties;
-    private _parseCommonConstantProperties;
     private _parseDefaultMaterialPropertiesAsync;
+    private _parseShaderMaterialPropertiesAsync;
     private _parseCustomMaterialPropertiesAsync;
+    private _parseCommonConstantProperties;
 }
 /**
  * Babylon Editor Toolkit - Loader Class

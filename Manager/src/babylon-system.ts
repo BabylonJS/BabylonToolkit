@@ -350,6 +350,14 @@ module BABYLON {
             });
         }
 
+        // ************************************ //
+        // * Public Has Own Property Support  * //
+        // ************************************ //
+
+        public static HasOwnProperty(object:any, property:string):boolean {
+            return (object != null && property != null && property !== "" && property in object);
+        }
+    
         // *********************************** //
         // * Public Print To Screen Support  * //
         // *********************************** //
@@ -375,6 +383,25 @@ module BABYLON {
             }
         }
 
+        // *********************************** //
+        // * Public Shader Material Support  * //
+        // *********************************** //
+
+        public static SetupShaderMaterial(material:BABYLON.ShaderMaterial, program: string, blending:boolean = false, testing:boolean = false, defaultAttributes:string[] = ["position", "normal", "uv"], defaultUniforms:string[] = ["world", "worldView", "worldViewProjection", "view", "projection"]):void {
+            const shaderProgram:any = { vertex: program, fragment: program };
+            const shaderOptions:BABYLON.IShaderMaterialOptions = {
+                needAlphaBlending: blending,
+                needAlphaTesting: testing,
+                attributes: defaultAttributes,
+                uniforms: defaultUniforms,
+                uniformBuffers: [],
+                samplers: [],
+                defines: []
+            };
+            (<any>material)._shaderPath = shaderProgram;
+            (<any>material)._options = shaderOptions;
+        }
+    
         // ************************************ //
         // * Public String Tools Support * //
         // ************************************ //
