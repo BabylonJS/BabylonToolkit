@@ -1,20 +1,37 @@
 module BABYLON {
-    declare var Ammo: any;
     /**
      * Babylon scene manager class
      * @class SceneManager
      */
     export class SceneManager {
         /** Gets the toolkit framework version number */
-        public static get VERSION_NUMBER():string { return  "4.0.0"; }
-        /** Enable scene physics system debug tracing */
-        public static DEBUG_PHYSICS:boolean = false;
+        public static get VersionNumber():string { return  "4.1.0 - A1"; }
+        /** Managed animation group start mode */
+        public static AnimationStartMode?:BABYLON.GLTFLoaderAnimationStartMode = null;
         /** Forces scene loader into right hand mode */
-        public static FORCE_RIGHT_HANDED:boolean = false;
+        public static ForceRightHanded?:boolean = null;
+        /** Enable scene physics system debug tracing */
+        public static DebugPhysics:boolean = false;
+        /** Managed json data store object */
+        public static DataStore:any = {};
 
         // ********************************** //
-        // * Babylon Scene Manager Platforms * //
+        // * Babylon Scene Manager Plugins  * //
         // ********************************** //
+
+        private static EnableSceneParsing:boolean = true;
+        /** Enable scene loader parsing plugin */
+        public static EnableSceneLoader(enabled:boolean):void {
+            BABYLON.SceneManager.EnableSceneParsing = enabled;
+        }
+        /** Is scene loader parsing plugin enabled */
+        public static IsSceneLoaderEnabled():boolean {
+            return BABYLON.SceneManager.EnableSceneParsing;
+        }
+
+        // ************************************ //
+        // * Babylon Scene Manager Platforms  * //
+        // ************************************ //
 
         /** Are unversial windows platform services available. */
         public static IsWindows(): boolean {
@@ -183,6 +200,10 @@ module BABYLON {
         // * Scene Manager System Functions * //
         // ********************************** //
 
+        /** Run a function on the next render loop. */
+        public static RunOnce(scene:BABYLON.Scene, func:()=>void): void {
+            scene.onBeforeRenderObservable.addOnce(func);
+        }
         /** Popup debug layer in window. */
         public static PopupDebug(scene:BABYLON.Scene): void {
             if (scene.debugLayer) {
@@ -245,13 +266,13 @@ module BABYLON {
         public static MultiRayCast(scene:BABYLON.Scene, ray: BABYLON.Ray, predicate?: (mesh: BABYLON.AbstractMesh) => boolean): BABYLON.PickingInfo[] {
             return scene.multiPickWithRay(ray, predicate);
         }
-        /** Safely destroy mesh entity */
-        public static SafeDestroy(entity: BABYLON.AbstractMesh, delay:number = 5, disable:boolean = false):void {
+        /** Safely destroy transform node */
+        public static SafeDestroy(transform: BABYLON.TransformNode, delay:number = 5, disable:boolean = false):void {
             if (delay > 0) { 
-                if (disable === true) entity.setEnabled(false);
-                BABYLON.SceneManager.SetTimeout(delay, ()=>{ entity.dispose(false, false); });
+                if (disable === true) transform.setEnabled(false);
+                BABYLON.SceneManager.SetTimeout(delay, ()=>{ transform.dispose(false, false); });
             } else { 
-                entity.dispose(false, false);
+                transform.dispose(false, false);
             }
         }
         /** Open alert message dialog. */
@@ -264,52 +285,6 @@ module BABYLON {
             }
             return result;
         }
-        /** Inline loads the required runtime script code */
-        public static InjectScript(script: string, id: string): void {
-            if (script != null) {
-                const header = document.head || document.getElementsByTagName("head")[0];
-                const filesrc = document.createTextNode(script);
-                const fileref = document.createElement("script");
-                if (id != null) fileref.id = id;
-                fileref.setAttribute("type", "text/javascript");
-                fileref.appendChild(filesrc); 
-                header.appendChild(fileref);
-            }
-        }
-        /** Sequentially loads the required runtime script libraries */
-        public static RequireScript(libs:string|Array<string>, callback:Function):void {
-            var injectScriptTags = function (scripts:Array<string>, index:number, callback:Function) {
-                const header = document.head || document.getElementsByTagName("head")[0];        
-                if (scripts[index]) {
-                    const filesrc = scripts[index];
-                    const fileref = document.createElement("script");
-                    fileref.id = (filesrc.indexOf('/') >= 0) ? filesrc.substring(filesrc.lastIndexOf('/') + 1) : filesrc;
-                    fileref.setAttribute("type", "text/javascript");
-                    fileref.setAttribute("src", filesrc);
-                    fileref.onerror = function(err) {
-                        console.warn("Failed to load library script tag for " + filesrc + ". " + err.toString());
-                        index = index + 1;
-                        injectScriptTags(scripts, index, callback)
-                    };
-                    fileref.onload = function() {
-                        index = index + 1;
-                        injectScriptTags(scripts, index, callback)
-                    };
-                    header.appendChild(fileref)
-                } else {
-                    if (callback != null) {
-                        callback();
-                    }
-                }
-            };
-            if (libs != null) {
-                if (libs instanceof Array) {
-                    injectScriptTags(libs, 0, callback);        
-                } else {
-                    injectScriptTags([libs], 0, callback);
-                }
-            }
-        } 
         /**  Gets the names query string from page url. */
         public static GetQueryStringParam(name: string, url: string): string {
             if (!url) url = window.location.href;
@@ -377,24 +352,52 @@ module BABYLON {
             }
         }
 
+        // ********************************** //
+        // * Scene Manager Engine Functions * //
+        // ********************************** //
+
+        /** Get the last create engine instance */
+        public static GetEngineInstances(): BABYLON.Engine[] { 
+            return BABYLON.EngineStore.Instances;
+        }
+        /** Get the last create engine instance */
+        public static GetLastCreatedEngine(): BABYLON.Engine { 
+            return BABYLON.EngineStore.LastCreatedEngine;
+        }
+        /** Get the last created scene instance */
+        public static GetLastCreatedScene(): BABYLON.Scene { 
+            return BABYLON.EngineStore.LastCreatedScene;
+        }
+
         // ******************************** //
         // * Scene Manager Mesh Functions * //
         // ******************************** //
 
         /** Gets the specified mesh from scene. */
-        public static GetMesh<T extends BABYLON.TransformNode|BABYLON.AbstractMesh|BABYLON.Mesh>(scene:BABYLON.Scene, name:string): T {
-            if (scene == null) return null;
-            let result:any = scene.getNodeByName(name);
-            return (result != null) ? result as T : null;
+        public static GetMesh(scene:BABYLON.Scene, name:string): BABYLON.AbstractMesh {
+            return scene.getNodeByName(name) as BABYLON.AbstractMesh;
         }
-        /** Gets the prefab mesh from scene. */
+        /** Gets the specified transform node from scene. */
+        public static GetTransform(scene:BABYLON.Scene, name:string): BABYLON.TransformNode {
+            if (scene == null) return null;
+            return scene.getNodeByName(name) as BABYLON.TransformNode;
+        }
+        /** Gets the specified prefab mesh from scene. */
         public static GetPrefabMesh(scene:BABYLON.Scene, prefabName:string): BABYLON.AbstractMesh {
             const realPrefab:string = "Prefab." + prefabName;
             return BABYLON.SceneManager.GetMesh(scene, realPrefab);
         }
-        /** Gets the navigation mesh from scene. */
+        /** TODO: Remove This - Gets the transform node primitive meshes. */
+        public static GetPrimitiveMeshes(transform:TransformNode): BABYLON.AbstractMesh[] {
+            return transform.getChildMeshes(true, (node:BABYLON.Node)=>{  return ( node.name.indexOf("_primitive") >= 0); });
+        }
+        /** Gets the transform node collision meshes. */
+        public static GetCollisionMeshes(transform:TransformNode): BABYLON.AbstractMesh[] {
+            return transform.getChildMeshes(true, (node:BABYLON.Node)=>{  return ( node.name.indexOf("_collider") >= 0); });
+        }
+        /** Gets the system navigation mesh from scene. */
         public static GetNavigationMesh(scene:BABYLON.Scene):BABYLON.AbstractMesh {
-            return BABYLON.SceneManager.GetMesh(scene, "NavigationMesh") as BABYLON.AbstractMesh;
+            return BABYLON.SceneManager.GetMesh(scene, "NavigationMesh");
         }
         /** Instantiates the specfied prefab object into scene. */
         public static InstantiatePrefab(scene:BABYLON.Scene, name:string, cloneName: string, newParent: Node = null, newPosition:BABYLON.Vector3 = null, newRotation:BABYLON.Vector3 = null, newScaling:BABYLON.Vector3 = null): BABYLON.AbstractMesh {
@@ -414,12 +417,10 @@ module BABYLON {
                     if (clones == null) clones = [result];
                     else clones.unshift(result);
                     // Parse cloned mesh prefabs
-                    let physicsList:Array<any> = [];
-                    let shadowList:Array<BABYLON.AbstractMesh> = [];
-                    let scriptList:Array<any> = [];
+                    const parser:BABYLON.MetadataParser = new BABYLON.MetadataParser(scene);
                     clones.forEach((cloned) => {
                         cloned.name = BABYLON.Utilities.ReplaceAll(cloned.name, "Prefab.", "");
-                        cloned.id = cloned.name;
+                        cloned.id = BABYLON.Utilities.CreateGuid(cloned.uniqueId.toFixed());
                         cloned.setEnabled(true);
                         const clone:BABYLON.AbstractMesh = cloned as BABYLON.AbstractMesh;
                         const source:any = (<any>clone).source || (<any>clone).sourceMesh;
@@ -442,16 +443,9 @@ module BABYLON {
                                 }
                             }
                         }
-                        BABYLON.SceneManager.ParseSceneComponents(scene, clone, shadowList, scriptList, physicsList);
+                        parser.parseSceneComponents(clone);
                     });
-                    BABYLON.SceneManager.ProcessPendingPhysics(scene, physicsList);
-                    BABYLON.SceneManager.ProcessPendingShadows(scene, shadowList);
-                    BABYLON.SceneManager.ProcessPendingScripts(scene, scriptList);
-                    physicsList = null;
-                    shadowList = null;
-                    scriptList = null;
-                    childs = null;
-                    clones = null;
+                    parser.postProcessSceneComponents();
                 } else {
                     BABYLON.Tools.Warn("Failed to create prefab of: " + name);
                 }
@@ -459,28 +453,6 @@ module BABYLON {
                 BABYLON.Tools.Warn("Failed to lookup source mesh: " + name);
             }
             return result;
-        }
-        /** Creates a system skybox mesh for the scene */
-        public static CreateSkyboxMesh(scene:BABYLON.Scene, root:string, url:string, size:number = 1000, extensions:string[] = null, fog:boolean = false): BABYLON.Mesh {
-            const skyboxTexture:BABYLON.CubeTexture = new BABYLON.CubeTexture(url, scene, extensions);                
-            skyboxTexture.name = "SkyboxTexture";
-            skyboxTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
-            const skyboxMesh:BABYLON.Mesh = BABYLON.Mesh.CreateBox("Ambient Skybox", size, scene);
-            skyboxMesh.infiniteDistance = true;
-            skyboxMesh.applyFog = fog;
-            if (scene.useRightHandedSystem === true) { 
-                skyboxTexture.rotationY = Math.PI;
-                skyboxMesh.scaling.x *= -1;                
-            }
-            const standardMaterial = new BABYLON.StandardMaterial("SkyboxMaterial", scene);
-            standardMaterial.backFaceCulling = false;
-            standardMaterial.disableLighting = true;
-            standardMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
-            standardMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
-            standardMaterial.ambientColor = new BABYLON.Color3(0, 0, 0);
-            standardMaterial.reflectionTexture =  skyboxTexture;
-            skyboxMesh.material = standardMaterial;
-            return skyboxMesh;
         }
 
         // ************************************* //
@@ -499,17 +471,17 @@ module BABYLON {
                 (<any>instance).destroyComponentInstance(instance);
             }
         }
-        /** Finds a script component in the scene with the specfied klass name. */
-        public static FindScriptComponent<T extends BABYLON.ScriptComponent>(entity: BABYLON.AbstractMesh, klass: string): T {
+        /** Finds a script component in the scene with the specfied class name. */
+        public static FindScriptComponent<T extends BABYLON.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T {
+            if (transform == null) return null;
             let result: any = null;
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            if (entity.metadata != null && entity.metadata.unity) {
-                const metadata: any = entity.metadata.unity;
+            if (transform.metadata != null && transform.metadata.unity) {
+                const metadata: any = transform.metadata.unity;
                 if (metadata.components != null && metadata.components.length > 0) {
                     for (let ii: number = 0; ii < metadata.components.length; ii++) {
-                        const entityscript: any = metadata.components[ii];
-                        if (entityscript.instance != null && entityscript.klass === klass) {
-                            result = entityscript.instance;
+                        const transformscript: any = metadata.components[ii];
+                        if (transformscript.instance != null && transformscript.klass === klass) {
+                            result = transformscript.instance;
                             break;
                         }
                     }
@@ -517,58 +489,60 @@ module BABYLON {
             }
             return (result != null) ? result as T : null;
         }
-        /** Finds all script components in the scene with the specfied klass name. */
-        public static FindScriptComponents<T extends BABYLON.ScriptComponent>(entity: BABYLON.AbstractMesh, klass: string): T[] {
+        /** Finds all script components in the scene with the specfied class name. */
+        public static FindScriptComponents<T extends BABYLON.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T[] {
+            if (transform == null) return null;
             let result: any[] = null;
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            if (entity.metadata != null && entity.metadata.unity) {
-                const metadata: any = entity.metadata.unity;
+            if (transform.metadata != null && transform.metadata.unity) {
+                const metadata: any = transform.metadata.unity;
                 if (metadata.components != null && metadata.components.length > 0) {
                     for (let ii: number = 0; ii < metadata.components.length; ii++) {
-                        const entityscript: any = metadata.components[ii];
-                        if (entityscript.instance != null && entityscript.klass === klass) {
-                            result.push(entityscript.instance);
+                        const transformscript: any = metadata.components[ii];
+                        if (transformscript.instance != null && transformscript.klass === klass) {
+                            result.push(transformscript.instance);
                         }
                     }
                 }
             }
             return (result != null) ? result as T[] : null;
         }
-        /** Finds the entity object metedata in the scene. */
-        public static FindSceneMetadata(entity: BABYLON.AbstractMesh): any {
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            return (entity.metadata != null && entity.metadata.unity) ? entity.metadata.unity : null;
+        /** Finds the transform object metedata in the scene. */
+        public static FindSceneMetadata(transform: BABYLON.TransformNode): any {
+            if (transform == null) return null;
+            return (transform.metadata != null && transform.metadata.unity) ? transform.metadata.unity : null;
         }
-        /** Finds the specfied particle system rig of entity in the scene. */
-        public static FindSceneParticleRig(entity: BABYLON.AbstractMesh): BABYLON.ParticleSystem {
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            return ((<any>entity).particleRig != null) ? (<any>entity).particleRig : null;
+        /** Finds the specfied particle system rig in the scene. */
+        public static FindSceneParticleRig(transform: BABYLON.TransformNode): BABYLON.ParticleSystem {
+            if (transform == null) return null;
+            return ((<any>transform).particleRig != null) ? (<any>transform).particleRig : null;
         }
-        /** Finds the specfied camera rig of entity in the scene. */
-        public static FindSceneCameraRig(entity: BABYLON.AbstractMesh): BABYLON.Camera {
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            return ((<any>entity).cameraRig != null) ? (<any>entity).cameraRig : null;
+        /** Finds the specfied camera rig in the scene. */
+        public static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.Camera {
+            if (transform == null) return null;
+            return ((<any>transform).cameraRig != null) ? (<any>transform).cameraRig : null;
         }
-        /** Finds the specfied light rig of entity in the scene. */
-        public static FindSceneLightRig(entity: BABYLON.AbstractMesh): BABYLON.Light {
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            return ((<any>entity).lightRig != null) ? (<any>entity).lightRig : null;
+        /** Finds the specfied light rig in the scene. */
+        public static FindSceneLightRig(transform: BABYLON.TransformNode): BABYLON.Light {
+            if (transform == null) return null;
+            return ((<any>transform).lightRig != null) ? (<any>transform).lightRig : null;
         }
-        /** Finds the specfied lens flare system rig of entity in the scene. */
-        public static FindSceneFlareRig(entity: BABYLON.AbstractMesh): BABYLON.LensFlareSystem {
-            if (entity == null) throw new Error("Null entity scene entity specified.");
-            return ((<any>entity).flareRig != null) ? (<any>entity).flareRig : null;
+        /** Finds the specfied lens flare system rig in the scene. */
+        public static FindSceneFlareRig(transform: BABYLON.TransformNode): BABYLON.LensFlareSystem {
+            if (transform == null) return null;
+            return ((<any>transform).flareRig != null) ? (<any>transform).flareRig : null;
         }
-        /** Finds the specfied child mesh of entity in the scene. */
-        public static FindSceneChildMesh(entity:BABYLON.AbstractMesh, name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null):BABYLON.AbstractMesh {
+        /** Finds the specfied child mesh in the scene. */
+        public static FindSceneChildMesh(transform:BABYLON.TransformNode, name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null):BABYLON.AbstractMesh {
+            if (transform == null) return null;
             const search:BABYLON.SearchType = (searchType != null) ? searchType : BABYLON.SearchType.StartsWith;
-            const children:BABYLON.AbstractMesh[] = entity.getChildMeshes(directDecendantsOnly, predicate) as BABYLON.AbstractMesh[];
+            const children:BABYLON.AbstractMesh[] = transform.getChildMeshes(directDecendantsOnly, predicate) as BABYLON.AbstractMesh[];
             return BABYLON.Utilities.FindMesh(name, children, search);
         }
-        /** Finds the specfied child transform of entity in the scene. */
-        public static FindSceneChildTransform(entity:BABYLON.AbstractMesh, name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null):BABYLON.AbstractMesh {
+        /** Finds the specfied child transform in the scene. */
+        public static FindSceneChildTransform(transform:BABYLON.TransformNode, name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null):BABYLON.AbstractMesh {
+            if (transform == null) return null;
             const search:BABYLON.SearchType = (searchType != null) ? searchType : BABYLON.SearchType.StartsWith;
-            const children:BABYLON.AbstractMesh[] = entity.getChildTransformNodes(directDecendantsOnly, predicate) as BABYLON.AbstractMesh[];
+            const children:BABYLON.AbstractMesh[] = transform.getChildTransformNodes(directDecendantsOnly, predicate) as BABYLON.AbstractMesh[];
             return BABYLON.Utilities.FindMesh(name, children, search);
         }
 
@@ -613,123 +587,110 @@ module BABYLON {
         /** Callback to setup ammo.js plugin when activated on the scene */
         public static OnSetupPhysicsPlugin:(scene:BABYLON.Scene, plugin:BABYLON.AmmoJSPlugin)=>void = null;
 
-        /** Applies force to entity using physics impostor. */
+        /** Applies force to transform using physics impostor. */
         public static ApplyEntityForce(entity:BABYLON.AbstractMesh, force:BABYLON.Vector3, contact:BABYLON.Vector3) : void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (force != null) entity.physicsImpostor.applyForce(force, contact);
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (force != null) entity.physicsImpostor.applyForce(force, contact);
             }
         }
         /** Applies impulse to entity using physics impostor. */
         public static ApplyEntityImpulse(entity:BABYLON.AbstractMesh, impusle:BABYLON.Vector3, contact:BABYLON.Vector3) : void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (impusle != null) entity.physicsImpostor.applyImpulse(impusle, contact);
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (impusle != null) entity.physicsImpostor.applyImpulse(impusle, contact);
             }
         }
         /** Applies friction to entity using physics impostor. */
         public static ApplyEntityFriction(entity:BABYLON.AbstractMesh, friction:number):void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
-                    if (entity.physicsImpostor.physicsBody.material.friction !== friction) {
-                        entity.physicsImpostor.physicsBody.material.friction = friction;
-                    }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
+                if (entity.physicsImpostor.physicsBody.material.friction !== friction) {
+                    entity.physicsImpostor.physicsBody.material.friction = friction;
                 }
             }
         }
         /** Gets mass of entity using physics impostor. */
         public static GetEntityMass(entity:BABYLON.AbstractMesh):number {
-            let result:number = -1;
-            if (entity != null) {
-                if (entity.physicsImpostor != null) {
-                    result = entity.physicsImpostor.mass;
-                }
+            if (entity == null) return 0;
+            let result:number = 0;
+            if (entity.physicsImpostor != null) {
+                result = entity.physicsImpostor.mass;
             }
             return result;
         }
         /** Sets mass to entity using physics impostor. */
         public static SetEntityMass(entity:BABYLON.AbstractMesh, mass:number):void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null) {
-                    entity.physicsImpostor.mass = mass;
-                    //entity.physicsImpostor.setMass(mass);
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null) {
+                entity.physicsImpostor.mass = mass;
+                //entity.physicsImpostor.setMass(mass);
             }
         }
         /** Gets restitution of entity using physics impostor. */
         public static GetEntityRestitution(entity:BABYLON.AbstractMesh):number {
-            let result:number = -1;
-            if (entity != null) {
-                if (entity.physicsImpostor != null) {
-                    result = entity.physicsImpostor.restitution;
-                }
+            if (entity == null) return 0;
+            let result:number = 0;
+            if (entity.physicsImpostor != null) {
+                result = entity.physicsImpostor.restitution;
             }
             return result;
         }
         /** Sets restitution to entity using physics impostor. */
         public static SetEntityRestitution(entity:BABYLON.AbstractMesh, restitution:number):void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null) {
-                    entity.physicsImpostor.restitution = restitution;
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null) {
+                entity.physicsImpostor.restitution = restitution;
             }
         }
         /** Gets entity friction level using physics impostor. */
         public static GetEntityFrictionLevel(entity:BABYLON.AbstractMesh):number {
+            if (entity == null) return 0;
             let result:number = 0;
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
-                    result = entity.physicsImpostor.physicsBody.material.friction;
-                }
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
+                result = entity.physicsImpostor.physicsBody.material.friction;
             }
             return result;
         }
         /** Gets entity linear velocity using physics impostor. */
         public static GetEntityLinearVelocity(entity:BABYLON.AbstractMesh):BABYLON.Vector3 {
+            if (entity == null) return null;
             let result:BABYLON.Vector3 = null;
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    result = entity.physicsImpostor.getLinearVelocity();
-                }
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                result = entity.physicsImpostor.getLinearVelocity();
             }
             return result;
         }
         /** Sets entity linear velocity using physics impostor. */
         public static SetEntityLinearVelocity(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3):void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (velocity != null) entity.physicsImpostor.setLinearVelocity(velocity);
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (velocity != null) entity.physicsImpostor.setLinearVelocity(velocity);
             }
         }
         /** Gets entity angular velocity using physics impostor. */
         public static GetEntityAngularVelocity(entity:BABYLON.AbstractMesh):BABYLON.Vector3 {
+            if (entity == null) return null;
             let result:BABYLON.Vector3 = null;
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    result = entity.physicsImpostor.getAngularVelocity();
-                }
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                result = entity.physicsImpostor.getAngularVelocity();
             }
             return result;
         }
         /** Sets entity angular velocity using physics impostor. */
         public static SetEntityAngularVelocity(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3):void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (velocity != null) entity.physicsImpostor.setAngularVelocity(velocity);
-                }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (velocity != null) entity.physicsImpostor.setAngularVelocity(velocity);
             }
         }
         /** Checks collision contact of the entity using physics impostor. */
         public static CheckEntityCollisionContact(entity:BABYLON.AbstractMesh, collider:BABYLON.AbstractMesh, contact:BABYLON.CollisionContact, threashold:number = 0.5):boolean {
+            if (entity == null) return false;
             let result:boolean = false;
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    // TODO: Valid Grounding Contact
-                    result = true;
-                }
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                // TODO: Valid Grounding Contact
+                result = true;
             }
             return result;
         }
@@ -740,97 +701,23 @@ module BABYLON {
 
         /** Shows the entity physics impostor for debugging. */
         public static ShowEntityPhysicsImpostor(scene:BABYLON.Scene, entity:BABYLON.AbstractMesh) : void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (BABYLON.SceneManager.PhysicsViewer == null) {
-                        BABYLON.SceneManager.PhysicsViewer = new BABYLON.Debug.PhysicsViewer(scene);
-                    }
-                    if (BABYLON.SceneManager.PhysicsViewer != null) {
-                        BABYLON.SceneManager.PhysicsViewer.showImpostor(entity.physicsImpostor);
-                    }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (BABYLON.SceneManager.PhysicsViewer == null) {
+                    BABYLON.SceneManager.PhysicsViewer = new BABYLON.Debug.PhysicsViewer(scene);
+                }
+                if (BABYLON.SceneManager.PhysicsViewer != null) {
+                    BABYLON.SceneManager.PhysicsViewer.showImpostor(entity.physicsImpostor);
                 }
             }
         }
         /** Hides the entity physics impostor for debugging. */
         public static HideEntityPhysicsImpostor(scene:BABYLON.Scene, entity:BABYLON.AbstractMesh) : void {
-            if (entity != null) {
-                if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                    if (BABYLON.SceneManager.PhysicsViewer != null) {
-                        BABYLON.SceneManager.PhysicsViewer.hideImpostor(entity.physicsImpostor);
-                    }
+            if (entity == null) return;
+            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
+                if (BABYLON.SceneManager.PhysicsViewer != null) {
+                    BABYLON.SceneManager.PhysicsViewer.hideImpostor(entity.physicsImpostor);
                 }
-            }
-        }
-        /** Creates a safe physics impostor for the specified entity preserving parent child relations. */
-        public static CreateEntityPhysicsImpostor(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, type: number, options: BABYLON.PhysicsImpostorParameters, reparent:boolean = true):void {
-            if (entity != null) {
-                const parent:BABYLON.Node = entity.parent;
-                if (reparent === true) entity.parent = null;
-                entity.physicsImpostor = new BABYLON.PhysicsImpostor(entity, type, options, scene);
-                if (reparent === true) entity.parent = parent;
-            }
-        }
-        /** Setup native physics impostor function for the specified entity. Internal use only */
-        private static SetupEntityPhysicsFunction(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, child:boolean, trigger:boolean, rigidbody:any, debugging:boolean):void {
-            if (entity.physicsImpostor != null) {
-                entity.physicsImpostor.executeNativeFunction((word:any, body:any) => {
-                    // console.log("===> Setup Native Physics Body: " + entity.name);
-                    // console.log(body);
-                    // ..
-                    // Disable Gravity
-                    // ..
-                    let gravity:boolean = (rigidbody != null && rigidbody.gravity != null) ? rigidbody.gravity : true;
-                    if (gravity === false) {
-                        if (body.setGravity) {
-                            body.setGravity(new Ammo.btVector3(0.0, 0.0, 0.0));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set gravity override not supported for: " + entity.name);
-                        }
-                    }
-                    // ..
-                    // Setup Drag Damping
-                    // ..
-                    if (body.setDamping) {
-                        const ldrag:number = (rigidbody != null && rigidbody.ldrag != null) ? rigidbody.ldrag : 0.0;
-                        const adrag:number = (rigidbody != null && rigidbody.adrag != null) ? rigidbody.adrag : 0.05;
-                        body.setDamping(ldrag, adrag);
-                    } else {
-                        BABYLON.Tools.Warn("Physics engine set drag damping not supported for: " + entity.name);
-                    }
-                    // ..
-                    // Setup Collision Flags
-                    // ..
-                    if (body.setCollisionFlags && body.getCollisionFlags) {
-                        if (trigger === true) body.setCollisionFlags(body.getCollisionFlags() | BABYLON.CollisionFlags.CF_NO_CONTACT_RESPONSE);
-                    } else {
-                        BABYLON.Tools.Warn("Physics engine set collision flags not supported for: " + entity.name);
-                    }
-                    // ..
-                    // Setup Freeze Constraints
-                    // ..
-                    const freeze:any = (rigidbody != null && rigidbody.freeze != null) ? rigidbody.freeze : null;
-                    if (freeze != null) {
-                        if (body.setLinearFactor) {
-                            const freeze_pos_x:number = (freeze.positionx != null && freeze.positionx === true) ? 0 : 1;
-                            const freeze_pos_y:number = (freeze.positiony != null && freeze.positiony === true) ? 0 : 1;
-                            const freeze_pos_z:number = (freeze.positionz != null && freeze.positionz === true) ? 0 : 1;
-                            body.setLinearFactor(new Ammo.btVector3(freeze_pos_x, freeze_pos_y, freeze_pos_z));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set linear factor not supported for: " + entity.name);
-                        }
-                        if (body.setAngularFactor) {
-                            const freeze_rot_x:number = (freeze.rotationx != null && freeze.rotationx === true) ? 0 : 1;
-                            const freeze_rot_y:number = (freeze.rotationy != null && freeze.rotationy === true) ? 0 : 1;
-                            const freeze_rot_z:number = (freeze.rotationz != null && freeze.rotationz === true) ? 0 : 1;
-                            body.setAngularFactor(new Ammo.btVector3(freeze_rot_x, freeze_rot_y, freeze_rot_z));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set angular factor not supported for: " + entity.name);
-                        }
-                    }
-                });
-                if (debugging === true) BABYLON.SceneManager.ShowEntityPhysicsImpostor(scene, entity);
-            } else {
-                BABYLON.Tools.Warn("No valid physics impostor to setup for " + entity.name);
             }
         }
         
@@ -840,21 +727,18 @@ module BABYLON {
         
         /** Moves entity using collisions. */
         public static MoveWithCollisions(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3) : void {
-            if (entity != null) {
-                if (velocity != null) entity.moveWithCollisions(velocity);
-            }
+            if (entity == null) return null;
+            if (velocity != null) entity.moveWithCollisions(velocity);
         }
         /** Moves entity using positions. */
         public static MoveWithTranslation(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3) : void {
-            if (entity != null) {
-                if (velocity != null) entity.position.addInPlace(velocity);
-            }
+            if (entity == null) return null;
+            if (velocity != null) entity.position.addInPlace(velocity);
         }
         /** Turns entity using rotations. */
         public static TurnWithRotation(entity:BABYLON.AbstractMesh, rotation:number = 0.0) : void {
-            if (entity != null) {
-                if (rotation != 0.0) entity.rotate(BABYLON.Axis.Y, rotation * BABYLON.System.Deg2Rad);
-            }
+            if (entity == null) return null;
+            if (rotation != 0.0) entity.rotate(BABYLON.Axis.Y, rotation * BABYLON.System.Deg2Rad);
         }
         
         // ********************************** //
@@ -1482,420 +1366,6 @@ module BABYLON {
         public static SetXboxLiveSignOutHandler(handler: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void = null): void {
             if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
                 (<any>window).BabylonToolkit.XboxLive.Plugin.onusersignout = handler;
-            }
-        }
-
-        // ************************************ //
-        // * Scene Manager Internal Functions * //
-        // ************************************ //
-
-        /** Parse the scene component metadata. Note: Internal use only */
-        public static ParseSceneComponents(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>, physicsList:Array<any>): void {
-            if (entity != null && entity.metadata != null && entity.metadata.unity != null) {
-                //console.log("===> Registering Entity: " + entity.name);
-                entity.onDisposeObservable.addOnce(() => { BABYLON.Utilities.DisposeEntity(entity); });
-                entity.metadata.clone = () => { return BABYLON.Utilities.CloneMetadata(entity.metadata); };
-                const metadata:any = entity.metadata.unity;
-                // ..
-                // Parse Mesh Tags
-                // ..
-                const tags:string = metadata.tags;
-                if (tags != null && tags !== "") {
-                    BABYLON.Tags.AddTagsTo(entity, tags);
-                    if (tags.indexOf("NavigationMesh") >= 0) {
-                        entity.isVisible = false;
-                    }
-                }
-                // ..
-                // Parse Mesh Renderer
-                // ..                
-                if (metadata.renderer != null) {
-                    if (metadata.renderer.castshadows != null && metadata.renderer.castshadows === true) {
-                        if (shadowList != null) shadowList.push(entity);
-                    }
-                    if (metadata.renderer.receiveshadows != null && metadata.renderer.receiveshadows === true) {
-                        entity.receiveShadows = true;
-                    }
-                    if (metadata.renderer.checkcollisions != null && metadata.renderer.checkcollisions === true) {
-                        entity.checkCollisions = true;
-                    }
-                }
-                // ..
-                // Parse Physics Rigidbody
-                // ..
-                if (metadata.rigidbody != null) {
-                    if (physicsList != null) physicsList.push({mesh:entity, comp:metadata});
-                }
-                // ..
-                // Parse Mesh Components
-                // ..
-                if (metadata.components != null) {
-                    const components:any[] = metadata.components;
-                    if (components != null && components.length > 0) {
-                        components.forEach((component:any) => {
-                            if (component != null) {
-                                switch (component.alias) {
-                                    case "script":
-                                        if (scriptList != null) scriptList.push({mesh:entity, comp:component});
-                                        break;
-                                    case "camera":
-                                        BABYLON.SceneManager.SetupCameraComponent(scene, entity, component);
-                                        break;
-                                    case "light":
-                                        BABYLON.SceneManager.SetupLightComponent(scene, entity, component);
-                                        break;
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-        }
-        /** Process pending physics list items. Note: Internal use only */
-        public static ProcessPendingPhysics(scene:BABYLON.Scene, physicsList: Array<any>):void {
-            if (physicsList != null && physicsList.length > 0) {
-                const physicsenabled:boolean = scene.isPhysicsEnabled();
-                const physicsengine:BABYLON.IPhysicsEngine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;
-                const physicsloaded:boolean = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
-                if (physicsloaded === true) {
-                    physicsList.forEach((item) => { BABYLON.SceneManager.SetupPhysicsComponent(scene, item.mesh, item.comp); });
-                } else {
-                    BABYLON.Tools.Warn("Ammo.js physics engine not loaded. Physics impostors will not be created.");
-                }
-            }
-        }
-        /** Process pending shadow list items. Note: Internal use only */
-        public static ProcessPendingShadows(scene:BABYLON.Scene, shadowList: Array<BABYLON.AbstractMesh>):void {
-            if (shadowList != null && shadowList.length > 0) {
-                if (scene.lights != null && scene.lights.length > 0) {
-                    scene.lights.forEach((light) => {
-                        if (light._shadowGenerator != null && light.metadata != null && light.metadata.unity != null && light.metadata.unity.generator === true) {
-                            const shadowgenerator:BABYLON.IShadowGenerator = light._shadowGenerator;
-                            const shadowmap:BABYLON.RenderTargetTexture = shadowgenerator.getShadowMap();
-                            if (shadowmap != null) {
-                                if (shadowmap.renderList == null) shadowmap.renderList = [];
-                                shadowList.forEach((mesh:BABYLON.AbstractMesh) => { shadowmap.renderList.push(mesh); });
-                            }
-                        }
-                    });
-                }
-            }
-        }
-        /** Process pending script list items. Note: Internal use only */
-        public static ProcessPendingScripts(scene:BABYLON.Scene, scriptList: Array<any>):void {
-            if (scriptList != null && scriptList.length > 0) {
-                let registerList:Array<any> = [];
-                scriptList.sort((left, right): number => {
-                    if (left.comp.order < right.comp.order) return -1;
-                    if (left.comp.order > right.comp.order) return 1;
-                    return 0;
-                });
-                scriptList.forEach((item) => {
-                    if (item.comp.klass != null && item.comp.klass !== "" && item.comp.klass !== "BABYLON.ScriptComponent") {
-                        let ScriptComponentClass = BABYLON.Utilities.InstantiateClass(item.comp.klass);
-                        if (ScriptComponentClass != null) {
-                            const scriptComponent:BABYLON.ScriptComponent = new ScriptComponentClass(item.mesh, scene, item.comp.properties);
-                            if (scriptComponent != null) {
-                                const isscript:boolean = (scriptComponent instanceof BABYLON.ScriptComponent);
-                                if (isscript === true) {
-                                    item.comp.instance = scriptComponent;
-                                    registerList.push(item.comp.instance);
-                                } else {
-                                    BABYLON.Tools.Warn("Non script component instantiated class: " + item.comp.klass);
-                                }
-                            } else {
-                                BABYLON.Tools.Warn("Failed to instantiate script class: " + item.comp.klass);
-                            }
-                        } else {
-                            BABYLON.Tools.Warn("Failed to locate script class: " + item.comp.klass);
-                        }
-                    }
-                });
-                if (registerList != null && registerList.length > 0) {
-                    registerList.forEach((instance) => { BABYLON.SceneManager.RegisterScriptComponent(instance, false); });
-                }
-                registerList = null;
-            }
-        }
-
-        // ****************************************** //
-        // * Scene Manager Private Worker Functions * //
-        // ****************************************** //
-
-        private static SetupPhysicsComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, metadata: any): void {
-            if (metadata.rigidbody != null) {
-                entity.checkCollisions = false;
-                if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Initialize rigidbody physics for: " + entity.name);
-                const mass:number = (metadata.rigidbody.mass != null) ? metadata.rigidbody.mass : 0;
-                const center:BABYLON.Vector3 = (metadata.rigidbody.center != null) ? BABYLON.Utilities.ParseVector3(metadata.rigidbody.center, BABYLON.Vector3.Zero()) : BABYLON.Vector3.Zero();
-                if (metadata.collision != null && metadata.collision.type != null && metadata.collision.type === "MeshCollider") {
-                    // ..
-                    // Setup Mesh Collider Impostors
-                    // ..
-                    let impostortype:number = BABYLON.PhysicsImpostor.MeshImpostor;
-                    const convexmesh:boolean = (metadata.collision.convexmesh != null) ? metadata.collision.convexmesh : false;
-                    const impersonatemesh:string = (metadata.collision.impersonatemesh != null) ? metadata.collision.impersonatemesh : "DefaultImpostor";
-                    const dynamicfriction:number = (metadata.collision.dynamicfriction != null) ? metadata.collision.dynamicfriction : 0.6;
-                    const staticfriction:number = (metadata.collision.staticfriction != null) ? metadata.collision.staticfriction : 0.6;
-                    const restitution:number = (metadata.collision.restitution != null) ? metadata.collision.restitution : 0.0;
-                    const debugging:boolean = (metadata.collision.debugging != null) ? metadata.collision.debugging : false;
-                    const istrigger:boolean = (metadata.collision.trigger != null) ? metadata.collision.trigger : false;
-                    if (impersonatemesh === "BoxImpostor") impostortype = BABYLON.PhysicsImpostor.BoxImpostor;
-                    else if (impersonatemesh === "PlaneImpostor") impostortype = BABYLON.PhysicsImpostor.PlaneImpostor;
-                    else if (impersonatemesh === "SphereImpostor") impostortype = BABYLON.PhysicsImpostor.SphereImpostor;
-                    else if (impersonatemesh === "CylinderImpostor") impostortype = BABYLON.PhysicsImpostor.CylinderImpostor;
-                    else impostortype = (convexmesh === true) ? BABYLON.PhysicsImpostor.ConvexHullImpostor : BABYLON.PhysicsImpostor.MeshImpostor;
-                    if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(impostortype).toLowerCase() + " entity imposter for: " + entity.name);
-                    BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, entity, impostortype, { mass: mass, friction: dynamicfriction, restitution: restitution });
-                    BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, entity, false, istrigger, metadata.rigidbody, debugging);
-                } else {
-                    // ..
-                    // Setup Compound Collider Impostors
-                    // ..
-                    let fdynamicfriction:number = 0.0;
-                    let fstaticfriction:number = 0.0;
-                    let frestitution:number = 0.0;
-                    let fdebugging:number = 0;
-                    let ftrigger:boolean = false;
-                    let fcount:number = 0;
-                    let childnodes:BABYLON.AbstractMesh[] = entity.getChildMeshes(true);
-                    if (childnodes != null && childnodes.length > 0) {
-                        childnodes.forEach((childnode:BABYLON.AbstractMesh) => {
-                            if (childnode.metadata != null && childnode.metadata.unity != null) {
-                                if (childnode.metadata.unity.collision != null) {
-                                    childnode.position.subtractInPlace(center);
-                                    const collision:any = childnode.metadata.unity.collision;
-                                    let cimpostortype:number = BABYLON.PhysicsImpostor.BoxImpostor;
-                                    const cconvexmesh:boolean = (collision.convexmesh != null) ? collision.convexmesh : false;
-                                    const cimpersonatemesh:string = (collision.impersonatemesh != null) ? collision.impersonatemesh : "DefaultImpostor";
-                                    const cdynamicfriction:number = (collision.dynamicfriction != null) ? collision.dynamicfriction : 0.6;
-                                    const cstaticfriction:number = (collision.staticfriction != null) ? collision.staticfriction : 0.6;
-                                    const crestitution:number = (collision.restitution != null) ? collision.restitution : 0.0;
-                                    const cdebugging:boolean = (collision.debugging != null) ? collision.debugging : false;
-                                    const cistrigger:boolean = (collision.trigger != null) ? collision.trigger : false;
-                                    const ccollider:string = (collision.type != null) ? collision.type : "BoxCollider";
-                                    if (ccollider === "MeshCollider") {
-                                        if (cimpersonatemesh === "BoxImpostor") cimpostortype = BABYLON.PhysicsImpostor.BoxImpostor;
-                                        else if (cimpersonatemesh === "PlaneImpostor") cimpostortype = BABYLON.PhysicsImpostor.PlaneImpostor;
-                                        else if (cimpersonatemesh === "SphereImpostor") cimpostortype = BABYLON.PhysicsImpostor.SphereImpostor;
-                                        else if (cimpersonatemesh === "CylinderImpostor") cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor;
-                                        else cimpostortype = (cconvexmesh === true) ? BABYLON.PhysicsImpostor.ConvexHullImpostor : BABYLON.PhysicsImpostor.MeshImpostor;
-                                    } else if (ccollider === "WheelCollider") {
-                                        cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor; 
-                                    } else if (ccollider === "CapsuleCollider") {
-                                        cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor; 
-                                    } else if (ccollider === "SphereCollider") {
-                                        cimpostortype = BABYLON.PhysicsImpostor.SphereImpostor; 
-                                    } else if (ccollider === "BoxCollider") {
-                                        cimpostortype = BABYLON.PhysicsImpostor.BoxImpostor; 
-                                    }
-                                    if (cdynamicfriction > fdynamicfriction) fdynamicfriction = cdynamicfriction;
-                                    if (cstaticfriction > fstaticfriction) fstaticfriction = cstaticfriction;
-                                    if (crestitution > frestitution) frestitution = crestitution;
-                                    if (cdebugging === true) fdebugging = 1;
-                                    if (cistrigger == true) ftrigger = true;
-                                    if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(cimpostortype).toLowerCase() + " child imposter for: " + childnode.name);
-                                    BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, childnode, cimpostortype, { mass: 0, friction: 0, restitution: 0 });
-                                    BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, childnode, true, false, metadata.rigidbody, cdebugging);
-                                    fcount++;
-                                }
-                            }
-                        });
-                    }
-                    if (fcount > 0) {
-                        if (BABYLON.SceneManager.DEBUG_PHYSICS) BABYLON.Tools.Log("Setup physics root no imposter for: " + entity.name);
-                        BABYLON.SceneManager.CreateEntityPhysicsImpostor(scene, entity, BABYLON.PhysicsImpostor.NoImpostor, { mass: mass, friction: fdynamicfriction, restitution: frestitution });
-                        BABYLON.SceneManager.SetupEntityPhysicsFunction(scene, entity, false, ftrigger, metadata.rigidbody, (fdebugging === 1));
-                    }
-                    childnodes = null;
-                }
-            }
-        }
-        private static SetupCameraComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any): void {
-            const name = entity.name + ".Rig";
-            const rotation:number = (scene.useRightHandedSystem === true) ? Math.PI : 0;
-            let babyonCamera:BABYLON.UniversalCamera = new BABYLON.UniversalCamera(name, BABYLON.Vector3.Zero(), scene);
-            babyonCamera.parent = entity;
-            babyonCamera.rotation = new BABYLON.Vector3(0, rotation, 0);
-            babyonCamera.checkCollisions = false;
-            entity.checkCollisions = false;
-            // ..
-            // Setup Camera Properties
-            // ..
-            const maincamera:boolean = component.maincamera != null ? component.maincamera : false;
-            if (maincamera === true && scene.activeCamera == null) {
-                scene.activeCamera = babyonCamera;
-            }
-            const cameratype:number = component.type != null ? component.type : 0;
-            switch (cameratype) {
-                case 0: { // PERSPECTIVE
-                    babyonCamera.mode = BABYLON.Camera.PERSPECTIVE_CAMERA;
-                    if (component.perspectiveyfov != null) {
-                        babyonCamera.fov = component.perspectiveyfov;
-                    }
-                    if (component.perspectiveznear != null) {
-                        babyonCamera.minZ = component.perspectiveznear;
-                    }
-                    if (component.perspectivezfar != null) {
-                        babyonCamera.maxZ = component.perspectivezfar;
-                    }
-                    break;
-                }
-                case 1: { // ORTHOGRAPHIC
-                    babyonCamera.mode = BABYLON.Camera.ORTHOGRAPHIC_CAMERA;
-                    if (component.orthoxmag != null) {
-                        babyonCamera.orthoLeft = -component.orthoxmag;
-                        babyonCamera.orthoRight = component.orthoxmag;
-                    }
-                    if (component.orthoymag != null) {
-                        babyonCamera.orthoBottom = -component.orthoymag;
-                        babyonCamera.orthoTop = component.orthoymag;
-                    }
-                    if (component.orthoznear != null) {
-                        babyonCamera.minZ = component.orthoznear;
-                    }
-                    if (component.orthozfar != null) {
-                        babyonCamera.maxZ = component.orthozfar;
-                    }
-                    break;
-                }
-            }
-            // ..
-            // Attach Camera Rig To Mesh
-            // ..
-            (<any>entity).cameraRig = babyonCamera;
-        }
-        private static SetupLightComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any):void {
-            const name = entity.name + ".Rig";
-            const direction:Vector3 = (scene.useRightHandedSystem === true) ? BABYLON.Vector3.Backward() : BABYLON.Vector3.Forward();
-            let babylonLight: BABYLON.Light;
-            let lightFactor:number = 1.0;
-            entity.checkCollisions = false;
-            // ..
-            // Setup Light Properties
-            // ..
-            const lightType:number = component.type != null ? component.type : 0;
-            switch (lightType) {
-                case 0: { // DIRECTIONAL
-                    lightFactor = DIR_LIGHT_SCALE;
-                    babylonLight = new BABYLON.DirectionalLight(name, direction, scene);
-                    const orthoscale:number = component.orthoscale != null ? component.orthoscale : 0.1;
-                    (<BABYLON.DirectionalLight>babylonLight).shadowOrthoScale = orthoscale;
-                    break;
-                }
-                case 1: { // POINT
-                    lightFactor = POINT_LIGHT_SCALE;
-                    babylonLight = new BABYLON.PointLight(name, BABYLON.Vector3.Zero(), scene);
-                    break;
-                }
-                case 2: { // SPOT
-                    lightFactor = SPOT_LIGHT_SCALE;
-                    const outerAngle:number = component.spotangle != null ? component.spotangle : (Math.PI / 4);
-                    const babylonSpotLight = new BABYLON.SpotLight(name, BABYLON.Vector3.Zero(), direction, 0, 1, scene);
-                    babylonSpotLight.angle = ((outerAngle * BABYLON.System.Deg2Rad) * 2);
-                    babylonSpotLight.innerAngle = 0;
-                    babylonLight = babylonSpotLight;
-                    break;
-                }
-            }
-            if (babylonLight != null) {
-                babylonLight.parent = entity;
-                babylonLight.range = component.range != null ? component.range : Number.MAX_VALUE;
-                babylonLight.diffuse = component.color != null ? BABYLON.Utilities.ParseColor3(component.color) : BABYLON.Color3.White();
-                babylonLight.intensity = component.intensity != null ? (component.intensity * lightFactor) : 1.0;
-                babylonLight.falloffType = BABYLON.Light.FALLOFF_GLTF;
-                // ..
-                const softshadows:boolean = component.softshadows != null ? component.softshadows : false;
-                const shadowmapsize:number = component.shadowmapsize != null ? component.shadowmapsize : 512;
-                const generateshadows:boolean = component.generateshadows != null ? component.generateshadows : false;
-                const hardshadowfilter:string = component.hardshadowfilter != null ? component.hardshadowfilter : "None";
-                const softshadowfilter:string = component.softshadowfilter != null ? component.softshadowfilter : "None";
-                const biasscalefactor:number = component.biasscalefactor != null ? component.biasscalefactor : 0.01;
-                const shadowmapbias:number = component.shadowmapbias != null ? component.shadowmapbias : 0.05;
-                const normalmapbias:number = component.normalmapbias != null ? component.normalmapbias : 0.4;
-                const shadowstrength:number = component.shadowstrength != null ? component.shadowstrength : 1;
-                const shadowdistance:number = component.shadowdistance != null ? component.shadowdistance : 40;
-                const shadownearplane:number = component.shadownearplane != null ? component.shadownearplane : 0.2;
-                const shadowdepthscale:number = component.shadowdepthscale != null ? component.shadowdepthscale : 50.0;
-                const contacthardening:number = component.contacthardening != null ? component.contacthardening : 0.1;
-                const usekernelblur:boolean = component.usekernelblur != null ? component.usekernelblur : true;
-                const shadowblurkernel:number = component.shadowblurkernel != null ? component.shadowblurkernel : 1.0;
-                const shadowblurscale:number = component.shadowblurscale != null ? component.shadowblurscale : 2.0;
-                const shadowbluroffset:number = component.shadowbluroffset != null ? component.shadowbluroffset : 1.0;
-                const shadowfilterquality:string = component.shadowfilterquality != null ? component.shadowfilterquality : "Medium";
-                const transparencyshadow:boolean = component.transparencyshadow != null ? component.transparencyshadow : false;
-                const forcebackfacesonly:boolean = component.forcebackfacesonly != null ? component.forcebackfacesonly : true;
-                const frustumedgefalloff:number = component.frustumedgefalloff != null ? component.frustumedgefalloff : 0.0;
-                // ..                   
-                if (generateshadows === true) {
-                    const shadowlight = babylonLight as BABYLON.ShadowLight;
-                    const shadowgenerator:BABYLON.ShadowGenerator = new BABYLON.ShadowGenerator(shadowmapsize, shadowlight, true);
-                    // ..
-                    // Setup Shadow Map Generator Options
-                    // ..
-                    shadowlight.shadowMinZ = shadownearplane;
-                    shadowlight.shadowMaxZ = shadowdistance;
-                    // ..
-                    shadowgenerator.bias = shadowmapbias * biasscalefactor;
-                    shadowgenerator.normalBias = normalmapbias * biasscalefactor;
-                    shadowgenerator.depthScale = shadowdepthscale;
-                    shadowgenerator.setDarkness(1.0 - shadowstrength);
-                    shadowgenerator.useKernelBlur = usekernelblur;
-                    shadowgenerator.blurKernel = shadowblurkernel;
-                    shadowgenerator.blurScale = shadowblurscale;
-                    shadowgenerator.blurBoxOffset = shadowbluroffset;
-                    shadowgenerator.frustumEdgeFalloff = frustumedgefalloff;
-                    shadowgenerator.forceBackFacesOnly = forcebackfacesonly;
-                    shadowgenerator.setTransparencyShadow(transparencyshadow);
-                    shadowgenerator.contactHardeningLightSizeUVRatio = contacthardening;
-                    // ..
-                    if (softshadows === true) {
-                        switch (softshadowfilter) {
-                            case "PoissonSampling":
-                                shadowgenerator.usePoissonSampling = true;
-                                break;
-                            case "BlurExponentialShadowMap":
-                                shadowgenerator.useBlurExponentialShadowMap = true;
-                                break;
-                            case "BlurCloseExponentialShadowMap":
-                                shadowgenerator.useBlurCloseExponentialShadowMap = true;
-                                break;
-                            case "PercentageCloserFiltering":
-                                shadowgenerator.usePercentageCloserFiltering = true;
-                                break;
-                            case "ContactHardeningShadowMap":
-                                shadowgenerator.useContactHardeningShadow = true;
-                                break;
-                        }
-                    } else {
-                        switch (hardshadowfilter) {
-                            case "ExponentialShadowMap":
-                                shadowgenerator.useExponentialShadowMap = true;
-                                break;
-                            case "CloseExponentialShadowMap":
-                                shadowgenerator.useCloseExponentialShadowMap = true;
-                                break;
-                        }
-                    }
-                    switch (shadowfilterquality) {
-                        case "High":
-                            shadowgenerator.filteringQuality = BABYLON.ShadowGenerator.QUALITY_HIGH;
-                            break;
-                        case "Medium":
-                            shadowgenerator.filteringQuality = BABYLON.ShadowGenerator.QUALITY_MEDIUM;
-                            break;
-                        case "Low":
-                            shadowgenerator.filteringQuality = BABYLON.ShadowGenerator.QUALITY_LOW;
-                            break;
-                    }
-                    if (babylonLight.metadata == null) babylonLight.metadata = {};
-                    if (babylonLight.metadata.unity == null) babylonLight.metadata.unity = {};
-                    babylonLight.metadata.unity.generator = true;
-                }
-                // ..
-                // Attach Light Rig To Mesh
-                // ..
-                (<any>entity).lightRig = babylonLight;
             }
         }
 
@@ -2917,228 +2387,6 @@ module BABYLON {
             */
         }
     }
-    /**
-     * Babylon script component class
-     * @class ScriptComponent
-     */
-    export abstract class ScriptComponent {
-        protected start(): void { }
-        protected update(): void { }
-        protected after(): void { }
-        protected destroy(): void { }
-        private _before: () => void = null;
-        private _after: () => void = null;
-        private _properties:any = null;
-        private _started:boolean = false;
-        private _scene:BABYLON.Scene = null;
-        private _entity:BABYLON.AbstractMesh = null;
-        /** Gets the scene object */
-        public get scene():BABYLON.Scene { return this._scene; }
-        /** Gets the owner entity mesh object */
-        public get entity():BABYLON.AbstractMesh { return this._entity; };
-        /** Constructs a managed script component */
-        public constructor(entity: BABYLON.AbstractMesh, scene: BABYLON.Scene, properties: any = {}) {
-            if (entity == null) throw new Error("Null entity scene object specified.");
-            if (scene == null) throw new Error("Null host scene object specified.");
-            this._scene = scene;
-            this._entity = entity;
-            this._properties = properties || {};
-            // ..
-            // Register script component instance
-            // ..
-            const instance:BABYLON.ScriptComponent = this;
-            instance._before = () => { BABYLON.ScriptComponent.BeforeInstance(instance); };
-            instance._after = () => { BABYLON.ScriptComponent.AfterInstance(instance); };
-            if (!instance.registerComponentInstance || !instance.destroyComponentInstance) {
-                BABYLON.Tools.Warn("Invalid component registration handlers for: " + this._entity.name);
-            }
-        }
-        /** TODO */
-        public setProperty(name: string, propertyValue: any): void {
-            if (this._properties == null) this._properties = {};
-            this._properties[name] = propertyValue;
-        }
-        /** TODO */
-        public getProperty<T>(name: string, defaultValue: T = null): T {
-            let result: any = null
-            if (this._properties != null) {
-                result = this._properties[name];
-            }
-            if (result == null) result = defaultValue;
-            return (result != null) ? result as T : null;
-        }
-        /** TODO */
-        public getClassname():string {
-            const funcNameRegex = /function (.{1,})\(/;
-            const results = (funcNameRegex).exec((<any> this).constructor.toString());
-            return (results && results.length > 1) ? results[1] : "";
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////
-        // Component Scene Manager Helper Functions
-        ////////////////////////////////////////////////////////////////////////////////////
-
-        /** TODO */
-        public getMetadata(): any {
-            return BABYLON.SceneManager.FindSceneMetadata(this._entity);
-        }
-        /** TODO */
-        public getComponent<T extends BABYLON.ScriptComponent>(klass: string): T {
-            const result:any = BABYLON.SceneManager.FindScriptComponent<T>(this._entity, klass);
-            return (result != null) ? result as T : null;
-        }
-        /** TODO */
-        public getComponents<T extends BABYLON.ScriptComponent>(klass: string): T[] {
-            const result:any = BABYLON.SceneManager.FindScriptComponents<T>(this._entity, klass);
-            return (result != null) ? result as T[] : null;
-        }
-        /** TODO */
-        public getParticleRig(): BABYLON.ParticleSystem {
-            return BABYLON.SceneManager.FindSceneParticleRig(this._entity);
-        }
-        /** TODO */
-        public getCameraRig(): BABYLON.Camera {
-            return BABYLON.SceneManager.FindSceneCameraRig(this._entity);
-        }
-        /** TODO */
-        public getLightRig(): BABYLON.Light {
-            return BABYLON.SceneManager.FindSceneLightRig(this._entity);
-        }
-        /** TODO */
-        public getFlareRig(): BABYLON.LensFlareSystem {
-            return BABYLON.SceneManager.FindSceneFlareRig(this._entity);
-        }
-        /** TODO */
-        public getChildMesh(name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null): BABYLON.AbstractMesh {
-            return BABYLON.SceneManager.FindSceneChildMesh(this._entity, name, searchType, directDecendantsOnly, predicate);
-        }
-        /** TODO */
-        public getChildTransform(name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null): BABYLON.AbstractMesh {
-            return BABYLON.SceneManager.FindSceneChildTransform(this._entity, name, searchType, directDecendantsOnly, predicate);
-        }
-        /** Gets the delta time spent between current and previous frame in seconds */
-        public getDeltaSeconds(): number {
-            return BABYLON.SceneManager.GetDeltaSeconds(this._scene);
-        };
-
-        ////////////////////////////////////////////////////////////////////////////////////
-        // Component Instance Registration Functions
-        ////////////////////////////////////////////////////////////////////////////////////
-
-        private registerComponentInstance(instance: BABYLON.ScriptComponent, validate:boolean = true):void {
-            if (validate === true) {
-                if (this.entity.metadata == null) this.entity.metadata = {};
-                if (this.entity.metadata.unity == null) this.entity.metadata.unity = {};
-                if (this.entity.metadata.unity.prefab == null) this.entity.metadata.unity.prefab = false;
-                if (this.entity.metadata.unity.visible == null) this.entity.metadata.unity.visible = true;
-                if (this.entity.metadata.unity.visibility == null) this.entity.metadata.unity.visibility = 1.0;
-                if (this.entity.metadata.unity.tags == null) this.entity.metadata.unity.tags = "Untagged";
-                if (this.entity.metadata.unity.bone == null) this.entity.metadata.unity.bone = null;
-                if (this.entity.metadata.unity.group == null) this.entity.metadata.unity.group = "Untagged";
-                if (this.entity.metadata.unity.layer == null) this.entity.metadata.unity.layer = 0;
-                if (this.entity.metadata.unity.layername == null) this.entity.metadata.unity.layername = "Default";
-                if (this.entity.metadata.unity.renderer == null) this.entity.metadata.unity.renderer = null;
-                if (this.entity.metadata.unity.rigidbody == null) this.entity.metadata.unity.rigidbody = null;
-                if (this.entity.metadata.unity.collision == null) this.entity.metadata.unity.collision = null;
-                if (this.entity.metadata.unity.properties == null) this.entity.metadata.unity.properties = null;
-                if (this.entity.metadata.unity.components == null) this.entity.metadata.unity.components = [];
-                const script:any = {
-                    alias: "script",
-                    order: 0,
-                    klass: this.getClassname(),
-                    properties: null,
-                    instance: instance
-                };
-                this.entity.metadata.unity.components.push(script);
-            }
-            BABYLON.ScriptComponent.RegisterInstance(instance);
-        }
-        private destroyComponentInstance(instance: BABYLON.ScriptComponent):void {
-            BABYLON.ScriptComponent.DestroyInstance(instance);
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////
-        // Component Instance Life Cycle Helpers
-        ////////////////////////////////////////////////////////////////////////////////////
-
-        private static RegisterInstance(instance: BABYLON.ScriptComponent): void {
-            if (instance != null && instance.entity != null) {
-                if (instance._before != null) {
-                    instance.scene.registerBeforeRender(instance._before);
-                }
-                if (instance._after != null) {
-                    instance.scene.registerAfterRender(instance._after);
-                }
-            }
-        }
-        private static BeforeInstance(instance: BABYLON.ScriptComponent): void {
-            if (instance != null && instance.entity != null) {
-                if (!instance._started) {
-                    instance.start();
-                    instance._started = true;
-                } else if (instance._before != null && instance._started) {
-                    instance.update();
-                }
-            }
-        }
-        private static AfterInstance(instance: BABYLON.ScriptComponent): void {
-            if (instance != null && instance.entity != null) {
-                if (instance._after != null && instance._started) {
-                    instance.after();
-                }
-            }
-        }
-        private static DestroyInstance(instance: BABYLON.ScriptComponent) {
-            if (instance != null && instance.entity != null) {
-                instance.scene.unregisterBeforeRender(instance._before);
-                instance.scene.unregisterAfterRender(instance._after);
-                // ..
-                // TODO: Remove Entity From All Light Shadow Map Render Lists - ???
-                // ..
-                try{ instance.destroy(); }catch(e){};
-                instance._properties = null;
-                instance._started = false;
-                instance._before = null;
-                instance._after = null;
-                instance._scene = null;
-                instance._entity = null;
-            }
-        }
-    }
-    /**
-     * Babylon navigation agent class
-     * @class NavigationAgent
-     */
-    export class NavigationAgent {
-        private _mesh:BABYLON.AbstractMesh;
-        private _info:BABYLON.INavigationAgent;
-        /** TODO */
-        constructor(entity: BABYLON.AbstractMesh) {
-            if (entity == null) throw new Error("Null entity agent mesh specified.");
-            this._mesh = entity;
-            this._info = (this._mesh.metadata != null && this._mesh.metadata.unity != null && this._mesh.metadata.unity.navAgent != null) ? this._mesh.metadata.unity.navAgent : null;
-        }
-        /** TODO */
-        public get mesh():BABYLON.AbstractMesh {
-            return this._mesh;
-        }
-        /** TODO */
-        public get info():BABYLON.INavigationAgent {
-            return this._info;
-        }
-        /** TODO */
-        public get hasAgentInfo(): boolean {
-            return (this.info != null);
-        }
-        /** TODO */
-        public setDestination(destination: BABYLON.Vector3): void {
-            if (this.hasAgentInfo) {
-                // TODO: Create SetDestination Navigation AI With Obsticale Avoidance
-            } else {
-                BABYLON.Tools.Warn("Null navigation agent metadata. Set agent destination ignored.");
-            }
-        }
-    }
 }
 if (BABYLON.SceneManager.IsWindows()) {
     if (typeof Windows.UI.ViewManagement !== "undefined" && typeof Windows.UI.ViewManagement.ApplicationViewBoundsMode !== "undefined" && typeof Windows.UI.ViewManagement.ApplicationViewBoundsMode.useCoreWindow !== "undefined") {
@@ -3150,101 +2398,3 @@ if (BABYLON.SceneManager.IsXboxOne()) {
         navigator.gamepadInputEmulation = "gamepad";
     }
 }
-
-/**
- * RequestAnimationFrame() Original Shim By: Paul Irish
- * http://paulirish.com/2011/requestanimationframe-for-smart-animating/
- * @class TimerPlugin
- */
-var TimerPlugin:any = window;
-TimerPlugin.requestAnimFrame = (function() {
-	return  TimerPlugin.requestAnimationFrame || 
-			TimerPlugin.webkitRequestAnimationFrame || 
-			TimerPlugin.mozRequestAnimationFrame || 
-			TimerPlugin.oRequestAnimationFrame || 
-			TimerPlugin.msRequestAnimationFrame || function(callback, element){ window.setTimeout(callback, 1000 / 60); };
-})();
-/**
- * Behaves the same as setInterval except uses requestAnimationFrame() where possible for better performance
- * @param {function} fn The callback function
- * @param {int} delay The delay in milliseconds
- */
-TimerPlugin.requestInterval = function(fn, delay) {
-	if( !TimerPlugin.requestAnimationFrame && 
-		!TimerPlugin.webkitRequestAnimationFrame && 
-		!(TimerPlugin.mozRequestAnimationFrame && TimerPlugin.mozCancelRequestAnimationFrame) && // Firefox 5 ships without cancel support
-        !TimerPlugin.oRequestAnimationFrame &&
-        !TimerPlugin.msRequestAnimationFrame)
-			return window.setInterval(fn, delay);
-			
-    let start = TimerPlugin.getTimeMilliseconds();
-	let	handle:any = new Object();
-	function loop() {
-		let current = TimerPlugin.getTimeMilliseconds(), delta = current - start;
-		if(delta >= delay) {
-			fn.call();
-			start = TimerPlugin.getTimeMilliseconds();
-		}
-		handle.value = TimerPlugin.requestAnimFrame(loop);
-    };
-    // ..
-	handle.value = TimerPlugin.requestAnimFrame(loop);
-	return handle;
-};
-/**
- * Behaves the same as clearInterval except uses cancelRequestAnimationFrame() where possible for better performance
- * @param {int|object} fn The callback function
- */
-TimerPlugin.clearRequestInterval = function(handle) {
-    TimerPlugin.cancelAnimationFrame ? TimerPlugin.cancelAnimationFrame(handle.value) :
-    TimerPlugin.webkitCancelAnimationFrame ? TimerPlugin.webkitCancelAnimationFrame(handle.value) :
-    TimerPlugin.webkitCancelRequestAnimationFrame ? TimerPlugin.webkitCancelRequestAnimationFrame(handle.value) : /* Support for legacy API */
-    TimerPlugin.mozCancelRequestAnimationFrame ? TimerPlugin.mozCancelRequestAnimationFrame(handle.value) :
-    TimerPlugin.oCancelRequestAnimationFrame	? TimerPlugin.oCancelRequestAnimationFrame(handle.value) :
-    TimerPlugin.msCancelRequestAnimationFrame ? TimerPlugin.msCancelRequestAnimationFrame(handle.value) :
-    window.clearInterval(handle);
-    handle = null;
-};
-/**
- * Behaves the same as setTimeout except uses requestAnimationFrame() where possible for better performance
- * @param {function} fn The callback function
- * @param {int} delay The delay in milliseconds
- */
-TimerPlugin.requestTimeout = function(fn, delay) {
-	if( !TimerPlugin.requestAnimationFrame      	&& 
-		!TimerPlugin.webkitRequestAnimationFrame && 
-		!(TimerPlugin.mozRequestAnimationFrame && TimerPlugin.mozCancelRequestAnimationFrame) && // Firefox 5 ships without cancel support
-		!TimerPlugin.oRequestAnimationFrame      && 
-		!TimerPlugin.msRequestAnimationFrame)
-			return window.setTimeout(fn, delay);
-			
-	let start = TimerPlugin.getTimeMilliseconds();
-    let	handle:any = new Object();
-	function loop(){
-		let current = TimerPlugin.getTimeMilliseconds(), delta = current - start;
-		delta >= delay ? fn.call() : handle.value = TimerPlugin.requestAnimFrame(loop);
-    };
-    // ..
-	handle.value = TimerPlugin.requestAnimFrame(loop);
-	return handle;
-};
-/**
- * Behaves the same as clearTimeout except uses cancelRequestAnimationFrame() where possible for better performance
- * @param {int|object} fn The callback function
- */
-TimerPlugin.clearRequestTimeout = function(handle) {
-    TimerPlugin.cancelAnimationFrame ? TimerPlugin.cancelAnimationFrame(handle.value) :
-    TimerPlugin.webkitCancelAnimationFrame ? TimerPlugin.webkitCancelAnimationFrame(handle.value) :
-    TimerPlugin.webkitCancelRequestAnimationFrame ? TimerPlugin.webkitCancelRequestAnimationFrame(handle.value) : /* Support for legacy API */
-    TimerPlugin.mozCancelRequestAnimationFrame ? TimerPlugin.mozCancelRequestAnimationFrame(handle.value) :
-    TimerPlugin.oCancelRequestAnimationFrame	? TimerPlugin.oCancelRequestAnimationFrame(handle.value) :
-    TimerPlugin.msCancelRequestAnimationFrame ? TimerPlugin.msCancelRequestAnimationFrame(handle.value) :
-    window.clearTimeout(handle);
-    handle = null;
-};
-/**
- * Return the game time in total milliseconds
- */
-TimerPlugin.getTimeMilliseconds = function () {
-    return (performance || Date).now();
-};

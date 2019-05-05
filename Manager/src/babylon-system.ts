@@ -1,3 +1,4 @@
+declare var Ammo: any;
 declare class Navigation {
     // Babylon Navigation Mesh Tool
     // https://github.com/wanadev/babylon-navigation-mesh
@@ -252,6 +253,7 @@ module BABYLON {
         public static PointerAngularSensibility:number = 1.0;
         public static PointerWheelDeadZone:number = 0.1;
     }
+    
     /**
      * Babylon utility class
      * @class Utilities
@@ -350,12 +352,16 @@ module BABYLON {
             });
         }
 
-        // ************************************ //
-        // * Public Has Own Property Support  * //
-        // ************************************ //
-
+        // ********************************** //
+        // * Public General Helper Support  * //
+        // ********************************** //
+    
         public static HasOwnProperty(object:any, property:string):boolean {
             return (object != null && property != null && property !== "" && property in object);
+        }
+
+        public static GetFilenameFromUrl(url:string): string {
+            return url.substring(url.lastIndexOf('/') + 1);
         }
     
         // *********************************** //
@@ -382,25 +388,6 @@ module BABYLON {
                 BABYLON.Utilities.PrintElement.innerHTML = text;
             }
         }
-
-        // *********************************** //
-        // * Public Shader Material Support  * //
-        // *********************************** //
-
-        public static SetupShaderMaterial(material:BABYLON.ShaderMaterial, program: string, blending:boolean = false, testing:boolean = false, defaultAttributes:string[] = ["position", "normal", "uv", "uv2", "color"], defaultUniforms:string[] = ["world", "worldView", "worldViewProjection", "view", "projection"]):void {
-            const shaderProgram:any = { vertex: program, fragment: program };
-            const shaderOptions:BABYLON.IShaderMaterialOptions = {
-                needAlphaBlending: blending,
-                needAlphaTesting: testing,
-                attributes: defaultAttributes,
-                uniforms: defaultUniforms,
-                uniformBuffers: [],
-                samplers: [],
-                defines: []
-            };
-            (<any>material)._shaderPath = shaderProgram;
-            (<any>material)._options = shaderOptions;
-        }
     
         // ************************************ //
         // * Public String Tools Support * //
@@ -417,6 +404,16 @@ module BABYLON {
         /** TODO */
         public static ReplaceAll(source:string, word:string, replace:string):string {
             return source.replace(new RegExp(word, 'g'), replace);            
+        }
+        /** TODO */
+        public static IsNullOrEmpty(source:string):boolean {
+            return (source == null || source === "");
+        }
+        /** TODO */
+        public static SafeStringPush(array:string[], value:string):void {
+            if (array.indexOf(value) === -1) {
+                array.push(value);
+            }
         }
 
         //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -740,6 +737,12 @@ module BABYLON {
             return 1 / (rate * duration);
         }
 
+        public static CalculateCameraDistance(farClipPlane:number, lodPercent:number, clipPlaneScale:number = 1.0):number
+        {
+            const bias:number = 1.0; // Ignore Lod Bias For Distances - (QualitySettings.lodBias > 0.0f) ? QualitySettings.lodBias : 1.0f;
+            return Math.round(((farClipPlane * clipPlaneScale) * lodPercent) * bias);
+        }
+
         //////////////////////////////////////////////////////////////////////////////////////////////////////
         // Canvas Tools Instance Helper Functions
         //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -845,6 +848,27 @@ module BABYLON {
             }
             return result;            
         }
+
+        public static CreateGuid(suffix:string = null):string
+        {
+            let result:string = BABYLON.Tools.RandomId();   
+            if (!BABYLON.Utilities.IsNullOrEmpty(result)) {
+                result += ("_" + suffix);
+            }
+            return result;
+        }
+
+        public static ValidateTransformGuid(node:TransformNode):void
+        {
+            if (node != null && node.metadata != null && node.metadata.unity != null && node.metadata.unity.guid != null && node.metadata.unity.guid !== "") {
+                const guid:string = node.metadata.unity.guid;
+                if (node.id !== guid) {
+                    node.id = guid;
+                }
+                delete node.metadata.unity.guid;
+            }
+        }
+
         /** TODO */
         public static CloneValue(source:any, destinationObject:any): any {
             if (!source) return null;
@@ -864,22 +888,27 @@ module BABYLON {
                 if (source.unity != null) {
                     const new_visible:boolean = source.unity.visible != null ? source.unity.visible : true;
                     const new_visibilty:number = source.unity.visibility != null ? source.unity.visibility : 1.0;
-                    const new_tags:string = source.unity.tags != null ? source.unity.tags : "Untagged";
-                    const new_bone:string = source.unity.bone != null ? source.unity.bone : null;
+                    const new_billboard:number = source.unity.billboard != null ? source.unity.billboard : 0;
+                    const new_tags:string = source.unity.tags != null ? source.unity.tags : "Untagged Layer0";
+                    const new_skin:string = source.unity.skin != null ? source.unity.skin : false;
+                    const new_bone:number = source.unity.bone != null ? source.unity.bone : null;
                     const new_group:string = source.unity.group != null ? source.unity.group : "Untagged";
                     const new_layer:number = source.unity.layer != null ? source.unity.layer : 0;
                     const new_layername:string = source.unity.layername != null ? source.unity.layername : "Default";
+                    //const new_lods:string = source.unity.lods != null ? source.unity.lods : null;
+                    //const new_coverages:string = source.unity.coverages != null ? source.unity.coverages : null;
+                    //const new_distances:string = source.unity.distances != null ? source.unity.distances : null;
+                    let new_physics:any = null;
                     let new_renderer:any = null;
-                    let new_rigidbody:any = null;
                     let new_collision:any = null;
                     let new_properties:any = null;
+                    if (source.unity.physics) {
+                        new_physics = {};
+                        BABYLON.Utilities.DeepCopyProperties(source.unity.physics, new_physics);
+                    }
                     if (source.unity.renderer) {
                         new_renderer = {};
                         BABYLON.Utilities.DeepCopyProperties(source.unity.renderer, new_renderer);
-                    }
-                    if (source.unity.rigidbody) {
-                        new_rigidbody = {};
-                        BABYLON.Utilities.DeepCopyProperties(source.unity.rigidbody, new_rigidbody);
                     }
                     if (source.unity.collision) {
                         new_collision = {};
@@ -903,16 +932,28 @@ module BABYLON {
                         });
                     }
                     new_unity = {};
+                    new_unity.parsed = false;
                     new_unity.prefab = false;
+                    ////////////////////////////////////////
+                    new_unity.lods = null;
+                    new_unity.coverages = null;
+                    new_unity.distances = null;
+                    //new_unity.body = new_body;
+                    //new_unity.lods = new_lods;
+                    //new_unity.coverages = new_coverages;
+                    //new_unity.distances = new_distances;
+                    ////////////////////////////////////////
                     new_unity.visible = new_visible;
                     new_unity.visibility = new_visibilty;
+                    new_unity.billboard = new_billboard;
                     new_unity.tags = new_tags;
+                    new_unity.skin = new_skin;
                     new_unity.bone = new_bone;
                     new_unity.group = new_group;
                     new_unity.layer = new_layer;
                     new_unity.layername = new_layername;
                     new_unity.renderer = new_renderer;
-                    new_unity.rigidbody = new_rigidbody;
+                    new_unity.physics = new_physics;
                     new_unity.collision = new_collision;
                     new_unity.properties = new_properties;
                     new_unity.components = new_components;
@@ -958,5 +999,128 @@ module BABYLON {
                 }
             }
         }
+        /** TODO */
+        public static ValidateTransformMetadata(transform:BABYLON.TransformNode): void {
+            if (transform.metadata == null) transform.metadata = {};
+            if (transform.metadata.unity == null) transform.metadata.unity = {};
+            const metadata:any = transform.metadata.unity;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "parsed")) transform.metadata.unity.parsed = false;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "prefab")) transform.metadata.unity.prefab = false;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "visible")) transform.metadata.unity.visible = true;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "visibility")) transform.metadata.unity.visibility = 1.0;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "billboard")) transform.metadata.unity.billboard = 0;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "tags")) transform.metadata.unity.tags = "Untagged Layer0";
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "skin")) transform.metadata.unity.skin = false;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "bone")) transform.metadata.unity.bone = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "group")) transform.metadata.unity.group = "Untagged";
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "layer")) transform.metadata.unity.layer = 0;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "layername")) transform.metadata.unity.layername = "Default";
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "lods")) transform.metadata.unity.lods = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "coverages")) transform.metadata.unity.coverages = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "distances")) transform.metadata.unity.distances = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "physics")) transform.metadata.unity.physics = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "renderer")) transform.metadata.unity.renderer = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "collision")) transform.metadata.unity.collision = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "properties")) transform.metadata.unity.properties = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "components")) transform.metadata.unity.components = null;
+        }
     }
 }
+
+/**
+ * RequestAnimationFrame() Original Shim By: Paul Irish (Internal use only)
+ * http://paulirish.com/2011/requestanimationframe-for-smart-animating/
+ * @class TimerPlugin
+ */
+var TimerPlugin:any = window;
+TimerPlugin.requestAnimFrame = (function() {
+	return  TimerPlugin.requestAnimationFrame || 
+			TimerPlugin.webkitRequestAnimationFrame || 
+			TimerPlugin.mozRequestAnimationFrame || 
+			TimerPlugin.oRequestAnimationFrame || 
+			TimerPlugin.msRequestAnimationFrame || function(callback, element){ window.setTimeout(callback, 1000 / 60); };
+})();
+/**
+ * Behaves the same as setInterval except uses requestAnimationFrame() where possible for better performance
+ * @param {function} fn The callback function
+ * @param {int} delay The delay in milliseconds
+ */
+TimerPlugin.requestInterval = function(fn, delay) {
+	if( !TimerPlugin.requestAnimationFrame && 
+		!TimerPlugin.webkitRequestAnimationFrame && 
+		!(TimerPlugin.mozRequestAnimationFrame && TimerPlugin.mozCancelRequestAnimationFrame) && // Firefox 5 ships without cancel support
+        !TimerPlugin.oRequestAnimationFrame &&
+        !TimerPlugin.msRequestAnimationFrame)
+			return window.setInterval(fn, delay);
+			
+    let start = TimerPlugin.getTimeMilliseconds();
+	let	handle:any = new Object();
+	function loop() {
+		let current = TimerPlugin.getTimeMilliseconds(), delta = current - start;
+		if(delta >= delay) {
+			fn.call();
+			start = TimerPlugin.getTimeMilliseconds();
+		}
+		handle.value = TimerPlugin.requestAnimFrame(loop);
+    };
+    // ..
+	handle.value = TimerPlugin.requestAnimFrame(loop);
+	return handle;
+};
+/**
+ * Behaves the same as clearInterval except uses cancelRequestAnimationFrame() where possible for better performance
+ * @param {int|object} fn The callback function
+ */
+TimerPlugin.clearRequestInterval = function(handle) {
+    TimerPlugin.cancelAnimationFrame ? TimerPlugin.cancelAnimationFrame(handle.value) :
+    TimerPlugin.webkitCancelAnimationFrame ? TimerPlugin.webkitCancelAnimationFrame(handle.value) :
+    TimerPlugin.webkitCancelRequestAnimationFrame ? TimerPlugin.webkitCancelRequestAnimationFrame(handle.value) : /* Support for legacy API */
+    TimerPlugin.mozCancelRequestAnimationFrame ? TimerPlugin.mozCancelRequestAnimationFrame(handle.value) :
+    TimerPlugin.oCancelRequestAnimationFrame	? TimerPlugin.oCancelRequestAnimationFrame(handle.value) :
+    TimerPlugin.msCancelRequestAnimationFrame ? TimerPlugin.msCancelRequestAnimationFrame(handle.value) :
+    window.clearInterval(handle);
+    handle = null;
+};
+/**
+ * Behaves the same as setTimeout except uses requestAnimationFrame() where possible for better performance
+ * @param {function} fn The callback function
+ * @param {int} delay The delay in milliseconds
+ */
+TimerPlugin.requestTimeout = function(fn, delay) {
+	if( !TimerPlugin.requestAnimationFrame      	&& 
+		!TimerPlugin.webkitRequestAnimationFrame && 
+		!(TimerPlugin.mozRequestAnimationFrame && TimerPlugin.mozCancelRequestAnimationFrame) && // Firefox 5 ships without cancel support
+		!TimerPlugin.oRequestAnimationFrame      && 
+		!TimerPlugin.msRequestAnimationFrame)
+			return window.setTimeout(fn, delay);
+			
+	let start = TimerPlugin.getTimeMilliseconds();
+    let	handle:any = new Object();
+	function loop(){
+		let current = TimerPlugin.getTimeMilliseconds(), delta = current - start;
+		delta >= delay ? fn.call() : handle.value = TimerPlugin.requestAnimFrame(loop);
+    };
+    // ..
+	handle.value = TimerPlugin.requestAnimFrame(loop);
+	return handle;
+};
+/**
+ * Behaves the same as clearTimeout except uses cancelRequestAnimationFrame() where possible for better performance
+ * @param {int|object} fn The callback function
+ */
+TimerPlugin.clearRequestTimeout = function(handle) {
+    TimerPlugin.cancelAnimationFrame ? TimerPlugin.cancelAnimationFrame(handle.value) :
+    TimerPlugin.webkitCancelAnimationFrame ? TimerPlugin.webkitCancelAnimationFrame(handle.value) :
+    TimerPlugin.webkitCancelRequestAnimationFrame ? TimerPlugin.webkitCancelRequestAnimationFrame(handle.value) : /* Support for legacy API */
+    TimerPlugin.mozCancelRequestAnimationFrame ? TimerPlugin.mozCancelRequestAnimationFrame(handle.value) :
+    TimerPlugin.oCancelRequestAnimationFrame	? TimerPlugin.oCancelRequestAnimationFrame(handle.value) :
+    TimerPlugin.msCancelRequestAnimationFrame ? TimerPlugin.msCancelRequestAnimationFrame(handle.value) :
+    window.clearTimeout(handle);
+    handle = null;
+};
+/**
+ * Return the game time in total milliseconds
+ */
+TimerPlugin.getTimeMilliseconds = function () {
+    return (performance || Date).now();
+};

@@ -1,3 +1,4 @@
+// Note: Gulp 3.9.1 - Required
 var gulp = require("gulp");
 var typescript = require("gulp-typescript");
 var sourcemaps = require("gulp-sourcemaps");
@@ -6,7 +7,6 @@ var concat = require("gulp-concat");
 var uglify = require("gulp-uglify");
 
 var tsConfig = {
-    noExternalResolve: true,
     target: 'ES5',
     module: 'system',
     lib: ["es5", "es2015", "dom"],
@@ -14,12 +14,17 @@ var tsConfig = {
     typescript: require('typescript'),
     experimentalDecorators: true,
     isolatedModules: false,
-    removeComments: false
+    removeComments: false,
+    noResolve: true
 };
+
 var tsProject = typescript.createProject(tsConfig);
 
 var files = [
-    "./temp/babylon-master.js",
+    "./temp/babylon-manager.js",
+    "./temp/babylon-parsing.js",
+    "./temp/babylon-scripts.js",
+    "./temp/babylon-shaders.js",
     "./temp/babylon-system.js",
     "./temp/babylon-toolkit.js"
 ]
@@ -27,7 +32,7 @@ var files = [
 gulp.task("compile", function () {
     var tsResult = gulp.src(["./types/**/*.ts", "./src/**/*.ts"])      
             .pipe(sourcemaps.init())
-            .pipe(typescript(tsProject));
+            .pipe(tsProject());
 
     return merge2([
         tsResult.dts
@@ -46,7 +51,7 @@ gulp.task("compile", function () {
 
 gulp.task("default", ["compile"], function () {
     return merge2(gulp.src(files))
-        .pipe(concat("babylon.manager.jscript"))
+        .pipe(concat("babylon.manager.js"))
         .pipe(uglify())
         .pipe(gulp.dest("../Assets/Babylon/Template/Library/"));
 });

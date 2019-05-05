@@ -5,11 +5,20 @@ declare module BABYLON {
      */
     class SceneManager {
         /** Gets the toolkit framework version number */
-        static readonly VERSION_NUMBER: string;
-        /** Enable scene physics system debug tracing */
-        static DEBUG_PHYSICS: boolean;
+        static readonly VersionNumber: string;
+        /** Managed animation group start mode */
+        static AnimationStartMode?: BABYLON.GLTFLoaderAnimationStartMode;
         /** Forces scene loader into right hand mode */
-        static FORCE_RIGHT_HANDED: boolean;
+        static ForceRightHanded?: boolean;
+        /** Enable scene physics system debug tracing */
+        static DebugPhysics: boolean;
+        /** Managed json data store object */
+        static DataStore: any;
+        private static EnableSceneParsing;
+        /** Enable scene loader parsing plugin */
+        static EnableSceneLoader(enabled: boolean): void;
+        /** Is scene loader parsing plugin enabled */
+        static IsSceneLoaderEnabled(): boolean;
         /** Are unversial windows platform services available. */
         static IsWindows(): boolean;
         /** Are mobile cordova platform services available. */
@@ -48,6 +57,8 @@ declare module BABYLON {
         static IsXboxOne(): boolean;
         /** Are xbox live platform services available. */
         static IsXboxLive(): boolean;
+        /** Run a function on the next render loop. */
+        static RunOnce(scene: BABYLON.Scene, func: () => void): void;
         /** Popup debug layer in window. */
         static PopupDebug(scene: BABYLON.Scene): void;
         /** Toggle debug layer on and off. */
@@ -66,14 +77,10 @@ declare module BABYLON {
         static RayCast(scene: BABYLON.Scene, ray: BABYLON.Ray, predicate?: (mesh: BABYLON.AbstractMesh) => boolean, fastCheck?: boolean): BABYLON.PickingInfo;
         /** TODO */
         static MultiRayCast(scene: BABYLON.Scene, ray: BABYLON.Ray, predicate?: (mesh: BABYLON.AbstractMesh) => boolean): BABYLON.PickingInfo[];
-        /** Safely destroy mesh entity */
-        static SafeDestroy(entity: BABYLON.AbstractMesh, delay?: number, disable?: boolean): void;
+        /** Safely destroy transform node */
+        static SafeDestroy(transform: BABYLON.TransformNode, delay?: number, disable?: boolean): void;
         /** Open alert message dialog. */
         static AlertMessage(text: string, title?: string): any;
-        /** Inline loads the required runtime script code */
-        static InjectScript(script: string, id: string): void;
-        /** Sequentially loads the required runtime script libraries */
-        static RequireScript(libs: string | Array<string>, callback: Function): void;
         /**  Gets the names query string from page url. */
         static GetQueryStringParam(name: string, url: string): string;
         /** Gets the current engine WebGL version string info. */
@@ -90,38 +97,48 @@ declare module BABYLON {
         static RemoveSceneLoader(): void;
         /** Quit the Windows Runtime host application. */
         static QuitWindowsApplication(): void;
+        /** Get the last create engine instance */
+        static GetEngineInstances(): BABYLON.Engine[];
+        /** Get the last create engine instance */
+        static GetLastCreatedEngine(): BABYLON.Engine;
+        /** Get the last created scene instance */
+        static GetLastCreatedScene(): BABYLON.Scene;
         /** Gets the specified mesh from scene. */
-        static GetMesh<T extends BABYLON.TransformNode | BABYLON.AbstractMesh | BABYLON.Mesh>(scene: BABYLON.Scene, name: string): T;
-        /** Gets the prefab mesh from scene. */
+        static GetMesh(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh;
+        /** Gets the specified transform node from scene. */
+        static GetTransform(scene: BABYLON.Scene, name: string): BABYLON.TransformNode;
+        /** Gets the specified prefab mesh from scene. */
         static GetPrefabMesh(scene: BABYLON.Scene, prefabName: string): BABYLON.AbstractMesh;
-        /** Gets the navigation mesh from scene. */
+        /** TODO: Remove This - Gets the transform node primitive meshes. */
+        static GetPrimitiveMeshes(transform: TransformNode): BABYLON.AbstractMesh[];
+        /** Gets the transform node collision meshes. */
+        static GetCollisionMeshes(transform: TransformNode): BABYLON.AbstractMesh[];
+        /** Gets the system navigation mesh from scene. */
         static GetNavigationMesh(scene: BABYLON.Scene): BABYLON.AbstractMesh;
         /** Instantiates the specfied prefab object into scene. */
         static InstantiatePrefab(scene: BABYLON.Scene, name: string, cloneName: string, newParent?: Node, newPosition?: BABYLON.Vector3, newRotation?: BABYLON.Vector3, newScaling?: BABYLON.Vector3): BABYLON.AbstractMesh;
-        /** Creates a system skybox mesh for the scene */
-        static CreateSkyboxMesh(scene: BABYLON.Scene, root: string, url: string, size?: number, extensions?: string[], fog?: boolean): BABYLON.Mesh;
         /** TODO */
         static RegisterScriptComponent(instance: BABYLON.ScriptComponent, validate?: boolean): void;
         /** TODO */
         static DestroyScriptComponent(instance: BABYLON.ScriptComponent): void;
-        /** Finds a script component in the scene with the specfied klass name. */
-        static FindScriptComponent<T extends BABYLON.ScriptComponent>(entity: BABYLON.AbstractMesh, klass: string): T;
-        /** Finds all script components in the scene with the specfied klass name. */
-        static FindScriptComponents<T extends BABYLON.ScriptComponent>(entity: BABYLON.AbstractMesh, klass: string): T[];
-        /** Finds the entity object metedata in the scene. */
-        static FindSceneMetadata(entity: BABYLON.AbstractMesh): any;
-        /** Finds the specfied particle system rig of entity in the scene. */
-        static FindSceneParticleRig(entity: BABYLON.AbstractMesh): BABYLON.ParticleSystem;
-        /** Finds the specfied camera rig of entity in the scene. */
-        static FindSceneCameraRig(entity: BABYLON.AbstractMesh): BABYLON.Camera;
-        /** Finds the specfied light rig of entity in the scene. */
-        static FindSceneLightRig(entity: BABYLON.AbstractMesh): BABYLON.Light;
-        /** Finds the specfied lens flare system rig of entity in the scene. */
-        static FindSceneFlareRig(entity: BABYLON.AbstractMesh): BABYLON.LensFlareSystem;
-        /** Finds the specfied child mesh of entity in the scene. */
-        static FindSceneChildMesh(entity: BABYLON.AbstractMesh, name: string, searchType?: BABYLON.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.AbstractMesh;
-        /** Finds the specfied child transform of entity in the scene. */
-        static FindSceneChildTransform(entity: BABYLON.AbstractMesh, name: string, searchType?: BABYLON.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.AbstractMesh;
+        /** Finds a script component in the scene with the specfied class name. */
+        static FindScriptComponent<T extends BABYLON.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T;
+        /** Finds all script components in the scene with the specfied class name. */
+        static FindScriptComponents<T extends BABYLON.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T[];
+        /** Finds the transform object metedata in the scene. */
+        static FindSceneMetadata(transform: BABYLON.TransformNode): any;
+        /** Finds the specfied particle system rig in the scene. */
+        static FindSceneParticleRig(transform: BABYLON.TransformNode): BABYLON.ParticleSystem;
+        /** Finds the specfied camera rig in the scene. */
+        static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.Camera;
+        /** Finds the specfied light rig in the scene. */
+        static FindSceneLightRig(transform: BABYLON.TransformNode): BABYLON.Light;
+        /** Finds the specfied lens flare system rig in the scene. */
+        static FindSceneFlareRig(transform: BABYLON.TransformNode): BABYLON.LensFlareSystem;
+        /** Finds the specfied child mesh in the scene. */
+        static FindSceneChildMesh(transform: BABYLON.TransformNode, name: string, searchType?: BABYLON.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.AbstractMesh;
+        /** Finds the specfied child transform in the scene. */
+        static FindSceneChildTransform(transform: BABYLON.TransformNode, name: string, searchType?: BABYLON.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.AbstractMesh;
         /** Gets the default navigation zone (https://github.com/wanadev/babylon-navigation-mesh) */
         static GetNavigationZone(): string;
         /** Build navigation mesh zone nodes (https://github.com/wanadev/babylon-navigation-mesh) */
@@ -131,7 +148,7 @@ declare module BABYLON {
         private static PhysicsViewer;
         /** Callback to setup ammo.js plugin when activated on the scene */
         static OnSetupPhysicsPlugin: (scene: BABYLON.Scene, plugin: BABYLON.AmmoJSPlugin) => void;
-        /** Applies force to entity using physics impostor. */
+        /** Applies force to transform using physics impostor. */
         static ApplyEntityForce(entity: BABYLON.AbstractMesh, force: BABYLON.Vector3, contact: BABYLON.Vector3): void;
         /** Applies impulse to entity using physics impostor. */
         static ApplyEntityImpulse(entity: BABYLON.AbstractMesh, impusle: BABYLON.Vector3, contact: BABYLON.Vector3): void;
@@ -161,10 +178,6 @@ declare module BABYLON {
         static ShowEntityPhysicsImpostor(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
         /** Hides the entity physics impostor for debugging. */
         static HideEntityPhysicsImpostor(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
-        /** Creates a safe physics impostor for the specified entity preserving parent child relations. */
-        static CreateEntityPhysicsImpostor(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, type: number, options: BABYLON.PhysicsImpostorParameters, reparent?: boolean): void;
-        /** Setup native physics impostor function for the specified entity. Internal use only */
-        private static SetupEntityPhysicsFunction;
         /** Moves entity using collisions. */
         static MoveWithCollisions(entity: BABYLON.AbstractMesh, velocity: BABYLON.Vector3): void;
         /** Moves entity using positions. */
@@ -266,17 +279,6 @@ declare module BABYLON {
         static ResetXboxLivePropertyContexts(): void;
         /** Sets the Xbox User Sign Out Complete Handler */
         static SetXboxLiveSignOutHandler(handler?: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void): void;
-        /** Parse the scene component metadata. Note: Internal use only */
-        static ParseSceneComponents(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>, physicsList: Array<any>): void;
-        /** Process pending physics list items. Note: Internal use only */
-        static ProcessPendingPhysics(scene: BABYLON.Scene, physicsList: Array<any>): void;
-        /** Process pending shadow list items. Note: Internal use only */
-        static ProcessPendingShadows(scene: BABYLON.Scene, shadowList: Array<BABYLON.AbstractMesh>): void;
-        /** Process pending script list items. Note: Internal use only */
-        static ProcessPendingScripts(scene: BABYLON.Scene, scriptList: Array<any>): void;
-        private static SetupPhysicsComponent;
-        private static SetupCameraComponent;
-        private static SetupLightComponent;
         private static input;
         private static keymap;
         private static wheel;
@@ -435,11 +437,56 @@ declare module BABYLON {
         private static inputManagerRightControllerTriggered;
         private static inputManagerControllerConnected;
     }
+}
+
+declare module BABYLON {
+    /**
+     * Babylon scene manager parser class (Internal use only)
+     * @class MetadataParser
+     */
+    class MetadataParser {
+        private _disposeList;
+        private _detailList;
+        private _physicList;
+        private _shadowList;
+        private _scriptList;
+        private _babylonScene;
+        private _gltfLoader;
+        readonly loader: BABYLON.GLTF2.GLTFLoader;
+        constructor(scene: BABYLON.Scene, loader?: BABYLON.GLTF2.GLTFLoader);
+        /** Parse the scene component metadata. Note: Internal use only */
+        parseSceneComponents(entity: BABYLON.AbstractMesh): void;
+        /** Post process pending scene components. Note: Internal use only */
+        postProcessSceneComponents(): void;
+        /** Add detail level list item. Note: Internal use only */
+        addDetailLevelItem(mesh: BABYLON.AbstractMesh): void;
+        /** Add dispose entity list item. Note: Internal use only */
+        addDisposeEntityItem(transform: BABYLON.TransformNode): void;
+        /** Load float array from gltf accessor data */
+        loadFloatAccessorData(context: string, index: number): Promise<Nullable<Float32Array>>;
+        /** Load indices array from gltf accessor data */
+        loadIndicesAccessorData(context: string, index: number): Promise<BABYLON.IndicesArray>;
+        private static DoParseSceneComponents;
+        private static DoProcessPendingDisposes;
+        private static DoProcessPendingDetails;
+        private static DoProcessPendingPhysics;
+        private static DoProcessPendingShadows;
+        private static DoProcessPendingScripts;
+        private static SetupPhysicsComponent;
+        private static SetupCameraComponent;
+        private static SetupLightComponent;
+        /** Creates a safe physics impostor for the specified entity preserving parent child relations. */
+        private static CreateEntityPhysicsImpostor;
+        private static SetupRigidbodyPhysicsFunction;
+    }
+}
+
+declare module BABYLON {
     /**
      * Babylon script component class
      * @class ScriptComponent
      */
-    abstract class ScriptComponent {
+    class ScriptComponent {
         protected start(): void;
         protected update(): void;
         protected after(): void;
@@ -449,19 +496,24 @@ declare module BABYLON {
         private _properties;
         private _started;
         private _scene;
-        private _entity;
-        /** Gets the scene object */
+        private _transform;
         readonly scene: BABYLON.Scene;
-        /** Gets the owner entity mesh object */
-        readonly entity: BABYLON.AbstractMesh;
-        /** Constructs a managed script component */
-        constructor(entity: BABYLON.AbstractMesh, scene: BABYLON.Scene, properties?: any);
-        /** TODO */
+        readonly transform: BABYLON.TransformNode;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        /** Gets the script component class name */
+        getClassName(): string;
+        /** Sets a script component property bag value */
         setProperty(name: string, propertyValue: any): void;
-        /** TODO */
+        /** Gets a script component property bag value */
         getProperty<T>(name: string, defaultValue?: T): T;
-        /** TODO */
-        getClassname(): string;
+        /** Gets the safe transform mesh entity */
+        getTransformMesh(): BABYLON.Mesh;
+        /** Gets the safe transform abstract mesh entity */
+        getAbstractMesh(): BABYLON.AbstractMesh;
+        /** Gets the transform collision meshes */
+        getCollisionMeshes(): BABYLON.AbstractMesh[];
+        /** Gets the transform primitive meshes */
+        getPrimitiveMeshes(): BABYLON.AbstractMesh[];
         /** TODO */
         getMetadata(): any;
         /** TODO */
@@ -490,31 +542,260 @@ declare module BABYLON {
         private static DestroyInstance;
     }
     /**
+     * Babylon shuriken particle class
+     * @class ShurikenParticleSystem
+     */
+    class ShurikenParticleSystem extends BABYLON.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected start(): void;
+        protected update(): void;
+        protected after(): void;
+        protected destroy(): void;
+    }
+    /**
+     * Babylon character controller class
+     * @class CharacterController
+     */
+    class CharacterController extends BABYLON.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected start(): void;
+        protected update(): void;
+        protected after(): void;
+        protected destroy(): void;
+    }
+    /**
+     * Babylon animation state class
+     * @class AnimationState
+     */
+    class AnimationState extends BABYLON.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected start(): void;
+        protected update(): void;
+        protected after(): void;
+        protected destroy(): void;
+    }
+    /**
      * Babylon navigation agent class
      * @class NavigationAgent
      */
-    class NavigationAgent {
-        private _mesh;
-        private _info;
-        /** TODO */
-        constructor(entity: BABYLON.AbstractMesh);
-        /** TODO */
-        readonly mesh: BABYLON.AbstractMesh;
-        /** TODO */
+    class NavigationAgent extends BABYLON.ScriptComponent {
         readonly info: BABYLON.INavigationAgent;
-        /** TODO */
         readonly hasAgentInfo: boolean;
+        private _info;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected start(): void;
+        protected update(): void;
+        protected after(): void;
+        protected destroy(): void;
         /** TODO */
         setDestination(destination: BABYLON.Vector3): void;
     }
 }
-/**
- * RequestAnimationFrame() Original Shim By: Paul Irish
- * http://paulirish.com/2011/requestanimationframe-for-smart-animating/
- * @class TimerPlugin
- */
-declare var TimerPlugin: any;
 
+declare module BABYLON {
+    type UniversalMaterial = UniversalPushMaterial | UniversalAlbedoMaterial | UniversalDiffuseMaterial;
+    class UniversalShaderDefines {
+        private _defines;
+        constructor();
+        getDefines(): any;
+        defineBoolean(name: string): void;
+        defineNumeric(name: string, value: number): void;
+        static ShaderIndexer: number;
+    }
+    class UniversalMaterialDefines extends BABYLON.MaterialDefines {
+        DIFFUSE: boolean;
+        CLIPPLANE: boolean;
+        CLIPPLANE2: boolean;
+        CLIPPLANE3: boolean;
+        CLIPPLANE4: boolean;
+        ALPHATEST: boolean;
+        DEPTHPREPASS: boolean;
+        POINTSIZE: boolean;
+        FOG: boolean;
+        NORMAL: boolean;
+        UV1: boolean;
+        UV2: boolean;
+        VERTEXCOLOR: boolean;
+        VERTEXALPHA: boolean;
+        NUM_BONE_INFLUENCERS: number;
+        BonesPerMesh: number;
+        INSTANCES: boolean;
+        constructor();
+    }
+    class UniversalAlbedoChunks {
+        constructor();
+        Vertex_Begin: string;
+        Vertex_Definitions: string;
+        Vertex_MainBegin: string;
+        Vertex_Before_PositionUpdated: string;
+        Vertex_Before_NormalUpdated: string;
+        Vertex_MainEnd: string;
+        Fragment_Begin: string;
+        Fragment_Definitions: string;
+        Fragment_MainBegin: string;
+        Fragment_Custom_Albedo: string;
+        Fragment_Custom_Alpha: string;
+        Fragment_Before_Lights: string;
+        Fragment_Before_Fog: string;
+        Fragment_Before_FragColor: string;
+        Fragment_MetallicRoughness: string;
+        Fragment_MicroSurface: string;
+    }
+    class UniversalDiffuseChunks {
+        constructor();
+        Vertex_Begin: string;
+        Vertex_Definitions: string;
+        Vertex_MainBegin: string;
+        Vertex_Before_PositionUpdated: string;
+        Vertex_Before_NormalUpdated: string;
+        Vertex_MainEnd: string;
+        Fragment_Begin: string;
+        Fragment_Definitions: string;
+        Fragment_MainBegin: string;
+        Fragment_Custom_Diffuse: string;
+        Fragment_Custom_Alpha: string;
+        Fragment_Before_Lights: string;
+        Fragment_Before_Fog: string;
+        Fragment_Before_FragColor: string;
+    }
+    class UniversalShaderMaterial {
+        static Initialize(material: BABYLON.ShaderMaterial, binding?: boolean): void;
+    }
+    /**
+     * Babylon universal push material
+     * @class UniversalPushMaterial
+     */
+    class UniversalPushMaterial extends BABYLON.PushMaterial {
+        private _diffuseTexture;
+        diffuseTexture: BABYLON.BaseTexture;
+        diffuseColor: Color3;
+        private _disableLighting;
+        disableLighting: boolean;
+        private _maxSimultaneousLights;
+        maxSimultaneousLights: number;
+        customShaderNameResolve: (shaderName: string, uniforms: string[], uniformBuffers: string[], samplers: string[], defines: BABYLON.UniversalMaterialDefines) => string;
+        protected locals: BABYLON.UniversalShaderDefines;
+        private _defines;
+        private _uniforms;
+        private _samplers;
+        private _textures;
+        private _vectors4;
+        private _floats;
+        private _renderId;
+        constructor(name: string, scene: BABYLON.Scene);
+        getClassName(): string;
+        getShaderName(): string;
+        getShaderDefines(): BABYLON.UniversalMaterialDefines;
+        needAlphaBlending(): boolean;
+        needAlphaTesting(): boolean;
+        getAlphaTestTexture(): BABYLON.Nullable<BABYLON.BaseTexture>;
+        getTexture(name: string): BABYLON.Texture;
+        getVector4(name: string): BABYLON.Vector4;
+        getFloat(name: string): number;
+        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): BABYLON.UniversalPushMaterial;
+        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): BABYLON.UniversalPushMaterial;
+        setFloat(name: string, value: number, initialize?: boolean): BABYLON.UniversalPushMaterial;
+        checkUniform(uniformName: string): void;
+        checkSampler(samplerName: string): void;
+        isReadyForSubMesh(mesh: BABYLON.AbstractMesh, subMesh: BABYLON.SubMesh, useInstances?: boolean): boolean;
+        bindForSubMesh(world: BABYLON.Matrix, mesh: BABYLON.Mesh, subMesh: BABYLON.SubMesh): void;
+        getAnimatables(): BABYLON.IAnimatable[];
+        getActiveTextures(): BABYLON.BaseTexture[];
+        hasTexture(texture: BABYLON.BaseTexture): boolean;
+        dispose(forceDisposeEffect?: boolean): void;
+        clone(cloneName: string): BABYLON.UniversalPushMaterial;
+        serialize(): any;
+        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): BABYLON.UniversalPushMaterial;
+        private _buildCustomShader;
+        private _attachAfterBind;
+    }
+    /**
+     * Babylon universal albedo material
+     * @class UniversalAlbedoMaterial
+     */
+    class UniversalAlbedoMaterial extends BABYLON.PBRMaterial {
+        protected locals: BABYLON.UniversalShaderDefines;
+        private _defines;
+        private _uniforms;
+        private _samplers;
+        private _textures;
+        private _vectors4;
+        private _floats;
+        private _isCreatedShader;
+        private _createdShaderName;
+        private _enableShaderChunks;
+        private _materialShaderChunks;
+        constructor(name: string, scene: Scene);
+        getClassName(): string;
+        getShaderName(): string;
+        getShaderChunk(): string;
+        getShaderDefines(): BABYLON.PBRMaterialDefines;
+        getTexture(name: string): BABYLON.Texture;
+        getVector4(name: string): BABYLON.Vector4;
+        getFloat(name: string): number;
+        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): BABYLON.UniversalAlbedoMaterial;
+        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): BABYLON.UniversalAlbedoMaterial;
+        setFloat(name: string, value: number, initialize?: boolean): BABYLON.UniversalAlbedoMaterial;
+        checkUniform(uniformName: string): void;
+        checkSampler(samplerName: string): void;
+        getAnimatables(): IAnimatable[];
+        getActiveTextures(): BaseTexture[];
+        hasTexture(texture: BaseTexture): boolean;
+        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
+        clone(cloneName: string): BABYLON.UniversalAlbedoMaterial;
+        serialize(): any;
+        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): BABYLON.UniversalAlbedoMaterial;
+        protected customShaderChunkResolve(): void;
+        private _buildCustomShader;
+        private _createShaderChunks;
+        private _attachAfterBind;
+        private _setupAttachAfterBind;
+    }
+    /**
+     * Babylon universal diffuse material
+     * @class UniversalDiffuseMaterial
+     */
+    class UniversalDiffuseMaterial extends BABYLON.StandardMaterial {
+        protected locals: BABYLON.UniversalShaderDefines;
+        private _defines;
+        private _uniforms;
+        private _samplers;
+        private _textures;
+        private _vectors4;
+        private _floats;
+        private _isCreatedShader;
+        private _createdShaderName;
+        private _enableShaderChunks;
+        private _materialShaderChunks;
+        constructor(name: string, scene: Scene);
+        getClassName(): string;
+        getShaderName(): string;
+        getShaderChunk(): string;
+        getShaderDefines(): BABYLON.StandardMaterialDefines;
+        getTexture(name: string): BABYLON.Texture;
+        getVector4(name: string): BABYLON.Vector4;
+        getFloat(name: string): number;
+        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): BABYLON.UniversalDiffuseMaterial;
+        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): BABYLON.UniversalDiffuseMaterial;
+        setFloat(name: string, value: number, initialize?: boolean): BABYLON.UniversalDiffuseMaterial;
+        checkUniform(uniformName: string): void;
+        checkSampler(samplerName: string): void;
+        getAnimatables(): IAnimatable[];
+        getActiveTextures(): BaseTexture[];
+        hasTexture(texture: BaseTexture): boolean;
+        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
+        clone(cloneName: string): BABYLON.UniversalDiffuseMaterial;
+        serialize(): any;
+        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): BABYLON.UniversalDiffuseMaterial;
+        protected customShaderChunkResolve(): void;
+        private _buildCustomShader;
+        private _createShaderChunks;
+        private _attachAfterBind;
+        private _setupAttachAfterBind;
+    }
+}
+
+declare var Ammo: any;
 declare class Navigation {
     buildNodes(mesh: BABYLON.AbstractMesh): any;
     setZoneData(zone: string, data: any): void;
@@ -798,15 +1079,19 @@ declare module BABYLON {
         /** TODO */
         static DownloadEnvironment(cubemap: BABYLON.CubeTexture, success?: () => void, failure?: () => void): void;
         static HasOwnProperty(object: any, property: string): boolean;
+        static GetFilenameFromUrl(url: string): string;
         /** TODO */
         static PrintToScreen(text: string, color?: string): void;
-        static SetupShaderMaterial(material: BABYLON.ShaderMaterial, program: string, blending?: boolean, testing?: boolean, defaultAttributes?: string[], defaultUniforms?: string[]): void;
         /** TODO */
         static StartsWith(source: string, word: string): boolean;
         /** TODO */
         static EndsWith(source: string, word: string): boolean;
         /** TODO */
         static ReplaceAll(source: string, word: string, replace: string): string;
+        /** TODO */
+        static IsNullOrEmpty(source: string): boolean;
+        /** TODO */
+        static SafeStringPush(array: string[], value: string): void;
         /** TODO */
         static ParseColor3(source: any, defaultValue?: BABYLON.Color3): BABYLON.Color3;
         /** TODO */
@@ -867,30 +1152,35 @@ declare module BABYLON {
         static SetSkeletonProperties(skeleton: BABYLON.Skeleton, loopBehavior: number, blendingSpeed: number): void;
         /** Computes the transition duration blending speed */
         static ComputeBlendingSpeed(rate: number, duration: number): number;
+        static CalculateCameraDistance(farClipPlane: number, lodPercent: number, clipPlaneScale?: number): number;
         /** TODO */
         static InstantiateClass(className: string): any;
         /** TODO */
         static DisposeEntity(entity: BABYLON.AbstractMesh): void;
         /** TODO */
         static FindMesh(name: string, meshes: BABYLON.AbstractMesh[], searchType?: BABYLON.SearchType): BABYLON.AbstractMesh;
+        static CreateGuid(suffix?: string): string;
+        static ValidateTransformGuid(node: TransformNode): void;
         /** TODO */
         static CloneValue(source: any, destinationObject: any): any;
         /** TODO */
         static CloneMetadata(source: any): any;
         /** TODO */
         static DeepCopyProperties(source: any, destination: any, doNotCopyList?: string[], mustCopyList?: string[]): void;
+        /** TODO */
+        static ValidateTransformMetadata(transform: BABYLON.TransformNode): void;
     }
 }
+/**
+ * RequestAnimationFrame() Original Shim By: Paul Irish (Internal use only)
+ * http://paulirish.com/2011/requestanimationframe-for-smart-animating/
+ * @class TimerPlugin
+ */
+declare var TimerPlugin: any;
 
 declare const CVTOOLS_NAME = "CVTOOLS_unity_metadata";
-declare const CVTOOLS_HAND = "CVTOOLS_left_handedness";
-/**
- * Babylon Editor Toolkit - Light Scaling
- */
-declare const DIR_LIGHT_SCALE = 1;
-declare const SPOT_LIGHT_SCALE = 1;
-declare const POINT_LIGHT_SCALE = 1;
-declare const AMBIENT_LIGHT_SCALE = 1;
+declare const CVTOOLS_MESH = "CVTOOLS_babylon_mesh";
+declare const CVTOOLS_HAND = "CVTOOLS_left_handed";
 /**
  * Babylon Editor Toolkit - Loader Class
  * @class CVTOOLS_unity_metadata
@@ -902,13 +1192,12 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     /** Defines whether this extension is enabled. */
     enabled: boolean;
     private _loader;
-    private _physicsList;
-    private _shadowList;
-    private _scriptList;
-    private _sceneLoaded;
-    private _disposeRoot;
-    private _leftHanded;
+    private _parser;
     private _parseScene;
+    private _leftHanded;
+    private _disposeRoot;
+    private _sceneParsed;
+    private _rootUrl;
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader);
     /** @hidden */
@@ -918,27 +1207,48 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     /** @hidden */
     onReady(): void;
     /** @hidden */
-    loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
+    loadSceneAsync(context: string, scene: BABYLON.GLTF2.IScene): BABYLON.Nullable<Promise<void>>;
     /** @hidden */
-    loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
+    loadNodeAsync(context: string, node: BABYLON.GLTF2.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
     /** @hidden */
-    loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
+    loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
     /** @hidden */
-    createMaterial(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
+    createMaterial(context: string, material: BABYLON.GLTF2.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
+    /** @hidden */
+    _loadMeshPrimitiveAsync(context: string, name: string, node: BABYLON.GLTF2.INode, mesh: BABYLON.GLTF2.IMesh, primitive: BABYLON.GLTF2.IMeshPrimitive, assign: (babylonMesh: BABYLON.AbstractMesh) => void): Promise<BABYLON.AbstractMesh>;
+    private _setupBabylonMesh;
+    private _setupBabylonMaterials;
     private _parseSceneProperties;
-    private _parseDefaultMaterialPropertiesAsync;
+    private _parseMultiMaterialAsync;
     private _parseShaderMaterialPropertiesAsync;
-    private _parseCustomMaterialPropertiesAsync;
+    private _parseAlbedoMaterialPropertiesAsync;
+    private _parseDiffuseMaterialPropertiesAsync;
     private _parseCommonConstantProperties;
 }
 /**
  * Babylon Editor Toolkit - Loader Class
- * @class CVTOOLS_left_handedness
+ * @class CVTOOLS_babylon_mesh
  * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
  */
-declare class CVTOOLS_left_handedness implements BABYLON.GLTF2.IGLTFLoaderExtension {
+declare class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
     /** The name of this extension. */
-    readonly name = "CVTOOLS_left_handedness";
+    readonly name = "CVTOOLS_babylon_mesh";
+    /** Defines whether this extension is enabled. */
+    enabled: boolean;
+    private _loader;
+    /** @hidden */
+    constructor(loader: BABYLON.GLTF2.GLTFLoader);
+    /** @hidden */
+    dispose(): void;
+}
+/**
+ * Babylon Editor Toolkit - Loader Class
+ * @class CVTOOLS_left_handed
+ * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
+ */
+declare class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
+    /** The name of this extension. */
+    readonly name = "CVTOOLS_left_handed";
     /** Defines whether this extension is enabled. */
     enabled: boolean;
     private _loader;
