@@ -2,8 +2,8 @@ const CVTOOLS_NAME = "CVTOOLS_unity_metadata";
 const CVTOOLS_MESH = "CVTOOLS_babylon_mesh";
 const CVTOOLS_HAND = "CVTOOLS_left_handed";
 /**
- * Babylon Editor Toolkit - Loader Class
- * @class CVTOOLS_unity_metadata
+ * Babylon Toolkit Editor - Loader Class
+ * @class CVTOOLS_unity_metadata - All rights reserved (c) 2019 Mackey Kinard
  * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
  */
 class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
@@ -26,6 +26,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         this._loader = loader;
         this._parser = new BABYLON.MetadataParser(this._loader.babylonScene, this._loader);
         this._parseScene = this._leftHanded = this._disposeRoot = this._sceneParsed = false;
+        this._rootUrl = null;
     }
 
     /** @hidden */
@@ -37,7 +38,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
 
     /** @hidden */
     public onLoading(): void {
-        this._rootUrl = ((<any>this._loader)._uniqueRootUrl) ? (<any>this._loader)._uniqueRootUrl : "";
+        this._rootUrl = ((<any>this._loader)._uniqueRootUrl) ? (<any>this._loader)._uniqueRootUrl : "/";
         this._parseScene = (BABYLON.SceneManager.IsSceneLoaderEnabled() === true && this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf(CVTOOLS_NAME) >= 0);
         this._leftHanded = (this._loader.gltf != null && this._loader.gltf.extensionsUsed != null && this._loader.gltf.extensionsUsed.indexOf(CVTOOLS_HAND) >= 0);
         this._disposeRoot = this._sceneParsed = false;
@@ -82,12 +83,13 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 mesh.metadata.unity = metadata;
                 BABYLON.Utilities.ValidateTransformGuid(mesh);
                 BABYLON.Utilities.ValidateTransformMetadata(mesh);
+                BABYLON.Utilities.ValidateTransformQuaternion(mesh);
                 if (mesh.name.indexOf("_dispose") >= 0) {
                     this._parser.addDisposeEntityItem(mesh);
                 } else {
                     const prefab:boolean = (mesh.metadata.unity.prefab != null) ? mesh.metadata.unity.prefab : false;
                     mesh.isVisible = (mesh.metadata.unity.visible != null) ? mesh.metadata.unity.visible : true;
-                    mesh.visibility = (mesh.metadata.unity.visibility != null) ? mesh.metadata.unity.visibility : 1.0;
+                    mesh.visibility = (mesh.metadata.unity.visibility != null) ? mesh.metadata.unity.visibility : 1;
                     mesh.billboardMode = (mesh.metadata.unity.billboard != null) ? mesh.metadata.unity.billboard : 0;
                     if (prefab === true) {
                         mesh.setEnabled(false);
@@ -136,7 +138,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         babylonMaterial.fillMode = babylonDrawMode;
                         babylonMaterial.sideOrientation = this._loader.babylonScene.useRightHandedSystem ? BABYLON.Material.CounterClockWiseSideOrientation : BABYLON.Material.ClockWiseSideOrientation;
                         if (babylonMaterial instanceof BABYLON.ShaderMaterial) {
-                            BABYLON.UniversalShaderMaterial.Initialize(babylonMaterial);
+                            BABYLON.Utilities.InitializeShaderMaterial(babylonMaterial);
                         }
                     } else {
                         BABYLON.Tools.Warn("Non material instantiated class: " + CustomClassName);
@@ -295,10 +297,18 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         if (this._sceneParsed === false && scene.extras != null && scene.extras.metadata != null && scene.extras.metadata.properties != null && scene.extras.metadata.properties === true) {
             this._sceneParsed = true;
             //console.warn("CVTOOLS: ParseSceneProperties: " + scene.name);
+            const root:string = (this._rootUrl != null) ? this._rootUrl : "/";
             const metadata:any = scene.extras.metadata;
             const filename:string = (<any>this._loader)._fileName ? (<any>this._loader)._fileName : null;
             if (this._loader.rootBabylonMesh != null) this._loader.rootBabylonMesh.name = "Root." + filename.replace(".gltf", "").replace(".glb", "");
             this._disposeRoot = (metadata.disposeroot != null && metadata.disposeroot === true);
+            BABYLON.SceneManager.SetRootUrl(this._loader.babylonScene, root);
+            // ..
+            // Setup Freeze Active Meshes
+            // ..
+            if (metadata.freezeactivemeshes != null && metadata.freezeactivemeshes === true)  {
+                this._parser.setFreezeActiveMeshes(true);
+            }
             // ..
             // Setup Scene Clear Coloring
             // ..
@@ -312,11 +322,12 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             // ..
             if (metadata.skybox != null)  {
                 const skybox:any = metadata.skybox;
-                const skyfog:boolean = (skybox.skyfog != null) ? skybox.skyfog : false;
-                const skysize:number = (skybox.skysize != null) ? skybox.skysize : 1000;
-                const skypath:string = (skybox.basename != null && skybox.basename !== "") ? (this._rootUrl + skybox.basename) : null;
+                const skyfog:boolean = (skybox.skyfog != null) ? skybox.skyfog : false; // NOTE: NOT IMPLEMENTED
+                const skytags:string = (skybox.skytags != null) ? skybox.skytags : "Untagged";
+                const skysize:number = (skybox.skysize != null) ? skybox.skysize : 2000;
+                const skypath:string = (skybox.basename != null && skybox.basename !== "") ? (root + skybox.basename) : null;
                 const extensions:string[] = (skybox.extensions != null && skybox.extensions.length > 0) ? skybox.extensions : null;
-                const polynomial:number = (skybox.polynomial != null) ? skybox.polynomial : 1.0;
+                const polynomial:number = (skybox.polynomial != null) ? skybox.polynomial : 1;
                 try {
                     if (skypath != null && skypath !== "") {
                         const skyboxTexture:BABYLON.CubeTexture = new BABYLON.CubeTexture(skypath, this._loader.babylonScene, extensions);                
@@ -325,6 +336,9 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         const skyboxMesh:BABYLON.Mesh = BABYLON.Mesh.CreateBox("Ambient Skybox", skysize, this._loader.babylonScene);
                         skyboxMesh.infiniteDistance = true;
                         skyboxMesh.applyFog = skyfog;
+                        if (skytags != null && skytags !== "") {
+                            BABYLON.Tags.AddTagsTo(skyboxMesh, skytags);
+                        }
                         if (this._loader.babylonScene.useRightHandedSystem === true) { 
                             skyboxTexture.rotationY = Math.PI;
                             skyboxMesh.scaling.x *= -1;                
@@ -337,6 +351,9 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         standardMaterial.ambientColor = new BABYLON.Color3(0, 0, 0);
                         standardMaterial.reflectionTexture =  skyboxTexture;
                         skyboxMesh.material = standardMaterial;
+                        // Optimize Clear Color Buffer With Skybox Usage
+                        this._loader.babylonScene.autoClear = false;                // Color buffer
+                        this._loader.babylonScene.autoClearDepthAndStencil = false; // Depth and stencil
                     }
                 } catch (e1) {
                     console.warn(e1);
@@ -346,7 +363,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     const environment:any = skybox.environment;
                     if (environment != null) {
                         const envtype:string = (environment.type != null && environment.type !== "") ? environment.type : null;
-                        const envpath:string = (environment.url != null && environment.url !== "") ? (this._rootUrl + environment.url) : null;
+                        const envpath:string = (environment.url != null && environment.url !== "") ? (root + environment.url) : null;
                         const envname:string = (environment.url != null && environment.url !== "") ? environment.url : "SkyboxEnvironment";
                         if (envtype != null && envtype !== "") {
                             try {
@@ -434,26 +451,13 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             if (metadata.enablephysics != null) {
                 const enablephysics:boolean = metadata.enablephysics;
                 if (enablephysics === true) {
-                    const defaultvalue:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
+                    const gravitycheck:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
+                    const maxworldsweep:number = metadata.maxworldsweep != null ? metadata.maxworldsweep : 1000;
+                    const ccdenabled:boolean = metadata.ccdenabled != null ? metadata.ccdenabled : true;
+                    const ccdpenetration:number = metadata.ccdpenetration != null ? metadata.ccdpenetration : 0;
                     const deltaworldstep:boolean = metadata.deltaworldstep != null ? metadata.deltaworldstep : true;
-                    const defaultgravity:BABYLON.Vector3 = metadata.defaultgravity != null ? BABYLON.Utilities.ParseVector3(metadata.defaultgravity, defaultvalue) : defaultvalue;
-                    if (BABYLON.AmmoJSPlugin) {
-                        const physicsenabled:boolean = this._loader.babylonScene.isPhysicsEnabled();
-                        const physicsengine:BABYLON.IPhysicsEngine = (physicsenabled === true) ? this._loader.babylonScene.getPhysicsEngine() : null;
-                        const physicsloaded:boolean = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
-                        if (physicsloaded === false) {
-                            const physicsplugin:BABYLON.AmmoJSPlugin = new BABYLON.AmmoJSPlugin(deltaworldstep);
-                            if (BABYLON.SceneManager.OnSetupPhysicsPlugin != null) {
-                                BABYLON.SceneManager.OnSetupPhysicsPlugin(this._loader.babylonScene, physicsplugin);
-                            }
-                            this._loader.babylonScene.enablePhysics(defaultgravity, physicsplugin);
-                            BABYLON.Tools.Log("Enabled ammo.js physics engine plugin");
-                        } else {
-                            BABYLON.Tools.Log("Attached ammo.js physics engine plugin");
-                        }
-                    } else {
-                        BABYLON.Tools.Warn("Ammo.js physics engine plugin not loaded");
-                    }
+                    const defaultgravity:BABYLON.Vector3 = metadata.defaultgravity != null ? BABYLON.Utilities.ParseVector3(metadata.defaultgravity, gravitycheck) : gravitycheck;
+                    BABYLON.SceneManager.ConfigurePhysicsEngine(this._loader.babylonScene, deltaworldstep, maxworldsweep, ccdenabled, ccdpenetration, defaultgravity);
                 }
             }
             // ..
@@ -561,7 +565,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         // ..
         // GENERAL PROPERTIES
         // ..
-        let baseColorAlpha:number = 1.0;
+        let baseColorAlpha:number = 1;
         if (material.pbrMetallicRoughness) {
             const properties = material.pbrMetallicRoughness;
             if (properties) {
@@ -570,13 +574,13 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     babylonMaterial.setVector4("diffuseColor", new BABYLON.Vector4(Math.pow(linearBaseColor.r, 1 / 2.2), Math.pow(linearBaseColor.g, 1 / 2.2), Math.pow(linearBaseColor.b, 1 / 2.2), linearBaseColor.a));
                     baseColorAlpha = linearBaseColor.a;
                 } else {
-                    babylonMaterial.setVector4("diffuseColor", new BABYLON.Vector4(1.0, 1.0, 1.0, 1.0));
+                    babylonMaterial.setVector4("diffuseColor", new BABYLON.Vector4(1, 1, 1, 1));
                 }
                 if (properties.baseColorTexture) {
                     promises.push(this._loader.loadTextureInfoAsync(`${context}/baseColorTexture`, properties.baseColorTexture, (texture) => {
                         texture.name = `${sourceMaterial.name} (Base Color)`;
                         const diffuseTexture:BABYLON.Texture = texture as BABYLON.Texture;
-                        diffuseTexture.level = (commonConstant != null && commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1.0;
+                        diffuseTexture.level = (commonConstant != null && commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1;
                         babylonMaterial.setTexture("diffuseTexture", diffuseTexture);
                     }));
                 }
@@ -616,7 +620,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         const alphaMode = material.alphaMode || BABYLON.GLTF2.MaterialAlphaMode.OPAQUE;
         switch (alphaMode) {
             case BABYLON.GLTF2.MaterialAlphaMode.OPAQUE: {  // Note: Normal-Mode (OPAQUE)
-                babylonMaterial.alpha = 1.0;                // Note: Reset Alpha To Opaque
+                babylonMaterial.alpha = 1;                  // Note: Reset Alpha To Opaque
                 break;
             }
             case BABYLON.GLTF2.MaterialAlphaMode.MASK: {    // Note: Transparency-Cutout (ALPHATEST)
@@ -638,15 +642,17 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             }
         }
         if (commonConstant != null) {
+            babylonMaterial.wireframe = (commonConstant.useWireframe != null) ? commonConstant.useWireframe : false;
+            babylonMaterial.needDepthPrePass = (commonConstant.depthPrepass != null) ? commonConstant.depthPrepass : false;
             // ..
             // LIGHTMAP PROPERTIES
             // ..
             if (commonConstant.lightmapTexture) {
                 promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
                     texture.name = `${sourceMaterial.name} (Light Map)`;
-                    texture.level = (commonConstant.lightmapLevel) ? commonConstant.lightmapLevel : 1.0;
+                    texture.level = (commonConstant.lightmapLevel) ? commonConstant.lightmapLevel : 1;
                     babylonMaterial.setTexture("lightmapTexture", texture as BABYLON.Texture);
-                    //babylonMaterial.useLightmapAsShadowmap = true;
+                    //babylonMaterial.useLightmapAsShadowmap = false;
                 }));
             }
             // ..
@@ -687,6 +693,12 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     }
                 } 
             }
+            // ..
+            // FREEZE MATERIAL PROPERTIES
+            // ..
+            if (commonConstant.freezeMaterial != null && commonConstant.freezeMaterial === true) {
+                this._parser.addFreezeShaderMaterial(babylonMaterial);
+            }
         }
         return Promise.all(promises).then(() => { });
     }
@@ -724,7 +736,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         // ..
         // GENERAL PROPERTIES
         // ..
-        let baseColorAlpha:number = 1.0;
+        let baseColorAlpha:number = 1;
         if (material.pbrMetallicRoughness) {
             const properties = material.pbrMetallicRoughness;
             if (properties) {
@@ -742,7 +754,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         promises.push(this._loader.loadTextureInfoAsync(`${context}/baseColorTexture`, properties.baseColorTexture, (texture) => {
                             texture.name = `${sourceMaterial.name} (Base Color)`;
                             babylonMaterial.diffuseTexture = texture;
-                            babylonMaterial.diffuseTexture.level = (commonConstant != null && commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1.0;
+                            babylonMaterial.diffuseTexture.level = (commonConstant != null && commonConstant.diffuseIntensity != null) ? commonConstant.diffuseIntensity : 1;
                         }));
                     }
                 }
@@ -773,7 +785,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             }
         }
         if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "emissiveColor")) {
-            const linearEmmisveColor:BABYLON.Color4 = material.emissiveFactor ? BABYLON.Color4.FromArray(material.emissiveFactor) : new BABYLON.Color4(0.0, 0.0, 0.0, 1.0);
+            const linearEmmisveColor:BABYLON.Color4 = material.emissiveFactor ? BABYLON.Color4.FromArray(material.emissiveFactor) : new BABYLON.Color4(0, 0, 0, 1);
             babylonMaterial.emissiveColor = new BABYLON.Color3(Math.pow(linearEmmisveColor.r, 1 / 2.2), Math.pow(linearEmmisveColor.g, 1 / 2.2), Math.pow(linearEmmisveColor.b, 1 / 2.2));
         }
         if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "emissiveTexture")) {
@@ -795,13 +807,13 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         }
         const alphaMode = material.alphaMode || BABYLON.GLTF2.MaterialAlphaMode.OPAQUE;
         switch (alphaMode) {
-            case BABYLON.GLTF2.MaterialAlphaMode.OPAQUE: {  // Note: Normal-Mode (OPAQUE)
+            case BABYLON.GLTF2.MaterialAlphaMode.OPAQUE: {      // Note: Normal-Mode (OPAQUE)
                 if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "alpha")) {
-                    babylonMaterial.alpha = 1.0;                // Note: Reset Alpha To Opaque
+                    babylonMaterial.alpha = 1;                  // Note: Reset Alpha To Opaque
                 }
                 break;
             }
-            case BABYLON.GLTF2.MaterialAlphaMode.MASK: {    // Note: Transparency-Cutout (ALPHATEST)
+            case BABYLON.GLTF2.MaterialAlphaMode.MASK: {        // Note: Transparency-Cutout (ALPHATEST)
                 babylonMaterial.alphaCutOff = (material.alphaCutoff == undefined ? 0.5 : material.alphaCutoff);
                 if (babylonMaterial.diffuseTexture) {
                     if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseTexture")) {
@@ -810,7 +822,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 }
                 break;
             }
-            case BABYLON.GLTF2.MaterialAlphaMode.BLEND: {   // Note: Transparency (ALPHABLEND)
+            case BABYLON.GLTF2.MaterialAlphaMode.BLEND: {       // Note: Transparency (ALPHABLEND)
                 if (babylonMaterial.diffuseTexture) {
                     if (BABYLON.Utilities.HasOwnProperty(babylonMaterial, "diffuseTexture")) {
                         babylonMaterial.diffuseTexture.hasAlpha = true;
@@ -838,16 +850,16 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             // PBR PROPERTIES (TODO: Support Seconday Albedo And Normal Maps)
             // ..
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "directIntensity")) {
-                commonMaterial.directIntensity = (commonConstant.directIntensity != null) ? commonConstant.directIntensity : 1.0;
+                commonMaterial.directIntensity = (commonConstant.directIntensity != null) ? commonConstant.directIntensity : 1;
             }
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "specularIntensity")) {
-                commonMaterial.specularIntensity = (commonConstant.specularIntensity != null) ? commonConstant.specularIntensity : 1.0;
+                commonMaterial.specularIntensity = (commonConstant.specularIntensity != null) ? commonConstant.specularIntensity : 1;
             }
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "emissiveIntensity")) {
-                commonMaterial.emissiveIntensity = (commonConstant.emissiveIntensity != null) ? commonConstant.emissiveIntensity : 1.0;
+                commonMaterial.emissiveIntensity = (commonConstant.emissiveIntensity != null) ? commonConstant.emissiveIntensity : 1;
             }
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "environmentIntensity")) {
-                commonMaterial.environmentIntensity = (commonConstant.environmentIntensity != null) ? commonConstant.environmentIntensity : 1.0;
+                commonMaterial.environmentIntensity = (commonConstant.environmentIntensity != null) ? commonConstant.environmentIntensity : 1;
             }
             // ..
             // LIGHT PROPERTIES
@@ -855,35 +867,47 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "unlit")) {
                 commonMaterial.unlit = (commonConstant.unlitMaterial != null) ? commonConstant.unlitMaterial : false;
             }
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "wireframe")) {
+                commonMaterial.wireframe = (commonConstant.useWireframe != null) ? commonConstant.useWireframe : false;
+            }
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "disableLighting")) {
                 commonMaterial.disableLighting = (commonConstant.disableLighting != null) ? commonConstant.disableLighting : false;
             }
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "maxSimultaneousLights")) {
                 commonMaterial.maxSimultaneousLights = (commonConstant.maxSimultaneousLights != null) ? commonConstant.maxSimultaneousLights : 4;
             }
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "needDepthPrePass")) {
+                commonMaterial.needDepthPrePass = (commonConstant.depthPrepass != null) ? commonConstant.depthPrepass : false;
+            }
             // ..
             // LIGHTMAP PROPERTIES
             // ..
             if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "lightmapTexture")) {
                 if (commonConstant.lightmapTexture) {
-                    let useLightmapAsShadowmap:boolean = true;            
+                    let useLightmapAsShadowmap:boolean = false;            
                     if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "useLightmapAsShadowmap")) {
-                        useLightmapAsShadowmap = (commonConstant.useLightmapAsShadowmap != null) ? commonConstant.useLightmapAsShadowmap : true;
+                        useLightmapAsShadowmap = (commonConstant.useLightmapAsShadowmap != null) ? commonConstant.useLightmapAsShadowmap : false;
                     }
                     promises.push(this._loader.loadTextureInfoAsync(context + "/lightmapTexture", commonConstant.lightmapTexture, (texture) => {
                         texture.name = `${sourceMaterial.name} (Light Map)`;
-                        texture.level = (commonConstant.lightmapLevel) ? commonConstant.lightmapLevel : 1.0;
+                        texture.level = (commonConstant.lightmapLevel) ? commonConstant.lightmapLevel : 1;
                         commonMaterial.lightmapTexture = texture;
                         commonMaterial.useLightmapAsShadowmap = useLightmapAsShadowmap;
                     }));
                 }
             }
             // ..
+            // TERRAIN PROPERTIES
+            // ..
+            if (BABYLON.Utilities.HasOwnProperty(commonMaterial, "terrainInfo")) {
+                commonMaterial.terrainInfo = (commonConstant.terrainInfo != null) ? commonConstant.terrainInfo : null;
+            }
+            // ..
             // CUSTOM PROPERTIES
             // ..
-            if (sourceMaterial instanceof BABYLON.UniversalPushMaterial || sourceMaterial instanceof BABYLON.UniversalAlbedoMaterial || sourceMaterial instanceof BABYLON.UniversalDiffuseMaterial) {
+            if (BABYLON.Utilities.HasOwnProperty(sourceMaterial, "universalMaterial")) {
                 // Parse Universal Material Custom Properties
-                const universalMaterial:BABYLON.UniversalMaterial = sourceMaterial as BABYLON.UniversalMaterial;
+                const universalMaterial:any = sourceMaterial;
                 //console.warn("CVTOOLS: UniversalMaterialProperties: " + universalMaterial.name);
                 if (commonConstant.customTextures) {
                     for(const tkey in commonConstant.customTextures) {
@@ -971,13 +995,19 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     } 
                 }
             }
+            // ..
+            // FREEZE MATERIAL PROPERTIES
+            // ..
+            if (commonConstant.freezeMaterial != null && commonConstant.freezeMaterial === true) {
+                this._parser.addFreezeShaderMaterial(sourceMaterial);
+            }
         }
     }
 }
 
 /**
- * Babylon Editor Toolkit - Loader Class
- * @class CVTOOLS_babylon_mesh
+ * Babylon Toolkit Editor - Loader Class
+ * @class CVTOOLS_babylon_mesh - All rights reserved (c) 2019 Mackey Kinard
  * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
  */
 class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
@@ -1001,8 +1031,8 @@ class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
 }
 
 /**
- * Babylon Editor Toolkit - Loader Class
- * @class CVTOOLS_left_handed
+ * Babylon Toolkit Editor - Loader Class
+ * @class CVTOOLS_left_handed - All rights reserved (c) 2019 Mackey Kinard
  * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
  */
 class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
@@ -1026,7 +1056,7 @@ class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
 }
 
 /**
- * Babylon Editor Toolkit - Register Extensions
+ * Babylon Toolkit Editor - Register Extensions
  */
 BABYLON.GLTF2.GLTFLoader.RegisterExtension(CVTOOLS_NAME, (loader) => new CVTOOLS_unity_metadata(loader));
 BABYLON.GLTF2.GLTFLoader.RegisterExtension(CVTOOLS_MESH, (loader) => new CVTOOLS_babylon_mesh(loader));

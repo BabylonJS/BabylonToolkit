@@ -20,11 +20,10 @@ var tsConfig = {
 
 var tsProject = typescript.createProject(tsConfig);
 
-var files = [
+var srcfiles = [
     "./temp/babylon-manager.js",
     "./temp/babylon-parsing.js",
     "./temp/babylon-scripts.js",
-    "./temp/babylon-shaders.js",
     "./temp/babylon-system.js",
     "./temp/babylon-toolkit.js"
 ]
@@ -37,7 +36,8 @@ gulp.task("compile", function () {
     return merge2([
         tsResult.dts
             .pipe(concat("babylon.manager.d.ts"))
-            .pipe(gulp.dest("../Assets/Babylon/Template/Typings")),
+            .pipe(gulp.dest("../Professional/types"))
+            .pipe(gulp.dest("../../Assets/Babylon/Template/Typings")),
         tsResult.js
             .pipe(sourcemaps.write("./", {
                     includeContent:false, 
@@ -50,8 +50,8 @@ gulp.task("compile", function () {
 });
 
 gulp.task("default", ["compile"], function () {
-    return merge2(gulp.src(files))
+    return merge2(gulp.src(srcfiles))
         .pipe(concat("babylon.manager.js"))
         .pipe(uglify())
-        .pipe(gulp.dest("../Assets/Babylon/Template/Library/"));
+        .pipe(gulp.dest("../../Assets/Babylon/Template/Library/"));
 });

@@ -1,20 +1,22 @@
-declare var Ammo: any;
-declare class Navigation {
-    // Babylon Navigation Mesh Tool
-    // https://github.com/wanadev/babylon-navigation-mesh
-    buildNodes(mesh: BABYLON.AbstractMesh): any;
-    setZoneData(zone: string, data: any): void;
-    getGroup(zone: string, position: BABYLON.Vector3): number;
-    getRandomNode(zone: string, group: number, nearPosition: BABYLON.Vector3, nearRange: number): BABYLON.Vector3;
-    projectOnNavmesh(position: BABYLON.Vector3, zone: string, group: number): BABYLON.Vector3;
-    findPath(startPosition: BABYLON.Vector3, targetPosition: BABYLON.Vector3, zone: string, group: number): BABYLON.Vector3[];
-    getVectorFrom(vertices: number[], index: number, _vector: BABYLON.Vector3): BABYLON.Vector3;
-}
 module BABYLON {
+    /**
+     * Babylon system class
+     * @class System - All rights reserved (c) 2019 Mackey Kinard
+     */
     export enum System
     {
         Deg2Rad = 0.0174532924,
         Rad2Deg = 57.29578,
+        Kph2Mph = 0.621371,
+        Mph2Kph = 1.60934,
+        Meter2Inch = 39.3701,
+        Inch2Meter = 0.0254,
+        Gravity = 9.81,
+        Gravity3G = (9.8 * 3),
+        SkidFactor = 0.25,
+        WalkingVelocity = (1.1 * 4), // 4 km/h -> 1.1 m/s
+        TerminalVelocity = 55,
+        gammaCorrection = 2.2
     }
     export enum Handedness
     {
@@ -37,7 +39,9 @@ module BABYLON {
     export enum GamepadType {
         None = -1,
         Generic = 0,
-        Xbox360 = 1
+        Xbox360 = 1,
+        DualShock = 2,
+        PoseController = 3
     }
     export enum JoystickButton {
         Left = 0,
@@ -50,8 +54,7 @@ module BABYLON {
     export enum MovementType
     {
         DirectVelocity = 0,
-        AppliedForces = 1,
-        CheckCollision = 2
+        AppliedForces = 1
     }
     export enum CollisionContact
     {
@@ -60,47 +63,66 @@ module BABYLON {
         Right = 2,
         Bottom = 3
     }
-    export interface INavigationArea {
-        index: number;
-        area: string;
-        cost: number;
+    export enum IntersectionPrecision
+    {
+        AABB = 0,
+        OBB = 1
     }
-    export interface INavigationAgent {
-        name: string;
-        radius: number;
-        height: number;
-        speed: number;
-        acceleration: number;
-        angularSpeed: number;
-        areaMask: number;
-        autoBraking: boolean;
-        autoTraverseOffMeshLink: boolean;
-        avoidancePriority: number;
-        baseOffset: number;
-        obstacleAvoidanceType: string;
-        stoppingDistance: number;
+    export enum ConditionMode
+    {
+        If = 1,
+        IfNot = 2,
+        Greater = 3,
+        Less = 4,
+        Equals = 6,
+        NotEqual = 7
     }
-    export interface INavigationLink {
-        name: string;
-        activated: boolean;
-        area: number;
-        autoUpdatePositions: boolean;
-        biDirectional: boolean;
-        costOverride: number;
-        occupied: boolean;
-        start: any;
-        end: any;
+    export enum InterruptionSource
+    {
+        None = 0,
+        Source = 1,
+        Destination = 2,
+        SourceThenDestination = 3,
+        DestinationThenSource = 4
     }
-    export interface INavigationObstacle {
-        name: string;
-        carving: boolean;
-        carveOnlyStationary: boolean;
-        carvingMoveThreshold: number;
-        carvingTimeToStationary: number;
-        shap: string;
-        radius: number;
-        center: number[];
-        size: number[];
+    export enum BlendTreeType
+    {
+        Simple1D = 0,
+        SimpleDirectional2D = 1,
+        FreeformDirectional2D = 2,
+        FreeformCartesian2D = 3,
+        Direct = 4,
+        Clip = 5
+    }
+	export enum CollisionFilters {
+        DefaultFilter = 1,
+        StaticFilter = 2,
+        KinematicFilter = 4,
+        DebrisFilter = 8,
+        SensorTrigger = 16,
+        CharacterFilter = 32,
+        GroundFilter = 64,
+        AllFilter = -1
+    }
+	export enum CollisionState {
+        ACTIVE_TAG = 1,
+        ISLAND_SLEEPING = 2,
+        WANTS_DEACTIVATION = 3,
+        DISABLE_DEACTIVATION = 4,
+        DISABLE_SIMULATION = 5
+    }
+    export enum CollisionFlags { 
+        CF_STATIC_OBJECT = 1, 
+        CF_KINEMATIC_OBJECT = 2, 
+        CF_NO_CONTACT_RESPONSE = 4, 
+        CF_CUSTOM_MATERIAL_CALLBACK = 8, 
+        CF_CHARACTER_OBJECT = 16, 
+        CF_DISABLE_VISUALIZE_OBJECT = 32, 
+        CF_DISABLE_SPU_COLLISION_PROCESSING = 64, 
+        CF_HAS_CONTACT_STIFFNESS_DAMPING = 128, 
+        CF_HAS_CUSTOM_DEBUG_RENDERING_COLOR = 256, 
+        CF_HAS_FRICTION_ANCHOR = 512, 
+        CF_HAS_COLLISION_SOUND_TRIGGER = 1024 
     }
     export enum UserInputPointer {
         Left = 0,
@@ -115,19 +137,6 @@ module BABYLON {
         MouseX = 4,
         MouseY = 5,
         Wheel = 6
-    }
-    export enum CollisionFlags { 
-        CF_STATIC_OBJECT = 1, 
-        CF_KINEMATIC_OBJECT = 2, 
-        CF_NO_CONTACT_RESPONSE = 4, 
-        CF_CUSTOM_MATERIAL_CALLBACK = 8, 
-        CF_CHARACTER_OBJECT = 16, 
-        CF_DISABLE_VISUALIZE_OBJECT = 32, 
-        CF_DISABLE_SPU_COLLISION_PROCESSING = 64, 
-        CF_HAS_CONTACT_STIFFNESS_DAMPING = 128, 
-        CF_HAS_CUSTOM_DEBUG_RENDERING_COLOR = 256, 
-        CF_HAS_FRICTION_ANCHOR = 512, 
-        CF_HAS_COLLISION_SOUND_TRIGGER = 1024 
     }
     export enum UserInputKey {
         BackSpace = 8,
@@ -231,6 +240,57 @@ module BABYLON {
         CloseBraket = 221,
         SingleQuote = 222
     }
+
+    export interface IUnityTransform {
+        type:string;
+        id:string;
+        tag:string;
+        name:string;
+        layer:number;
+    }
+    export interface INavigationArea {
+        index: number;
+        area: string;
+        cost: number;
+    }
+    export interface INavigationAgent {
+        name: string;
+        radius: number;
+        height: number;
+        speed: number;
+        acceleration: number;
+        angularSpeed: number;
+        areaMask: number;
+        autoBraking: boolean;
+        autoTraverseOffMeshLink: boolean;
+        avoidancePriority: number;
+        baseOffset: number;
+        obstacleAvoidanceType: string;
+        stoppingDistance: number;
+    }
+    export interface INavigationLink {
+        name: string;
+        activated: boolean;
+        area: number;
+        autoUpdatePositions: boolean;
+        biDirectional: boolean;
+        costOverride: number;
+        occupied: boolean;
+        start: any;
+        end: any;
+    }
+    export interface INavigationObstacle {
+        name: string;
+        carving: boolean;
+        carveOnlyStationary: boolean;
+        carvingMoveThreshold: number;
+        carvingTimeToStationary: number;
+        shap: string;
+        radius: number;
+        center: number[];
+        size: number[];
+    }
+    
     export interface UserInputPress {
         index: number;
         action: () => void;
@@ -240,26 +300,27 @@ module BABYLON {
 
     export class UserInputOptions {
         public static JoystickRightHandleColor:string = "yellow";
-        public static JoystickLeftSensibility:number = 1.0;
-        public static JoystickRightSensibility:number = 1.0;
+        public static JoystickLeftSensibility:number = 1;
+        public static JoystickRightSensibility:number = 1;
         public static JoystickDeadStickValue:number = 0.1;
         public static GamepadDeadStickValue:number = 0.25;
         public static GamepadLStickXInverted:boolean = false;
         public static GamepadLStickYInverted:boolean = false;
         public static GamepadRStickXInverted:boolean = false;
-        public static GamepadRStickYInverted:boolean = false;
-        public static GamepadLStickSensibility:number = 1.0;
-        public static GamepadRStickSensibility:number = 1.0;
-        public static PointerAngularSensibility:number = 1.0;
+        public static GamepadRStickYInverted:boolean = true;
+        public static GamepadLStickSensibility:number = 1;
+        public static GamepadRStickSensibility:number = 1;
+        public static PointerAngularSensibility:number = 0.5;
         public static PointerWheelDeadZone:number = 0.1;
     }
     
     /**
      * Babylon utility class
-     * @class Utilities
+     * @class Utilities - All rights reserved (c) 2019 Mackey Kinard
      */
     export class Utilities {
         private static UpVector:BABYLON.Vector3 = BABYLON.Vector3.Up();
+        private static AuxVector:BABYLON.Vector3 = BABYLON.Vector3.Zero();
         private static ZeroVector:BABYLON.Vector3 = BABYLON.Vector3.Zero();
         private static TempMatrix:BABYLON.Matrix = BABYLON.Matrix.Zero();
         private static TempVector2:BABYLON.Vector2 = BABYLON.Vector2.Zero();
@@ -281,6 +342,27 @@ module BABYLON {
             } while (result < -360 || result > 360)
             return BABYLON.Scalar.Clamp(result, min, max);
         }
+        /** TODO */
+		public static LerpClamp(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            return a + (b - a) * clampedT;
+        }
+        /** TODO */
+		public static LerpUnclamp(a:number, b:number, t:number):number {
+            return a + (b - a) * t;
+        }
+        /** TODO */
+		public static LerpLog(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            const logT:number = Math.sin(clampedT * Math.PI * 0.5);
+            return a + (b - a) * logT;
+        }
+        /** TODO */
+		public static LerpExp(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            const expT:number = 1 - Math.cos(clampedT * Math.PI * 0.5);
+            return a + (b - a) * expT;
+        }
         /** Returns a new radion converted from degree */
 		public static Deg2Rad(degree:number):number {
 			return degree * BABYLON.System.Deg2Rad;
@@ -289,21 +371,51 @@ module BABYLON {
 		public static Rad2Deg(radion:number):number {
 			return radion * BABYLON.System.Rad2Deg;
         }
-        /** Returns a new Quaternion set from the passed Euler float angles (x, y, z). */
-        public static Euler(eulerX:number, eulerY:number, eulerZ:number) : BABYLON.Quaternion {
-            return BABYLON.Quaternion.RotationYawPitchRoll(eulerY, eulerX, eulerZ);
+        /** Returns a new vector3 degrees converted from radions */
+        public static Vector3Rad2Deg(vector:BABYLON.Vector3, ):BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = BABYLON.Vector3.Zero();
+            BABYLON.Utilities.Vector3Rad2DegToRef(vector, result);
+            return result;
         }
-        /** Returns a new Quaternion set from the passed Euler float angles (x, y, z). */
-        public static EulerToRef(eulerX:number, eulerY:number, eulerZ:number, result:BABYLON.Quaternion):void  {
-            BABYLON.Quaternion.RotationYawPitchRollToRef(eulerY, eulerX, eulerZ, result);
+        /** Sets a vector3 result degrees converted from radions */
+        public static Vector3Rad2DegToRef(vector:BABYLON.Vector3, result:BABYLON.Vector3) {
+            result.x = vector.x * BABYLON.System.Rad2Deg;
+            result.y = vector.y * BABYLON.System.Rad2Deg;
+            result.z = vector.z * BABYLON.System.Rad2Deg;;
         }
-        /** Returns a new Matrix as a rotation matrix from the Euler angles (x, y, z). */
-        public static Matrix(eulerX:number, eulerY:number, eulerZ:number) : BABYLON.Matrix {
-            return BABYLON.Matrix.RotationYawPitchRoll(eulerY, eulerX, eulerZ);
+        /** Returns a new Matrix as a rotation matrix from the Euler angles in degrees (x, y, z). */
+        public static ToMatrix(eulerX:number, eulerY:number, eulerZ:number) : BABYLON.Matrix {
+            ///return BABYLON.Matrix.RotationYawPitchRoll(eulerY * BABYLON.System.Deg2Rad, eulerX * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad);
+            return BABYLON.Matrix.RotationYawPitchRoll(eulerY * BABYLON.System.Deg2Rad, eulerX * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad);
         }
-        /** Returns a new Matrix as a rotation matrix from the Euler angles (x, y, z). */
-        public static MatrixToRef(eulerX:number, eulerY:number, eulerZ:number, result:BABYLON.Matrix): void {
-            BABYLON.Matrix.RotationYawPitchRollToRef(eulerY, eulerX, eulerZ, result);
+        /** Sets a Matrix result as a rotation matrix from the Euler angles in degrees (x, y, z). */
+        public static ToMatrixToRef(eulerX:number, eulerY:number, eulerZ:number, result:BABYLON.Matrix): void {
+            BABYLON.Matrix.RotationYawPitchRollToRef(eulerY * BABYLON.System.Deg2Rad, eulerX * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad, result);
+        }
+        /** Returns a new Vector Euler in degress set from the passed qauternion. */
+        public static ToEuler(quaternion:BABYLON.Quaternion):BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = quaternion.toEulerAngles();
+            result.x = result.x * BABYLON.System.Rad2Deg;
+            result.y = result.y * BABYLON.System.Rad2Deg;
+            result.z = result.z * BABYLON.System.Rad2Deg;;
+            return result;
+        }
+        /** Sets a Vector Euler result in degress set from the passed qauternion. */
+        public static ToEulerToRef(quaternion:BABYLON.Quaternion, result:BABYLON.Vector3):void {
+            quaternion.toEulerAnglesToRef(result);
+            result.x = result.x * BABYLON.System.Rad2Deg;
+            result.y = result.y * BABYLON.System.Rad2Deg;
+            result.z = result.z * BABYLON.System.Rad2Deg;;
+        }
+        /** Returns a new Quaternion set from the passed Euler float angles in degrees (x, y, z). */
+        public static FromEuler(eulerX:number, eulerY:number, eulerZ:number) : BABYLON.Quaternion {
+            //return BABYLON.Quaternion.RotationYawPitchRoll(eulerY * BABYLON.System.Deg2Rad, eulerX * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad);
+            return BABYLON.Quaternion.FromEulerAngles(eulerX * BABYLON.System.Deg2Rad, eulerY * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad);
+        }
+        /** Sets a Quaternion result set from the passed Euler float angles in degrees (x, y, z). */
+        public static FromEulerToRef(eulerX:number, eulerY:number, eulerZ:number, result:BABYLON.Quaternion):void  {
+            //BABYLON.Quaternion.RotationYawPitchRollToRef(eulerY * BABYLON.System.Deg2Rad, eulerX * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad, result);
+            BABYLON.Quaternion.FromEulerAnglesToRef(eulerX * BABYLON.System.Deg2Rad, eulerY * BABYLON.System.Deg2Rad, eulerZ * BABYLON.System.Deg2Rad, result);
         }
         /** Multplies a quaternion by a vector (rotates vector) */
         public static RotateVector(vec: BABYLON.Vector3, quat: BABYLON.Quaternion): BABYLON.Vector3 {
@@ -322,17 +434,23 @@ module BABYLON {
             result.z = vec.z + quat.w * tz + (quat.x * ty - quat.y * tx);
         }
         /** Returns a new Quaternion set from the passed vector position. */
-        public static LookRotation(position:BABYLON.Vector3):BABYLON.Quaternion {
+        public static LookRotation(position:BABYLON.Vector3, up:BABYLON.Vector3):BABYLON.Quaternion {
             let result:BABYLON.Quaternion = BABYLON.Quaternion.Zero();
-            BABYLON.Utilities.LookRotationToRef(position, result);
+            BABYLON.Utilities.LookRotationToRef(position, up, result);
             return result;
         }
         /** Returns a new Quaternion set from the passed vector position. */
-        public static LookRotationToRef(position:BABYLON.Vector3, result:BABYLON.Quaternion):void {
+        public static LookRotationToRef(position:BABYLON.Vector3, up:BABYLON.Vector3, result:BABYLON.Quaternion):void {
             BABYLON.Utilities.TempMatrix.reset();
-            BABYLON.Matrix.LookAtLHToRef(BABYLON.Utilities.ZeroVector, position, BABYLON.Utilities.UpVector, BABYLON.Utilities.TempMatrix)
+            BABYLON.Matrix.LookAtLHToRef(BABYLON.Utilities.ZeroVector, position, (up != null) ? up : BABYLON.Utilities.UpVector, BABYLON.Utilities.TempMatrix)
             BABYLON.Utilities.TempMatrix.invert()
             BABYLON.Quaternion.FromRotationMatrixToRef(BABYLON.Utilities.TempMatrix, result);
+        }
+        /** Validate and switch Euler rotation to Quaternion rotation. */
+        public static ValidateTransformQuaternion(transform:BABYLON.TransformNode) : void {
+            if (transform.rotationQuaternion == null && transform.rotation != null) {
+                transform.rotationQuaternion = BABYLON.Utilities.FromEuler(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+            }
         }
 
         // ************************************ //
@@ -388,6 +506,65 @@ module BABYLON {
                 BABYLON.Utilities.PrintElement.innerHTML = text;
             }
         }
+
+        // ************************************* //
+        // * Public Convex Hull Shape Support  * //
+        // ************************************* //
+
+        private static TmpHullMatrix = null;
+        private static TmpAmmoVectorA: any = null;
+        private static TmpAmmoVectorB: any = null;
+        private static TmpAmmoVectorC: any = null;
+        public static AddHullVerts(btConvexHullShape: any, topLevelObject: BABYLON.IPhysicsEnabledObject, object: BABYLON.IPhysicsEnabledObject):number {
+            if (BABYLON.Utilities.TmpHullMatrix == null) BABYLON.Utilities.TmpHullMatrix = new BABYLON.Matrix();
+            if (BABYLON.Utilities.TmpAmmoVectorA == null) BABYLON.Utilities.TmpAmmoVectorA = new Ammo.btVector3(0, 0, 0);
+            if (BABYLON.Utilities.TmpAmmoVectorB == null) BABYLON.Utilities.TmpAmmoVectorB = new Ammo.btVector3(0, 0, 0);
+            if (BABYLON.Utilities.TmpAmmoVectorC == null) BABYLON.Utilities.TmpAmmoVectorC = new Ammo.btVector3(0, 0, 0);
+            var triangleCount = 0;
+            if (object && object.getIndices && object.getWorldMatrix && object.getChildMeshes) {
+                var indices = object.getIndices();
+                if (!indices) {
+                    indices = [];
+                }
+                var vertexPositions = object.getVerticesData(BABYLON.VertexBuffer.PositionKind);
+                if (!vertexPositions) {
+                    vertexPositions = [];
+                }
+                object.computeWorldMatrix(false);
+                var faceCount = indices.length / 3;
+                for (var i = 0; i < faceCount; i++) {
+                    var triPoints = [];
+                    for (var point = 0; point < 3; point++) {
+                        var v = new BABYLON.Vector3(vertexPositions[(indices[(i * 3) + point] * 3) + 0], vertexPositions[(indices[(i * 3) + point] * 3) + 1], vertexPositions[(indices[(i * 3) + point] * 3) + 2]);
+
+                        // Adjust for initial scaling
+                        BABYLON.Matrix.ScalingToRef(object.scaling.x, object.scaling.y, object.scaling.z, BABYLON.Utilities.TmpHullMatrix);
+                        v = BABYLON.Vector3.TransformCoordinates(v, BABYLON.Utilities.TmpHullMatrix);
+
+                        var vec: any;
+                        if (point == 0) {
+                            vec = BABYLON.Utilities.TmpAmmoVectorA;
+                        } else if (point == 1) {
+                            vec = BABYLON.Utilities.TmpAmmoVectorB;
+                        } else {
+                            vec = BABYLON.Utilities.TmpAmmoVectorC;
+                        }
+                        vec.setValue(v.x, v.y, v.z);
+
+                        triPoints.push(vec);
+                    }
+                    btConvexHullShape.addPoint(triPoints[0], true);
+                    btConvexHullShape.addPoint(triPoints[1], true);
+                    btConvexHullShape.addPoint(triPoints[2], true);
+                    triangleCount++;
+                }
+
+                object.getChildMeshes().forEach((m) => {
+                    triangleCount += BABYLON.Utilities.AddHullVerts(btConvexHullShape, topLevelObject, m);
+                });
+            }
+            return triangleCount;
+        }
     
         // ************************************ //
         // * Public String Tools Support * //
@@ -421,6 +598,18 @@ module BABYLON {
         //////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /** TODO */
+        public static ParseTexture(source:any, scene:BABYLON.Scene):BABYLON.Texture {
+            let result:BABYLON.Texture = null;
+            if (source != null && source.filename != null && source.filename !== "") {
+                const root:string = BABYLON.SceneManager.GetRootUrl(scene);
+                const url:string = source.filename;
+                result = new BABYLON.Texture((root + url), scene);
+                // TODO: Set Texture Properties
+            }
+            return result;
+        }
+
+        /** TODO */
         public static ParseColor3(source:any, defaultValue:BABYLON.Color3 = null):BABYLON.Color3 {
             let result:BABYLON.Color3 = null
             if (source != null && source.r != null && source.g != null&& source.b != null) {
@@ -434,7 +623,7 @@ module BABYLON {
         public static ParseColor4(source:any, defaultValue:BABYLON.Color4 = null):BABYLON.Color4 {
             let result:BABYLON.Color4 = null
             if (source != null && source.r != null && source.g != null && source.b != null) {
-                const alpha:number = (source.a != null) ? source.a : 1.0;
+                const alpha:number = (source.a != null) ? source.a : 1;
                 result = new BABYLON.Color4(source.r, source.g, source.b, source.a);
             } else {
                 result = defaultValue;
@@ -476,26 +665,51 @@ module BABYLON {
         // *  Scene Transform Tools Support  * //
         // *********************************** //
         
-        /** Transforms position from local space to world space. */
-        public  static TransformPosition(owner: BABYLON.AbstractMesh | BABYLON.Camera, position:BABYLON.Vector3):BABYLON.Vector3 {
+        /** Transforms position from local space to world space. (Using TransformCoordinates) */
+        public  static TransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3):BABYLON.Vector3 {
             return BABYLON.Vector3.TransformCoordinates(position, owner.getWorldMatrix());
         }
-        /** Transforms position from local space to world space. */
-        public static TransformPositionToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        /** Inverse transforms position from world space to local space. (Using TransformCoordinates) */
+        public  static InverseTransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3):BABYLON.Vector3 {
+            BABYLON.Utilities.TempMatrix.reset();
+            owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
+            return BABYLON.Vector3.TransformCoordinates(position, BABYLON.Utilities.TempMatrix);
+        }
+        /** Transforms position from local space to world space. (Using TransformCoordinates) */
+        public static TransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3):void {
             return BABYLON.Vector3.TransformCoordinatesToRef(position, owner.getWorldMatrix(), result);
         }
-        /** Transforms direction from local space to world space. */
-        public static TransformDirection(owner: BABYLON.AbstractMesh | BABYLON.Camera, direction:BABYLON.Vector3):BABYLON.Vector3 {
+        /** Inverse transforms position from world space to local space. (Using TransformCoordinates) */
+        public static InverseTransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3):void {
+            BABYLON.Utilities.TempMatrix.reset();
+            owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
+            return BABYLON.Vector3.TransformCoordinatesToRef(position, BABYLON.Utilities.TempMatrix, result);
+        }
+        /** Transforms direction from local space to world space. (Using TransformNormal) */
+        public static TransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3):BABYLON.Vector3 {
             return BABYLON.Vector3.TransformNormal(direction, owner.getWorldMatrix());
         }
-        /** Transforms direction from local space to world space. */
-        public static TransformDirectionToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        /** Inverse transforms direction from world space to local space. (Using TransformNormal) */
+        public static InverseTransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3):BABYLON.Vector3 {
+            BABYLON.Utilities.TempMatrix.reset();
+            owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
+            return BABYLON.Vector3.TransformNormal(direction, BABYLON.Utilities.TempMatrix);
+        }
+        /** Transforms direction from local space to world space. (Using TransformNormal) */
+        public static TransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3):void {
             return BABYLON.Vector3.TransformNormalToRef(direction, owner.getWorldMatrix(), result);
+        }
+        /** Inverse transforms direction from world space to local space. (Using TransformNormal) */
+        public static InverseTransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3):void {
+            BABYLON.Utilities.TempMatrix.reset();
+            owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
+            return BABYLON.Vector3.TransformNormalToRef(direction, BABYLON.Utilities.TempMatrix, result);
         }
         /** Recomputes the meshes bounding center pivot point */
         public static RecomputePivotPoint(owner:BABYLON.AbstractMesh):void {
             var boundingCenter = owner.getBoundingInfo().boundingSphere.center;
             owner.setPivotMatrix(BABYLON.Matrix.Translation(-boundingCenter.x, -boundingCenter.y, -boundingCenter.z));
+
         }      
           
         // ************************************ //
@@ -503,35 +717,35 @@ module BABYLON {
         // ************************************ //
 
         /** Gets any direction vector of the owner in world space. */
-        public static GetDirectionVector(owner: BABYLON.AbstractMesh | BABYLON.Camera, vector:BABYLON.Vector3):BABYLON.Vector3 {
+        public static GetDirectionVector(owner: BABYLON.TransformNode | BABYLON.Camera, vector:BABYLON.Vector3):BABYLON.Vector3 {
             return owner.getDirection(vector);
         }
         /** Gets any direction vector of the owner in world space. */
-        public static GetDirectionVectorToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, vector:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        public static GetDirectionVectorToRef(owner: BABYLON.TransformNode | BABYLON.Camera, vector:BABYLON.Vector3, result:BABYLON.Vector3):void {
             owner.getDirectionToRef(vector, result);
         }
         /** Gets the blue axis of the owner in world space. */
-        public static GetForwardVector(owner: BABYLON.AbstractMesh | BABYLON.Camera):BABYLON.Vector3 {
+        public static GetForwardVector(owner: BABYLON.TransformNode | BABYLON.Camera):BABYLON.Vector3 {
             return owner.getDirection(BABYLON.Vector3.Forward());
         }
         /** Gets the blue axis of the owner in world space. */
-        public static GetForwardVectorToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, result:BABYLON.Vector3):void {
+        public static GetForwardVectorToRef(owner: BABYLON.TransformNode | BABYLON.Camera, result:BABYLON.Vector3):void {
             owner.getDirectionToRef(BABYLON.Vector3.Forward(), result);
         }
         /** Gets the red axis of the owner in world space. */
-        public static GetRightVector(owner: BABYLON.AbstractMesh | BABYLON.Camera):BABYLON.Vector3 {
+        public static GetRightVector(owner: BABYLON.TransformNode | BABYLON.Camera):BABYLON.Vector3 {
             return owner.getDirection(BABYLON.Vector3.Right());
         }
         /** Gets the red axis of the owner in world space. */
-        public static GetRightVectorToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, result:BABYLON.Vector3):void {
+        public static GetRightVectorToRef(owner: BABYLON.TransformNode | BABYLON.Camera, result:BABYLON.Vector3):void {
             owner.getDirectionToRef(BABYLON.Vector3.Right(), result);
         }
         /** Gets the green axis of the owner in world space. */
-        public static GetUpVector(owner: BABYLON.AbstractMesh | BABYLON.Camera):BABYLON.Vector3 {
+        public static GetUpVector(owner: BABYLON.TransformNode | BABYLON.Camera):BABYLON.Vector3 {
             return owner.getDirection(BABYLON.Vector3.Up());
         }
         /** Gets the green axis of the owner in world space. */
-        public static GetUpVectorToRef(owner: BABYLON.AbstractMesh | BABYLON.Camera, result:BABYLON.Vector3):void {
+        public static GetUpVectorToRef(owner: BABYLON.TransformNode | BABYLON.Camera, result:BABYLON.Vector3):void {
             owner.getDirectionToRef(BABYLON.Vector3.Up(), result);
         }
 
@@ -660,41 +874,54 @@ module BABYLON {
             }
             return keys[keys.length - 1].value;
         }
-        /** Formats a string version of a physics imposter type */
-        public static FormatPhysicsImposterType(type:number):string {
-            let result:string = "Unknownr";
-            switch (type) {
-                case BABYLON.PhysicsImpostor.NoImpostor:
-                    result = "No";
-                    break;
-                case BABYLON.PhysicsImpostor.SphereImpostor:
-                    result = "Sphere";
-                    break;
-                case BABYLON.PhysicsImpostor.BoxImpostor:
-                    result = "Box";
-                    break;
-                case BABYLON.PhysicsImpostor.PlaneImpostor:
-                    result = "Plane";
-                    break;
-                case BABYLON.PhysicsImpostor.MeshImpostor:
-                    result = "Mesh";
-                    break;
-                case BABYLON.PhysicsImpostor.CylinderImpostor:
-                    result = "Cylinder";
-                    break;
-                case BABYLON.PhysicsImpostor.ParticleImpostor:
-                    result = "Particle";
-                    break;
-                case BABYLON.PhysicsImpostor.HeightmapImpostor:
-                    result = "Heightmap";
-                    break;
-                case BABYLON.PhysicsImpostor.ConvexHullImpostor:
-                    result = "ConvexHull";
-                    break;
+        /** Initialize default shader material properties */
+        public static InitializeShaderMaterial(material:BABYLON.ShaderMaterial, binding:boolean = true):void {
+            const shaderMaterial:any = material;
+            const shaderProgram:string = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getShaderName") ? shaderMaterial.getShaderName() : "glsl";
+            const alphaBlending:boolean = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getAlphaBlending") ? shaderMaterial.getAlphaBlending() : false;
+            const alphaTesting:boolean = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getAlphaTesting") ? shaderMaterial.getAlphaTesting() : false;
+            let defaultDefines:string[] = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getDefaultDefines") ? shaderMaterial.getDefaultDefines() : null;
+            let defaultAttributes:string[] = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getDefaultAttributes") ? shaderMaterial.getDefaultAttributes() : null;
+            let defaultUniforms:string[] = BABYLON.Utilities.HasOwnProperty(shaderMaterial, "getDefaultUniforms") ? shaderMaterial.getDefaultUniforms() : null;
+            if (defaultDefines == null || defaultDefines.length <= 0) {
+                defaultDefines = ["#define DIFFUSECOLOR", "#define DIFFUSETEXTURE"];
             }
-            return result;
+            if (defaultAttributes == null || defaultAttributes.length <= 0) {
+                defaultAttributes = ["position", "normal", "uv", "uv2", "color"];
+            }
+            if (defaultUniforms == null || defaultUniforms.length <= 0) {
+                defaultUniforms = ["world", "worldView", "worldViewProjection", "view", "projection", "viewProjection", "diffuseColor", "diffuseTexture", "diffuseTextureInfos", "diffuseTextureMatrix"];
+            }
+            const shaderProgramInfo:any = { vertex: shaderProgram, fragment: shaderProgram };
+            const shaderOptionsInfo:BABYLON.IShaderMaterialOptions = {
+                needAlphaBlending: alphaBlending,
+                needAlphaTesting: alphaTesting,
+                attributes: defaultAttributes,
+                uniforms: defaultUniforms,
+                defines: defaultDefines,
+                samplers: [],
+                uniformBuffers: []
+            };
+            shaderMaterial._shaderPath = shaderProgramInfo;
+            shaderMaterial._options = shaderOptionsInfo;
+            if (binding === true) {
+                shaderMaterial.fn_afterBind = shaderMaterial._afterBind;
+                shaderMaterial._afterBind = (mesh:BABYLON.Mesh) => { 
+                    const scene:BABYLON.Scene = material.getScene();
+                    if (scene.texturesEnabled) {
+                        for (let name in shaderMaterial._textures) {
+                            const texture:BABYLON.Texture = shaderMaterial._textures[name];
+                            if (texture != null) {
+                                shaderMaterial._effect.setFloat2(name + "Infos", texture.coordinatesIndex, texture.level);
+                                shaderMaterial._effect.setMatrix(name + "Matrix", texture.getTextureMatrix());
+                            }
+                        }
+                    }
+                    if (shaderMaterial.fn_afterBind) try { shaderMaterial.fn_afterBind(mesh); }catch(e){};
+                };
+            }
         }
-
+    
         // *********************************** //
         // *   Public Animation Blend Tools  * //
         // *********************************** //
@@ -719,7 +946,7 @@ module BABYLON {
         public static SetSkeletonBlending(skeleton:BABYLON.Skeleton, blendingSpeed:number) {
             if (skeleton != null) {
                 if (skeleton.animationPropertiesOverride == null) skeleton.animationPropertiesOverride = new BABYLON.AnimationPropertiesOverride();
-                skeleton.animationPropertiesOverride.enableBlending = (blendingSpeed > 0.0);
+                skeleton.animationPropertiesOverride.enableBlending = (blendingSpeed > 0);
                 skeleton.animationPropertiesOverride.blendingSpeed = blendingSpeed;
             }
         }
@@ -728,7 +955,7 @@ module BABYLON {
             if (skeleton != null) {
                 if (skeleton.animationPropertiesOverride == null) skeleton.animationPropertiesOverride = new BABYLON.AnimationPropertiesOverride();
                 skeleton.animationPropertiesOverride.loopMode = loopBehavior;
-                skeleton.animationPropertiesOverride.enableBlending = (blendingSpeed > 0.0);
+                skeleton.animationPropertiesOverride.enableBlending = (blendingSpeed > 0);
                 skeleton.animationPropertiesOverride.blendingSpeed = blendingSpeed;
             }
         }
@@ -737,9 +964,9 @@ module BABYLON {
             return 1 / (rate * duration);
         }
 
-        public static CalculateCameraDistance(farClipPlane:number, lodPercent:number, clipPlaneScale:number = 1.0):number
+        public static CalculateCameraDistance(farClipPlane:number, lodPercent:number, clipPlaneScale:number = 1):number
         {
-            const bias:number = 1.0; // Ignore Lod Bias For Distances - (QualitySettings.lodBias > 0.0f) ? QualitySettings.lodBias : 1.0f;
+            const bias:number = 1; // Ignore Lod Bias For Distances - (QualitySettings.lodBias > 0f) ? QualitySettings.lodBias : 1f;
             return Math.round(((farClipPlane * clipPlaneScale) * lodPercent) * bias);
         }
 
@@ -782,6 +1009,17 @@ module BABYLON {
                     if (anyImpostor.onCollideEvent != null) {
                         anyImpostor.onCollideEvent = null;
                     }
+                    if (anyImpostor.tmpCollisionObjects != null) {
+                        delete anyImpostor.tmpCollisionObjects;
+                    }
+                    if (entity.physicsImpostor.physicsBody != null) {
+                        if (entity.physicsImpostor.physicsBody.entity != null) {
+                            delete entity.physicsImpostor.physicsBody.entity;
+                        }
+                        if (entity.physicsImpostor.physicsBody.triangleMapInfo != null) {
+                            delete entity.physicsImpostor.physicsBody.triangleMapInfo;
+                        }
+                    }
                     entity.physicsImpostor.dispose();
                     entity.physicsImpostor = null;
                 }
@@ -807,12 +1045,12 @@ module BABYLON {
                     }
                     delete (<any>entity).lightRig;
                 }
-                if ((<any>entity).flareRig != null) {
-                    if ((<any>entity).flareRig.dispose) {
-                        //console.warn("===> Disposing Flare Rig: " + (<any>entity).flareRig.name);
-                        (<any>entity).flareRig.dispose();
+                if ((<any>entity).textWriter != null) {
+                    if ((<any>entity).textWriter.dispose) {
+                        //console.warn("===> Disposing Text Writer: " + (<any>entity).textWriter.name);
+                        (<any>entity).textWriter.dispose();
                     }
-                    delete (<any>entity).flareRig;
+                    delete (<any>entity).textWriter;
                 }
             }
         }
@@ -887,7 +1125,7 @@ module BABYLON {
                 let new_unity:any = null;
                 if (source.unity != null) {
                     const new_visible:boolean = source.unity.visible != null ? source.unity.visible : true;
-                    const new_visibilty:number = source.unity.visibility != null ? source.unity.visibility : 1.0;
+                    const new_visibilty:number = source.unity.visibility != null ? source.unity.visibility : 1;
                     const new_billboard:number = source.unity.billboard != null ? source.unity.billboard : 0;
                     const new_tags:string = source.unity.tags != null ? source.unity.tags : "Untagged Layer0";
                     const new_skin:string = source.unity.skin != null ? source.unity.skin : false;
@@ -938,6 +1176,7 @@ module BABYLON {
                     new_unity.lods = null;
                     new_unity.coverages = null;
                     new_unity.distances = null;
+                    new_unity.handlers = null;
                     //new_unity.body = new_body;
                     //new_unity.lods = new_lods;
                     //new_unity.coverages = new_coverages;
@@ -1007,7 +1246,7 @@ module BABYLON {
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "parsed")) transform.metadata.unity.parsed = false;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "prefab")) transform.metadata.unity.prefab = false;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "visible")) transform.metadata.unity.visible = true;
-            if (!BABYLON.Utilities.HasOwnProperty(metadata, "visibility")) transform.metadata.unity.visibility = 1.0;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "visibility")) transform.metadata.unity.visibility = 1;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "billboard")) transform.metadata.unity.billboard = 0;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "tags")) transform.metadata.unity.tags = "Untagged Layer0";
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "skin")) transform.metadata.unity.skin = false;
@@ -1018,6 +1257,7 @@ module BABYLON {
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "lods")) transform.metadata.unity.lods = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "coverages")) transform.metadata.unity.coverages = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "distances")) transform.metadata.unity.distances = null;
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "handlers")) transform.metadata.unity.handlers = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "physics")) transform.metadata.unity.physics = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "renderer")) transform.metadata.unity.renderer = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "collision")) transform.metadata.unity.collision = null;
@@ -1030,7 +1270,7 @@ module BABYLON {
 /**
  * RequestAnimationFrame() Original Shim By: Paul Irish (Internal use only)
  * http://paulirish.com/2011/requestanimationframe-for-smart-animating/
- * @class TimerPlugin
+ * @class TimerPlugin - All rights reserved (c) 2019 Mackey Kinard
  */
 var TimerPlugin:any = window;
 TimerPlugin.requestAnimFrame = (function() {
@@ -1122,5 +1362,17 @@ TimerPlugin.clearRequestTimeout = function(handle) {
  * Return the game time in total milliseconds
  */
 TimerPlugin.getTimeMilliseconds = function () {
-    return (performance || Date).now();
+    if (BABYLON.PrecisionDate != null && BABYLON.PrecisionDate.Now != null)
+    {
+        return BABYLON.PrecisionDate.Now;
+    }
+    else
+    {
+        return (performance || Date).now();
+    }
 };
+/**
+ *  Sets the system game start time
+ */
+TimerPlugin.gameStartTime = TimerPlugin.getTimeMilliseconds();
+

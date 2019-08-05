@@ -1,38 +1,51 @@
 module BABYLON {
     /**
-     * Babylon scene manager parser class (Internal use only)
-     * @class MetadataParser
+     * Babylon metadata parser class (Internal use only)
+     * @class MetadataParser - All rights reserved (c) 2019 Mackey Kinard
      */
     export class MetadataParser {
         private _disposeList:Array<BABYLON.TransformNode>;
         private _detailList:Array<BABYLON.AbstractMesh>;
         private _physicList:Array<BABYLON.AbstractMesh>;
         private _shadowList:Array<BABYLON.AbstractMesh>;
+        private _freezeList:Array<BABYLON.AbstractMesh>;
+        private _shaderList:Array<BABYLON.Material>;
         private _scriptList:Array<any>;
+        private _activeMeshes:boolean;
         private _babylonScene:BABYLON.Scene;
         private _gltfLoader:BABYLON.GLTF2.GLTFLoader;
         public get loader():BABYLON.GLTF2.GLTFLoader { return this._gltfLoader; }
-        constructor(scene:BABYLON.Scene, loader:BABYLON.GLTF2.GLTFLoader = null) { this._babylonScene = scene; this._gltfLoader = loader; this._disposeList = []; this._detailList = []; this._physicList = []; this._shadowList = []; this._scriptList = []; }
+        constructor(scene:BABYLON.Scene, loader:BABYLON.GLTF2.GLTFLoader = null) { this._babylonScene = scene; this._gltfLoader = loader; this._disposeList = []; this._detailList = []; this._physicList = []; this._shadowList = []; this._shaderList = []; this._freezeList = []; this._scriptList = []; this._activeMeshes = false; }
         /** Parse the scene component metadata. Note: Internal use only */
         public parseSceneComponents(entity: BABYLON.AbstractMesh): void {
-            BABYLON.MetadataParser.DoParseSceneComponents(this._babylonScene, entity, this._physicList, this._shadowList, this._scriptList);
+            BABYLON.MetadataParser.DoParseSceneComponents(this._babylonScene, entity, this._physicList, this._shadowList, this._scriptList, this._freezeList);
         }
         /** Post process pending scene components. Note: Internal use only */
         public postProcessSceneComponents():void {
             BABYLON.MetadataParser.DoProcessPendingDetails(this._babylonScene, this._detailList);
             BABYLON.MetadataParser.DoProcessPendingPhysics(this._babylonScene, this._physicList);
             BABYLON.MetadataParser.DoProcessPendingShadows(this._babylonScene, this._shadowList);
+            BABYLON.MetadataParser.DoProcessPendingShaders(this._babylonScene, this._shaderList);
+            BABYLON.MetadataParser.DoProcessPendingFreezes(this._babylonScene, this._freezeList, this._activeMeshes);
             BABYLON.MetadataParser.DoProcessPendingScripts(this._babylonScene, this._scriptList);
             BABYLON.MetadataParser.DoProcessPendingDisposes(this._disposeList);
-            this._babylonScene = null; this._disposeList = null; this._detailList = null; this._physicList = null; this._shadowList = null; this._scriptList = null;
+            this._babylonScene = null; this._disposeList = null; this._detailList = null; this._physicList = null; this._shadowList = null; this._shaderList = null; this._freezeList = null; this._scriptList = null; this._activeMeshes = false;
         }
         /** Add detail level list item. Note: Internal use only */
         public addDetailLevelItem(mesh:BABYLON.AbstractMesh):void {
-            this._detailList.push(mesh);
+            if (this._detailList != null) this._detailList.push(mesh);
         }
         /** Add dispose entity list item. Note: Internal use only */
         public addDisposeEntityItem(transform:BABYLON.TransformNode):void {
-            this._disposeList.push(transform);
+            if (this._disposeList != null) this._disposeList.push(transform);
+        }
+        /** Add freeze shader material list item. Note: Internal use only */
+        public addFreezeShaderMaterial(material:BABYLON.Material):void {
+            if (this._shaderList != null) this._shaderList.push(material);
+        }
+        /** Set freeze scene active meshe list items. Note: Internal use only */
+        public setFreezeActiveMeshes(freeze:boolean):void {
+            this._activeMeshes = freeze;
         }
         /** Load float array from gltf accessor data */
         public loadFloatAccessorData(context:string, index:number):Promise<Nullable<Float32Array>> {
@@ -51,7 +64,7 @@ module BABYLON {
         // * Scene Manager Private Parsing Functions * //
         // ******************************************* //
 
-        private static DoParseSceneComponents(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, physicList:Array<BABYLON.AbstractMesh>, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>): void {
+        private static DoParseSceneComponents(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, physicList:Array<BABYLON.AbstractMesh>, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>, freezeList: Array<BABYLON.TransformNode>): void {
             if (entity != null && entity.metadata != null && entity.metadata.unity != null && entity.metadata.unity.parsed != null && entity.metadata.unity.parsed === false) {
                 entity.metadata.parsed = true;
                 const metadata:any = entity.metadata.unity;
@@ -74,6 +87,12 @@ module BABYLON {
                 // ..
                 if (metadata.renderer != null) {
                     if (abstractmesh === true) {
+                        entity.isPickable = false;
+                        entity.useVertexColors = false;
+                        entity.cullingStrategy = BABYLON.AbstractMesh.CULLINGSTRATEGY_STANDARD;
+                        if (metadata.renderer.cullingstrategy != null && metadata.renderer.cullingstrategy !== BABYLON.AbstractMesh.CULLINGSTRATEGY_STANDARD) {
+                            entity.cullingStrategy = metadata.renderer.cullingstrategy;
+                        }
                         if (metadata.renderer.castshadows != null && metadata.renderer.castshadows === true) {
                             if (shadowList != null) shadowList.push(entity);
                         }
@@ -83,10 +102,25 @@ module BABYLON {
                         if (metadata.renderer.checkcollisions != null && metadata.renderer.checkcollisions === true) {
                             entity.checkCollisions = true;
                         }
+                        if (metadata.renderer.usevertexcolors != null && metadata.renderer.usevertexcolors === true) {
+                            entity.useVertexColors = true;
+                        }
+                        if (metadata.renderer.setmeshpickable != null && metadata.renderer.setmeshpickable === true) {
+                            entity.isPickable = true;
+                        }
+                        if (metadata.renderer.freezeworldmatrix != null && metadata.renderer.freezeworldmatrix === true) {
+                            if (freezeList != null) freezeList.push(entity);
+                        }
                     } else {
                         const primitives = BABYLON.SceneManager.GetPrimitiveMeshes(entity);
                         if (primitives != null && primitives.length > 0) {
                             primitives.forEach((primitive) => {
+                                primitive.isPickable = false;
+                                primitive.useVertexColors = false;
+                                primitive.cullingStrategy = BABYLON.AbstractMesh.CULLINGSTRATEGY_STANDARD;
+                                if (metadata.renderer.cullingstrategy != null && metadata.renderer.cullingstrategy !== BABYLON.AbstractMesh.CULLINGSTRATEGY_STANDARD) {
+                                    primitive.cullingStrategy = metadata.renderer.cullingstrategy;
+                                }
                                 if (metadata.renderer.castshadows != null && metadata.renderer.castshadows === true) {
                                     if (shadowList != null) shadowList.push(primitive);
                                 }
@@ -96,12 +130,21 @@ module BABYLON {
                                 if (metadata.renderer.checkcollisions != null && metadata.renderer.checkcollisions === true) {
                                     primitive.checkCollisions = true;
                                 }
+                                if (metadata.renderer.usevertexcolors != null && metadata.renderer.usevertexcolors === true) {
+                                    primitive.useVertexColors = true;
+                                }
+                                if (metadata.renderer.setmeshpickable != null && metadata.renderer.setmeshpickable === true) {
+                                    primitive.isPickable = true;
+                                }
+                                if (metadata.renderer.freezeworldmatrix != null && metadata.renderer.freezeworldmatrix === true) {
+                                    if (freezeList != null) freezeList.push(primitive);
+                                }
                             });
                         }
                     }
                 }
                 // ..
-                // Parse Mesh Components
+                // Parse Node Components
                 // ..
                 if (metadata.components != null) {
                     const components:any[] = metadata.components;
@@ -109,25 +152,27 @@ module BABYLON {
                         components.forEach((component:any) => {
                             if (component != null) {
                                 switch (component.alias) {
-                                    case "script":
-                                        if (scriptList != null) scriptList.push({mesh:entity, comp:component});
-                                        break;
-                                    case "camera":
+                                    case "camera": {    // Parse Unity Camera Properties
                                         BABYLON.MetadataParser.SetupCameraComponent(scene, entity, component);
                                         break;
-                                    case "light":
+                                    }
+                                    case "light": {     // Parse Unity Lighting And Shadowing
                                         BABYLON.MetadataParser.SetupLightComponent(scene, entity, component);
                                         break;
+                                    }
+                                    case "text": {      // Parse Unity Text Mesh Writer Properties
+                                        BABYLON.MetadataParser.SetupTextComponent(scene, entity, component);                                        
+                                        break;
+                                    }
+                                    case "script": {    // Parse Native Babylon Script Components
+                                        if (scriptList != null) scriptList.push({mesh:entity, comp:component});
+                                        break;
+                                    }
                                 }
                             }
                         });
                     }
                 }
-            }
-        }
-        private static DoProcessPendingDisposes(disposeList: Array<BABYLON.TransformNode>):void {
-            if (disposeList != null && disposeList.length > 0) {
-                disposeList.forEach((node) => { node.dispose(false); });
             }
         }
         private static DoProcessPendingDetails(scene:BABYLON.Scene, detailList:Array<BABYLON.AbstractMesh>):void {
@@ -171,7 +216,12 @@ module BABYLON {
                 const physicsengine:BABYLON.IPhysicsEngine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;
                 const physicsloaded:boolean = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
                 if (physicsloaded === true) {
-                    physicList.forEach((mesh) => { BABYLON.MetadataParser.SetupPhysicsComponent(scene, mesh); });
+                    physicList.forEach((mesh) => { 
+                        // Pro Feature Pack - Rigidbody Physics System
+                        if ((<any>window).BABYLON.RigidbodyPhysics && (<any>window).BABYLON.RigidbodyPhysics.SetupPhysicsComponent) {
+                            (<any>window).BABYLON.RigidbodyPhysics.SetupPhysicsComponent(scene, mesh);
+                        }
+                    });
                 } else {
                     BABYLON.Tools.Warn("Ammo.js physics engine not loaded. Physics impostors will not be created.");
                 }
@@ -192,6 +242,17 @@ module BABYLON {
                     });
                 }
             }
+        }
+        private static DoProcessPendingShaders(scene:BABYLON.Scene, shaderList: Array<BABYLON.Material>):void {
+            if (shaderList != null && shaderList.length > 0) {
+                shaderList.forEach((material) => { material.freeze(); });
+            }
+        }
+        private static DoProcessPendingFreezes(scene:BABYLON.Scene, freezeList: Array<BABYLON.AbstractMesh>, activeMeshes:boolean):void {
+            if (freezeList != null && freezeList.length > 0) {
+                freezeList.forEach((mesh) => { mesh.freezeWorldMatrix(); });
+            }
+            if (activeMeshes === true) scene.freeActiveMeshes();
         }
         private static DoProcessPendingScripts(scene:BABYLON.Scene, scriptList: Array<any>):void {
             if (scriptList != null && scriptList.length > 0) {
@@ -228,119 +289,33 @@ module BABYLON {
                 registerList = null;
             }
         }
+        private static DoProcessPendingDisposes(disposeList: Array<BABYLON.TransformNode>):void {
+            if (disposeList != null && disposeList.length > 0) {
+                disposeList.forEach((node) => { node.dispose(false); });
+            }
+        }
 
         // ****************************************** //
         // * Scene Manager Private Worker Functions * //
         // ****************************************** //
-
-        private static SetupPhysicsComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh): void {
-            const metadata:any = (entity.metadata != null && entity.metadata.unity != null) ? entity.metadata.unity : null;
-            if (metadata != null && metadata.physics != null) {
-                entity.checkCollisions = false;
-                const mass:number = (metadata.physics.mass != null) ? metadata.physics.mass : 0;
-                const center:BABYLON.Vector3 = (metadata.physics.center != null) ? BABYLON.Utilities.ParseVector3(metadata.physics.center, BABYLON.Vector3.Zero()) : BABYLON.Vector3.Zero();
-                if (metadata.physics.type === "rigidbody") {
-                    if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Initialize rigidbody physics for: " + entity.name);
-                    if (metadata.collision != null && metadata.collision.type != null && metadata.collision.type === "MeshCollider") {
-                        // ..
-                        // Setup Mesh Collider Impostors
-                        // ..
-                        let impostortype:number = BABYLON.PhysicsImpostor.MeshImpostor;
-                        const convexmesh:boolean = (metadata.collision.convexmesh != null) ? metadata.collision.convexmesh : false;
-                        const impersonatemesh:string = (metadata.collision.impersonatemesh != null) ? metadata.collision.impersonatemesh : "DefaultImpostor";
-                        const dynamicfriction:number = (metadata.collision.dynamicfriction != null) ? metadata.collision.dynamicfriction : 0.6;
-                        const staticfriction:number = (metadata.collision.staticfriction != null) ? metadata.collision.staticfriction : 0.6;
-                        const restitution:number = (metadata.collision.restitution != null) ? metadata.collision.restitution : 0.0;
-                        const debugging:boolean = (metadata.collision.debugging != null) ? metadata.collision.debugging : false;
-                        const istrigger:boolean = (metadata.collision.trigger != null) ? metadata.collision.trigger : false;
-                        if (impersonatemesh === "BoxImpostor") impostortype = BABYLON.PhysicsImpostor.BoxImpostor;
-                        else if (impersonatemesh === "PlaneImpostor") impostortype = BABYLON.PhysicsImpostor.PlaneImpostor;
-                        else if (impersonatemesh === "SphereImpostor") impostortype = BABYLON.PhysicsImpostor.SphereImpostor;
-                        else if (impersonatemesh === "CylinderImpostor") impostortype = BABYLON.PhysicsImpostor.CylinderImpostor;
-                        else impostortype = (convexmesh === true) ? BABYLON.PhysicsImpostor.ConvexHullImpostor : BABYLON.PhysicsImpostor.MeshImpostor;
-                        if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(impostortype).toLowerCase() + " entity imposter for: " + entity.name);
-                        BABYLON.MetadataParser.CreateEntityPhysicsImpostor(scene, entity, impostortype, { mass: mass, friction: dynamicfriction, restitution: restitution });
-                        BABYLON.MetadataParser.SetupRigidbodyPhysicsFunction(scene, entity, false, istrigger, metadata.physics, debugging);
-                    } else {
-                        // ..
-                        // Setup Compound Collider Impostors
-                        // ..
-                        let fdynamicfriction:number = 0.0;
-                        let fstaticfriction:number = 0.0;
-                        let frestitution:number = 0.0;
-                        let fdebugging:number = 0;
-                        let ftrigger:boolean = false;
-                        let fcount:number = 0;
-                        let childnodes:BABYLON.AbstractMesh[] = entity.getChildMeshes(true);
-                        if (childnodes != null && childnodes.length > 0) {
-                            childnodes.forEach((childnode:BABYLON.AbstractMesh) => {
-                                if (childnode.metadata != null && childnode.metadata.unity != null) {
-                                    if (childnode.metadata.unity.collision != null) {
-                                        childnode.position.subtractInPlace(center);
-                                        const collision:any = childnode.metadata.unity.collision;
-                                        let cimpostortype:number = BABYLON.PhysicsImpostor.BoxImpostor;
-                                        const cconvexmesh:boolean = (collision.convexmesh != null) ? collision.convexmesh : false;
-                                        const cimpersonatemesh:string = (collision.impersonatemesh != null) ? collision.impersonatemesh : "DefaultImpostor";
-                                        const cdynamicfriction:number = (collision.dynamicfriction != null) ? collision.dynamicfriction : 0.6;
-                                        const cstaticfriction:number = (collision.staticfriction != null) ? collision.staticfriction : 0.6;
-                                        const crestitution:number = (collision.restitution != null) ? collision.restitution : 0.0;
-                                        const cdebugging:boolean = (collision.debugging != null) ? collision.debugging : false;
-                                        const cistrigger:boolean = (collision.trigger != null) ? collision.trigger : false;
-                                        const ccollider:string = (collision.type != null) ? collision.type : "BoxCollider";
-                                        if (ccollider === "MeshCollider") {
-                                            if (cimpersonatemesh === "BoxImpostor") cimpostortype = BABYLON.PhysicsImpostor.BoxImpostor;
-                                            else if (cimpersonatemesh === "PlaneImpostor") cimpostortype = BABYLON.PhysicsImpostor.PlaneImpostor;
-                                            else if (cimpersonatemesh === "SphereImpostor") cimpostortype = BABYLON.PhysicsImpostor.SphereImpostor;
-                                            else if (cimpersonatemesh === "CylinderImpostor") cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor;
-                                            else cimpostortype = (cconvexmesh === true) ? BABYLON.PhysicsImpostor.ConvexHullImpostor : BABYLON.PhysicsImpostor.MeshImpostor;
-                                        } else if (ccollider === "WheelCollider") {
-                                            cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor; 
-                                        } else if (ccollider === "CapsuleCollider") {
-                                            cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor; 
-                                        } else if (ccollider === "CharacterController") {
-                                            cimpostortype = BABYLON.PhysicsImpostor.CylinderImpostor; 
-                                        } else if (ccollider === "SphereCollider") {
-                                            cimpostortype = BABYLON.PhysicsImpostor.SphereImpostor; 
-                                        } else if (ccollider === "BoxCollider") {
-                                            cimpostortype = BABYLON.PhysicsImpostor.BoxImpostor; 
-                                        }
-                                        if (cdynamicfriction > fdynamicfriction) fdynamicfriction = cdynamicfriction;
-                                        if (cstaticfriction > fstaticfriction) fstaticfriction = cstaticfriction;
-                                        if (crestitution > frestitution) frestitution = crestitution;
-                                        if (cdebugging === true) fdebugging = 1;
-                                        if (cistrigger == true) ftrigger = true;
-                                        if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup " + BABYLON.Utilities.FormatPhysicsImposterType(cimpostortype).toLowerCase() + " child imposter for: " + childnode.name);
-                                        BABYLON.MetadataParser.CreateEntityPhysicsImpostor(scene, childnode, cimpostortype, { mass: 0, friction: 0, restitution: 0 });
-                                        BABYLON.MetadataParser.SetupRigidbodyPhysicsFunction(scene, childnode, true, false, metadata.physics, cdebugging);
-                                        fcount++;
-                                    }
-                                }
-                            });
-                        }
-                        if (fcount > 0) {
-                            if (BABYLON.SceneManager.DebugPhysics) BABYLON.Tools.Log("Setup physics root no imposter for: " + entity.name);
-                            BABYLON.MetadataParser.CreateEntityPhysicsImpostor(scene, entity, BABYLON.PhysicsImpostor.NoImpostor, { mass: mass, friction: fdynamicfriction, restitution: frestitution });
-                            BABYLON.MetadataParser.SetupRigidbodyPhysicsFunction(scene, entity, false, ftrigger, metadata.physics, (fdebugging === 1));
-                        }
-                        childnodes = null;
-                    }
-                }
-            }
-        }
+        
         private static SetupCameraComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any): void {
-            const name = entity.name + "_rig";
-            const rotation:number = (scene.useRightHandedSystem === true) ? Math.PI : 0;
-            let babyonCamera:BABYLON.UniversalCamera = new BABYLON.UniversalCamera(name, BABYLON.Vector3.Zero(), scene);
-            babyonCamera.parent = entity;
-            babyonCamera.rotation = new BABYLON.Vector3(0, rotation, 0);
-            babyonCamera.checkCollisions = false;
             entity.checkCollisions = false;
+            const name = entity.name + "_rig";
+            const rotation:number = (scene.useRightHandedSystem === true) ? (Math.PI * BABYLON.System.Rad2Deg) : 0;
+            const babyonCamera:BABYLON.FreeCamera = new BABYLON.FreeCamera(name, BABYLON.Vector3.Zero(), scene);
+            babyonCamera.checkCollisions = false;
+            babyonCamera.rotationQuaternion = BABYLON.Utilities.FromEuler(0, rotation, 0);
+            babyonCamera.parent = entity;
+            if (babyonCamera.inputs != null) {
+                babyonCamera.inputs.clear();
+            }
             // ..
             // Setup Camera Properties
             // ..
             const maincamera:boolean = component.maincamera != null ? component.maincamera : false;
-            if (maincamera === true && scene.activeCamera == null) {
-                scene.activeCamera = babyonCamera;
+            if (maincamera === true) {
+                if (scene.activeCamera == null) scene.activeCamera = babyonCamera;
             }
             const cameratype:number = component.type != null ? component.type : 0;
             switch (cameratype) {
@@ -382,13 +357,13 @@ module BABYLON {
             (<any>entity).cameraRig = babyonCamera;
         }
         private static SetupLightComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any):void {
+            entity.checkCollisions = false;
             const name = entity.name + "_rig";
             let babylonLight: BABYLON.Light;
-            entity.checkCollisions = false;
             // ..
             // Setup Light Properties
             // ..
-            let intensityFactor:number = 1.0;
+            let intensityFactor:number = 1;
             const lightType:number = component.type != null ? component.type : 0;
             switch (lightType) {
                 case 0: { // DIRECTIONAL
@@ -398,14 +373,14 @@ module BABYLON {
                     babylonDirLight.shadowOrthoScale = orthoscale;
                     babylonLight = babylonDirLight;
                     babylonLight.falloffType = BABYLON.Light.FALLOFF_STANDARD;
-                    intensityFactor = 2.66;                    
+                    intensityFactor = 3.99;
                     break;
                 }
                 case 1: { // POINT
                     const babylonPointLight = babylonLight = new BABYLON.PointLight(name, BABYLON.Vector3.Zero(), scene);
                     babylonLight = babylonPointLight;
                     babylonLight.falloffType = BABYLON.Light.FALLOFF_STANDARD;
-                    intensityFactor = 1.0;
+                    intensityFactor = 1;
                     break;
                 }
                 case 2: { // SPOT
@@ -424,7 +399,7 @@ module BABYLON {
                 babylonLight.parent = entity;
                 babylonLight.range = component.range != null ? component.range : Number.MAX_VALUE;
                 babylonLight.diffuse = component.color != null ? BABYLON.Utilities.ParseColor3(component.color) : BABYLON.Color3.White();
-                babylonLight.intensity = (component.intensity != null ? component.intensity : 1.0) * intensityFactor;
+                babylonLight.intensity = (component.intensity != null ? component.intensity : 1) * intensityFactor;
                 babylonLight.lightmapMode = component.lightmapmode != null ? component.lightmapmode : BABYLON.Light.LIGHTMAP_DEFAULT;
                 babylonLight.intensityMode = BABYLON.Light.INTENSITYMODE_AUTOMATIC;
                 babylonLight.shadowEnabled = false;                
@@ -440,16 +415,16 @@ module BABYLON {
                 const shadowstrength:number = component.shadowstrength != null ? component.shadowstrength : 1;
                 const shadowdistance:number = component.shadowdistance != null ? component.shadowdistance : 40;
                 const shadownearplane:number = component.shadownearplane != null ? component.shadownearplane : 0.2;
-                const shadowdepthscale:number = component.shadowdepthscale != null ? component.shadowdepthscale : 50.0;
+                const shadowdepthscale:number = component.shadowdepthscale != null ? component.shadowdepthscale : 50;
                 const contacthardening:number = component.contacthardening != null ? component.contacthardening : 0.1;
                 const usekernelblur:boolean = component.usekernelblur != null ? component.usekernelblur : true;
-                const shadowblurkernel:number = component.shadowblurkernel != null ? component.shadowblurkernel : 1.0;
-                const shadowblurscale:number = component.shadowblurscale != null ? component.shadowblurscale : 2.0;
-                const shadowbluroffset:number = component.shadowbluroffset != null ? component.shadowbluroffset : 1.0;
+                const shadowblurkernel:number = component.shadowblurkernel != null ? component.shadowblurkernel : 1;
+                const shadowblurscale:number = component.shadowblurscale != null ? component.shadowblurscale : 2;
+                const shadowbluroffset:number = component.shadowbluroffset != null ? component.shadowbluroffset : 1;
                 const shadowfilterquality:string = component.shadowfilterquality != null ? component.shadowfilterquality : "Medium";
                 const transparencyshadow:boolean = component.transparencyshadow != null ? component.transparencyshadow : false;
                 const forcebackfacesonly:boolean = component.forcebackfacesonly != null ? component.forcebackfacesonly : true;
-                const frustumedgefalloff:number = component.frustumedgefalloff != null ? component.frustumedgefalloff : 0.0;
+                const frustumedgefalloff:number = component.frustumedgefalloff != null ? component.frustumedgefalloff : 0;
                 // ..                   
                 if (generateshadows === true) {
                     const shadowlight = babylonLight as BABYLON.ShadowLight;
@@ -464,7 +439,7 @@ module BABYLON {
                     shadowgenerator.bias = shadowmapbias * biasscalefactor;
                     shadowgenerator.normalBias = normalmapbias * biasscalefactor;
                     shadowgenerator.depthScale = shadowdepthscale;
-                    shadowgenerator.setDarkness(1.0 - BABYLON.Scalar.Clamp(shadowstrength * 0.9));
+                    shadowgenerator.setDarkness(1 - BABYLON.Scalar.Clamp(shadowstrength * 0.9));
                     shadowgenerator.useKernelBlur = usekernelblur;
                     shadowgenerator.blurKernel = shadowblurkernel;
                     shadowgenerator.blurScale = shadowblurscale;
@@ -523,75 +498,75 @@ module BABYLON {
                 (<any>entity).lightRig = babylonLight;
             }
         }
-        /** Creates a safe physics impostor for the specified entity preserving parent child relations. */
-        private static CreateEntityPhysicsImpostor(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, type: number, options: BABYLON.PhysicsImpostorParameters, reparent:boolean = true):void {
-            if (entity == null) return;
-            const parent:BABYLON.Node = entity.parent;
-            if (reparent === true) entity.parent = null;
-            entity.physicsImpostor = new BABYLON.PhysicsImpostor(entity, type, options, scene);
-            if (reparent === true) entity.parent = parent;
-        }
-        private static SetupRigidbodyPhysicsFunction(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, child:boolean, trigger:boolean, physics:any, debugging:boolean):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null) {
-                entity.physicsImpostor.executeNativeFunction((word:any, body:any) => {
-                    // console.log("===> Setup RidigBody Native Physics Body: " + entity.name);
-                    // console.log(body);
-                    // ..
-                    // Disable Gravity
-                    // ..
-                    let gravity:boolean = (physics != null && physics.gravity != null) ? physics.gravity : true;
-                    if (gravity === false) {
-                        if (body.setGravity) {
-                            body.setGravity(new Ammo.btVector3(0.0, 0.0, 0.0));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set gravity override not supported for: " + entity.name);
+        private static SetupTextComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any): void {
+            //console.log("Parsing Text Mesh Component: " + entity.name);
+            const achor:string = (component.anchor != null) ? component.anchor : "UpperLeft";
+            const fontname:string = (component.fontname != null) ? component.fontname : "Arial";
+            const fontnames:string[] = ["Arial", "Helvetica", "Sans-Serif", "ComicSans", "Jura", "HirukoPro-Book", "WebGL-Dings"];
+            let anchor_mode:string = "upper";
+            let text_anchor:string = "left";
+            let font_name:string = "Arial";
+            // ..
+            const mesh_text:string = (component.text != null && component.text !== "") ? component.text : "babylon.js";
+            const text_alpha:number = (component.alpha != null) ? component.alpha : 1;
+            const letter_height:number = (component.charactersize != null) ? component.charactersize : 1;
+            const letter_thickness:number = (component.letterthickness != null) ? component.letterthickness :0.01;
+            const upper_offset:number = (letter_height * -1);
+            const middle_offset:number = (letter_height * -0.33);
+            const lower_offset:number = (letter_height * 0.25);
+            const y_offset:number = (anchor_mode === "middle") ? middle_offset : (anchor_mode === "lower") ? lower_offset : upper_offset;
+            const z_offset:number = (component.offsetz != null) ? component.offsetz : 0;
+            // ..
+            const diffuse_color:string = (component.diffusecolor != null && component.diffusecolor !== "") ? component.diffusecolor : "#FFFFFF";
+            const ambient_color:string = (component.ambientcolor != null && component.ambientcolor !== "") ? component.ambientcolor : "#E6E6E6";
+            const specular_color:string = (component.specularcolor != null && component.specularcolor !== "") ? component.specularcolor : "#000000";
+            const emissive_color:string = (component.emissivecolor != null && component.emissivecolor !== "") ? component.emissivecolor : "#000000";
+            const disable_lighting:boolean = (component.disablelighting != null) ? component.disablelighting : false;
+            // ..
+            if ((<any>window).BABYLON.MeshWriter) {
+                const Writer = (<any>window).BABYLON.MeshWriter(scene, {scale: 1});
+                if (Writer != null) {
+                    const textOptions:any = {
+                        "anchor" : text_anchor,
+                        "font-family" : font_name, 
+                        "letter-height" : letter_height,
+                        "letter-thickness" : letter_thickness,
+                        "position" : {
+                            "y" : y_offset,
+                            "z" : z_offset
+                        },
+                        "alpha" : text_alpha,
+                        "colors" : {
+                            "diffuse" : diffuse_color,
+                            "ambient" : ambient_color,
+                            "specular" : specular_color,                    
+                            "emissive": emissive_color,
                         }
-                    }
-                    // ..
-                    // Setup Drag Damping
-                    // ..
-                    if (body.setDamping) {
-                        const ldrag:number = (physics != null && physics.ldrag != null) ? physics.ldrag : 0.0;
-                        const adrag:number = (physics != null && physics.adrag != null) ? physics.adrag : 0.05;
-                        body.setDamping(ldrag, adrag);
+                    };
+                    const textWriter  = new Writer(mesh_text, textOptions);
+                    if (textWriter != null) { 
+                        const textMaterial:BABYLON.StandardMaterial = textWriter.getMaterial();
+                        if (textMaterial != null) {
+                            textMaterial.disableLighting = disable_lighting;
+                        }
+                        const textMesh:BABYLON.AbstractMesh = textWriter.getMesh();
+                        if (textMesh != null) {
+                            textMesh.rotation = new BABYLON.Vector3(-Math.PI/2, Math.PI/2, -Math.PI/2);
+                            textMesh.parent = entity;
+                            textMesh.name = entity.name + "_text";
+                        } else {
+                            BABYLON.Tools.Warn("Failed to get text mesh or material for: " + entity.name);
+                        }
+                        // ..
+                        // Attach Text Writer To Mesh
+                        // ..
+                        (<any>entity).textWriter = textWriter;
                     } else {
-                        BABYLON.Tools.Warn("Physics engine set drag damping not supported for: " + entity.name);
+                        BABYLON.Tools.Warn("Failed to create textWriter instance for: " + entity.name);
                     }
-                    // ..
-                    // Setup Collision Flags
-                    // ..
-                    if (body.setCollisionFlags && body.getCollisionFlags) {
-                        if (trigger === true) body.setCollisionFlags(body.getCollisionFlags() | BABYLON.CollisionFlags.CF_NO_CONTACT_RESPONSE);
-                    } else {
-                        BABYLON.Tools.Warn("Physics engine set collision flags not supported for: " + entity.name);
-                    }
-                    // ..
-                    // Setup Freeze Constraints
-                    // ..
-                    const freeze:any = (physics != null && physics.freeze != null) ? physics.freeze : null;
-                    if (freeze != null) {
-                        if (body.setLinearFactor) {
-                            const freeze_pos_x:number = (freeze.positionx != null && freeze.positionx === true) ? 0 : 1;
-                            const freeze_pos_y:number = (freeze.positiony != null && freeze.positiony === true) ? 0 : 1;
-                            const freeze_pos_z:number = (freeze.positionz != null && freeze.positionz === true) ? 0 : 1;
-                            body.setLinearFactor(new Ammo.btVector3(freeze_pos_x, freeze_pos_y, freeze_pos_z));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set linear factor not supported for: " + entity.name);
-                        }
-                        if (body.setAngularFactor) {
-                            const freeze_rot_x:number = (freeze.rotationx != null && freeze.rotationx === true) ? 0 : 1;
-                            const freeze_rot_y:number = (freeze.rotationy != null && freeze.rotationy === true) ? 0 : 1;
-                            const freeze_rot_z:number = (freeze.rotationz != null && freeze.rotationz === true) ? 0 : 1;
-                            body.setAngularFactor(new Ammo.btVector3(freeze_rot_x, freeze_rot_y, freeze_rot_z));
-                        } else {
-                            BABYLON.Tools.Warn("Physics engine set angular factor not supported for: " + entity.name);
-                        }
-                    }
-                });
-                if (debugging === true) BABYLON.SceneManager.ShowEntityPhysicsImpostor(scene, entity);
-            } else {
-                BABYLON.Tools.Warn("No valid physics impostor to setup for " + entity.name);
+                } else {
+                    BABYLON.Tools.Warn("Failed to create MeshWriter class for: " + entity.name);
+                }
             }
         }
     }

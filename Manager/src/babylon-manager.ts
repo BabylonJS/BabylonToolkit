@@ -1,19 +1,19 @@
 module BABYLON {
     /**
      * Babylon scene manager class
-     * @class SceneManager
+     * @class SceneManager - All rights reserved (c) 2019 Mackey Kinard
      */
     export class SceneManager {
         /** Gets the toolkit framework version number */
         public static get VersionNumber():string { return  "4.1.0 - A1"; }
+        /** Gets the toolkit framework copyright notice */
+        public static get CopyrightNotice():string { return  "All rights reserved (c) 2019 Mackey Kinard"; }
+        /** Gets the toolkit framework copyright notice */
+        public static get ToolkitLicense():string { return  ((<any>window).BabylonToolkitLicense != null && (<any>window).BabylonToolkitLicense !== "") ? (<any>window).BabylonToolkitLicense : "STANDARD" ; }
         /** Managed animation group start mode */
         public static AnimationStartMode?:BABYLON.GLTFLoaderAnimationStartMode = null;
         /** Forces scene loader into right hand mode */
         public static ForceRightHanded?:boolean = null;
-        /** Enable scene physics system debug tracing */
-        public static DebugPhysics:boolean = false;
-        /** Managed json data store object */
-        public static DataStore:any = {};
 
         // ********************************** //
         // * Babylon Scene Manager Plugins  * //
@@ -22,6 +22,7 @@ module BABYLON {
         private static EnableSceneParsing:boolean = true;
         /** Enable scene loader parsing plugin */
         public static EnableSceneLoader(enabled:boolean):void {
+            
             BABYLON.SceneManager.EnableSceneParsing = enabled;
         }
         /** Is scene loader parsing plugin enabled */
@@ -196,42 +197,23 @@ module BABYLON {
             return (BABYLON.SceneManager.IsWindows() && typeof Microsoft !== "undefined" && typeof Microsoft.Xbox !== "undefined" && typeof Microsoft.Xbox.Services !== "undefined");
         }
 
-        // ********************************** //
-        // * Scene Manager System Functions * //
-        // ********************************** //
+        // ********************************* //
+        // * Scene Manager Timer Functions * //
+        // ********************************* //
 
-        /** Run a function on the next render loop. */
-        public static RunOnce(scene:BABYLON.Scene, func:()=>void): void {
-            scene.onBeforeRenderObservable.addOnce(func);
+        /** Get the game time in seconds */
+        public static GetGameTime():number {
+            return (TimerPlugin.getTimeMilliseconds() - TimerPlugin.gameStartTime) / 1000;
         }
-        /** Popup debug layer in window. */
-        public static PopupDebug(scene:BABYLON.Scene): void {
-            if (scene.debugLayer) {
-                scene.debugLayer.hide();
-                scene.debugLayer.show({ enablePopup: true, globalRoot: null });
-            }            
+        /** Get the system time in seconds */
+        public static GetSystemTime():number {
+            return TimerPlugin.getTimeMilliseconds() / 1000;
         }
-        /** Toggle debug layer on and off. */
-        public static ToggleDebug(scene:BABYLON.Scene, popups:boolean = false, parent:HTMLElement = null): void {
-            if (scene.debugLayer) {
-                const wnd:any = window;
-                if (BABYLON.SceneManager.debugLayerVisible === true) {
-                    BABYLON.SceneManager.debugLayerVisible = false;
-                    if (wnd.METER && wnd.METER.show) wnd.METER.show();
-                    scene.debugLayer.hide();
-                } else {
-                    BABYLON.SceneManager.debugLayerVisible = true;
-                    if (wnd.METER && wnd.METER.hide) wnd.METER.hide();
-                    scene.debugLayer.show({ enablePopup: popups, globalRoot: parent });
-                }
-            }            
-        }
-        /** Disposes entire scene and release all resources */
-        public static DisposeScene(scene:BABYLON.Scene, clearColor:BABYLON.Color4 = new BABYLON.Color4(0,0,0,1)): void {
-            const engine:BABYLON.Engine = scene.getEngine();
-            scene.dispose();
-            engine.clear(clearColor, true, true, true);
-        }
+
+        // *********************************** //
+        // * Scene Manager Timeout Functions * //
+        // *********************************** //
+
         /** Delays a function call using request animation frames. Returns a handle object */
         public static SetTimeout(timeout:number, func:()=>void):any {
             let handle:any = null;
@@ -255,17 +237,46 @@ module BABYLON {
         }
 
         // ********************************** //
+        // * Scene Manager System Functions * //
+        // ********************************** //
+
+        /** Run a function on the next render loop. */
+        public static RunOnce(scene:BABYLON.Scene, func:()=>void): BABYLON.Observer<BABYLON.Scene> {
+            return scene.onBeforeRenderObservable.addOnce(func);
+        }
+        /** Popup debug layer in window. */
+        public static PopupDebug(scene:BABYLON.Scene): void {
+            if (scene.debugLayer) {
+                scene.debugLayer.hide();
+                scene.debugLayer.show({ enablePopup: true, globalRoot: null });
+            }            
+        }
+        /** Toggle debug layer on and off. */
+        public static ToggleDebug(scene:BABYLON.Scene, embed:boolean = false, parent:HTMLElement = null): void {
+            if (scene.debugLayer) {
+                const wnd:any = window;
+                if (BABYLON.SceneManager.debugLayerVisible === true) {
+                    BABYLON.SceneManager.debugLayerVisible = false;
+                    if (wnd.METER && wnd.METER.show) wnd.METER.show();
+                    scene.debugLayer.hide();
+                } else {
+                    BABYLON.SceneManager.debugLayerVisible = true;
+                    if (wnd.METER && wnd.METER.hide) wnd.METER.hide();
+                    scene.debugLayer.show({ embedMode: embed, globalRoot: parent });
+                }
+            }            
+        }
+        /** Disposes entire scene and release all resources */
+        public static DisposeScene(scene:BABYLON.Scene, clearColor:BABYLON.Color4 = new BABYLON.Color4(0,0,0,1)): void {
+            const engine:BABYLON.Engine = scene.getEngine();
+            scene.dispose();
+            engine.clear(clearColor, true, true, true);
+        }
+
+        // ********************************** //
         // * Scene Manager Helper Functions * //
         // ********************************** //
 
-        /** TODO */
-        public static RayCast(scene:BABYLON.Scene, ray: BABYLON.Ray, predicate?: (mesh: BABYLON.AbstractMesh) => boolean, fastCheck?: boolean): BABYLON.PickingInfo {
-            return scene.pickWithRay(ray, predicate, fastCheck);
-        }
-        /** TODO */
-        public static MultiRayCast(scene:BABYLON.Scene, ray: BABYLON.Ray, predicate?: (mesh: BABYLON.AbstractMesh) => boolean): BABYLON.PickingInfo[] {
-            return scene.multiPickWithRay(ray, predicate);
-        }
         /** Safely destroy transform node */
         public static SafeDestroy(transform: BABYLON.TransformNode, delay:number = 5, disable:boolean = false):void {
             if (delay > 0) { 
@@ -319,9 +330,30 @@ module BABYLON {
             }
             return result;
         }
+        /** Get the root url the main scene properties was loaded from */
+        public static GetRootUrl(scene:BABYLON.Scene):string {
+            return ((<any>scene)._rootUrl != null && (<any>scene)._rootUrl !== "") ? (<any>scene)._rootUrl : "/";
+        }
+        /** Sets the root url the main scene properties was loaded from */
+        public static SetRootUrl(scene:BABYLON.Scene, url:string):void {
+            (<any>scene)._rootUrl = url;
+        }
         /** TODO */
-        public static GetDeltaSeconds(scene:BABYLON.Scene): number { 
-            return (scene.getEngine().getDeltaTime() / 1000);
+        public static GetDeltaSeconds(scene:BABYLON.Scene, applyAnimationRatio:boolean = true): number {
+            const deltaTime = scene.useConstantAnimationDeltaTime ? 16 : Math.max(Scene.MinDeltaTime, Math.min(scene.getEngine().getDeltaTime(), Scene.MaxDeltaTime));
+            if (applyAnimationRatio === true) {
+                let animationRatio:number = 1.0;            
+                if (scene.getEngine().isDeterministicLockStep()) {
+                    const defaultFPS:number = (60.0 / 1000.0);
+                    const defaultFrameTime:number = scene.getDeterministicFrameTime();
+                    animationRatio = defaultFrameTime * defaultFPS;
+                } else {
+                    animationRatio = deltaTime * (60.0 / 1000.0);                
+                }
+                return (deltaTime / 1000) * animationRatio;
+            }  else {
+                return (deltaTime / 1000);
+            }
         }
         /** Gets the instanced material from scene. If does not exists, execute a optional defaultinstance handler. */
         public static GetMaterialInstance<T>(scene:BABYLON.Scene, name:string, defaultInstance:(newName:String)=>BABYLON.Material = null): T {
@@ -370,24 +402,39 @@ module BABYLON {
         }
 
         // ******************************** //
-        // * Scene Manager Mesh Functions * //
+        // * Scene Manager Node Functions * //
         // ******************************** //
 
-        /** Gets the specified mesh from scene. */
-        public static GetMesh(scene:BABYLON.Scene, name:string): BABYLON.AbstractMesh {
-            return scene.getNodeByName(name) as BABYLON.AbstractMesh;
+        /** Gets the specified transform node primary tag name. */
+        public static GetTransformTag(transform:BABYLON.TransformNode): string {
+            return (transform.metadata != null && transform.metadata.unity != null && transform.metadata.unity.group != null && transform.metadata.unity.group !== "") ? transform.metadata.unity.group : "Untagged";
         }
-        /** Gets the specified transform node from scene. */
-        public static GetTransform(scene:BABYLON.Scene, name:string): BABYLON.TransformNode {
+        /** Gets the specified transform node by name from scene. */
+        public static GetTransformNode(scene:BABYLON.Scene, name:string): BABYLON.TransformNode {
             if (scene == null) return null;
             return scene.getNodeByName(name) as BABYLON.TransformNode;
         }
-        /** Gets the specified prefab mesh from scene. */
-        public static GetPrefabMesh(scene:BABYLON.Scene, prefabName:string): BABYLON.AbstractMesh {
-            const realPrefab:string = "Prefab." + prefabName;
-            return BABYLON.SceneManager.GetMesh(scene, realPrefab);
+        /** Gets the specified transform node by id from scene. */
+        public static GetTransformNodeByID(scene:BABYLON.Scene, id:string): BABYLON.TransformNode {
+            if (scene == null) return null;
+            return scene.getNodeByID(id) as BABYLON.TransformNode;
         }
-        /** TODO: Remove This - Gets the transform node primitive meshes. */
+        /** Gets the specified abstract mesh by name from scene. */
+        public static GetAbstractMesh(scene:BABYLON.Scene, name:string): BABYLON.AbstractMesh {
+            if (scene == null) return null;
+            return scene.getNodeByName(name) as BABYLON.AbstractMesh;
+        }
+        /** Gets the specified abstract mesh by id from scene. */
+        public static GetAbstractMeshByID(scene:BABYLON.Scene, id:string): BABYLON.AbstractMesh {
+            if (scene == null) return null;
+            return scene.getNodeByID(id) as BABYLON.AbstractMesh;
+        }
+        /** Gets the specified raw prefab mesh from scene. */
+        public static GetRawPrefabMesh(scene:BABYLON.Scene, prefabName:string): BABYLON.AbstractMesh {
+            const realPrefab:string = "Prefab." + prefabName;
+            return BABYLON.SceneManager.GetAbstractMesh(scene, realPrefab);
+        }
+        /** Gets the transform node primitive meshes. */
         public static GetPrimitiveMeshes(transform:TransformNode): BABYLON.AbstractMesh[] {
             return transform.getChildMeshes(true, (node:BABYLON.Node)=>{  return ( node.name.indexOf("_primitive") >= 0); });
         }
@@ -395,15 +442,16 @@ module BABYLON {
         public static GetCollisionMeshes(transform:TransformNode): BABYLON.AbstractMesh[] {
             return transform.getChildMeshes(true, (node:BABYLON.Node)=>{  return ( node.name.indexOf("_collider") >= 0); });
         }
-        /** Gets the system navigation mesh from scene. */
-        public static GetNavigationMesh(scene:BABYLON.Scene):BABYLON.AbstractMesh {
-            return BABYLON.SceneManager.GetMesh(scene, "NavigationMesh");
-        }
+
+        // ********************************** //
+        // * Scene Manager Prefab Functions * //
+        // ********************************** //
+
         /** Instantiates the specfied prefab object into scene. */
         public static InstantiatePrefab(scene:BABYLON.Scene, name:string, cloneName: string, newParent: Node = null, newPosition:BABYLON.Vector3 = null, newRotation:BABYLON.Vector3 = null, newScaling:BABYLON.Vector3 = null): BABYLON.AbstractMesh {
             if (scene == null) return null;
             let result:BABYLON.AbstractMesh = null;
-            const prefab:BABYLON.AbstractMesh = BABYLON.SceneManager.GetPrefabMesh(scene, name);
+            const prefab:BABYLON.AbstractMesh = BABYLON.SceneManager.GetRawPrefabMesh(scene, name);
             if (prefab != null) {
                 result = prefab.clone(cloneName, newParent, false);
                 if (result != null) {
@@ -511,13 +559,8 @@ module BABYLON {
             if (transform == null) return null;
             return (transform.metadata != null && transform.metadata.unity) ? transform.metadata.unity : null;
         }
-        /** Finds the specfied particle system rig in the scene. */
-        public static FindSceneParticleRig(transform: BABYLON.TransformNode): BABYLON.ParticleSystem {
-            if (transform == null) return null;
-            return ((<any>transform).particleRig != null) ? (<any>transform).particleRig : null;
-        }
         /** Finds the specfied camera rig in the scene. */
-        public static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.Camera {
+        public static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.FreeCamera {
             if (transform == null) return null;
             return ((<any>transform).cameraRig != null) ? (<any>transform).cameraRig : null;
         }
@@ -526,10 +569,10 @@ module BABYLON {
             if (transform == null) return null;
             return ((<any>transform).lightRig != null) ? (<any>transform).lightRig : null;
         }
-        /** Finds the specfied lens flare system rig in the scene. */
-        public static FindSceneFlareRig(transform: BABYLON.TransformNode): BABYLON.LensFlareSystem {
+        /** Finds the specfied text writer in the scene. (Pro Feature Pack Only) */
+        public static FindSceneTextWriter(transform: BABYLON.TransformNode): any {
             if (transform == null) return null;
-            return ((<any>transform).flareRig != null) ? (<any>transform).flareRig : null;
+            return ((<any>transform).textWriter != null) ? (<any>transform).textWriter : null;
         }
         /** Finds the specfied child mesh in the scene. */
         public static FindSceneChildMesh(transform:BABYLON.TransformNode, name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null):BABYLON.AbstractMesh {
@@ -546,201 +589,328 @@ module BABYLON {
             return BABYLON.Utilities.FindMesh(name, children, search);
         }
 
-        // **************************************** //
-        // *  Scene Manager Navigation Functions  * //
-        // **************************************** //
+        // *************************************** //
+        // *  Scene Camera Input Helper Support  * //
+        // *************************************** //
 
-        /** Gets the default navigation zone (https://github.com/wanadev/babylon-navigation-mesh) */
-        public static GetNavigationZone(): string {
-            return "scene";
-        }
-        /** Build navigation mesh zone nodes (https://github.com/wanadev/babylon-navigation-mesh) */
-        public static BuildNavigationNodes(scene:BABYLON.Scene, customNavMesh:BABYLON.AbstractMesh = null): Navigation {
-            let navigation:Navigation = null;
-            const navmesh:BABYLON.AbstractMesh = customNavMesh || BABYLON.SceneManager.GetNavigationMesh(scene);
-            if (navmesh != null) {
-                navigation = new Navigation();
-                const zoneNodes: any = navigation.buildNodes(navmesh);
-                if (zoneNodes != null) {
-                    navigation.setZoneData(BABYLON.SceneManager.GetNavigationZone(), zoneNodes);
-                } else {
-                    BABYLON.Tools.Warn("Failed to build navigation zone nodes");
-                }
-            } else {
-                BABYLON.Tools.Warn("Failed to locate scene navigation mesh");
-            }
-            return navigation;
-        }
-        /** Finds a navigation path and returns a array of navigation positions (https://github.com/wanadev/babylon-navigation-mesh) */
-        public static FindNavigationPath(navigation:Navigation, origin: BABYLON.Vector3, destination: BABYLON.Vector3): BABYLON.Vector3[] {
-            const zone: string = BABYLON.SceneManager.GetNavigationZone();
-            const group: number = navigation.getGroup(zone, origin);
-            return navigation.findPath(origin, destination, zone, group);
-        }
-
-        // *********************************** //
-        // * Scene Manager Physics Functions * //
-        // *********************************** //
-
-        private static PhysicsViewer:BABYLON.Debug.PhysicsViewer = null;
-
-        /** Callback to setup ammo.js plugin when activated on the scene */
-        public static OnSetupPhysicsPlugin:(scene:BABYLON.Scene, plugin:BABYLON.AmmoJSPlugin)=>void = null;
-
-        /** Applies force to transform using physics impostor. */
-        public static ApplyEntityForce(entity:BABYLON.AbstractMesh, force:BABYLON.Vector3, contact:BABYLON.Vector3) : void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (force != null) entity.physicsImpostor.applyForce(force, contact);
+        /** Update simple first person style camera input. */
+        public static UpdateCameraInput(camera:BABYLON.FreeCamera, movementSpeed: number, rotationSpeed: number, player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): void {
+            if (camera != null) {
+                let horizontal: number = BABYLON.SceneManager.GetUserInput(BABYLON.UserInputAxis.Horizontal, player);
+                let vertical: number = BABYLON.SceneManager.GetUserInput(BABYLON.UserInputAxis.Vertical, player);
+                let mousex: number = BABYLON.SceneManager.GetUserInput(BABYLON.UserInputAxis.MouseX, player);
+                let mousey: number = BABYLON.SceneManager.GetUserInput(BABYLON.UserInputAxis.MouseY, player);
+                BABYLON.SceneManager.UpdateCameraPosition(camera, horizontal, vertical, movementSpeed);
+                BABYLON.SceneManager.UpdateCameraRotation(camera, mousex, mousey, rotationSpeed);
             }
         }
-        /** Applies impulse to entity using physics impostor. */
-        public static ApplyEntityImpulse(entity:BABYLON.AbstractMesh, impusle:BABYLON.Vector3, contact:BABYLON.Vector3) : void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (impusle != null) entity.physicsImpostor.applyImpulse(impusle, contact);
+        /** Update simple first person style camera position. */
+        public static UpdateCameraPosition(camera:BABYLON.FreeCamera, horizontal: number, vertical: number, speed: number): void {
+            if (camera != null) {
+                let cameraLocal:number = (camera._computeLocalCameraSpeed() * speed);
+                // Camera Transform Translation
+                (<any>window).BABYLON.Utilities.TempMatrix.reset();
+                BABYLON.Matrix.RotationYawPitchRollToRef(camera.rotation.y, camera.rotation.x, 0, (<any>window).BABYLON.Utilities.TempMatrix);
+                // Camera Transform Position Delta
+                (<any>window).BABYLON.Utilities.AuxVector.copyFromFloats(0, 0, 0);
+                (<any>window).BABYLON.Utilities.TempVector3.copyFromFloats((horizontal * cameraLocal), 0, (vertical * cameraLocal));
+                BABYLON.Vector3.TransformCoordinatesToRef((<any>window).BABYLON.Utilities.TempVector3, (<any>window).BABYLON.Utilities.TempMatrix, (<any>window).BABYLON.Utilities.AuxVector);
+                camera.cameraDirection.addInPlace((<any>window).BABYLON.Utilities.AuxVector);
             }
         }
-        /** Applies friction to entity using physics impostor. */
-        public static ApplyEntityFriction(entity:BABYLON.AbstractMesh, friction:number):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
-                if (entity.physicsImpostor.physicsBody.material.friction !== friction) {
-                    entity.physicsImpostor.physicsBody.material.friction = friction;
-                }
+        /** Update simple first person style camera rotation. */
+        public static UpdateCameraRotation(camera:BABYLON.FreeCamera, mousex: number, mousey: number, speed: number): void {
+            if (camera != null) {
+                (<any>window).BABYLON.Utilities.TempVector2.copyFromFloats(mousey * speed, mousex * speed);
+                camera.cameraRotation.addInPlace((<any>window).BABYLON.Utilities.TempVector2);
             }
         }
-        /** Gets mass of entity using physics impostor. */
-        public static GetEntityMass(entity:BABYLON.AbstractMesh):number {
-            if (entity == null) return 0;
-            let result:number = 0;
-            if (entity.physicsImpostor != null) {
-                result = entity.physicsImpostor.mass;
-            }
-            return result;
-        }
-        /** Sets mass to entity using physics impostor. */
-        public static SetEntityMass(entity:BABYLON.AbstractMesh, mass:number):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null) {
-                entity.physicsImpostor.mass = mass;
-                //entity.physicsImpostor.setMass(mass);
-            }
-        }
-        /** Gets restitution of entity using physics impostor. */
-        public static GetEntityRestitution(entity:BABYLON.AbstractMesh):number {
-            if (entity == null) return 0;
-            let result:number = 0;
-            if (entity.physicsImpostor != null) {
-                result = entity.physicsImpostor.restitution;
-            }
-            return result;
-        }
-        /** Sets restitution to entity using physics impostor. */
-        public static SetEntityRestitution(entity:BABYLON.AbstractMesh, restitution:number):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null) {
-                entity.physicsImpostor.restitution = restitution;
-            }
-        }
-        /** Gets entity friction level using physics impostor. */
-        public static GetEntityFrictionLevel(entity:BABYLON.AbstractMesh):number {
-            if (entity == null) return 0;
-            let result:number = 0;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null && entity.physicsImpostor.physicsBody.material != null) {
-                result = entity.physicsImpostor.physicsBody.material.friction;
-            }
-            return result;
-        }
-        /** Gets entity linear velocity using physics impostor. */
-        public static GetEntityLinearVelocity(entity:BABYLON.AbstractMesh):BABYLON.Vector3 {
-            if (entity == null) return null;
-            let result:BABYLON.Vector3 = null;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                result = entity.physicsImpostor.getLinearVelocity();
-            }
-            return result;
-        }
-        /** Sets entity linear velocity using physics impostor. */
-        public static SetEntityLinearVelocity(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (velocity != null) entity.physicsImpostor.setLinearVelocity(velocity);
-            }
-        }
-        /** Gets entity angular velocity using physics impostor. */
-        public static GetEntityAngularVelocity(entity:BABYLON.AbstractMesh):BABYLON.Vector3 {
-            if (entity == null) return null;
-            let result:BABYLON.Vector3 = null;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                result = entity.physicsImpostor.getAngularVelocity();
-            }
-            return result;
-        }
-        /** Sets entity angular velocity using physics impostor. */
-        public static SetEntityAngularVelocity(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3):void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (velocity != null) entity.physicsImpostor.setAngularVelocity(velocity);
-            }
-        }
-        /** Checks collision contact of the entity using physics impostor. */
-        public static CheckEntityCollisionContact(entity:BABYLON.AbstractMesh, collider:BABYLON.AbstractMesh, contact:BABYLON.CollisionContact, threashold:number = 0.5):boolean {
-            if (entity == null) return false;
-            let result:boolean = false;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                // TODO: Valid Grounding Contact
-                result = true;
-            }
-            return result;
+        /** Update the specfied entity transform camera rigging. */
+        public static UpdateCameraRigging(transform: BABYLON.TransformNode, camera:BABYLON.FreeCamera): void {
+            if (transform == null) return null;
+            (<any>transform).cameraRig = camera;
         }
 
-        // ************************************ //
-        // * Scene Manager Impostor Functions * //
-        // ************************************ //
-
-        /** Shows the entity physics impostor for debugging. */
-        public static ShowEntityPhysicsImpostor(scene:BABYLON.Scene, entity:BABYLON.AbstractMesh) : void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (BABYLON.SceneManager.PhysicsViewer == null) {
-                    BABYLON.SceneManager.PhysicsViewer = new BABYLON.Debug.PhysicsViewer(scene);
-                }
-                if (BABYLON.SceneManager.PhysicsViewer != null) {
-                    BABYLON.SceneManager.PhysicsViewer.showImpostor(entity.physicsImpostor);
-                }
-            }
-        }
-        /** Hides the entity physics impostor for debugging. */
-        public static HideEntityPhysicsImpostor(scene:BABYLON.Scene, entity:BABYLON.AbstractMesh) : void {
-            if (entity == null) return;
-            if (entity.physicsImpostor != null && entity.physicsImpostor.physicsBody != null) {
-                if (BABYLON.SceneManager.PhysicsViewer != null) {
-                    BABYLON.SceneManager.PhysicsViewer.hideImpostor(entity.physicsImpostor);
-                }
-            }
-        }
+        // ****************************************** //
+        // *  Scene Entity Movement Helper Support  * //
+        // ****************************************** //
         
-        // *********************************** //
-        // *  Scene Movement Helper Support  * //
-        // *********************************** //
-        
-        /** Moves entity using collisions. */
+        /** Moves entity using vector position with camera collisions. */
         public static MoveWithCollisions(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3) : void {
             if (entity == null) return null;
             if (velocity != null) entity.moveWithCollisions(velocity);
         }
-        /** Moves entity using positions. */
-        public static MoveWithTranslation(entity:BABYLON.AbstractMesh, velocity:BABYLON.Vector3) : void {
+        /** Moves entity using vector position using translations. */
+        public static MoveWithTranslation(entity:BABYLON.TransformNode, velocity:BABYLON.Vector3) : void {
             if (entity == null) return null;
             if (velocity != null) entity.position.addInPlace(velocity);
         }
-        /** Turns entity using rotations. */
-        public static TurnWithRotation(entity:BABYLON.AbstractMesh, rotation:number = 0.0) : void {
+        /** Turns entity using quaternion rotations in radians. */
+        public static TurnWithRotation(entity:BABYLON.TransformNode, radians:number, space:BABYLON.Space = BABYLON.Space.LOCAL) : void {
             if (entity == null) return null;
-            if (rotation != 0.0) entity.rotate(BABYLON.Axis.Y, rotation * BABYLON.System.Deg2Rad);
+            if (radians != 0) entity.rotate(BABYLON.Axis.Y, radians, space);
         }
-        
+
+        // *************************************** //
+        // * Scene Physcis Engine Helper Support * //
+        // *************************************** //
+
+        /** Callback to setup ammo.js plugin properties when activated on the scene. */
+        public static OnSetupPhysicsPlugin:(scene:BABYLON.Scene, plugin:BABYLON.AmmoJSPlugin)=>void = null;
+        /** Confiures ammo.js physcis engine advanced sweeping and collision detection options on the scene. */
+        public static ConfigurePhysicsEngine(scene:BABYLON.Scene, deltaWorldStep:boolean = true, maxWorldSweep:number = 1000, ccdEnabled:boolean = true, ccdPenetration:number = 0, gravityLevel:BABYLON.Vector3 = null):void {
+            Ammo.btCollisionObject.prototype.entity = null;
+            const defaultvalue:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
+            const defaultgravity:BABYLON.Vector3 = gravityLevel != null ? gravityLevel : defaultvalue;
+            if (BABYLON.AmmoJSPlugin) {
+                // Check Bullet Physcis Engine (Ammo.js)
+                let physicsenabled:boolean = scene.isPhysicsEnabled();
+                let physicsengine:BABYLON.IPhysicsEngine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;
+                let physicsplugin:BABYLON.IPhysicsEnginePlugin = (physicsenabled === true && physicsengine != null) ? physicsengine.getPhysicsPlugin() : null;
+                let physicsammojs:boolean = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
+                if (physicsammojs === false) {
+                    // Enable Bullet Physcis Engine (Ammo.js)
+                    let ammojsplugin:BABYLON.AmmoJSPlugin = null;
+                    if (maxWorldSweep > 0) {
+                        const worldPairCache:any = new Ammo.btAxisSweep3(new Ammo.btVector3(-maxWorldSweep, -maxWorldSweep, -maxWorldSweep), new Ammo.btVector3(maxWorldSweep, maxWorldSweep, maxWorldSweep));
+                        ammojsplugin = new BABYLON.AmmoJSPlugin(deltaWorldStep, Ammo, worldPairCache);
+                        BABYLON.Tools.Log("Ammo.js physics plugin ready (btAxisSweep3)");
+                    } else {
+                        ammojsplugin = new BABYLON.AmmoJSPlugin(deltaWorldStep);
+                        BABYLON.Tools.Log("Ammo.js physics plugin ready (btDbvtBroadphase)");
+                    }
+                    if (BABYLON.SceneManager.OnSetupPhysicsPlugin != null) {
+                        BABYLON.SceneManager.OnSetupPhysicsPlugin(scene, ammojsplugin);
+                    }
+                    scene.enablePhysics(defaultgravity, ammojsplugin);
+                    // Validate Bullet Physcis Engine (Ammo.js)
+                    physicsenabled = scene.isPhysicsEnabled();
+                    physicsengine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;
+                    physicsplugin = (physicsenabled === true && physicsengine != null) ? physicsengine.getPhysicsPlugin() : null;
+                    physicsammojs = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
+                } else {
+                    BABYLON.Tools.Warn("Ammo.js physics plugin already enabled");
+                }
+                // Configure Bullet Collision Detection (Ammo.js)
+                if (physicsammojs === true && physicsengine != null && physicsplugin != null && physicsplugin.world != null) {
+                    physicsplugin.world.getBroadphase().getOverlappingPairCache().setInternalGhostPairCallback(new Ammo.btGhostPairCallback());
+                    physicsplugin.world.getDispatchInfo().set_m_allowedCcdPenetration(ccdPenetration);
+                    const contactAddedCallbackPtr = Ammo.addFunction((cp:any, colObj0Wrap:any, partId0:number, index0:number, colObj1Wrap, partId1:number, index1:number) => {
+                        // NOTE: KEEP FOR REFERENCE
+                        // colObj0Wrap = Ammo.wrapPointer(colObj0Wrap, Ammo.btCollisionObjectWrapper);
+                        // colObj1Wrap = Ammo.wrapPointer(colObj1Wrap, Ammo.btCollisionObjectWrapper);
+                        // const colobj0:any = colObj0Wrap.getCollisionObject();
+                        // const colobj1:any = colObj1Wrap.getCollisionObject();
+                        // if (colobj0 != null && colobj1 != null) {
+                        //    const colshape0:any = colobj0.getCollisionShape();
+                        //    const colshape1:any = colobj1.getCollisionShape();
+                        // }
+                        if (physicsplugin.world.adjustInternalEdgeContacts) {
+                            physicsplugin.world.adjustInternalEdgeContacts(cp, colObj1Wrap, colObj0Wrap, partId1, index1);
+                            return true;
+                        } else {
+                            return false;
+                        }
+                    });
+                    physicsplugin.world.setContactAddedCallback(contactAddedCallbackPtr);
+                    const physicsscene:any = scene;
+                    if (!physicsscene._monitorContactManifolds) {
+                        physicsscene._monitorContactManifolds = true;
+                        if (ccdEnabled === true) {
+                            BABYLON.Tools.Log("Ammo.js physics contact manifolds enabled");
+                            scene.registerBeforeRender(()=>{
+                                const manifolds:number = physicsplugin.world.getDispatcher().getNumManifolds();
+                                if (manifolds > 0) {
+                                    for (let index = 0; index < manifolds; index++) {
+                                        const persistentManifold = physicsplugin.world.getDispatcher().getManifoldByIndexInternal(index);
+                                        const persistentBody0:any = Ammo.castObject(persistentManifold.getBody0(), Ammo.btCollisionObject);
+                                        const persistentBody1:any = Ammo.castObject(persistentManifold.getBody1(), Ammo.btCollisionObject);
+                                        // Parse Collision Contact Manifold Pairs (Ammo.js)
+                                        if (persistentBody0 != null && persistentBody0.entity != null && persistentBody0.entity.physicsImpostor != null) {
+                                            if (persistentBody1 != null && persistentBody1.entity != null && persistentBody1.isActive()) {
+                                                if (persistentBody0.entity.physicsImpostor.tmpCollisionObjects != null) {
+                                                    persistentBody0.entity.physicsImpostor.tmpCollisionObjects[persistentBody1.entity.uniqueId] = persistentBody1.entity;
+                                                }
+                                            }
+                                        }
+                                        if (persistentBody1 != null && persistentBody1.entity != null && persistentBody1.entity.physicsImpostor != null) {
+                                            if (persistentBody0 != null && persistentBody0.entity != null && persistentBody0.isActive()) {
+                                                if (persistentBody1.entity.physicsImpostor.tmpCollisionObjects != null) {
+                                                    persistentBody1.entity.physicsImpostor.tmpCollisionObjects[persistentBody0.entity.uniqueId] = persistentBody0.entity;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    BABYLON.Tools.Warn("Ammo.js physics plugins are invalid");
+                }
+            } else {
+                BABYLON.Tools.Warn("Ammo.js physics library not loaded");
+            }
+        }
+        /** Gets the current ammo.js physics world. */
+        public static GetPhysicsEngine(scene:BABYLON.Scene):BABYLON.IPhysicsEngine {
+            return scene.getPhysicsEngine();
+        }
+        /** Gets the current ammo.js physics world. */
+        public static GetPhysicsWorld(scene:BABYLON.Scene):any {
+            let result:any = null;
+            const physicsengine:BABYLON.IPhysicsEngine = BABYLON.SceneManager.GetPhysicsEngine(scene);
+            if (physicsengine != null) {
+                const physicsplugin:BABYLON.IPhysicsEnginePlugin = physicsengine.getPhysicsPlugin();
+                if (physicsplugin != null) {
+                    result = physicsplugin.world;
+                }
+            }
+            return result;
+        }
+
+        // ***************************************** //
+        // * Scene Physcis Impostor Helper Support * //
+        // ***************************************** //
+
+        /** Creates a validated entity parent child physics impostor */
+        public static CreatePhysicsImpostor(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, type: number, options: BABYLON.PhysicsImpostorParameters, reparent:boolean = true):void {
+            if (entity == null) return;
+            entity.checkCollisions = false;
+            const parent:BABYLON.Node = entity.parent;
+            if (reparent === true) entity.parent = null;
+            entity.physicsImpostor = new BABYLON.PhysicsImpostor(entity, type, options, scene);
+            if (reparent === true) entity.parent = parent;
+        }
+        /** Gets the physics impostor type as a string. */
+        public static GetPhysicsImposterType(type:number):string {
+            let result:string = "Unknownr";
+            switch (type) {
+                case BABYLON.PhysicsImpostor.NoImpostor:
+                    result = "No";
+                    break;
+                case BABYLON.PhysicsImpostor.SphereImpostor:
+                    result = "Sphere";
+                    break;
+                case BABYLON.PhysicsImpostor.BoxImpostor:
+                    result = "Box";
+                    break;
+                case BABYLON.PhysicsImpostor.PlaneImpostor:
+                    result = "Plane";
+                    break;
+                case BABYLON.PhysicsImpostor.MeshImpostor:
+                    result = "Mesh";
+                    break;
+                case BABYLON.PhysicsImpostor.CapsuleImpostor:
+                    result = "Capsule";
+                    break;
+                case BABYLON.PhysicsImpostor.CylinderImpostor:
+                    result = "Cylinder";
+                    break;
+                case BABYLON.PhysicsImpostor.ParticleImpostor:
+                    result = "Particle";
+                    break;
+                case BABYLON.PhysicsImpostor.HeightmapImpostor:
+                    result = "Heightmap";
+                    break;
+                case BABYLON.PhysicsImpostor.ConvexHullImpostor:
+                    result = "ConvexHull";
+                    break;
+            }
+            return result;
+        }
+
+        // **************************************** //
+        // * Scene Physcis Raycast Helper Support * //
+        // **************************************** //
+
+        /** Perform a simple ray cast in the physics world. */
+        public static SimpleRayCast(scene:BABYLON.Scene, origin:BABYLON.Vector3, dest:BABYLON.Vector3): BABYLON.Nullable<BABYLON.PhysicsRaycastResult> {
+            if (scene == null) return null;
+            let result:BABYLON.PhysicsRaycastResult = null;
+            const physics:BABYLON.IPhysicsEngine = BABYLON.SceneManager.GetPhysicsEngine(scene);
+            if (physics != null) {
+                result = physics.raycast(origin, dest);
+            }
+            return result;
+        }
+        private static TempVRayOrigin = null;
+        private static TempVRayDest = null;
+        private static ClosestRayResultCallback = null;
+        /** void rayTest(btVector3 rayFromWorld, btVector3 rayToWorld, RayResultCallback resultCallback); */
+        /** Perform a ammo.js physics world ray test and optional filter mask. Can set result contact point and normal info. */
+        public static PerformRayTest(world:any, origin:BABYLON.Vector3, dest:BABYLON.Vector3, group:number = null, mask:number = null, resultContactPoint:BABYLON.Vector3 = null, resultContactNormal:BABYLON.Vector3 = null): BABYLON.Nullable<boolean> {
+            if (world == null) return null;
+            if (BABYLON.SceneManager.TempVRayOrigin == null) BABYLON.SceneManager.TempVRayOrigin = new Ammo.btVector3(0, 0, 0);
+            if (BABYLON.SceneManager.TempVRayDest == null) BABYLON.SceneManager.TempVRayDest = new Ammo.btVector3(0, 0, 0);
+            if (BABYLON.SceneManager.ClosestRayResultCallback == null) BABYLON.SceneManager.ClosestRayResultCallback = new Ammo.ClosestRayResultCallback(BABYLON.SceneManager.TempVRayOrigin, BABYLON.SceneManager.TempVRayDest);
+            // Reset closet callback result
+            var rayCallBack = Ammo.castObject(BABYLON.SceneManager.ClosestRayResultCallback, Ammo.RayResultCallback);
+            rayCallBack.set_m_closestHitFraction(1);
+            rayCallBack.set_m_collisionObject(null);
+            if (group != null) rayCallBack.set_m_collisionFilterGroup(group);
+            else rayCallBack.set_m_collisionFilterGroup(BABYLON.CollisionFilters.DefaultFilter);
+            if (mask != null) rayCallBack.set_m_collisionFilterMask(mask);
+            else rayCallBack.set_m_collisionFilterMask(BABYLON.CollisionFilters.AllFilter);
+            // Set origin and desttination
+            BABYLON.SceneManager.TempVRayOrigin.setValue(origin.x, origin.y, origin.z);
+            BABYLON.SceneManager.TempVRayDest.setValue(dest.x, dest.y, dest.z);
+            BABYLON.SceneManager.ClosestRayResultCallback.get_m_rayFromWorld().setValue(origin.x, origin.y, origin.z);
+            BABYLON.SceneManager.ClosestRayResultCallback.get_m_rayToWorld().setValue(dest.x, dest.y, dest.z);
+            // Perform ray cast testing
+            let result:boolean = false;
+            world.rayTest(BABYLON.SceneManager.TempVRayOrigin, BABYLON.SceneManager.TempVRayDest, BABYLON.SceneManager.ClosestRayResultCallback);
+            if (BABYLON.SceneManager.ClosestRayResultCallback.hasHit()) {
+                result = true;
+                if (resultContactPoint != null) {
+                    const point = BABYLON.SceneManager.ClosestRayResultCallback.get_m_hitPointWorld();
+                    resultContactPoint.set(point.x(), point.y(), point.z());
+                    // Calculate Ray Hit Distance
+                    // const resultContactDistance = BABYLON.Vector3.Distance(origin, resultContactPoint);
+                }
+                if (resultContactNormal != null) {
+                    const normal = BABYLON.SceneManager.ClosestRayResultCallback.get_m_hitNormalWorld();
+                    resultContactNormal.set(normal.x(), normal.y(), normal.z());
+                }
+            }
+            return result;
+        }
+        /** void rayTest(btVector3 rayFromWorld, btVector3 rayToWorld, RayResultCallback resultCallback); */
+        /** Perform a ammo.js physics world ray test all and optional filter mask. Can set result contact point and normal info. */
+        public static PerformRayTestAll(world:any, origin:BABYLON.Vector3, dest:BABYLON.Vector3, group:number = null, mask:number = null, resultContactPoint:BABYLON.Vector3 = null, resultContactNormal:BABYLON.Vector3 = null): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world box convex test and optional filter mask. Can set result contact point and normal info. */
+        public static PerformBoxTest(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world box convex test all and optional filter mask. Can set result contact point and normal info. */
+        public static PerformBoxTestAll(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world capsule convex test and optional filter mask. Can set result contact point and normal info. */
+        public static PerformCapsuleTest(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world capsule convex test all and optional filter mask. Can set result contact point and normal info. */
+        public static PerformCapsuleTestAll(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world sphere convex test and optional filter mask. Can set result contact point and normal info. */
+        public static PerformSphereTest(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+        /** void convexSweepTest(btConvexShape castShape, btTransform from, btTransform to, ConvexResultCallback resultCallback, float allowedCcdPenetration); */
+        /** Perform a ammo.js physics world sphere convex test all and optional filter mask. Can set result contact point and normal info. */
+        public static PerformSphereTestAll(world:any): BABYLON.Nullable<boolean> {
+            return null;
+        }
+
         // ********************************** //
         // * Scene Manager Inputs Functions * //
         // ********************************** //
@@ -799,6 +969,10 @@ module BABYLON {
         public static DisableUserInput(scene:BABYLON.Scene, useCapture: boolean = false): void {
             scene.unregisterAfterRender(BABYLON.SceneManager.updateUserInput);
             BABYLON.SceneManager.resetUserInput();
+        }
+        /** Locks user pointer state in the scene. */
+        public static LockMousePointer(scene:BABYLON.Scene, lock: boolean): void {
+            scene.getEngine().isPointerLock = lock;
         }
 
         // ********************************** //
@@ -1217,156 +1391,6 @@ module BABYLON {
                 }
             }
             return pad;
-        }
-
-        // ************************************** //
-        // * Babylon Xbox Live Helper Functions * //
-        // ************************************** //
-
-        /** Are xbox live platform services available and user enabled. */
-        public static IsXboxLivePluginEnabled(): boolean {
-            return ((<any>window).isXboxLivePluginEnabled) ? (<any>window).isXboxLivePluginEnabled() : false;
-        }
-        /** Is xbox live user signed in if platform services enabled. */
-        public static IsXboxLiveUserSignedIn(systemUser: Windows.System.User = null, player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): boolean {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                let user: Microsoft.Xbox.Services.System.XboxLiveUser = (systemUser != null) ? BABYLON.SceneManager.GetXboxLiveSystemUser(systemUser, player) : BABYLON.SceneManager.GetXboxLiveUser(player);
-                return (user != null && user.isSignedIn == true);
-            } else {
-                return false;
-            }
-        }
-        /** Validated sign in xbox live user if platform services available. */
-        public static XboxLiveUserSignIn(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): void {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                BABYLON.SceneManager.XboxLiveUserSilentSignIn(player, (first: Microsoft.Xbox.Services.System.SignInResult) => {
-                    if (first.status === Microsoft.Xbox.Services.System.SignInStatus.userInteractionRequired) {
-                        BABYLON.SceneManager.XboxLiveUserDialogSignIn(player, (second: Microsoft.Xbox.Services.System.SignInResult) => {
-                            if (oncomplete) oncomplete(second);
-                        }, onerror, onprogress);
-                    } else {
-                        if (oncomplete) oncomplete(first);
-                    }
-                }, onerror, onprogress);
-            }
-        }
-        /** Silent sign in xbox live user if platform services available. */
-        public static XboxLiveUserSilentSignIn(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void> {
-            return (BABYLON.SceneManager.IsXboxLivePluginEnabled()) ? BABYLON.SceneManager.GetXboxLiveUser(player).signInSilentlyAsync(null).then(oncomplete, onerror, onprogress) : null;
-        }
-        /** Dialog sign in xbox live user if platform services available. */
-        public static XboxLiveUserDialogSignIn(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void> {
-            return (BABYLON.SceneManager.IsXboxLivePluginEnabled()) ? BABYLON.SceneManager.GetXboxLiveUser(player).signInAsync(null).then(oncomplete, onerror, onprogress) : null;
-        }
-        /** Loads a xbox live user profile if platform services available. */
-        public static LoadXboxLiveUserProfile(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One, oncomplete?: (result: Microsoft.Xbox.Services.Social.XboxUserProfile) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void> {
-            return (BABYLON.SceneManager.IsXboxLivePluginEnabled()) ? BABYLON.SceneManager.GetXboxLiveUserContext(player).profileService.getUserProfileAsync(BABYLON.SceneManager.GetXboxLiveUser(player).xboxUserId).then(oncomplete, onerror, onprogress) : null;
-        }
-        /** Get xbox live user if platform services available. */
-        public static GetXboxLiveUser(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): Microsoft.Xbox.Services.System.XboxLiveUser {
-            let user: Microsoft.Xbox.Services.System.XboxLiveUser = null;
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                switch (player) {
-                    case BABYLON.PlayerNumber.One:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveUserOne();
-                        break;
-                    case BABYLON.PlayerNumber.Two:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveUserTwo();
-                        break;
-                    case BABYLON.PlayerNumber.Three:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveUserThree();
-                        break;
-                    case BABYLON.PlayerNumber.Four:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveUserFour();
-                        break;
-               }
-            }
-            return user;
-        }
-        /** Get xbox live user if platform services available. */
-        public static GetXboxLiveSystemUser(systemUser: Windows.System.User, player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): Microsoft.Xbox.Services.System.XboxLiveUser {
-            let user: Microsoft.Xbox.Services.System.XboxLiveUser = null;
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                switch (player) {
-                    case BABYLON.PlayerNumber.One:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveSystemUserOne(systemUser);
-                        break;
-                    case BABYLON.PlayerNumber.Two:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveSystemUserTwo(systemUser);
-                        break;
-                    case BABYLON.PlayerNumber.Three:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveSystemUserThree(systemUser);
-                        break;
-                    case BABYLON.PlayerNumber.Four:
-                        user = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveSystemUserFour(systemUser);
-                        break;
-               }
-            }
-            return user;
-        }
-        /** Get xbox live user context if platform services available. */
-        public static GetXboxLiveUserContext(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): Microsoft.Xbox.Services.XboxLiveContext {
-            let context: Microsoft.Xbox.Services.XboxLiveContext = null;
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                switch (player) {
-                    case BABYLON.PlayerNumber.One:
-                        context = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveContextOne();
-                        break;
-                    case BABYLON.PlayerNumber.Two:
-                        context = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveContextTwo();
-                        break;
-                    case BABYLON.PlayerNumber.Three:
-                        context = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveContextThree();
-                        break;
-                    case BABYLON.PlayerNumber.Four:
-                        context = (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveContextFour();
-                        break;
-               }
-            }
-            return context;
-        }
-        /** Resets xbox live user context if platform services available. */
-        public static ResetXboxLiveUserContext(player:BABYLON.PlayerNumber = BABYLON.PlayerNumber.One): void {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                    switch (player) {
-                        case BABYLON.PlayerNumber.One:
-                            (<any>window).BabylonToolkit.XboxLive.Plugin.resetXboxLiveUserContextOne()
-                            break;
-                        case BABYLON.PlayerNumber.Two:
-                            (<any>window).BabylonToolkit.XboxLive.Plugin.resetXboxLiveUserContextTwo()
-                            break;
-                        case BABYLON.PlayerNumber.Three:
-                            (<any>window).BabylonToolkit.XboxLive.Plugin.resetXboxLiveUserContextThree()
-                            break;
-                        case BABYLON.PlayerNumber.Four:
-                            (<any>window).BabylonToolkit.XboxLive.Plugin.resetXboxLiveUserContextFour()
-                            break;
-                   }
-                }
-            }
-        }
-        /** Get xbox live context property if platform services available. */
-        public static GetXboxLiveContextProperty(name:any): any {
-            return (BABYLON.SceneManager.IsXboxLivePluginEnabled()) ? (<any>window).BabylonToolkit.XboxLive.Plugin.getXboxLiveContextProperty(name) : null;
-        }
-        /** Get xbox live context property if platform services available. */
-        public static SetXboxLiveContextProperty(name: any, property: any): void {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                (<any>window).BabylonToolkit.XboxLive.Plugin.setXboxLiveContextProperty(name, property);
-            }
-        }
-        /** Resets xbox live property context bag if platform services available. */
-        public static ResetXboxLivePropertyContexts(): void {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                (<any>window).BabylonToolkit.XboxLive.Plugin.resetXboxLivePropertyContexts()
-            }
-        }
-        /** Sets the Xbox User Sign Out Complete Handler */
-        public static SetXboxLiveSignOutHandler(handler: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void = null): void {
-            if (BABYLON.SceneManager.IsXboxLivePluginEnabled()) {
-                (<any>window).BabylonToolkit.XboxLive.Plugin.onusersignout = handler;
-            }
         }
 
         // ************************************ //
@@ -1862,6 +1886,30 @@ module BABYLON {
                 }
             }
         }
+        private static inputOneShockDPadDownHandler(dPadPressed: BABYLON.DualShockDpad): void {
+            if (BABYLON.SceneManager.gamepad1 != null) {
+                let key:string = "d1:" + dPadPressed.toString();
+                let pressed: boolean = false;
+                if (BABYLON.SceneManager.keymap[key] != null) {
+                    pressed = BABYLON.SceneManager.keymap[key];
+                }
+                BABYLON.SceneManager.keymap[key] = true;
+                if (BABYLON.SceneManager.gamepad1DpadDown != null && BABYLON.SceneManager.gamepad1DpadDown.length > 0) {
+                    BABYLON.SceneManager.gamepad1DpadDown.forEach((callback) => {
+                        callback(dPadPressed);
+                    });
+                }
+                if (!pressed) {
+                    if (BABYLON.SceneManager.gamepad1DpadPress != null && BABYLON.SceneManager.gamepad1DpadPress.length > 0) {
+                        BABYLON.SceneManager.gamepad1DpadPress.forEach((press) => {
+                            if (press.index === dPadPressed) {
+                                press.action();
+                            }
+                        });
+                    }
+                }
+            }
+        }
         private static inputOneXboxDPadUpHandler(dPadReleased: BABYLON.Xbox360Dpad): void {
             if (BABYLON.SceneManager.gamepad1 != null) {
                 let key:string = "d1:" + dPadReleased.toString();
@@ -1873,6 +1921,18 @@ module BABYLON {
                 }
             }
         }
+        private static inputOneShockDPadUpHandler(dPadReleased: BABYLON.DualShockDpad): void {
+            if (BABYLON.SceneManager.gamepad1 != null) {
+                let key:string = "d1:" + dPadReleased.toString();
+                BABYLON.SceneManager.keymap[key] = false;
+                if (BABYLON.SceneManager.gamepad1DpadUp != null && BABYLON.SceneManager.gamepad1DpadUp.length > 0) {
+                    BABYLON.SceneManager.gamepad1DpadUp.forEach((callback) => {
+                        callback(dPadReleased);
+                    });
+                }
+            }
+        }
+
         private static inputOneXboxLeftTriggerHandler(value: number): void {
             if (BABYLON.SceneManager.gamepad1 != null) {
                 BABYLON.SceneManager.keymap["t1:0"] = value;
@@ -1974,7 +2034,42 @@ module BABYLON {
                 }
             }
         }
+        private static inputTwoShockDPadDownHandler(dPadPressed: BABYLON.DualShockDpad): void {
+            if (BABYLON.SceneManager.gamepad2 != null) {
+                let key:string = "d2:" + dPadPressed.toString();
+                let pressed: boolean = false;
+                if (BABYLON.SceneManager.keymap[key] != null) {
+                    pressed = BABYLON.SceneManager.keymap[key];
+                }
+                BABYLON.SceneManager.keymap[key] = true;
+                if (BABYLON.SceneManager.gamepad2DpadDown != null && BABYLON.SceneManager.gamepad2DpadDown.length > 0) {
+                    BABYLON.SceneManager.gamepad2DpadDown.forEach((callback) => {
+                        callback(dPadPressed);
+                    });
+                }
+                if (!pressed) {
+                    if (BABYLON.SceneManager.gamepad2DpadPress != null && BABYLON.SceneManager.gamepad2DpadPress.length > 0) {
+                        BABYLON.SceneManager.gamepad2DpadPress.forEach((press) => {
+                            if (press.index === dPadPressed) {
+                                press.action();
+                            }
+                        });
+                    }
+                }
+            }
+        }
         private static inputTwoXboxDPadUpHandler(dPadReleased: BABYLON.Xbox360Dpad): void {
+            if (BABYLON.SceneManager.gamepad2 != null) {
+                let key:string = "d2:" + dPadReleased.toString();
+                BABYLON.SceneManager.keymap[key] = false;
+                if (BABYLON.SceneManager.gamepad2DpadUp != null && BABYLON.SceneManager.gamepad2DpadUp.length > 0) {
+                    BABYLON.SceneManager.gamepad2DpadUp.forEach((callback) => {
+                        callback(dPadReleased);
+                    });
+                }
+            }
+        }
+        private static inputTwoShockDPadUpHandler(dPadReleased: BABYLON.DualShockDpad): void {
             if (BABYLON.SceneManager.gamepad2 != null) {
                 let key:string = "d2:" + dPadReleased.toString();
                 BABYLON.SceneManager.keymap[key] = false;
@@ -2086,7 +2181,42 @@ module BABYLON {
                 }
             }
         }
+        private static inputThreeShockDPadDownHandler(dPadPressed: BABYLON.DualShockDpad): void {
+            if (BABYLON.SceneManager.gamepad3 != null) {
+                let key:string = "d3:" + dPadPressed.toString();
+                let pressed: boolean = false;
+                if (BABYLON.SceneManager.keymap[key] != null) {
+                    pressed = BABYLON.SceneManager.keymap[key];
+                }
+                BABYLON.SceneManager.keymap[key] = true;
+                if (BABYLON.SceneManager.gamepad3DpadDown != null && BABYLON.SceneManager.gamepad3DpadDown.length > 0) {
+                    BABYLON.SceneManager.gamepad3DpadDown.forEach((callback) => {
+                        callback(dPadPressed);
+                    });
+                }
+                if (!pressed) {
+                    if (BABYLON.SceneManager.gamepad3DpadPress != null && BABYLON.SceneManager.gamepad3DpadPress.length > 0) {
+                        BABYLON.SceneManager.gamepad3DpadPress.forEach((press) => {
+                            if (press.index === dPadPressed) {
+                                press.action();
+                            }
+                        });
+                    }
+                }
+            }
+        }
         private static inputThreeXboxDPadUpHandler(dPadReleased: BABYLON.Xbox360Dpad): void {
+            if (BABYLON.SceneManager.gamepad3 != null) {
+                let key:string = "d3:" + dPadReleased.toString();
+                BABYLON.SceneManager.keymap[key] = false;
+                if (BABYLON.SceneManager.gamepad3DpadUp != null && BABYLON.SceneManager.gamepad3DpadUp.length > 0) {
+                    BABYLON.SceneManager.gamepad3DpadUp.forEach((callback) => {
+                        callback(dPadReleased);
+                    });
+                }
+            }
+        }
+        private static inputThreeShockDPadUpHandler(dPadReleased: BABYLON.DualShockDpad): void {
             if (BABYLON.SceneManager.gamepad3 != null) {
                 let key:string = "d3:" + dPadReleased.toString();
                 BABYLON.SceneManager.keymap[key] = false;
@@ -2198,7 +2328,42 @@ module BABYLON {
                 }
             }
         }
+        private static inputFourShockDPadDownHandler(dPadPressed: BABYLON.DualShockDpad): void {
+            if (BABYLON.SceneManager.gamepad4 != null) {
+                let key:string = "d4:" + dPadPressed.toString();
+                let pressed: boolean = false;
+                if (BABYLON.SceneManager.keymap[key] != null) {
+                    pressed = BABYLON.SceneManager.keymap[key];
+                }
+                BABYLON.SceneManager.keymap[key] = true;
+                if (BABYLON.SceneManager.gamepad4DpadDown != null && BABYLON.SceneManager.gamepad4DpadDown.length > 0) {
+                    BABYLON.SceneManager.gamepad4DpadDown.forEach((callback) => {
+                        callback(dPadPressed);
+                    });
+                }
+                if (!pressed) {
+                    if (BABYLON.SceneManager.gamepad4DpadPress != null && BABYLON.SceneManager.gamepad4DpadPress.length > 0) {
+                        BABYLON.SceneManager.gamepad4DpadPress.forEach((press) => {
+                            if (press.index === dPadPressed) {
+                                press.action();
+                            }
+                        });
+                    }
+                }
+            }
+        }
         private static inputFourXboxDPadUpHandler(dPadReleased: BABYLON.Xbox360Dpad): void {
+            if (BABYLON.SceneManager.gamepad4 != null) {
+                let key:string = "d4:" + dPadReleased.toString();
+                BABYLON.SceneManager.keymap[key] = false;
+                if (BABYLON.SceneManager.gamepad4DpadUp != null && BABYLON.SceneManager.gamepad4DpadUp.length > 0) {
+                    BABYLON.SceneManager.gamepad4DpadUp.forEach((callback) => {
+                        callback(dPadReleased);
+                    });
+                }
+            }
+        }
+        private static inputFourShockDPadUpHandler(dPadReleased: BABYLON.DualShockDpad): void {
             if (BABYLON.SceneManager.gamepad4 != null) {
                 let key:string = "d4:" + dPadReleased.toString();
                 BABYLON.SceneManager.keymap[key] = false;
@@ -2255,9 +2420,9 @@ module BABYLON {
             if (BABYLON.SceneManager.gamepad1 == null && pad.index === 0) {
                 BABYLON.SceneManager.gamepad1 = pad;
                 BABYLON.Tools.Log("Gamepad One Connected: " + BABYLON.SceneManager.gamepad1.id);
-                if ((<string>BABYLON.SceneManager.gamepad1.id).search("Xbox 360") !== -1 || (<string>BABYLON.SceneManager.gamepad1.id).search("Xbox One") !== -1 || (<string>BABYLON.SceneManager.gamepad1.id).search("xinput") !== -1) {
+                if (BABYLON.SceneManager.gamepad1 instanceof BABYLON.Xbox360Pad) {                    
                     BABYLON.SceneManager.gamepad1Type = BABYLON.GamepadType.Xbox360;
-                    let xbox360Pad1: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad1 as BABYLON.Xbox360Pad;
+                    const xbox360Pad1: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad1 as BABYLON.Xbox360Pad;
                     xbox360Pad1.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
                     xbox360Pad1.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
                     xbox360Pad1.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
@@ -2266,9 +2431,37 @@ module BABYLON {
                     xbox360Pad1.ondpaddown(BABYLON.SceneManager.inputOneXboxDPadDownHandler);
                     xbox360Pad1.onlefttriggerchanged(BABYLON.SceneManager.inputOneXboxLeftTriggerHandler);
                     xbox360Pad1.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad1 instanceof BABYLON.DualShockPad) {
+                    BABYLON.SceneManager.gamepad1Type = BABYLON.GamepadType.DualShock;
+                    const dualShockPad1: BABYLON.DualShockPad = BABYLON.SceneManager.gamepad1 as BABYLON.DualShockPad;
+                    dualShockPad1.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
+                    dualShockPad1.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
+                    dualShockPad1.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
+                    dualShockPad1.onrightstickchanged(BABYLON.SceneManager.inputOneRightStickHandler);
+                    dualShockPad1.ondpadup(BABYLON.SceneManager.inputOneShockDPadUpHandler);
+                    dualShockPad1.ondpaddown(BABYLON.SceneManager.inputOneShockDPadDownHandler);
+                    dualShockPad1.onlefttriggerchanged(BABYLON.SceneManager.inputOneXboxLeftTriggerHandler);
+                    dualShockPad1.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad1 instanceof BABYLON.PoseEnabledController) {
+                    // TODO: Handle Pose Enabled Controllers (WebVR)
+                    /*
+                    gamepad.onTriggerStateChangedObservable.add((button, state)=>{
+                        triggerText.text = "Trigger:" + button.value;
+                    })
+                    gamepad.onMainButtonStateChangedObservable.add((button, state)=>{
+                        buttonsText.text = "Main button:" + button.value;
+                    })
+                    //Stick events
+                    gamepad.onleftstickchanged((values)=>{               
+                        stickText.text = "x:" + values.x.toFixed(3) + " y:" + values.y.toFixed(3);
+                    });
+                    gamepad.onrightstickchanged((values)=>{
+                        stickText.text = "x:" + values.x.toFixed(3) + " y:" + values.y.toFixed(3);
+                    }); 
+                    */                    
                 } else {
                     BABYLON.SceneManager.gamepad1Type = BABYLON.GamepadType.Generic;
-                    let genericPad1: BABYLON.GenericPad = BABYLON.SceneManager.gamepad1 as BABYLON.GenericPad;
+                    const genericPad1: BABYLON.GenericPad = BABYLON.SceneManager.gamepad1 as BABYLON.GenericPad;
                     genericPad1.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
                     genericPad1.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
                     genericPad1.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
@@ -2278,9 +2471,9 @@ module BABYLON {
             if (BABYLON.SceneManager.gamepad2 == null && pad.index === 1) {
                 BABYLON.SceneManager.gamepad2 = pad;
                 BABYLON.Tools.Log("Gamepad Two Connected: " + BABYLON.SceneManager.gamepad2.id);
-                if ((<string>BABYLON.SceneManager.gamepad2.id).search("Xbox 360") !== -1 || (<string>BABYLON.SceneManager.gamepad2.id).search("Xbox One") !== -1 || (<string>BABYLON.SceneManager.gamepad2.id).search("xinput") !== -1) {
+                if (BABYLON.SceneManager.gamepad2 instanceof BABYLON.Xbox360Pad) {                    
                     BABYLON.SceneManager.gamepad2Type = BABYLON.GamepadType.Xbox360;
-                    let xbox360Pad2: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad2 as BABYLON.Xbox360Pad;
+                    const xbox360Pad2: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad2 as BABYLON.Xbox360Pad;
                     xbox360Pad2.onbuttonup(BABYLON.SceneManager.inputTwoButtonUpHandler);
                     xbox360Pad2.onbuttondown(BABYLON.SceneManager.inputTwoButtonDownHandler);
                     xbox360Pad2.onleftstickchanged(BABYLON.SceneManager.inputTwoLeftStickHandler);
@@ -2289,6 +2482,19 @@ module BABYLON {
                     xbox360Pad2.ondpaddown(BABYLON.SceneManager.inputTwoXboxDPadDownHandler);
                     xbox360Pad2.onlefttriggerchanged(BABYLON.SceneManager.inputTwoXboxLeftTriggerHandler);
                     xbox360Pad2.onrighttriggerchanged(BABYLON.SceneManager.inputTwoXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad2 instanceof BABYLON.DualShockPad) {
+                    BABYLON.SceneManager.gamepad2Type = BABYLON.GamepadType.DualShock;
+                    const dualShockPad2: BABYLON.DualShockPad = BABYLON.SceneManager.gamepad2 as BABYLON.DualShockPad;
+                    dualShockPad2.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
+                    dualShockPad2.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
+                    dualShockPad2.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
+                    dualShockPad2.onrightstickchanged(BABYLON.SceneManager.inputOneRightStickHandler);
+                    dualShockPad2.ondpadup(BABYLON.SceneManager.inputOneShockDPadUpHandler);
+                    dualShockPad2.ondpaddown(BABYLON.SceneManager.inputOneShockDPadDownHandler);
+                    dualShockPad2.onlefttriggerchanged(BABYLON.SceneManager.inputOneXboxLeftTriggerHandler);
+                    dualShockPad2.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad2 instanceof BABYLON.PoseEnabledController) {
+                    // TODO: Handle Pose Enabled Controllers (WebVR)
                 } else {
                     BABYLON.SceneManager.gamepad2Type = BABYLON.GamepadType.Generic;
                     let genericPad2: BABYLON.GenericPad = BABYLON.SceneManager.gamepad2 as BABYLON.GenericPad;
@@ -2301,9 +2507,9 @@ module BABYLON {
             if (BABYLON.SceneManager.gamepad3 == null && pad.index === 2) {
                 BABYLON.SceneManager.gamepad3 = pad;
                 BABYLON.Tools.Log("Gamepad Three Connected: " + BABYLON.SceneManager.gamepad3.id);
-                if ((<string>BABYLON.SceneManager.gamepad3.id).search("Xbox 360") !== -1 || (<string>BABYLON.SceneManager.gamepad3.id).search("Xbox One") !== -1 || (<string>BABYLON.SceneManager.gamepad3.id).search("xinput") !== -1) {
+                if (BABYLON.SceneManager.gamepad3 instanceof BABYLON.Xbox360Pad) {                    
                     BABYLON.SceneManager.gamepad3Type = BABYLON.GamepadType.Xbox360;
-                    let xbox360Pad3: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad3 as BABYLON.Xbox360Pad;
+                    const xbox360Pad3: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad3 as BABYLON.Xbox360Pad;
                     xbox360Pad3.onbuttonup(BABYLON.SceneManager.inputThreeButtonUpHandler);
                     xbox360Pad3.onbuttondown(BABYLON.SceneManager.inputThreeButtonDownHandler);
                     xbox360Pad3.onleftstickchanged(BABYLON.SceneManager.inputThreeLeftStickHandler);
@@ -2312,9 +2518,21 @@ module BABYLON {
                     xbox360Pad3.ondpaddown(BABYLON.SceneManager.inputThreeXboxDPadDownHandler);
                     xbox360Pad3.onlefttriggerchanged(BABYLON.SceneManager.inputThreeXboxLeftTriggerHandler);
                     xbox360Pad3.onrighttriggerchanged(BABYLON.SceneManager.inputThreeXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad3 instanceof BABYLON.DualShockPad) {
+                    const dualShockPad3: BABYLON.DualShockPad = BABYLON.SceneManager.gamepad3 as BABYLON.DualShockPad;
+                    dualShockPad3.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
+                    dualShockPad3.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
+                    dualShockPad3.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
+                    dualShockPad3.onrightstickchanged(BABYLON.SceneManager.inputOneRightStickHandler);
+                    dualShockPad3.ondpadup(BABYLON.SceneManager.inputOneShockDPadUpHandler);
+                    dualShockPad3.ondpaddown(BABYLON.SceneManager.inputOneShockDPadDownHandler);
+                    dualShockPad3.onlefttriggerchanged(BABYLON.SceneManager.inputOneXboxLeftTriggerHandler);
+                    dualShockPad3.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad3 instanceof BABYLON.PoseEnabledController) {
+                    // TODO: Handle Pose Enabled Controllers (WebVR)
                 } else {
                     BABYLON.SceneManager.gamepad3Type = BABYLON.GamepadType.Generic;
-                    let genericPad3: BABYLON.GenericPad = BABYLON.SceneManager.gamepad3 as BABYLON.GenericPad;
+                    const genericPad3: BABYLON.GenericPad = BABYLON.SceneManager.gamepad3 as BABYLON.GenericPad;
                     genericPad3.onbuttonup(BABYLON.SceneManager.inputThreeButtonUpHandler);
                     genericPad3.onbuttondown(BABYLON.SceneManager.inputThreeButtonDownHandler);
                     genericPad3.onleftstickchanged(BABYLON.SceneManager.inputThreeLeftStickHandler);
@@ -2324,9 +2542,9 @@ module BABYLON {
             if (BABYLON.SceneManager.gamepad4 == null && pad.index === 3) {
                 BABYLON.SceneManager.gamepad4 = pad;
                 BABYLON.Tools.Log("Gamepad Four Connected: " + BABYLON.SceneManager.gamepad4.id);
-                if ((<string>BABYLON.SceneManager.gamepad4.id).search("Xbox 360") !== -1 || (<string>BABYLON.SceneManager.gamepad4.id).search("Xbox One") !== -1 || (<string>BABYLON.SceneManager.gamepad4.id).search("xinput") !== -1) {
+                if (BABYLON.SceneManager.gamepad4 instanceof BABYLON.Xbox360Pad) {                    
                     BABYLON.SceneManager.gamepad4Type = BABYLON.GamepadType.Xbox360;
-                    let xbox360Pad4: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad4 as BABYLON.Xbox360Pad;
+                    const xbox360Pad4: BABYLON.Xbox360Pad = BABYLON.SceneManager.gamepad4 as BABYLON.Xbox360Pad;
                     xbox360Pad4.onbuttonup(BABYLON.SceneManager.inputFourButtonUpHandler);
                     xbox360Pad4.onbuttondown(BABYLON.SceneManager.inputFourButtonDownHandler);
                     xbox360Pad4.onleftstickchanged(BABYLON.SceneManager.inputFourLeftStickHandler);
@@ -2335,6 +2553,18 @@ module BABYLON {
                     xbox360Pad4.ondpaddown(BABYLON.SceneManager.inputFourXboxDPadDownHandler);
                     xbox360Pad4.onlefttriggerchanged(BABYLON.SceneManager.inputFourXboxLeftTriggerHandler);
                     xbox360Pad4.onrighttriggerchanged(BABYLON.SceneManager.inputFourXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad4 instanceof BABYLON.DualShockPad) {
+                    const dualShockPad4: BABYLON.DualShockPad = BABYLON.SceneManager.gamepad4 as BABYLON.DualShockPad;
+                    dualShockPad4.onbuttonup(BABYLON.SceneManager.inputOneButtonUpHandler);
+                    dualShockPad4.onbuttondown(BABYLON.SceneManager.inputOneButtonDownHandler);
+                    dualShockPad4.onleftstickchanged(BABYLON.SceneManager.inputOneLeftStickHandler);
+                    dualShockPad4.onrightstickchanged(BABYLON.SceneManager.inputOneRightStickHandler);
+                    dualShockPad4.ondpadup(BABYLON.SceneManager.inputOneShockDPadUpHandler);
+                    dualShockPad4.ondpaddown(BABYLON.SceneManager.inputOneShockDPadDownHandler);
+                    dualShockPad4.onlefttriggerchanged(BABYLON.SceneManager.inputOneXboxLeftTriggerHandler);
+                    dualShockPad4.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
+                } else if (BABYLON.SceneManager.gamepad4 instanceof BABYLON.PoseEnabledController) {
+                    // TODO: Handle Pose Enabled Controllers (WebVR)
                 } else {
                     BABYLON.SceneManager.gamepad4Type = BABYLON.GamepadType.Generic;
                     let genericPad4: BABYLON.GenericPad = BABYLON.SceneManager.gamepad4 as BABYLON.GenericPad;
@@ -2386,15 +2616,5 @@ module BABYLON {
             xbox360Pad1.onrighttriggerchanged(BABYLON.SceneManager.inputOneXboxRightTriggerHandler);
             */
         }
-    }
-}
-if (BABYLON.SceneManager.IsWindows()) {
-    if (typeof Windows.UI.ViewManagement !== "undefined" && typeof Windows.UI.ViewManagement.ApplicationViewBoundsMode !== "undefined" && typeof Windows.UI.ViewManagement.ApplicationViewBoundsMode.useCoreWindow !== "undefined") {
-        Windows.UI.ViewManagement.ApplicationView.getForCurrentView().setDesiredBoundsMode(Windows.UI.ViewManagement.ApplicationViewBoundsMode.useCoreWindow);
-    }
-}
-if (BABYLON.SceneManager.IsXboxOne()) {
-    if (navigator.gamepadInputEmulation) {
-        navigator.gamepadInputEmulation = "gamepad";
     }
 }

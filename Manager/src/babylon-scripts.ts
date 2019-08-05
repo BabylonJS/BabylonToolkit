@@ -1,9 +1,9 @@
 module BABYLON {
     /**
      * Babylon script component class
-     * @class ScriptComponent
+     * @class ScriptComponent - All rights reserved (c) 2019 Mackey Kinard
      */
-    export class ScriptComponent {
+    export abstract class ScriptComponent {
         protected start(): void { }
         protected update(): void { }
         protected after(): void { }
@@ -43,25 +43,6 @@ module BABYLON {
         // Component Mesh Entity Helper Functions
         ////////////////////////////////////////////////////////////////////////////////////
 
-        /** Sets a script component property bag value */
-        public setProperty(name: string, propertyValue: any): void {
-            if (this._properties == null) this._properties = {};
-            this._properties[name] = propertyValue;
-        }
-        /** Gets a script component property bag value */
-        public getProperty<T>(name: string, defaultValue: T = null): T {
-            let result: any = null
-            if (this._properties != null) {
-                result = this._properties[name];
-            }
-            if (result == null) result = defaultValue;
-            return (result != null) ? result as T : null;
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////
-        // Component Mesh Entity Helper Functions
-        ////////////////////////////////////////////////////////////////////////////////////
-
         /** Gets the safe transform mesh entity */
         public getTransformMesh(): BABYLON.Mesh {
             return (this._transform instanceof BABYLON.Mesh) ? this._transform as BABYLON.Mesh : null;
@@ -69,6 +50,10 @@ module BABYLON {
         /** Gets the safe transform abstract mesh entity */
         public getAbstractMesh(): BABYLON.AbstractMesh {
             return (this._transform instanceof BABYLON.AbstractMesh) ? this._transform as BABYLON.AbstractMesh : null;
+        }
+        /** Gets the safe transform instanced mesh entity */
+        public getInstancedMesh(): BABYLON.InstancedMesh {
+            return (this._transform instanceof BABYLON.InstancedMesh) ? this._transform as BABYLON.InstancedMesh : null;
         }
         /** Gets the transform collision meshes */
         public getCollisionMeshes(): BABYLON.AbstractMesh[] {
@@ -98,11 +83,7 @@ module BABYLON {
             return (result != null) ? result as T[] : null;
         }
         /** TODO */
-        public getParticleRig(): BABYLON.ParticleSystem {
-            return BABYLON.SceneManager.FindSceneParticleRig(this._transform);
-        }
-        /** TODO */
-        public getCameraRig(): BABYLON.Camera {
+        public getCameraRig(): BABYLON.FreeCamera {
             return BABYLON.SceneManager.FindSceneCameraRig(this._transform);
         }
         /** TODO */
@@ -110,8 +91,8 @@ module BABYLON {
             return BABYLON.SceneManager.FindSceneLightRig(this._transform);
         }
         /** TODO */
-        public getFlareRig(): BABYLON.LensFlareSystem {
-            return BABYLON.SceneManager.FindSceneFlareRig(this._transform);
+        public getTextWriter(): any {
+            return BABYLON.SceneManager.FindSceneTextWriter(this._transform);
         }
         /** TODO */
         public getChildMesh(name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null): BABYLON.AbstractMesh {
@@ -121,10 +102,37 @@ module BABYLON {
         public getChildTransform(name:string, searchType:BABYLON.SearchType = BABYLON.SearchType.StartsWith, directDecendantsOnly:boolean = true, predicate:(node:BABYLON.Node)=>boolean = null): BABYLON.AbstractMesh {
             return BABYLON.SceneManager.FindSceneChildTransform(this._transform, name, searchType, directDecendantsOnly, predicate);
         }
+        /** Gets a script component transform primary tag name. */
+        public getTransformTag(): string {
+            return BABYLON.SceneManager.GetTransformTag(this.transform);
+        }
         /** Gets the delta time spent between current and previous frame in seconds */
-        public getDeltaSeconds(): number {
-            return BABYLON.SceneManager.GetDeltaSeconds(this._scene);
+        public getDeltaSeconds(applyAnimationRatio:boolean = true): number {
+            return BABYLON.SceneManager.GetDeltaSeconds(this._scene, applyAnimationRatio);
         };
+        /** Sets the new free camera rig for the specified entity */
+        public updateCameraRigging(camera:BABYLON.FreeCamera): void {
+            BABYLON.SceneManager.UpdateCameraRigging(this._transform, camera);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        // Component Entity Property Helper Functions
+        ////////////////////////////////////////////////////////////////////////////////////
+
+        /** Manually sets a script component property bag value */
+        protected setEditorProperty(name: string, propertyValue: any): void {
+            if (this._properties == null) this._properties = {};
+            this._properties[name] = propertyValue;
+        }
+        /** Manually gets a script component property bag value */
+        protected getEditorProperty<T>(name: string, defaultValue: T = null): T {
+            let result: any = null
+            if (this._properties != null) {
+                result = this._properties[name];
+            }
+            if (result == null) result = defaultValue;
+            return (result != null) ? result as T : null;
+        }
 
         ////////////////////////////////////////////////////////////////////////////////////
         // Component Instance Registration Functions
@@ -188,125 +196,6 @@ module BABYLON {
                 instance._before = null;
                 instance._after = null;
                 instance._scene = null;
-            }
-        }
-    }
-
-    /**
-     * Babylon shuriken particle class
-     * @class ShurikenParticleSystem
-     */
-    export class ShurikenParticleSystem extends BABYLON.ScriptComponent {
-        public constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}) {
-            super(transform, scene, properties);
-            // TODO: Create Shuriken Particle System
-        }
-
-        protected start(): void {
-            // Start render loop function
-        }
-
-        protected update(): void {
-            // Update render loop function
-        }
-
-        protected after(): void {
-            // After render loop function
-        }
-
-        protected destroy(): void {
-            // Destroy component function
-        }
-    }
-
-    /**
-     * Babylon character controller class
-     * @class CharacterController
-     */
-    export class CharacterController extends BABYLON.ScriptComponent {
-        public constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}) {
-            super(transform, scene, properties);
-            // TODO: Create Character Controller System
-        }
-
-        protected start(): void {
-            // Start render loop function
-        }
-    
-        protected update(): void {
-            // Update render loop function
-        }
-    
-        protected after(): void {
-            // After render loop function
-        }
-    
-        protected destroy(): void {
-            // Destroy component function
-        }
-    }
-
-    /**
-     * Babylon animation state class
-     * @class AnimationState
-     */
-    export class AnimationState extends BABYLON.ScriptComponent {
-        public constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}) {
-            super(transform, scene, properties);
-            // TODO: Create Animation State Machine
-        }
-
-        protected start(): void {
-            // Start render loop function
-        }
-
-        protected update(): void {
-            // Update render loop function
-        }
-
-        protected after(): void {
-            // After render loop function
-        }
-
-        protected destroy(): void {
-            // Destroy component function
-        }
-    }
-
-    /**
-     * Babylon navigation agent class
-     * @class NavigationAgent
-     */
-    export class NavigationAgent extends BABYLON.ScriptComponent {
-        public get info():BABYLON.INavigationAgent { return this._info; }
-        public get hasAgentInfo(): boolean { return (this.info != null); }
-        private _info:BABYLON.INavigationAgent;
-        public constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}) {
-            super(transform, scene, properties);
-        }
-
-        protected start(): void {
-            // Start render loop function
-        }
-
-        protected update(): void {
-            // Update render loop function
-        }
-
-        protected after(): void {
-            // After render loop function
-        }
-
-        protected destroy(): void {
-            // Destroy component function
-        }
-        
-        /** TODO */
-        public setDestination(destination: BABYLON.Vector3): void {
-            if (this.hasAgentInfo) {
-                // TODO: Create SetDestination Navigation AI With Obsticale Avoidance
-            } else {
-                BABYLON.Tools.Warn("Null navigation agent metadata. Set agent destination ignored.");
             }
         }
     }
