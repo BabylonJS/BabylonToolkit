@@ -659,10 +659,9 @@ module BABYLON {
         public static OnSetupPhysicsPlugin:(scene:BABYLON.Scene, plugin:BABYLON.AmmoJSPlugin)=>void = null;
         /** Confiures ammo.js physcis engine advanced sweeping and collision detection options on the scene. */
         public static ConfigurePhysicsEngine(scene:BABYLON.Scene, deltaWorldStep:boolean = true, maxWorldSweep:number = 1000, ccdEnabled:boolean = true, ccdPenetration:number = 0, gravityLevel:BABYLON.Vector3 = null):void {
-            Ammo.btCollisionObject.prototype.entity = null;
             const defaultvalue:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
             const defaultgravity:BABYLON.Vector3 = gravityLevel != null ? gravityLevel : defaultvalue;
-            if (BABYLON.AmmoJSPlugin) {
+            if (Ammo && BABYLON.AmmoJSPlugin) {
                 // Check Bullet Physcis Engine (Ammo.js)
                 let physicsenabled:boolean = scene.isPhysicsEnabled();
                 let physicsengine:BABYLON.IPhysicsEngine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;

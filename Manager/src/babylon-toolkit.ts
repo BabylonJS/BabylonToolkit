@@ -304,19 +304,16 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             this._disposeRoot = (metadata.disposeroot != null && metadata.disposeroot === true);
             BABYLON.SceneManager.SetRootUrl(this._loader.babylonScene, root);
             // ..
-            // Setup Freeze Active Meshes
+            // Setup Scene Default Coloring
             // ..
-            if (metadata.freezeactivemeshes != null && metadata.freezeactivemeshes === true)  {
-                this._parser.setFreezeActiveMeshes(true);
+            if (metadata.autoclear != null && metadata.autoclear === true) {
+                this._loader.babylonScene.autoClear = true;
+                this._loader.babylonScene.autoClearDepthAndStencil = true;
             }
-            // ..
-            // Setup Scene Clear Coloring
-            // ..
-            this._loader.babylonScene.autoClear = (metadata.autoclear) ? true : false;
-            this._loader.babylonScene.ambientColor = BABYLON.Color3.Black();
             if (metadata.clearcolor != null) {
                 this._loader.babylonScene.clearColor = BABYLON.Utilities.ParseColor4(metadata.clearcolor);
             }
+            this._loader.babylonScene.ambientColor = BABYLON.Color3.Black();
             // ..
             // Setup Scene Environment Textures
             // ..
@@ -351,9 +348,6 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         standardMaterial.ambientColor = new BABYLON.Color3(0, 0, 0);
                         standardMaterial.reflectionTexture =  skyboxTexture;
                         skyboxMesh.material = standardMaterial;
-                        // Optimize Clear Color Buffer With Skybox Usage
-                        this._loader.babylonScene.autoClear = false;                // Color buffer
-                        this._loader.babylonScene.autoClearDepthAndStencil = false; // Depth and stencil
                     }
                 } catch (e1) {
                     console.warn(e1);
@@ -498,6 +492,12 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     };
                     BABYLON.SceneManager.EnableUserInput(this._loader.babylonScene, inputOptions);
                 }
+            }
+            // ..
+            // Setup Freeze Active Meshes Optimization
+            // ..
+            if (metadata.freezeactivemeshes != null && metadata.freezeactivemeshes === true)  {
+                this._parser.setFreezeActiveMeshes(true);
             }
         }
     }
