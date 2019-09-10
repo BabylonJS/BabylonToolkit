@@ -9,6 +9,7 @@ module BABYLON {
         Rad2Deg = 57.29578,
         Kph2Mph = 0.621371,
         Mph2Kph = 1.60934,
+        Mps2Kph = 3.6,
         Meter2Inch = 39.3701,
         Inch2Meter = 0.0254,
         Gravity = 9.81,
@@ -16,7 +17,7 @@ module BABYLON {
         SkidFactor = 0.25,
         WalkingVelocity = (1.1 * 4), // 4 km/h -> 1.1 m/s
         TerminalVelocity = 55,
-        gammaCorrection = 2.2
+        GammaCorrection = 2.2
     }
     export enum Handedness
     {
@@ -240,7 +241,6 @@ module BABYLON {
         CloseBraket = 221,
         SingleQuote = 222
     }
-
     export interface IUnityTransform {
         type:string;
         id:string;
@@ -326,6 +326,37 @@ module BABYLON {
         private static TempVector2:BABYLON.Vector2 = BABYLON.Vector2.Zero();
         private static TempVector3:BABYLON.Vector3 = BABYLON.Vector3.Zero();
         private static PrintElement: HTMLElement = null;
+
+        // ********************************* //
+        // * Public Advanced Lerp Support  * //
+        // ********************************* //
+
+        /** TODO */
+        /** TODO */
+		public static LerpLog(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            const logT:number = Math.sin(clampedT * Math.PI * 0.5);
+            return a + (b - a) * logT;
+        }
+        /** TODO */
+		public static LerpExp(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            const expT:number = 1 - Math.cos(clampedT * Math.PI * 0.5);
+            return a + (b - a) * expT;
+        }
+		public static LerpClamp(a:number, b:number, t:number):number {
+            const clampedT:number = Math.min(Math.max(t, 0), 1);
+            return a + (b - a) * clampedT;
+        }
+        /** TODO */
+		public static LerpUnclamp(a:number, b:number, t:number):number {
+            return a + (b - a) * t;
+        }
+
+        // ********************************** //
+        // * Public Utility Helper Support  * //
+        // ********************************** //
+
 		public static Angle(from:BABYLON.Vector3, to:BABYLON.Vector3):number {
 			return Math.acos(BABYLON.Scalar.Clamp(BABYLON.Vector3.Dot(from.normalize(), to.normalize()), -1, 1)) * 57.29578;
         }
@@ -342,46 +373,36 @@ module BABYLON {
             } while (result < -360 || result > 360)
             return BABYLON.Scalar.Clamp(result, min, max);
         }
-        /** TODO */
-		public static LerpClamp(a:number, b:number, t:number):number {
-            const clampedT:number = Math.min(Math.max(t, 0), 1);
-            return a + (b - a) * clampedT;
+        /** Gradually changes a number towards a desired goal over time. (Note Only Uses currentVelocityResult.x as output variable ) */
+        public static SmoothDamp(current:number, target:number, smoothTime:number, maxSpeed:number, deltaTime:number, currentVelocityResult:BABYLON.Vector2):number
+        {
+            if (!currentVelocityResult) return 0;
+            // Based on Game Programming Gems 4 Chapter 1.10
+            let change:number = current - target;
+            const maxSmoothTime = Math.max(0.0001, smoothTime);
+            const omega:number = 2 / maxSmoothTime;
+            const x:number = omega * deltaTime;
+            const exp:number = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+            const originalTo:number = target;
+            // Clamp maximum speed
+            const maxChange:number = maxSpeed * maxSmoothTime;
+            change = BABYLON.Scalar.Clamp(change, -maxChange, maxChange);
+            const newTarget = current - change;
+            const temp:number = (currentVelocityResult.x + omega * change) * deltaTime;
+            currentVelocityResult.x = (currentVelocityResult.x - omega * temp) * exp;
+            // Prevent overshooting
+            let output:number = newTarget + (change + temp) * exp;
+            if (originalTo - current > 0.0 == output > originalTo) {
+                output = originalTo;
+                currentVelocityResult.x = (output - originalTo) / deltaTime;
+            }
+            return output;
         }
-        /** TODO */
-		public static LerpUnclamp(a:number, b:number, t:number):number {
-            return a + (b - a) * t;
-        }
-        /** TODO */
-		public static LerpLog(a:number, b:number, t:number):number {
-            const clampedT:number = Math.min(Math.max(t, 0), 1);
-            const logT:number = Math.sin(clampedT * Math.PI * 0.5);
-            return a + (b - a) * logT;
-        }
-        /** TODO */
-		public static LerpExp(a:number, b:number, t:number):number {
-            const clampedT:number = Math.min(Math.max(t, 0), 1);
-            const expT:number = 1 - Math.cos(clampedT * Math.PI * 0.5);
-            return a + (b - a) * expT;
-        }
-        /** Returns a new radion converted from degree */
-		public static Deg2Rad(degree:number):number {
-			return degree * BABYLON.System.Deg2Rad;
-        }
-        /** Returns a new degree converted from radion */
-		public static Rad2Deg(radion:number):number {
-			return radion * BABYLON.System.Rad2Deg;
-        }
-        /** Returns a new vector3 degrees converted from radions */
-        public static Vector3Rad2Deg(vector:BABYLON.Vector3, ):BABYLON.Vector3 {
-            const result:BABYLON.Vector3 = BABYLON.Vector3.Zero();
-            BABYLON.Utilities.Vector3Rad2DegToRef(vector, result);
-            return result;
-        }
-        /** Sets a vector3 result degrees converted from radions */
-        public static Vector3Rad2DegToRef(vector:BABYLON.Vector3, result:BABYLON.Vector3) {
-            result.x = vector.x * BABYLON.System.Rad2Deg;
-            result.y = vector.y * BABYLON.System.Rad2Deg;
-            result.z = vector.z * BABYLON.System.Rad2Deg;;
+        /** Gradually changes an angle given in degrees towards a desired goal angle over time. */
+        public static SmoothDampAngle(current:number, target:number, smoothTime:number, maxSpeed:number, deltaTime:number, currentVelocityResult:BABYLON.Vector2):number
+        {
+            const newTarget = current + BABYLON.Scalar.DeltaAngle(current, target);
+            return BABYLON.Utilities.SmoothDamp(current, newTarget, smoothTime, maxSpeed, deltaTime, currentVelocityResult);
         }
         /** Returns a new Matrix as a rotation matrix from the Euler angles in degrees (x, y, z). */
         public static ToMatrix(eulerX:number, eulerY:number, eulerZ:number) : BABYLON.Matrix {
@@ -446,10 +467,49 @@ module BABYLON {
             BABYLON.Utilities.TempMatrix.invert()
             BABYLON.Quaternion.FromRotationMatrixToRef(BABYLON.Utilities.TempMatrix, result);
         }
+        /** Returns a new vector3 degrees converted from radions */
+        public static Vector3Rad2Deg(vector:BABYLON.Vector3, ):BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = BABYLON.Vector3.Zero();
+            BABYLON.Utilities.Vector3Rad2DegToRef(vector, result);
+            return result;
+        }
+        /** Sets a vector3 result degrees converted from radions */
+        public static Vector3Rad2DegToRef(vector:BABYLON.Vector3, result:BABYLON.Vector3) {
+            result.x = vector.x * BABYLON.System.Rad2Deg;
+            result.y = vector.y * BABYLON.System.Rad2Deg;
+            result.z = vector.z * BABYLON.System.Rad2Deg;;
+        }
+        /** Multiply the quaternion by a vector */
+        public static MultiplyQuaternionByVector(quaternion:BABYLON.Quaternion, vector:BABYLON.Vector3): BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = new BABYLON.Vector3(0,0,0);
+            BABYLON.Utilities.MultiplyQuaternionByVectorToRef(quaternion, vector, result);
+            return result;
+        }
+        /** Multiply the quaternion by a vector to result */
+        public static MultiplyQuaternionByVectorToRef(quaternion:BABYLON.Quaternion, vector:BABYLON.Vector3, result:BABYLON.Vector3) : void {
+            // Vector
+            const x:number = vector.x;
+            const y:number = vector.y;
+            const z:number = vector.z;
+            // Quaternion
+            const qx:number = quaternion.x;
+            const qy:number = quaternion.y;
+            const qz:number = quaternion.z;
+            const qw:number = quaternion.w;
+            // Quaternion * Vector
+            const ix:number =  qw * x + qy * z - qz * y;
+            const iy:number =  qw * y + qz * x - qx * z;
+            const iz:number =  qw * z + qx * y - qy * x;
+            const iw:number = -qx * x - qy * y - qz * z;
+            // Final Quaternion * Vector = Result
+            result.x = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+            result.y = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+            result.z = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+        }
         /** Validate and switch Euler rotation to Quaternion rotation. */
-        public static ValidateTransformQuaternion(transform:BABYLON.TransformNode) : void {
+        public static ValidateTransformQuaternion(transform:BABYLON.TransformNode):void {
             if (transform.rotationQuaternion == null && transform.rotation != null) {
-                transform.rotationQuaternion = BABYLON.Utilities.FromEuler(transform.rotation.x, transform.rotation.y, transform.rotation.z);
+                transform.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(transform.rotation.x, transform.rotation.y, transform.rotation.z);
             }
         }
 
@@ -598,13 +658,12 @@ module BABYLON {
         //////////////////////////////////////////////////////////////////////////////////////////////////////
 
         /** TODO */
-        public static ParseTexture(source:any, scene:BABYLON.Scene):BABYLON.Texture {
+        public static ParseTexture(source:any, scene:BABYLON.Scene, noMipmap?: boolean, invertY?: boolean, samplingMode?: number, onLoad?: Nullable<() => void>, onError?: Nullable<(message?: string, exception?: any) => void>, buffer?: Nullable<string | ArrayBuffer | ArrayBufferView | HTMLImageElement | Blob>, deleteBuffer?: boolean, format?: number):BABYLON.Texture {
             let result:BABYLON.Texture = null;
             if (source != null && source.filename != null && source.filename !== "") {
                 const root:string = BABYLON.SceneManager.GetRootUrl(scene);
                 const url:string = source.filename;
-                result = new BABYLON.Texture((root + url), scene);
-                // TODO: Set Texture Properties
+                result = new BABYLON.Texture((root + url), scene, noMipmap, invertY, samplingMode, onLoad, onError, buffer, deleteBuffer, format);
             }
             return result;
         }
@@ -666,41 +725,49 @@ module BABYLON {
         // *********************************** //
         
         /** Transforms position from local space to world space. (Using TransformCoordinates) */
-        public  static TransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3):BABYLON.Vector3 {
+        public  static TransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, compute:boolean = false):BABYLON.Vector3 {
+            if (compute === true) owner.computeWorldMatrix();
             return BABYLON.Vector3.TransformCoordinates(position, owner.getWorldMatrix());
         }
         /** Inverse transforms position from world space to local space. (Using TransformCoordinates) */
-        public  static InverseTransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3):BABYLON.Vector3 {
+        public  static InverseTransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, compute:boolean = false):BABYLON.Vector3 {
+            if (compute === true) owner.computeWorldMatrix();
             BABYLON.Utilities.TempMatrix.reset();
             owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
             return BABYLON.Vector3.TransformCoordinates(position, BABYLON.Utilities.TempMatrix);
         }
         /** Transforms position from local space to world space. (Using TransformCoordinates) */
-        public static TransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        public static TransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3, compute:boolean = false):void {
+            if (compute === true) owner.computeWorldMatrix();
             return BABYLON.Vector3.TransformCoordinatesToRef(position, owner.getWorldMatrix(), result);
         }
         /** Inverse transforms position from world space to local space. (Using TransformCoordinates) */
-        public static InverseTransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        public static InverseTransformPointToRef(owner: BABYLON.TransformNode | BABYLON.Camera, position:BABYLON.Vector3, result:BABYLON.Vector3, compute:boolean = false):void {
+            if (compute === true) owner.computeWorldMatrix();
             BABYLON.Utilities.TempMatrix.reset();
             owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
             return BABYLON.Vector3.TransformCoordinatesToRef(position, BABYLON.Utilities.TempMatrix, result);
         }
         /** Transforms direction from local space to world space. (Using TransformNormal) */
-        public static TransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3):BABYLON.Vector3 {
+        public static TransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, compute:boolean = false):BABYLON.Vector3 {
+            if (compute === true) owner.computeWorldMatrix();
             return BABYLON.Vector3.TransformNormal(direction, owner.getWorldMatrix());
         }
         /** Inverse transforms direction from world space to local space. (Using TransformNormal) */
-        public static InverseTransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3):BABYLON.Vector3 {
+        public static InverseTransformDirection(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, compute:boolean = false):BABYLON.Vector3 {
+            if (compute === true) owner.computeWorldMatrix();
             BABYLON.Utilities.TempMatrix.reset();
             owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
             return BABYLON.Vector3.TransformNormal(direction, BABYLON.Utilities.TempMatrix);
         }
         /** Transforms direction from local space to world space. (Using TransformNormal) */
-        public static TransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        public static TransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3, compute:boolean = false):void {
+            if (compute === true) owner.computeWorldMatrix();
             return BABYLON.Vector3.TransformNormalToRef(direction, owner.getWorldMatrix(), result);
         }
         /** Inverse transforms direction from world space to local space. (Using TransformNormal) */
-        public static InverseTransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3):void {
+        public static InverseTransformDirectionToRef(owner: BABYLON.TransformNode | BABYLON.Camera, direction:BABYLON.Vector3, result:BABYLON.Vector3, compute:boolean = false):void {
+            if (compute === true) owner.computeWorldMatrix();
             BABYLON.Utilities.TempMatrix.reset();
             owner.getWorldMatrix().invertToRef(BABYLON.Utilities.TempMatrix);
             return BABYLON.Vector3.TransformNormalToRef(direction, BABYLON.Utilities.TempMatrix, result);

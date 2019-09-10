@@ -446,12 +446,13 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 const enablephysics:boolean = metadata.enablephysics;
                 if (enablephysics === true) {
                     const gravitycheck:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
+                    const maxphysicsstep:number = metadata.maxphysicsstep != null ? metadata.maxphysicsstep : 0;
                     const maxworldsweep:number = metadata.maxworldsweep != null ? metadata.maxworldsweep : 1000;
                     const ccdenabled:boolean = metadata.ccdenabled != null ? metadata.ccdenabled : true;
                     const ccdpenetration:number = metadata.ccdpenetration != null ? metadata.ccdpenetration : 0;
                     const deltaworldstep:boolean = metadata.deltaworldstep != null ? metadata.deltaworldstep : true;
                     const defaultgravity:BABYLON.Vector3 = metadata.defaultgravity != null ? BABYLON.Utilities.ParseVector3(metadata.defaultgravity, gravitycheck) : gravitycheck;
-                    BABYLON.SceneManager.ConfigurePhysicsEngine(this._loader.babylonScene, deltaworldstep, maxworldsweep, ccdenabled, ccdpenetration, defaultgravity);
+                    BABYLON.SceneManager.ConfigurePhysicsEngine(this._loader.babylonScene, deltaworldstep, maxphysicsstep, maxworldsweep, ccdenabled, ccdpenetration, defaultgravity);
                 }
             }
             // ..

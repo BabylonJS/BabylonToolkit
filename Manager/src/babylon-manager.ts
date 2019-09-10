@@ -657,8 +657,16 @@ module BABYLON {
 
         /** Callback to setup ammo.js plugin properties when activated on the scene. */
         public static OnSetupPhysicsPlugin:(scene:BABYLON.Scene, plugin:BABYLON.AmmoJSPlugin)=>void = null;
+        /** Get ammo.js total memory heap size */
+        public static GetPhysicsHeapSize():number {
+            let result:number = 0;
+            if (Ammo && Ammo.HEAP8 && Ammo.HEAP8.length) {
+                result = Ammo.HEAP8.length / (1024 * 1024);
+            }
+            return result;
+        }
         /** Confiures ammo.js physcis engine advanced sweeping and collision detection options on the scene. */
-        public static ConfigurePhysicsEngine(scene:BABYLON.Scene, deltaWorldStep:boolean = true, maxWorldSweep:number = 1000, ccdEnabled:boolean = true, ccdPenetration:number = 0, gravityLevel:BABYLON.Vector3 = null):void {
+        public static ConfigurePhysicsEngine(scene:BABYLON.Scene, deltaWorldStep:boolean = true, maxPhysicsStep:number = 0, maxWorldSweep:number = 1000, ccdEnabled:boolean = true, ccdPenetration:number = 0, gravityLevel:BABYLON.Vector3 = null):void {
             const defaultvalue:BABYLON.Vector3 = new BABYLON.Vector3(0, -9.81, 0);
             const defaultgravity:BABYLON.Vector3 = gravityLevel != null ? gravityLevel : defaultvalue;
             if (Ammo && BABYLON.AmmoJSPlugin) {
@@ -670,25 +678,27 @@ module BABYLON {
                 if (physicsammojs === false) {
                     // Enable Bullet Physcis Engine (Ammo.js)
                     let ammojsplugin:BABYLON.AmmoJSPlugin = null;
+                    let ammoheapsize:number = BABYLON.SceneManager.GetPhysicsHeapSize();
                     if (maxWorldSweep > 0) {
                         const worldPairCache:any = new Ammo.btAxisSweep3(new Ammo.btVector3(-maxWorldSweep, -maxWorldSweep, -maxWorldSweep), new Ammo.btVector3(maxWorldSweep, maxWorldSweep, maxWorldSweep));
                         ammojsplugin = new BABYLON.AmmoJSPlugin(deltaWorldStep, Ammo, worldPairCache);
-                        BABYLON.Tools.Log("Ammo.js physics plugin ready (btAxisSweep3)");
+                        BABYLON.Tools.Log("Ammo.js plugin (" + ammoheapsize + " MB - btAxisSweep3)");
                     } else {
                         ammojsplugin = new BABYLON.AmmoJSPlugin(deltaWorldStep);
-                        BABYLON.Tools.Log("Ammo.js physics plugin ready (btDbvtBroadphase)");
+                        BABYLON.Tools.Log("Ammo.js plugin (" + ammoheapsize + " MB - btDbvtBroadphase)");
                     }
                     if (BABYLON.SceneManager.OnSetupPhysicsPlugin != null) {
                         BABYLON.SceneManager.OnSetupPhysicsPlugin(scene, ammojsplugin);
                     }
                     scene.enablePhysics(defaultgravity, ammojsplugin);
+                    if (maxPhysicsStep > 0) ammojsplugin.setMaxSteps(maxPhysicsStep);
                     // Validate Bullet Physcis Engine (Ammo.js)
                     physicsenabled = scene.isPhysicsEnabled();
                     physicsengine = (physicsenabled === true) ? scene.getPhysicsEngine() : null;
                     physicsplugin = (physicsenabled === true && physicsengine != null) ? physicsengine.getPhysicsPlugin() : null;
                     physicsammojs = (physicsenabled === true && physicsengine != null && physicsengine.getPhysicsPluginName() === "AmmoJSPlugin");
                 } else {
-                    BABYLON.Tools.Warn("Ammo.js physics plugin already enabled");
+                    BABYLON.Tools.Warn("Ammo.js plugin enabled");
                 }
                 // Configure Bullet Collision Detection (Ammo.js)
                 if (physicsammojs === true && physicsengine != null && physicsplugin != null && physicsplugin.world != null) {
@@ -716,7 +726,7 @@ module BABYLON {
                     if (!physicsscene._monitorContactManifolds) {
                         physicsscene._monitorContactManifolds = true;
                         if (ccdEnabled === true) {
-                            BABYLON.Tools.Log("Ammo.js physics contact manifolds enabled");
+                            BABYLON.Tools.Log("Ammo.js contact manifolds enabled");
                             scene.registerBeforeRender(()=>{
                                 const manifolds:number = physicsplugin.world.getDispatcher().getNumManifolds();
                                 if (manifolds > 0) {
