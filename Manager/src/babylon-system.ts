@@ -248,6 +248,33 @@ module BABYLON {
         name:string;
         layer:number;
     }
+    export interface IVector2 {
+        x:number;
+        y:number;
+    }
+    export interface IVector3 {
+        x:number;
+        y:number;
+        z:number;
+    }
+    export interface IVector4 {
+        x:number;
+        y:number;
+        z:number;
+        w:number;
+    }
+    export interface IQuaternion {
+        x:number;
+        y:number;
+        z:number;
+        w:number;
+    }
+    export interface IColor {
+        r:number;
+        g:number;
+        b:number;
+        a:number;
+    }
     export interface INavigationArea {
         index: number;
         area: string;
@@ -625,7 +652,35 @@ module BABYLON {
             }
             return triangleCount;
         }
-    
+
+        // ************************************* //
+        // * Public Smooth Curve Tools Support * //
+        // ************************************* //
+        
+        /** TODO */
+        public static GetDirectTargetAngle(transform:BABYLON.TransformNode, worldSpaceTarget:BABYLON.Vector3):number {
+            BABYLON.Utilities.TempVector3.set(0,0,0);
+            BABYLON.Utilities.InverseTransformPointToRef(transform, worldSpaceTarget, BABYLON.Utilities.TempVector3);
+            return Math.atan2(BABYLON.Utilities.TempVector3.x, BABYLON.Utilities.TempVector3.z);
+        }
+        /** TODO */
+        public static GetSmoothTargetAngle(transform:BABYLON.TransformNode, worldSpaceTarget:BABYLON.Vector3):number {
+            BABYLON.Utilities.TempVector3.set(0,0,0);
+            BABYLON.Utilities.InverseTransformPointToRef(transform, worldSpaceTarget, BABYLON.Utilities.TempVector3);
+            return (BABYLON.Utilities.TempVector3.x / BABYLON.Utilities.TempVector3.length());
+        }
+        /** TODO */
+        public static CalculatCatmullRom(p0:BABYLON.Vector3, p1:BABYLON.Vector3, p2:BABYLON.Vector3, p3:BABYLON.Vector3, i:number): BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = new BABYLON.Vector3(0,0,0);
+            BABYLON.Utilities.CalculatCatmullRomToRef(p0, p1, p2, p3, i, result);
+            return result;
+        }
+        /** TODO */
+        public static CalculatCatmullRomToRef(p0:BABYLON.Vector3, p1:BABYLON.Vector3, p2:BABYLON.Vector3, p3:BABYLON.Vector3, i:number, result:BABYLON.Vector3): void {
+            // TODO: Convert Raw Catmull-rom equation
+            // result = 0.5f * ((2*p1) + (-p0 + p2)*i + (2*p0 - 5*p1 + 4*p2 - p3)*i*i + (-p0 + 3*p1 - 3*p2 + p3)*i*i*i);
+        }
+
         // ************************************ //
         // * Public String Tools Support * //
         // ************************************ //
@@ -714,6 +769,16 @@ module BABYLON {
             let result:BABYLON.Vector4 = null
             if (source != null && source.x != null && source.y != null && source.z != null && source.w != null) {
                 result = new BABYLON.Vector4(source.x, source.y, source.z, source.w);
+            } else {
+                result = defaultValue;
+            }
+            return result;
+        }
+        /** TODO */
+        public static ParseTransform(scene:BABYLON.Scene, source:any, defaultValue:BABYLON.TransformNode = null):BABYLON.TransformNode {
+            let result:BABYLON.TransformNode = null
+            if (source != null && source.id != null) {
+                result = BABYLON.SceneManager.GetTransformNodeByID(scene, source.id);
             } else {
                 result = defaultValue;
             }
@@ -868,7 +933,7 @@ module BABYLON {
                 if (endKey.frame >= currentFrame) {
                     const startKey = keys[key];
                     const startValue = startKey.value;
-                    if (startKey.interpolation === AnimationKeyInterpolation.STEP) {
+                    if (startKey.interpolation === BABYLON.AnimationKeyInterpolation.STEP) {
                         result.copyFrom(startValue);
                         return;
                     }
@@ -884,11 +949,11 @@ module BABYLON {
                     }
                     // Switch anmimation matrix type
                     switch (loopMode) {
-                        case Animation.ANIMATIONLOOPMODE_CYCLE:
-                        case Animation.ANIMATIONLOOPMODE_CONSTANT:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT:
                             BABYLON.Utilities.FastMatrixSlerp(startValue, endValue, gradient, result);
                             return;
-                        case Animation.ANIMATIONLOOPMODE_RELATIVE:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_RELATIVE:
                             result.copyFrom(startValue);
                             return;
                     }
@@ -898,8 +963,8 @@ module BABYLON {
             result.copyFrom(keys[keys.length - 1].value);
         }
         /** Returns float result as the interpolated values for animation key frame sampling. */
-        public static FastFloatInterpolate(animation:BABYLON.Animation, currentFrame: number, repeatCount: number, loopMode:number, offsetValue:any = null, highLimitValue: any = null):number {
-            if (loopMode === Animation.ANIMATIONLOOPMODE_CONSTANT && repeatCount > 0) {
+        public static FastFloatInterpolate(animation:BABYLON.Animation, currentFrame: number, loopMode:number, repeatCount: number = 0, offsetValue:any = null, highLimitValue: any = null):number {
+            if (loopMode === BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT && repeatCount > 0) {
                 return highLimitValue.clone ? highLimitValue.clone() : highLimitValue;
             }
             const keys:BABYLON.IAnimationKey[] = animation.getKeys();
@@ -914,7 +979,7 @@ module BABYLON {
                 if (endKey.frame >= currentFrame) {
                     const startKey = keys[key];
                     const startValue = startKey.value;
-                    if (startKey.interpolation === AnimationKeyInterpolation.STEP) {
+                    if (startKey.interpolation === BABYLON.AnimationKeyInterpolation.STEP) {
                         return startValue;
                     }
                     const endValue = endKey.value;
@@ -930,10 +995,10 @@ module BABYLON {
                     // Switch anmimation float type
                     const floatValue = useTangent ? animation.floatInterpolateFunctionWithTangents(startValue, startKey.outTangent * frameDelta, endValue, endKey.inTangent * frameDelta, gradient) : animation.floatInterpolateFunction(startValue, endValue, gradient);
                     switch (loopMode) {
-                        case Animation.ANIMATIONLOOPMODE_CYCLE:
-                        case Animation.ANIMATIONLOOPMODE_CONSTANT:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT:
                             return floatValue;
-                        case Animation.ANIMATIONLOOPMODE_RELATIVE:
+                        case BABYLON.Animation.ANIMATIONLOOPMODE_RELATIVE:
                             return offsetValue * repeatCount + floatValue;
                     }
                     break;
@@ -988,7 +1053,32 @@ module BABYLON {
                 };
             }
         }
+
+        // *********************************** //
+        // *   Public Ammo Physics Tools     * //
+        // *********************************** //
     
+        /** TODO */
+        public static ConvertAmmoVector3(btVector:any):BABYLON.Vector3 {
+            const result:BABYLON.Vector3 = new BABYLON.Vector3(0,0,0);
+            BABYLON.Utilities.ConvertAmmoVector3ToRef(btVector, result);
+            return result;
+        }
+        /** TODO */
+        public static ConvertAmmoVector3ToRef(btVector:any, result:BABYLON.Vector3):void {
+            result.set(btVector.x(), btVector.y(), btVector.z());
+        }
+        /** TODO */
+        public static ConvertAmmoQuaternion(btVector:any):BABYLON.Quaternion {
+            const result:BABYLON.Quaternion = new BABYLON.Quaternion(0,0,0,1);
+            BABYLON.Utilities.ConvertAmmoQuaternionToRef(btVector, result);
+            return result;
+        }
+        /** TODO */
+        public static ConvertAmmoQuaternionToRef(btQuaternion:any, result:BABYLON.Quaternion):void {
+            result.set(btQuaternion.x(), btQuaternion.y(), btQuaternion.z(), btQuaternion.w());
+        }
+
         // *********************************** //
         // *   Public Animation Blend Tools  * //
         // *********************************** //
@@ -1200,6 +1290,7 @@ module BABYLON {
                     const new_group:string = source.unity.group != null ? source.unity.group : "Untagged";
                     const new_layer:number = source.unity.layer != null ? source.unity.layer : 0;
                     const new_layername:string = source.unity.layername != null ? source.unity.layername : "Default";
+                    const new_boundingbox:string = source.unity.boundingbox != null ? source.unity.boundingbox : false;
                     //const new_lods:string = source.unity.lods != null ? source.unity.lods : null;
                     //const new_coverages:string = source.unity.coverages != null ? source.unity.coverages : null;
                     //const new_distances:string = source.unity.distances != null ? source.unity.distances : null;
@@ -1258,6 +1349,7 @@ module BABYLON {
                     new_unity.group = new_group;
                     new_unity.layer = new_layer;
                     new_unity.layername = new_layername;
+                    new_unity.boundingbox = new_boundingbox;
                     new_unity.renderer = new_renderer;
                     new_unity.physics = new_physics;
                     new_unity.collision = new_collision;
@@ -1321,6 +1413,7 @@ module BABYLON {
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "group")) transform.metadata.unity.group = "Untagged";
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "layer")) transform.metadata.unity.layer = 0;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "layername")) transform.metadata.unity.layername = "Default";
+            if (!BABYLON.Utilities.HasOwnProperty(metadata, "boundingbox")) transform.metadata.unity.boundingbox = false;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "lods")) transform.metadata.unity.lods = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "coverages")) transform.metadata.unity.coverages = null;
             if (!BABYLON.Utilities.HasOwnProperty(metadata, "distances")) transform.metadata.unity.distances = null;

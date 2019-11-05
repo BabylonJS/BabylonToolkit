@@ -87,16 +87,20 @@ declare module BABYLON {
         static GetWebGLVersionString(scene: BABYLON.Scene): string;
         /** Gets the current engine WebGL version number info. */
         static GetWebGLVersionNumber(scene: BABYLON.Scene): number;
-        /** Get the root url the main scene properties was loaded from */
+        /** Get the root url the last scene properties was loaded from */
         static GetRootUrl(scene: BABYLON.Scene): string;
-        /** Sets the root url the main scene properties was loaded from */
+        /** Sets the root url the last scene properties was loaded from */
         static SetRootUrl(scene: BABYLON.Scene, url: string): void;
+        /** Get the right hand loader flag the last scene properties was loaded from */
+        static GetRightHanded(scene: BABYLON.Scene): boolean;
+        /** Sets the right hand loader flag the last scene properties was loaded from */
+        static SetRightHanded(scene: BABYLON.Scene, righty: boolean): void;
         /** TODO */
         static GetDeltaSeconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
         /** Gets the instanced material from scene. If does not exists, execute a optional defaultinstance handler. */
         static GetMaterialInstance<T>(scene: BABYLON.Scene, name: string, defaultInstance?: (newName: String) => BABYLON.Material): T;
-        /** Set the Windows Runtime preferred launch windowing mode. */
-        static SetWindowsLaunchMode(mode: Windows.UI.ViewManagement.ApplicationViewWindowingMode): void;
+        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
+        static SetWindowsLaunchMode(mode?: number): void;
         /** Removes the default page scene loader. */
         static RemoveSceneLoader(): void;
         /** Quit the Windows Runtime host application. */
@@ -109,6 +113,8 @@ declare module BABYLON {
         static GetLastCreatedScene(): BABYLON.Scene;
         /** Gets the specified transform node primary tag name. */
         static GetTransformTag(transform: BABYLON.TransformNode): string;
+        /** Gets the specified transform node primary layer index. */
+        static GetTransformLayer(transform: BABYLON.TransformNode): number;
         /** Gets the specified transform node by name from scene. */
         static GetTransformNode(scene: BABYLON.Scene, name: string): BABYLON.TransformNode;
         /** Gets the specified transform node by id from scene. */
@@ -450,6 +456,7 @@ declare module BABYLON {
         private _physicList;
         private _shadowList;
         private _freezeList;
+        private _updateList;
         private _shaderList;
         private _scriptList;
         private _activeMeshes;
@@ -480,6 +487,7 @@ declare module BABYLON {
         private static DoProcessPendingShaders;
         private static DoProcessPendingFreezes;
         private static DoProcessPendingScripts;
+        private static DoProcessPendingUpdates;
         private static DoProcessPendingDisposes;
         private static SetupCameraComponent;
         private static SetupLightComponent;
@@ -536,6 +544,10 @@ declare module BABYLON {
         getChildTransform(name: string, searchType?: BABYLON.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.AbstractMesh;
         /** Gets a script component transform primary tag name. */
         getTransformTag(): string;
+        /** Gets the total game time in seconds */
+        getGameTime(): number;
+        /** Gets the system time in seconds */
+        getSystemTime(): number;
         /** Gets the delta time spent between current and previous frame in seconds */
         getDeltaSeconds(applyAnimationRatio?: boolean): number;
         /** Sets the new free camera rig for the specified entity */
@@ -550,6 +562,16 @@ declare module BABYLON {
         private static BeforeInstance;
         private static AfterInstance;
         private static DestroyInstance;
+    }
+    /**
+     * Babylon bounding box updater class
+     * @class BoundingBoxUpdater - All rights reserved (c) 2019 Mackey Kinard
+     */
+    class BoundingBoxUpdater extends BABYLON.ScriptComponent {
+        private _abtractMesh;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected update(): void;
+        protected destroy(): void;
     }
 }
 
@@ -795,6 +817,33 @@ declare module BABYLON {
         name: string;
         layer: number;
     }
+    interface IVector2 {
+        x: number;
+        y: number;
+    }
+    interface IVector3 {
+        x: number;
+        y: number;
+        z: number;
+    }
+    interface IVector4 {
+        x: number;
+        y: number;
+        z: number;
+        w: number;
+    }
+    interface IQuaternion {
+        x: number;
+        y: number;
+        z: number;
+        w: number;
+    }
+    interface IColor {
+        r: number;
+        g: number;
+        b: number;
+        a: number;
+    }
     interface INavigationArea {
         index: number;
         area: string;
@@ -926,6 +975,14 @@ declare module BABYLON {
         private static TmpAmmoVectorC;
         static AddHullVerts(btConvexHullShape: any, topLevelObject: BABYLON.IPhysicsEnabledObject, object: BABYLON.IPhysicsEnabledObject): number;
         /** TODO */
+        static GetDirectTargetAngle(transform: BABYLON.TransformNode, worldSpaceTarget: BABYLON.Vector3): number;
+        /** TODO */
+        static GetSmoothTargetAngle(transform: BABYLON.TransformNode, worldSpaceTarget: BABYLON.Vector3): number;
+        /** TODO */
+        static CalculatCatmullRom(p0: BABYLON.Vector3, p1: BABYLON.Vector3, p2: BABYLON.Vector3, p3: BABYLON.Vector3, i: number): BABYLON.Vector3;
+        /** TODO */
+        static CalculatCatmullRomToRef(p0: BABYLON.Vector3, p1: BABYLON.Vector3, p2: BABYLON.Vector3, p3: BABYLON.Vector3, i: number, result: BABYLON.Vector3): void;
+        /** TODO */
         static StartsWith(source: string, word: string): boolean;
         /** TODO */
         static EndsWith(source: string, word: string): boolean;
@@ -947,6 +1004,8 @@ declare module BABYLON {
         static ParseVector3(source: any, defaultValue?: BABYLON.Vector3): BABYLON.Vector3;
         /** TODO */
         static ParseVector4(source: any, defaultValue?: BABYLON.Vector4): BABYLON.Vector4;
+        /** TODO */
+        static ParseTransform(scene: BABYLON.Scene, source: any, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
         /** Transforms position from local space to world space. (Using TransformCoordinates) */
         static TransformPoint(owner: BABYLON.TransformNode | BABYLON.Camera, position: BABYLON.Vector3, compute?: boolean): BABYLON.Vector3;
         /** Inverse transforms position from world space to local space. (Using TransformCoordinates) */
@@ -992,9 +1051,17 @@ declare module BABYLON {
         /** Set the passed matrix "result" as the interpolated values for animation key frame sampling. */
         static FastMatrixInterpolate(animation: BABYLON.Animation, currentFrame: number, loopMode: number, result: BABYLON.Matrix): void;
         /** Returns float result as the interpolated values for animation key frame sampling. */
-        static FastFloatInterpolate(animation: BABYLON.Animation, currentFrame: number, repeatCount: number, loopMode: number, offsetValue?: any, highLimitValue?: any): number;
+        static FastFloatInterpolate(animation: BABYLON.Animation, currentFrame: number, loopMode: number, repeatCount?: number, offsetValue?: any, highLimitValue?: any): number;
         /** Initialize default shader material properties */
         static InitializeShaderMaterial(material: BABYLON.ShaderMaterial, binding?: boolean): void;
+        /** TODO */
+        static ConvertAmmoVector3(btVector: any): BABYLON.Vector3;
+        /** TODO */
+        static ConvertAmmoVector3ToRef(btVector: any, result: BABYLON.Vector3): void;
+        /** TODO */
+        static ConvertAmmoQuaternion(btVector: any): BABYLON.Quaternion;
+        /** TODO */
+        static ConvertAmmoQuaternionToRef(btQuaternion: any, result: BABYLON.Quaternion): void;
         /** TODO */
         static SetAnimationLooping(owner: BABYLON.IAnimatable, loopBehavior: number): void;
         /** TODO */

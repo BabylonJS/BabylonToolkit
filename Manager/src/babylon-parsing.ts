@@ -9,16 +9,17 @@ module BABYLON {
         private _physicList:Array<BABYLON.AbstractMesh>;
         private _shadowList:Array<BABYLON.AbstractMesh>;
         private _freezeList:Array<BABYLON.AbstractMesh>;
+        private _updateList:Array<BABYLON.AbstractMesh>;
         private _shaderList:Array<BABYLON.Material>;
         private _scriptList:Array<any>;
         private _activeMeshes:boolean;
         private _babylonScene:BABYLON.Scene;
         private _gltfLoader:BABYLON.GLTF2.GLTFLoader;
         public get loader():BABYLON.GLTF2.GLTFLoader { return this._gltfLoader; }
-        constructor(scene:BABYLON.Scene, loader:BABYLON.GLTF2.GLTFLoader = null) { this._babylonScene = scene; this._gltfLoader = loader; this._disposeList = []; this._detailList = []; this._physicList = []; this._shadowList = []; this._shaderList = []; this._freezeList = []; this._scriptList = []; this._activeMeshes = false; }
+        constructor(scene:BABYLON.Scene, loader:BABYLON.GLTF2.GLTFLoader = null) { this._babylonScene = scene; this._gltfLoader = loader; this._disposeList = []; this._detailList = []; this._physicList = []; this._shadowList = []; this._shaderList = []; this._freezeList = []; this._updateList = []; this._scriptList = []; this._activeMeshes = false; }
         /** Parse the scene component metadata. Note: Internal use only */
         public parseSceneComponents(entity: BABYLON.AbstractMesh): void {
-            BABYLON.MetadataParser.DoParseSceneComponents(this._babylonScene, entity, this._physicList, this._shadowList, this._scriptList, this._freezeList);
+            BABYLON.MetadataParser.DoParseSceneComponents(this._babylonScene, entity, this._physicList, this._shadowList, this._scriptList, this._freezeList, this._updateList);
         }
         /** Post process pending scene components. Note: Internal use only */
         public postProcessSceneComponents():void {
@@ -28,8 +29,9 @@ module BABYLON {
             BABYLON.MetadataParser.DoProcessPendingShaders(this._babylonScene, this._shaderList);
             BABYLON.MetadataParser.DoProcessPendingFreezes(this._babylonScene, this._freezeList, this._activeMeshes);
             BABYLON.MetadataParser.DoProcessPendingScripts(this._babylonScene, this._scriptList);
+            BABYLON.MetadataParser.DoProcessPendingUpdates(this._babylonScene, this._updateList);
             BABYLON.MetadataParser.DoProcessPendingDisposes(this._disposeList);
-            this._babylonScene = null; this._disposeList = null; this._detailList = null; this._physicList = null; this._shadowList = null; this._shaderList = null; this._freezeList = null; this._scriptList = null; this._activeMeshes = false;
+            this._babylonScene = null; this._disposeList = null; this._detailList = null; this._physicList = null; this._shadowList = null; this._shaderList = null; this._freezeList = null; this._updateList = null; this._scriptList = null; this._activeMeshes = false;
         }
         /** Add detail level list item. Note: Internal use only */
         public addDetailLevelItem(mesh:BABYLON.AbstractMesh):void {
@@ -64,7 +66,7 @@ module BABYLON {
         // * Scene Manager Private Parsing Functions * //
         // ******************************************* //
 
-        private static DoParseSceneComponents(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, physicList:Array<BABYLON.AbstractMesh>, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>, freezeList: Array<BABYLON.TransformNode>): void {
+        private static DoParseSceneComponents(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, physicList:Array<BABYLON.AbstractMesh>, shadowList: Array<BABYLON.AbstractMesh>, scriptList: Array<any>, freezeList: Array<BABYLON.AbstractMesh>, updateList: Array<BABYLON.AbstractMesh>): void {
             if (entity != null && entity.metadata != null && entity.metadata.unity != null && entity.metadata.unity.parsed != null && entity.metadata.unity.parsed === false) {
                 entity.metadata.parsed = true;
                 const metadata:any = entity.metadata.unity;
@@ -81,6 +83,9 @@ module BABYLON {
                 }
                 if (metadata.physics != null) {
                     if (physicList != null) physicList.push(entity);
+                }
+                if (metadata.boundingbox != null && metadata.boundingbox === true) {
+                    if (updateList != null) updateList.push(entity);
                 }
                 // ..
                 // Parse Mesh Primitives
@@ -289,6 +294,11 @@ module BABYLON {
                 registerList = null;
             }
         }
+        private static DoProcessPendingUpdates(scene:BABYLON.Scene, updateList: Array<BABYLON.AbstractMesh>):void {
+            if (updateList != null && updateList.length > 0) {
+                updateList.forEach((mesh) => { BABYLON.SceneManager.RegisterScriptComponent(new BABYLON.BoundingBoxUpdater(mesh, scene), true); });
+            }
+        }
         private static DoProcessPendingDisposes(disposeList: Array<BABYLON.TransformNode>):void {
             if (disposeList != null && disposeList.length > 0) {
                 disposeList.forEach((node) => { node.dispose(false); });
@@ -302,7 +312,7 @@ module BABYLON {
         private static SetupCameraComponent(scene:BABYLON.Scene, entity: BABYLON.AbstractMesh, component: any): void {
             entity.checkCollisions = false;
             const name = entity.name + "_rig";
-            const rotation:number = (scene.useRightHandedSystem === true) ? (Math.PI * BABYLON.System.Rad2Deg) : 0;
+            const rotation:number = (BABYLON.SceneManager.GetRightHanded(scene) === true) ? (Math.PI * BABYLON.System.Rad2Deg) : 0;
             const babyonCamera:BABYLON.FreeCamera = new BABYLON.FreeCamera(name, BABYLON.Vector3.Zero(), scene);
             babyonCamera.checkCollisions = false;
             babyonCamera.rotationQuaternion = BABYLON.Utilities.FromEuler(0, rotation, 0);
@@ -367,7 +377,7 @@ module BABYLON {
             const lightType:number = component.type != null ? component.type : 0;
             switch (lightType) {
                 case 0: { // DIRECTIONAL
-                    const direction:Vector3 = (scene.useRightHandedSystem === true) ? BABYLON.Vector3.Backward() : BABYLON.Vector3.Forward();
+                    const direction:Vector3 = (BABYLON.SceneManager.GetRightHanded(scene) === true) ? BABYLON.Vector3.Backward() : BABYLON.Vector3.Forward();
                     const orthoscale:number = component.orthoscale != null ? component.orthoscale : 0.1;
                     const babylonDirLight = new BABYLON.DirectionalLight(name, direction, scene);
                     babylonDirLight.shadowOrthoScale = orthoscale;
@@ -384,7 +394,7 @@ module BABYLON {
                     break;
                 }
                 case 2: { // SPOT
-                    const direction:Vector3 = (scene.useRightHandedSystem === true) ? BABYLON.Vector3.Backward() : BABYLON.Vector3.Forward();
+                    const direction:Vector3 = (BABYLON.SceneManager.GetRightHanded(scene) === true) ? BABYLON.Vector3.Backward() : BABYLON.Vector3.Forward();
                     const outerAngle:number = (component.spotangle != null) ? component.spotangle : (Math.PI / 4);
                     const babylonSpotLight = new BABYLON.SpotLight(name, BABYLON.Vector3.Zero(), direction, 0, 1, scene);
                     babylonSpotLight.angle = (outerAngle * BABYLON.System.Deg2Rad) * 0.966;

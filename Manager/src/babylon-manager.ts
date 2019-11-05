@@ -330,13 +330,21 @@ module BABYLON {
             }
             return result;
         }
-        /** Get the root url the main scene properties was loaded from */
+        /** Get the root url the last scene properties was loaded from */
         public static GetRootUrl(scene:BABYLON.Scene):string {
             return ((<any>scene)._rootUrl != null && (<any>scene)._rootUrl !== "") ? (<any>scene)._rootUrl : "/";
         }
-        /** Sets the root url the main scene properties was loaded from */
+        /** Sets the root url the last scene properties was loaded from */
         public static SetRootUrl(scene:BABYLON.Scene, url:string):void {
             (<any>scene)._rootUrl = url;
+        }
+        /** Get the right hand loader flag the last scene properties was loaded from */
+        public static GetRightHanded(scene:BABYLON.Scene):boolean {
+            return ((<any>scene)._righty != null && (<any>scene)._righty === true);
+        }
+        /** Sets the right hand loader flag the last scene properties was loaded from */
+        public static SetRightHanded(scene:BABYLON.Scene, righty:boolean):void {
+            (<any>scene)._righty = righty;
         }
         /** TODO */
         public static GetDeltaSeconds(scene:BABYLON.Scene, applyAnimationRatio:boolean = true): number {
@@ -363,10 +371,11 @@ module BABYLON {
             }
             return (result != null) ? result as T : null;
         }
-        /** Set the Windows Runtime preferred launch windowing mode. */
-        public static SetWindowsLaunchMode(mode:Windows.UI.ViewManagement.ApplicationViewWindowingMode): void {
+
+        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
+        public static SetWindowsLaunchMode(mode:number = 1): void {
             if (BABYLON.SceneManager.IsWindows() && typeof Windows.UI.ViewManagement !== "undefined" &&typeof Windows.UI.ViewManagement.ApplicationView !== "undefined") {
-                Windows.UI.ViewManagement.ApplicationView.preferredLaunchWindowingMode = Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen
+                Windows.UI.ViewManagement.ApplicationView.preferredLaunchWindowingMode = mode;
             }
         }
         /** Removes the default page scene loader. */
@@ -408,6 +417,10 @@ module BABYLON {
         /** Gets the specified transform node primary tag name. */
         public static GetTransformTag(transform:BABYLON.TransformNode): string {
             return (transform.metadata != null && transform.metadata.unity != null && transform.metadata.unity.group != null && transform.metadata.unity.group !== "") ? transform.metadata.unity.group : "Untagged";
+        }
+        /** Gets the specified transform node primary layer index. */
+        public static GetTransformLayer(transform:BABYLON.TransformNode): number {
+            return (transform.metadata != null && transform.metadata.unity != null && transform.metadata.unity.layer != null) ? transform.metadata.unity.layer : 0;
         }
         /** Gets the specified transform node by name from scene. */
         public static GetTransformNode(scene:BABYLON.Scene, name:string): BABYLON.TransformNode {

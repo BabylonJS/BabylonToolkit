@@ -106,10 +106,18 @@ module BABYLON {
         public getTransformTag(): string {
             return BABYLON.SceneManager.GetTransformTag(this.transform);
         }
+        /** Gets the total game time in seconds */
+        public getGameTime(): number {
+            return BABYLON.SceneManager.GetGameTime();
+        }
+        /** Gets the system time in seconds */
+        public getSystemTime(): number {
+            return BABYLON.SceneManager.GetSystemTime();
+        }
         /** Gets the delta time spent between current and previous frame in seconds */
         public getDeltaSeconds(applyAnimationRatio:boolean = true): number {
             return BABYLON.SceneManager.GetDeltaSeconds(this._scene, applyAnimationRatio);
-        };
+        }
         /** Sets the new free camera rig for the specified entity */
         public updateCameraRigging(camera:BABYLON.FreeCamera): void {
             BABYLON.SceneManager.UpdateCameraRigging(this._transform, camera);
@@ -197,6 +205,25 @@ module BABYLON {
                 instance._after = null;
                 instance._scene = null;
             }
+        }
+    }
+    /**
+     * Babylon bounding box updater class
+     * @class BoundingBoxUpdater - All rights reserved (c) 2019 Mackey Kinard
+     */
+    export class BoundingBoxUpdater extends BABYLON.ScriptComponent {
+        private _abtractMesh:BABYLON.AbstractMesh = null;
+        public constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}) {
+            super(transform, scene, properties);
+            this._abtractMesh = this.getAbstractMesh();
+        }
+        protected update(): void {
+            if (this._abtractMesh != null) {
+                this._abtractMesh.refreshBoundingInfo(true);
+            }
+        }
+        protected destroy(): void {
+            this._abtractMesh = null;
         }
     }
 }

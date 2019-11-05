@@ -27,6 +27,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         this._parser = new BABYLON.MetadataParser(this._loader.babylonScene, this._loader);
         this._parseScene = this._leftHanded = this._disposeRoot = this._sceneParsed = false;
         this._rootUrl = null;
+        (<any>this).order = 100;
     }
 
     /** @hidden */
@@ -84,6 +85,15 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 BABYLON.Utilities.ValidateTransformGuid(mesh);
                 BABYLON.Utilities.ValidateTransformMetadata(mesh);
                 BABYLON.Utilities.ValidateTransformQuaternion(mesh);
+                // ..
+                // Note: Override Material Side Orientation
+                // Force Counter Clock Wise Orientation For Left Hand Unwind And Native Right Hand System
+                // ..
+                if (this._leftHanded === true || this._loader.babylonScene.useRightHandedSystem === true) {
+                    mesh.overrideMaterialSideOrientation = BABYLON.Material.CounterClockWiseSideOrientation;
+                } else {
+                    mesh.overrideMaterialSideOrientation = BABYLON.Material.ClockWiseSideOrientation;
+                }
                 if (mesh.name.indexOf("_dispose") >= 0) {
                     this._parser.addDisposeEntityItem(mesh);
                 } else {
@@ -107,9 +117,6 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
 
     /** @hidden */
     public loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>> {
-        if (this._leftHanded === true) { // Note: Force Left Handed System
-            babylonMaterial.sideOrientation = BABYLON.Material.CounterClockWiseSideOrientation;
-        }
         if (this._parseScene === true) {
             //console.warn("CVTOOLS: LoadMaterialPropertiesAsync: " + material.name);
             if (babylonMaterial instanceof BABYLON.ShaderMaterial) return this._parseShaderMaterialPropertiesAsync(context, material, babylonMaterial);
@@ -136,7 +143,6 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                     if (ismaterial === true) {
                         babylonMaterial = customMaterial;
                         babylonMaterial.fillMode = babylonDrawMode;
-                        babylonMaterial.sideOrientation = this._loader.babylonScene.useRightHandedSystem ? BABYLON.Material.CounterClockWiseSideOrientation : BABYLON.Material.ClockWiseSideOrientation;
                         if (babylonMaterial instanceof BABYLON.ShaderMaterial) {
                             BABYLON.Utilities.InitializeShaderMaterial(babylonMaterial);
                         }
@@ -303,6 +309,7 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
             if (this._loader.rootBabylonMesh != null) this._loader.rootBabylonMesh.name = "Root." + filename.replace(".gltf", "").replace(".glb", "");
             this._disposeRoot = (metadata.disposeroot != null && metadata.disposeroot === true);
             BABYLON.SceneManager.SetRootUrl(this._loader.babylonScene, root);
+            BABYLON.SceneManager.SetRightHanded(this._loader.babylonScene, !this._leftHanded);
             // ..
             // Setup Scene Default Coloring
             // ..
@@ -321,7 +328,8 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                 const skybox:any = metadata.skybox;
                 const skyfog:boolean = (skybox.skyfog != null) ? skybox.skyfog : false; // NOTE: NOT IMPLEMENTED
                 const skytags:string = (skybox.skytags != null) ? skybox.skytags : "Untagged";
-                const skysize:number = (skybox.skysize != null) ? skybox.skysize : 2000;
+                const skysize:number = (skybox.skysize != null) ? skybox.skysize : 1000;
+                const skyroty:number = (skybox.rotation != null) ? skybox.rotation : 0;
                 const skypath:string = (skybox.basename != null && skybox.basename !== "") ? (root + skybox.basename) : null;
                 const extensions:string[] = (skybox.extensions != null && skybox.extensions.length > 0) ? skybox.extensions : null;
                 const polynomial:number = (skybox.polynomial != null) ? skybox.polynomial : 1;
@@ -333,12 +341,15 @@ class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
                         const skyboxMesh:BABYLON.Mesh = BABYLON.Mesh.CreateBox("Ambient Skybox", skysize, this._loader.babylonScene);
                         skyboxMesh.infiniteDistance = true;
                         skyboxMesh.applyFog = skyfog;
+                        skyboxTexture.rotationY = ((skyroty * BABYLON.System.Deg2Rad) / 2);
                         if (skytags != null && skytags !== "") {
                             BABYLON.Tags.AddTagsTo(skyboxMesh, skytags);
                         }
+                        if (BABYLON.SceneManager.GetRightHanded(this._loader.babylonScene) === true) {
+                            skyboxTexture.rotationY += Math.PI;
+                        }
                         if (this._loader.babylonScene.useRightHandedSystem === true) { 
-                            skyboxTexture.rotationY = Math.PI;
-                            skyboxMesh.scaling.x *= -1;                
+                            skyboxMesh.scaling.x *= -1;
                         }
                         const standardMaterial = new BABYLON.StandardMaterial("SkyboxMaterial", this._loader.babylonScene);
                         standardMaterial.backFaceCulling = false;
@@ -1023,6 +1034,7 @@ class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader) {
         this._loader = loader;
+        (<any>this).order = 101;
     }
 
     /** @hidden */
@@ -1048,6 +1060,7 @@ class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader) {
         this._loader = loader;
+        (<any>this).order = 102;
     }
 
     /** @hidden */
