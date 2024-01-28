@@ -2955,8 +2955,8 @@ declare namespace UNITY {
         static CachedPhysicsShapeCount: number;
         static DebugPhysicsViewer: any;
         static OnSetupPhysicsPlugin: (scene: BABYLON.Scene, plugin: BABYLON.HavokPlugin) => void;
-        protected static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
-        protected static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
+        static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
+        static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
         protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
         protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeConvexHull;
         protected static GetCachedPhysicsBoxShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeBox;
@@ -2966,8 +2966,8 @@ declare namespace UNITY {
         protected static CreateStandardPhysicsShapeAndBody(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, metadata: any, impostortype: number, istrigger: boolean, istruestatic: boolean, motiontype: BABYLON.PhysicsMotionType, mass: number, staticfriction: number, dynamicfriction: number, restitution: number, terraindata: any, com: any, persist: boolean, layer: number, filter: number): void;
         protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.AbstractMesh, element: any, impostortype: number, dynamicfriction: number, restitution: number, sitems: UNITY.PhyscisContainerData[], item: UNITY.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
         protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
-        protected static ConfigRigidbodyPhysics(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, child: boolean, trigger: boolean, physics: any, mass: number, com: BABYLON.Vector3): void;
         static GetPhysicsHeapSize(): number;
+        static ConfigRigidbodyPhysics(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, child: boolean, trigger: boolean, physics: any, mass: number, com: BABYLON.Vector3): void;
         static CreatePhysicsMetadata(mass: number, drag?: number, angularDrag?: number, centerMass?: BABYLON.Vector3): any;
         static CreateCollisionMetadata(type: string, trigger?: boolean, convexmesh?: boolean, restitution?: number, dynamicfriction?: number, staticfriction?: number): any;
         static CreatePhysicsProperties(mass: number, drag?: number, angularDrag?: number, useGravity?: boolean, isKinematic?: boolean): any;
