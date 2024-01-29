@@ -12,11 +12,11 @@ declare namespace UNITY {
         static WindowState: any;
         /** Set global window options */
         static GlobalOptions: any;
-        /** Gets the toolkit unity playground project repo cdn (without slash suffix) */
-        static get PlaygroundRepo(): string;
         /** Defines the local player avatar url */
         /** Default network game server endpoint (without slash suffix) */
         static ServerEndPoint: string;
+        /** Set the allow debug mode flag */
+        static EnableDebugMode: boolean;
         /** Set the allow user input flag */
         static EnableUserInput: boolean;
         /** Enable the main page render loop */
