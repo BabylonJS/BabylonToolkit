@@ -32,7 +32,7 @@ declare namespace UNITY {
         /** Set the support srgb buffers flag */
         static SupportSRGBBuffers: boolean;
         /** The animation start mode. Defaults to NONE. */
-        static AnimationStartMode: BABYLON.GLTFLoaderAnimationStartMode;
+        static AnimationStartMode: number;
         /** When loading glTF animations, which are defined in seconds, target them to this FPS. Defaults to 30 for for new behavior. Set to 1 for old behavior */
         static AnimationTargetFps: number;
         /** Set the default convex hull shape margin size */
