@@ -2954,7 +2954,7 @@ declare namespace UNITY {
         static NewPhysicsShapeCount: number;
         static CachedPhysicsShapeCount: number;
         static DebugPhysicsViewer: any;
-        static OnSetupPhysicsPlugin: (scene: BABYLON.Scene, plugin: BABYLON.HavokPlugin) => void;
+        static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
         static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
         static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
         protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
