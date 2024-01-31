@@ -1638,8 +1638,8 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _sceneParsed;
     private _preWarmTime;
     private _hideLoader;
-    private _fileName;
     private _rootUrl;
+    private static CurrentFileName;
     private static ScriptBundleCache;
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader);
@@ -1650,7 +1650,7 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     /** @hidden */
     onReady(): void;
     /** @hidden */
-    onComplete(): void;
+    onComplete(): Promise<void>;
     /** @hidden */
     onValidate(): void;
     /** @hidden */
