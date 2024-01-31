@@ -1,1379 +1,5 @@
 declare namespace UNITY {
     /**
-     * Babylon animation state pro class (Unity Style Mechanim Animation System)
-     * @class AnimationState - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class AnimationState extends UNITY.ScriptComponent {
-        static FPS: number;
-        static EXIT: string;
-        static TIME: number;
-        static SPEED: number;
-        private _looptime;
-        private _loopblend;
-        private _frametime;
-        private _layercount;
-        private _updatemode;
-        private _hasrootmotion;
-        private _animationplaying;
-        private _initialtargetblending;
-        private _hastransformhierarchy;
-        private _leftfeetbottomheight;
-        private _rightfeetbottomheight;
-        private _runtimecontroller;
-        private _executed;
-        private _awakened;
-        private _initialized;
-        private _checkers;
-        private _source;
-        private _machine;
-        private _animationmode;
-        private _animationrig;
-        private _deltaPosition;
-        private _deltaRotation;
-        private _angularVelocity;
-        private _rootMotionSpeed;
-        private _lastMotionSpeed;
-        private _loopMotionSpeed;
-        private _lastRotateSpeed;
-        private _loopRotateSpeed;
-        private _lastMotionRotation;
-        private _lastMotionPosition;
-        private _positionWeight;
-        private _rootBoneWeight;
-        private _rotationWeight;
-        private _rootQuatWeight;
-        private _rootBoneTransform;
-        private _positionHolder;
-        private _rootBoneHolder;
-        private _rotationHolder;
-        private _rootQuatHolder;
-        private _rootMotionMatrix;
-        private _rootMotionScaling;
-        private _rootMotionRotation;
-        private _rootMotionPosition;
-        private _dirtyMotionMatrix;
-        private _dirtyBlenderMatrix;
-        private _targetPosition;
-        private _targetRotation;
-        private _targetScaling;
-        private _updateMatrix;
-        private _blenderMatrix;
-        private _blendWeights;
-        private _emptyScaling;
-        private _emptyPosition;
-        private _emptyRotation;
-        private _ikFrameEanbled;
-        private _data;
-        private _anims;
-        private _clips;
-        private _timers;
-        private _starts;
-        private _stops;
-        private _numbers;
-        private _booleans;
-        private _triggers;
-        private _parameters;
-        speedRatio: number;
-        delayUpdateUntilReady: boolean;
-        enableAnimation: boolean;
-        applyRootMotion: boolean;
-        awakened(): boolean;
-        initialized(): boolean;
-        hasRootMotion(): boolean;
-        isFirstFrame(): boolean;
-        isLastFrame(): boolean;
-        ikFrameEnabled(): boolean;
-        getAnimationTime(): number;
-        getFrameLoopTime(): boolean;
-        getFrameLoopBlend(): boolean;
-        getAnimationPlaying(): boolean;
-        getRuntimeController(): string;
-        getRootBoneTransform(): BABYLON.TransformNode;
-        getDeltaRootMotionAngle(): number;
-        getDeltaRootMotionSpeed(): number;
-        getDeltaRootMotionPosition(): BABYLON.Vector3;
-        getDeltaRootMotionRotation(): BABYLON.Quaternion;
-        getFixedRootMotionPosition(): BABYLON.Vector3;
-        getFixedRootMotionRotation(): BABYLON.Quaternion;
-        /** Register handler that is triggered when the animation state machine has been awakened */
-        onAnimationAwakeObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when the animation state machine has been initialized */
-        onAnimationInitObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when the animation ik setup has been triggered */
-        onAnimationIKObservable: BABYLON.Observable<number>;
-        /** Register handler that is triggered when the animation end has been triggered */
-        onAnimationEndObservable: BABYLON.Observable<number>;
-        /** Register handler that is triggered when the animation loop has been triggered */
-        onAnimationLoopObservable: BABYLON.Observable<number>;
-        /** Register handler that is triggered when the animation event has been triggered */
-        onAnimationEventObservable: BABYLON.Observable<IAnimatorEvent>;
-        /** Register handler that is triggered when the animation frame has been updated */
-        onAnimationUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when the animation state is going to transition */
-        onAnimationTransitionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        protected m_zeroVector: BABYLON.Vector3;
-        protected m_defaultGroup: BABYLON.AnimationGroup;
-        protected m_animationTargets: BABYLON.TargetedAnimation[];
-        protected m_rotationIdentity: BABYLON.Quaternion;
-        protected awake(): void;
-        protected update(): void;
-        protected destroy(): void;
-        playDefaultAnimation(transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
-        playAnimation(state: string, transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
-        stopAnimation(animationLayer?: number): boolean;
-        hasBool(name: string): boolean;
-        getBool(name: string): boolean;
-        setBool(name: string, value: boolean): void;
-        hasFloat(name: string): boolean;
-        getFloat(name: string): number;
-        setFloat(name: string, value: number): void;
-        hasInteger(name: string): boolean;
-        getInteger(name: string): number;
-        setInteger(name: string, value: number): void;
-        hasTrigger(name: string): boolean;
-        getTrigger(name: string): boolean;
-        setTrigger(name: string): void;
-        resetTrigger(name: string): void;
-        setSmoothFloat(name: string, targetValue: number, dampTime: number, deltaTime: number): void;
-        setSmoothInteger(name: string, targetValue: number, dampTime: number, deltaTime: number): void;
-        resetSmoothProperty(name: string): void;
-        private getMachineState;
-        private setMachineState;
-        getCurrentState(layer: number): UNITY.MachineState;
-        getDefaultClips(): any[];
-        getDefaultSource(): string;
-        fixAnimationGroup(group: BABYLON.AnimationGroup): string;
-        getAnimationGroup(name: string): BABYLON.AnimationGroup;
-        getAnimationGroups(): BABYLON.AnimationGroup[];
-        setAnimationGroups(groups: BABYLON.AnimationGroup[]): void;
-        private updateAnimationGroups;
-        private awakeStateMachine;
-        private sourceAnimationGroups;
-        private updateStateMachine;
-        private setupSourceAnimationGroups;
-        private destroyStateMachine;
-        private updateAnimationState;
-        private updateAnimationTargets;
-        private updateBlendableTargets;
-        private finalizeAnimationTargets;
-        private checkStateMachine;
-        private checkStateTransitions;
-        private playCurrentAnimationState;
-        private stopCurrentAnimationState;
-        private checkAvatarTransformPath;
-        private filterTargetAvatarMask;
-        private sortWeightedBlendingList;
-        private computeWeightedFrameRatio;
-        private setupTreeBranches;
-        private parseTreeBranches;
-        private parse1DSimpleTreeBranches;
-        private parse2DSimpleDirectionalTreeBranches;
-        private parse2DFreeformDirectionalTreeBranches;
-        private parse2DFreeformCartesianTreeBranches;
-    }
-    class BlendTreeValue {
-        source: UNITY.IBlendTreeChild;
-        motion: string;
-        posX: number;
-        posY: number;
-        weight: number;
-        constructor(config: {
-            source: UNITY.IBlendTreeChild;
-            motion: string;
-            posX?: number;
-            posY?: number;
-            weight?: number;
-        });
-    }
-    class BlendTreeUtils {
-        static ClampValue(num: number, min: number, max: number): number;
-        static GetSignedAngle(a: BABYLON.Vector2, b: BABYLON.Vector2): number;
-        static GetLinearInterpolation(x0: number, y0: number, x1: number, y1: number, x: number): number;
-        static GetRightNeighbourIndex(inputX: number, blendTreeArray: UNITY.BlendTreeValue[]): number;
-    }
-    class BlendTreeSystem {
-        static Calculate1DSimpleBlendTree(inputX: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
-        static Calculate2DFreeformDirectional(inputX: number, inputY: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
-        static Calculate2DFreeformCartesian(inputX: number, inputY: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
-        private static TempVector2_IP;
-        private static TempVector2_POSI;
-        private static TempVector2_POSJ;
-        private static TempVector2_POSIP;
-        private static TempVector2_POSIJ;
-    }
-    class MachineState {
-        hash: number;
-        name: string;
-        tag: string;
-        time: number;
-        type: UNITY.MotionType;
-        rate: number;
-        length: number;
-        layer: string;
-        layerIndex: number;
-        played: number;
-        machine: string;
-        motionid: number;
-        interrupted: boolean;
-        apparentSpeed: number;
-        averageAngularSpeed: number;
-        averageDuration: number;
-        averageSpeed: number[];
-        cycleOffset: number;
-        cycleOffsetParameter: string;
-        cycleOffsetParameterActive: boolean;
-        iKOnFeet: boolean;
-        mirror: boolean;
-        mirrorParameter: string;
-        mirrorParameterActive: boolean;
-        speed: number;
-        speedParameter: string;
-        speedParameterActive: boolean;
-        blendtree: UNITY.IBlendTree;
-        transitions: UNITY.ITransition[];
-        behaviours: UNITY.IBehaviour[];
-        events: UNITY.IAnimatorEvent[];
-        ccurves: UNITY.IUnityCurve[];
-        tcurves: BABYLON.Animation[];
-        constructor();
-    }
-    class TransitionCheck {
-        result: string;
-        offest: number;
-        blending: number;
-        triggered: string[];
-    }
-    class AnimationMixer {
-        influenceBuffer: number;
-        positionBuffer: BABYLON.Vector3;
-        rotationBuffer: BABYLON.Quaternion;
-        scalingBuffer: BABYLON.Vector3;
-        originalMatrix: BABYLON.Matrix;
-        blendingFactor: number;
-        blendingSpeed: number;
-        rootPosition: BABYLON.Vector3;
-        rootRotation: BABYLON.Quaternion;
-    }
-    class BlendingWeights {
-        primary: UNITY.IBlendTreeChild;
-        secondary: UNITY.IBlendTreeChild;
-    }
-    enum MotionType {
-        Clip = 0,
-        Tree = 1
-    }
-    enum ConditionMode {
-        If = 1,
-        IfNot = 2,
-        Greater = 3,
-        Less = 4,
-        Equals = 6,
-        NotEqual = 7
-    }
-    enum InterruptionSource {
-        None = 0,
-        Source = 1,
-        Destination = 2,
-        SourceThenDestination = 3,
-        DestinationThenSource = 4
-    }
-    enum BlendTreeType {
-        Simple1D = 0,
-        SimpleDirectional2D = 1,
-        FreeformDirectional2D = 2,
-        FreeformCartesian2D = 3,
-        Direct = 4,
-        Clip = 5
-    }
-    enum BlendTreePosition {
-        Lower = 0,
-        Upper = 1
-    }
-    enum AnimatorParameterType {
-        Float = 1,
-        Int = 3,
-        Bool = 4,
-        Trigger = 9
-    }
-    interface IAnimatorEvent {
-        id: number;
-        clip: string;
-        time: number;
-        function: string;
-        intParameter: number;
-        floatParameter: number;
-        stringParameter: string;
-        objectIdParameter: string;
-        objectNameParameter: string;
-    }
-    interface IAvatarMask {
-        hash: number;
-        maskName: string;
-        maskType: string;
-        transformCount: number;
-        transformPaths: string[];
-    }
-    interface IAnimationLayer {
-        owner: string;
-        hash: number;
-        name: string;
-        index: number;
-        entry: string;
-        machine: string;
-        iKPass: boolean;
-        avatarMask: UNITY.IAvatarMask;
-        blendingMode: number;
-        defaultWeight: number;
-        syncedLayerIndex: number;
-        syncedLayerAffectsTiming: boolean;
-        animationTime: number;
-        animationNormal: number;
-        animationMaskMap: Map<string, number>;
-        animationFirstRun: boolean;
-        animationEndFrame: boolean;
-        animationLoopFrame: boolean;
-        animationLoopCount: number;
-        animationLoopEvents: any;
-        animationStateMachine: UNITY.MachineState;
-    }
-    interface IAnimationCurve {
-        length: number;
-        preWrapMode: string;
-        postWrapMode: string;
-        keyframes: UNITY.IAnimationKeyframe[];
-    }
-    interface IAnimationKeyframe {
-        time: number;
-        value: number;
-        inTangent: number;
-        outTangent: number;
-        tangentMode: number;
-    }
-    interface IBehaviour {
-        hash: number;
-        name: string;
-        layerIndex: number;
-        properties: any;
-    }
-    interface ITransition {
-        hash: number;
-        anyState: boolean;
-        layerIndex: number;
-        machineLayer: string;
-        machineName: string;
-        canTransitionToSelf: boolean;
-        destination: string;
-        duration: number;
-        exitTime: number;
-        hasExitTime: boolean;
-        fixedDuration: boolean;
-        intSource: UNITY.InterruptionSource;
-        isExit: boolean;
-        mute: boolean;
-        name: string;
-        offset: number;
-        orderedInt: boolean;
-        solo: boolean;
-        conditions: UNITY.ICondition[];
-    }
-    interface ICondition {
-        hash: number;
-        mode: UNITY.ConditionMode;
-        parameter: string;
-        threshold: number;
-    }
-    interface IBlendTree {
-        hash: number;
-        name: string;
-        state: string;
-        children: UNITY.IBlendTreeChild[];
-        layerIndex: number;
-        apparentSpeed: number;
-        averageAngularSpeed: number;
-        averageDuration: number;
-        averageSpeed: number[];
-        blendParameterX: string;
-        blendParameterY: string;
-        blendType: UNITY.BlendTreeType;
-        isAnimatorMotion: boolean;
-        isHumanMotion: boolean;
-        isLooping: boolean;
-        minThreshold: number;
-        maxThreshold: number;
-        useAutomaticThresholds: boolean;
-        valueParameterX: number;
-        valueParameterY: number;
-    }
-    interface IBlendTreeChild {
-        hash: number;
-        layerIndex: number;
-        cycleOffset: number;
-        directBlendParameter: string;
-        apparentSpeed: number;
-        averageAngularSpeed: number;
-        averageDuration: number;
-        averageSpeed: number[];
-        mirror: boolean;
-        type: UNITY.MotionType;
-        motion: string;
-        positionX: number;
-        positionY: number;
-        threshold: number;
-        timescale: number;
-        subtree: UNITY.IBlendTree;
-        weight: number;
-        ratio: number;
-        track: BABYLON.AnimationGroup;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon audio source manager standard class
-     * @class AudioSource - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class AudioSource extends UNITY.ScriptComponent implements UNITY.IAssetPreloader {
-        /** The default volume for the audio source if volume is at max level */
-        static MAX_VOLUME: number;
-        static DEFAULT_LEVEL: number;
-        static DEFAULT_ROLLOFF: number;
-        private _audio;
-        private _name;
-        private _loop;
-        private _mute;
-        private _pitch;
-        private _volume;
-        private _preload;
-        private _playonawake;
-        private _spatialblend;
-        private _preloaderUrl;
-        private _lastmutedvolume;
-        private _priority;
-        private _panstereo;
-        private _mindistance;
-        private _maxdistance;
-        private _rolloffmode;
-        private _reverbzonemix;
-        private _bypasseffects;
-        private _bypassreverbzones;
-        private _bypasslistenereffects;
-        private _initializedReadyInstance;
-        getSoundClip(): BABYLON.Sound;
-        getAudioElement(): HTMLAudioElement;
-        /** Register handler that is triggered when the audio clip is ready */
-        onReadyObservable: BABYLON.Observable<BABYLON.Sound>;
-        protected awake(): void;
-        protected start(): void;
-        protected destroy(): void;
-        protected awakeAudioSource(): void;
-        protected startAudioSource(): void;
-        protected destroyAudioSource(): void;
-        /**
-         * Gets the ready status for track
-         */
-        isReady(): boolean;
-        /**
-         * Gets the playing status for track
-         */
-        isPlaying(): boolean;
-        /**
-         * Gets the paused status for track
-         */
-        isPaused(): boolean;
-        /**
-         * Play the sound track
-         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
-         * @param offset (optional) Start the sound at a specific time in seconds
-         * @param length (optional) Sound duration (in seconds)
-         */
-        play(time?: number, offset?: number, length?: number): boolean;
-        private internalPlay;
-        /**
-         * Pause the sound track
-         */
-        pause(): boolean;
-        /**
-         * Stop the sound track
-         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
-         */
-        stop(time?: number): boolean;
-        /**
-         * Mute the sound track
-         * @param time (optional) Mute the sound after X seconds. Start immediately (0) by default.
-         */
-        mute(time?: number): boolean;
-        /**
-         * Unmute the sound track
-         * @param time (optional) Unmute the sound after X seconds. Start immediately (0) by default.
-         */
-        unmute(time?: number): boolean;
-        /**
-         * Gets the volume of the track
-         */
-        getVolume(): number;
-        /**
-         * Sets the volume of the track
-         * @param volume Define the new volume of the sound
-         * @param time Define time for gradual change to new volume
-         */
-        setVolume(volume: number, time?: number): boolean;
-        /**
-         * Gets the spatial sound option of the track
-         */
-        getSpatialSound(): boolean;
-        /**
-         * Gets the spatial sound option of the track
-         * @param value Define the value of the spatial sound
-         */
-        setSpatialSound(value: boolean): void;
-        /**
-         * Sets the sound track playback speed
-         * @param rate the audio playback rate
-         */
-        setPlaybackSpeed(rate: number): void;
-        /**
-         * Gets the current time of the track
-         */
-        getCurrentTrackTime(): number;
-        /** Set audio data source */
-        setDataSource(source: string | ArrayBuffer | MediaStream): void;
-        /** Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: UNITY.PreloadAssetsManager): void;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
-     * https://forum.babylonjs.com/u/raggar
-     * @script HavokRaycastVehicle
-     */
-    class HavokRaycastVehicle {
-        chassisBody: BABYLON.PhysicsBody;
-        wheelInfos: UNITY.HavokWheelInfo[];
-        sliding: boolean;
-        world: BABYLON.PhysicsEngine;
-        indexRightAxis: number;
-        indexForwardAxis: number;
-        indexUpAxis: number;
-        smoothFlyingImpulse: number;
-        currentVehicleSpeedKmHour: number;
-        constructor(options: any);
-        addWheel(options: any): number;
-        getNumWheels(): number;
-        getWheelInfo(wheelIndex: number): UNITY.HavokWheelInfo;
-        getSteeringValue(wheelIndex: number): number;
-        setSteeringValue(value: number, wheelIndex: number): void;
-        applyEngineForce(value: number, wheelIndex: number): void;
-        setBrake(brake: number, wheelIndex: number): void;
-        addToWorld(world: BABYLON.PhysicsEngine): void;
-        getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
-        getCurrentSpeedKmHour(): number;
-        updateVehicle(timeStep: number): void;
-        updateSuspension(deltaTime: number): void;
-        removeFromWorld(world: any): void;
-        castRay2(wheel: UNITY.HavokWheelInfo): number;
-        castRay(wheel: UNITY.HavokWheelInfo): number;
-        updateWheelTransformWorld(wheel: UNITY.HavokWheelInfo): void;
-        updateWheelTransform(wheelIndex: number): void;
-        getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
-        updateFriction(timeStep: number): void;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokWheelInfo
-     */
-    class HavokWheelInfo {
-        maxSuspensionTravel: number;
-        customSlidingRotationalSpeed: number;
-        useCustomSlidingRotationalSpeed: number;
-        sliding: boolean;
-        chassisConnectionPointLocal: BABYLON.Vector3;
-        chassisConnectionPointWorld: BABYLON.Vector3;
-        directionLocal: BABYLON.Vector3;
-        directionWorld: BABYLON.Vector3;
-        axleLocal: BABYLON.Vector3;
-        axleWorld: BABYLON.Vector3;
-        suspensionRestLength: number;
-        suspensionMaxLength: number;
-        radius: number;
-        suspensionStiffness: number;
-        dampingCompression: number;
-        dampingRelaxation: number;
-        frictionSlip: number;
-        steering: number;
-        rotation: number;
-        deltaRotation: number;
-        rollInfluence: number;
-        maxSuspensionForce: number;
-        engineForce: number;
-        brake: number;
-        isFrontWheel: boolean;
-        clippedInvContactDotSuspension: number;
-        suspensionRelativeVelocity: number;
-        suspensionForce: number;
-        skidInfo: number;
-        slipInfo: number;
-        suspensionLength: number;
-        sideImpulse: number;
-        forwardImpulse: number;
-        raycastResult: BABYLON.PhysicsRaycastResult;
-        worldTransform: BABYLON.TransformNode;
-        isInContact: boolean;
-        hub: BABYLON.TransformNode;
-        spinner: BABYLON.TransformNode;
-        defaultFriction: number;
-        steeringAngle: number;
-        rotationBoost: number;
-        locked: boolean;
-        constructor(options: any);
-        updateWheel(chassis: any): void;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokVehicleUtilities
-     */
-    class HavokVehicleUtilities {
-        static directions: BABYLON.Vector3[];
-        static calcRollingFriction_vel1: BABYLON.Vector3;
-        static calcRollingFriction_vel2: BABYLON.Vector3;
-        static calcRollingFriction_vel: BABYLON.Vector3;
-        static updateFriction_surfNormalWS_scaled_proj: BABYLON.Vector3;
-        static updateFriction_axle: BABYLON.Vector3[];
-        static updateFriction_forwardWS: BABYLON.Vector3[];
-        static sideFrictionStiffness2: number;
-        static castRay_rayvector: BABYLON.Vector3;
-        static castRay_target: BABYLON.Vector3;
-        static torque: BABYLON.Vector3;
-        static tmpVec1: BABYLON.Vector3;
-        static tmpVec2: BABYLON.Vector3;
-        static tmpVec3: BABYLON.Vector3;
-        static tmpVec4: BABYLON.Vector3;
-        static tmpVec5: BABYLON.Vector3;
-        static tmpVec6: BABYLON.Vector3;
-        static tmpVel2: BABYLON.Vector3;
-        static tmpMat1: BABYLON.Matrix;
-        static velocityAt: (body: BABYLON.PhysicsBody, pos: any, res: any) => any;
-        static bodyPosition: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyLinearVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyAngularVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyTransform: (body: BABYLON.PhysicsBody, res: any) => any;
-        static addImpulseAt: (body: BABYLON.PhysicsBody, impulse: any, point: any) => void;
-        static addForceAt: (body: BABYLON.PhysicsBody, force: any, point: any) => void;
-        static bodyOrientation: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInvMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInertiaWorld: (body: BABYLON.PhysicsBody, res: any) => any;
-        static calcRollingFriction(body0: BABYLON.PhysicsBody, body1: BABYLON.PhysicsBody, frictionPosWorld: any, frictionDirectionWorld: any, maxImpulse: any): number;
-        static computeImpulseDenominator_r0: BABYLON.Vector3;
-        static computeImpulseDenominator_c0: BABYLON.Vector3;
-        static computeImpulseDenominator_vec: BABYLON.Vector3;
-        static computeImpulseDenominator_m: BABYLON.Vector3;
-        static computeImpulseDenominator(body: BABYLON.PhysicsBody, pos: any, normal: any): number;
-        static resolveSingleBilateral_vel1: BABYLON.Vector3;
-        static resolveSingleBilateral_vel2: BABYLON.Vector3;
-        static resolveSingleBilateral_vel: BABYLON.Vector3;
-        static resolveSingleBilateral(body1: BABYLON.PhysicsBody, pos1: any, body2: BABYLON.PhysicsBody, pos2: any, normal: any): number;
-        static chassis_velocity_at_contactPoint: BABYLON.Vector3;
-        static relpos: BABYLON.Vector3;
-        static Utilsdefaults: (options: any, defaults: any) => any;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon navigation agent pro class (Unity Style Navigation Agent System)
-     * @class NavigationAgent - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class NavigationAgent extends UNITY.ScriptComponent {
-        private static TARGET_ANGLE_FACTOR;
-        private static ANGULAR_SPEED_RATIO;
-        private type;
-        private speed;
-        private baseOffset;
-        private avoidRadius;
-        private avoidHeight;
-        private acceleration;
-        private areaMask;
-        private autoRepath;
-        private autoBraking;
-        private autoTraverseOffMeshLink;
-        private avoidancePriority;
-        private obstacleAvoidanceType;
-        private distanceToTarget;
-        private teleporting;
-        private moveDirection;
-        private resetPosition;
-        private lastPosition;
-        private distancePosition;
-        private currentPosition;
-        private currentRotation;
-        private currentVelocity;
-        private currentWaypoint;
-        heightOffset: number;
-        angularSpeed: number;
-        updatePosition: boolean;
-        updateRotation: boolean;
-        distanceEpsilon: number;
-        velocityEpsilon: number;
-        offMeshVelocity: number;
-        stoppingDistance: number;
-        isReady(): boolean;
-        isNavigating(): boolean;
-        isTeleporting(): boolean;
-        isOnOffMeshLink(): boolean;
-        getAgentType(): number;
-        getAgentState(): number;
-        getAgentIndex(): number;
-        getAgentOffset(): number;
-        getTargetDistance(): number;
-        getCurrentPosition(): BABYLON.Vector3;
-        getCurrentRotation(): BABYLON.Quaternion;
-        getCurrentVelocity(): BABYLON.Vector3;
-        getAgentParameters(): BABYLON.IAgentParameters;
-        setAgentParameters(parameters: BABYLON.IAgentParameters): void;
-        /** Register handler that is triggered when the agent is ready for navigation */
-        onReadyObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered before the navigation update */
-        onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after the navigation update */
-        onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when the navigation is complete */
-        onNavCompleteObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        protected m_agentState: number;
-        protected m_agentIndex: number;
-        protected m_agentReady: boolean;
-        protected m_agentGhost: BABYLON.TransformNode;
-        protected m_agentParams: BABYLON.IAgentParameters;
-        protected m_agentMovement: BABYLON.Vector3;
-        protected m_agentDirection: BABYLON.Vector3;
-        protected m_agentQuaternion: BABYLON.Quaternion;
-        protected m_agentDestination: BABYLON.Vector3;
-        protected awake(): void;
-        protected update(): void;
-        protected destroy(): void;
-        private awakeNavigationAgent;
-        private updateNavigationAgent;
-        private updateAgentParameters;
-        private destroyNavigationAgent;
-        /** Move agent relative to current position. */
-        move(offset: BABYLON.Vector3, closetPoint?: boolean): void;
-        /** Teleport agent to destination point. */
-        teleport(destination: BABYLON.Vector3, closetPoint?: boolean): void;
-        /** Sets agent current destination point. */
-        setDestination(destination: BABYLON.Vector3, closetPoint?: boolean): void;
-        /** Gets agent current world space velocity. */
-        getAgentVelocity(): BABYLON.Vector3;
-        /** Gets agent current world space velocity. */
-        getAgentVelocityToRef(result: BABYLON.Vector3): void;
-        /** Gets agent current world space position. */
-        getAgentPosition(): BABYLON.Vector3;
-        /** Gets agent current world space position. */
-        getAgentPositionToRef(result: BABYLON.Vector3): void;
-        /** Gets agent current waypoint position. */
-        getAgentWaypoint(): BABYLON.Vector3;
-        /** Gets agent current waypoint position. */
-        getAgentWaypointToRef(result: BABYLON.Vector3): void;
-        /** Cancel current waypoint path navigation. */
-        cancelNavigation(): void;
-    }
-    /**
-     *  Recast Detour Crowd Agent States
-     */
-    enum CrowdAgentState {
-        DT_CROWDAGENT_STATE_INVALID = 0,///< The agent is not in a valid state.
-        DT_CROWDAGENT_STATE_WALKING = 1,///< The agent is traversing a normal navigation mesh polygon.
-        DT_CROWDAGENT_STATE_OFFMESH = 2
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon raycast vehicle pro class (Unity Style Wheeled Vehicle System)
-     * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class RaycastVehicle {
-        private _centerMass;
-        private _chassisMesh;
-        private _tempVectorPos;
-        lockedWheelIndexes: number[];
-        getNumWheels(): number;
-        getWheelInfo(wheel: number): UNITY.HavokWheelInfo;
-        setEngineForce(power: number, wheel: number): void;
-        setBrakingForce(brake: number, wheel: number): void;
-        getWheelTransform(wheel: number): BABYLON.TransformNode;
-        updateWheelTransform(wheel: number): void;
-        getRawCurrentSpeedKph(): number;
-        getRawCurrentSpeedMph(): number;
-        getAbsCurrentSpeedKph(): number;
-        getAbsCurrentSpeedMph(): number;
-        protected m_vehicleColliders: any[];
-        protected m_vehicle: UNITY.HavokRaycastVehicle;
-        protected m_scene: BABYLON.Scene;
-        constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
-        dispose(): void;
-        /** Gets the internal wheel index by id string. */
-        getWheelIndexByID(id: string): number;
-        /** Gets the internal wheel index by name string. */
-        getWheelIndexByName(name: string): number;
-        /** Gets the internal wheel collider information. */
-        getWheelColliderInfo(wheel: number): number;
-        getVisualSteeringAngle(wheel: number): number;
-        setVisualSteeringAngle(angle: number, wheel: number): void;
-        getPhysicsSteeringAngle(wheel: number): number;
-        setPhysicsSteeringAngle(angle: number, wheel: number): void;
-        /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        getStabilizingForce(): number;
-        /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        setStabilizingForce(force: number): void;
-        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
-        getSmoothFlyingImpulse(): number;
-        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
-        setSmoothFlyingImpulse(impulse: number): void;
-        protected setupWheelInformation(): void;
-        tickVehicleController(step: number): void;
-        updateWheelInformation(): void;
-        protected lockedWheelInformation(wheel: number): boolean;
-        protected deleteWheelInformation(): void;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon full rigidbody physics standard class (Native Havok Physics Engine)
-     * @class RigidbodyPhysics - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class RigidbodyPhysics extends UNITY.ScriptComponent {
-        static PHYSICS_STEP_TIME: number;
-        private _isKinematic;
-        private _centerOfMass;
-        protected m_raycastVehicle: UNITY.RaycastVehicle;
-        protected awake(): void;
-        protected update(): void;
-        protected late(): void;
-        protected destroy(): void;
-        protected awakeRigidbodyState(): void;
-        protected updateRigidbodyState(): void;
-        protected lateRigidbodyState(): void;
-        protected destroyRigidbodyState(): void;
-        /** Checks if rigidbody is kinematic. */
-        isKinematic(): boolean;
-        /** Checks if rigidbody has wheel collider metadata for the entity. Note: Wheel collider metadata informaion is required for vehicle control. */
-        hasWheelColliders(): boolean;
-        /** Get the raycast vehicle component */
-        getRaycastVehicle(): UNITY.RaycastVehicle;
-        /** Get the current havok instance from the global stack */
-        static GetHavokInstance(): any;
-        /** Get the current havok plugin from the global stack */
-        static GetHavokPlugin(): BABYLON.HavokPlugin;
-        /** Perform a physics engine raycast */
-        static RaycastToRef(from: BABYLON.Vector3, to: BABYLON.Vector3, result: BABYLON.PhysicsRaycastResult, query?: BABYLON.IRaycastQuery): void;
-        /** Set the maximum physics velocites */
-        static SetMaxVelocities(maxLinVel: number, maxAngVel: number): void;
-        static PhysicsShapeCache: any;
-        static NewPhysicsShapeCount: number;
-        static CachedPhysicsShapeCount: number;
-        static DebugPhysicsViewer: any;
-        static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
-        static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
-        static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
-        protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
-        protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeConvexHull;
-        protected static GetCachedPhysicsBoxShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeBox;
-        protected static GetCachedPhysicsSphereShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeSphere;
-        protected static GetCachedPhysicsCapsuleShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCapsule;
-        protected static GetCachedPhysicsCylinderShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCylinder;
-        protected static CreateStandardPhysicsShapeAndBody(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, metadata: any, impostortype: number, istrigger: boolean, istruestatic: boolean, motiontype: BABYLON.PhysicsMotionType, mass: number, staticfriction: number, dynamicfriction: number, restitution: number, terraindata: any, com: any, persist: boolean, layer: number, filter: number): void;
-        protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.AbstractMesh, element: any, impostortype: number, dynamicfriction: number, restitution: number, sitems: UNITY.PhyscisContainerData[], item: UNITY.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
-        protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
-        static GetPhysicsHeapSize(): number;
-        static ConfigRigidbodyPhysics(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, child: boolean, trigger: boolean, physics: any, mass: number, com: BABYLON.Vector3): void;
-        static CreatePhysicsMetadata(mass: number, drag?: number, angularDrag?: number, centerMass?: BABYLON.Vector3): any;
-        static CreateCollisionMetadata(type: string, trigger?: boolean, convexmesh?: boolean, restitution?: number, dynamicfriction?: number, staticfriction?: number): any;
-        static CreatePhysicsProperties(mass: number, drag?: number, angularDrag?: number, useGravity?: boolean, isKinematic?: boolean): any;
-        /**
-         * Utility to add a child shape to the specified container,
-         * automatically computing the relative transform between
-         * the container shape and the child instance.
-         *
-         * @param containerShape The specified physics shape container
-         * @param parentTransform The transform node associated with the shape
-         * @param newChild The new PhysicsShape to add
-         * @param childTransform The transform node associated with the child shape
-         */
-        protected static AddChildShapeFromParent(containerShape: BABYLON.PhysicsShape, parentTransform: BABYLON.TransformNode, newChild: BABYLON.PhysicsShape, childTransform: BABYLON.TransformNode): void;
-    }
-    class PhyscisContainerData {
-        shape: BABYLON.PhysicsShape;
-        translation: BABYLON.Vector3;
-        rotation: BABYLON.Quaternion;
-        scale: BABYLON.Vector3;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon shuriken particle system pro class (Unity Style Shuriken Particle System)
-     * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class ShurikenParticles extends UNITY.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected destroy(): void;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon terrain generator pro class (Unity Terrain Builder System)
-     * @class TerrainGenerator - All rights reserved (c) 2024 Mackey Kinard
-    */
-    class TerrainGenerator extends UNITY.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected fixed(): void;
-        protected update(): void;
-        protected late(): void;
-        protected after(): void;
-        protected ready(): void;
-        protected destroy(): void;
-    }
-}
-
-declare namespace UNITY {
-    /**
-     * Babylon web video player standard class (Unity Style Shuriken Particle System)
-     * @class WebVideoPlayer - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class WebVideoPlayer extends UNITY.ScriptComponent implements UNITY.IAssetPreloader {
-        private videoLoop;
-        private videoMuted;
-        private videoAlpha;
-        private videoFaded;
-        private videoPoster;
-        private videoInvert;
-        private videoSample;
-        private videoVolume;
-        private videoMipmaps;
-        private videoPlayback;
-        private videoPlayOnAwake;
-        private videoPreloaderUrl;
-        private videoBlobUrl;
-        private videoPreload;
-        private _initializedReadyInstance;
-        getVideoMaterial(): BABYLON.StandardMaterial;
-        getVideoTexture(): BABYLON.VideoTexture;
-        getVideoElement(): HTMLVideoElement;
-        getVideoScreen(): BABYLON.AbstractMesh;
-        getVideoBlobUrl(): string;
-        /** Register handler that is triggered when the video clip is ready */
-        onReadyObservable: BABYLON.Observable<BABYLON.VideoTexture>;
-        protected m_abstractMesh: BABYLON.AbstractMesh;
-        protected m_videoTexture: BABYLON.VideoTexture;
-        protected m_videoMaterial: BABYLON.StandardMaterial;
-        protected m_diffuseIntensity: number;
-        protected awake(): void;
-        protected destroy(): void;
-        protected awakeWebVideoPlayer(): void;
-        protected destroyWebVideoPlayer(): void;
-        /**
-         * Gets the video ready status
-         */
-        isReady(): boolean;
-        /**
-         * Gets the video playing status
-         */
-        isPlaying(): boolean;
-        /**
-         * Gets the video paused status
-         */
-        isPaused(): boolean;
-        /**
-         * Play the video track
-         */
-        play(): boolean;
-        private internalPlay;
-        private checkedPlay;
-        private checkedRePlay;
-        /**
-         * Pause the video track
-         */
-        pause(): boolean;
-        /**
-         * Mute the video track
-         */
-        mute(): boolean;
-        /**
-         * Unmute the video track
-         */
-        unmute(): boolean;
-        /**
-         * Gets the video volume
-         */
-        getVolume(): number;
-        /**
-         * Sets the video volume
-         * @param volume Define the new volume of the sound
-         */
-        setVolume(volume: number): boolean;
-        /** Set video data source */
-        setDataSource(source: string | string[] | HTMLVideoElement): void;
-        /** Revokes the current video blob url and releases resouces */
-        revokeVideoBlobUrl(): void;
-        /** Add video preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: UNITY.PreloadAssetsManager): void;
-    }
-}
-
-declare namespace UNITY {
-    class InputController {
-        static MOUSE_DAMPENER: number;
-        /** Global gamepad manager */
-        static GamepadManager: BABYLON.GamepadManager;
-        /** Global gamepad connect event handler */
-        static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
-        /** Global gamepad disconnect event handler */
-        static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
-        /** Configure user input state in the scene. */
-        static ConfigureUserInput(scene: BABYLON.Scene, options?: {
-            contextMenu?: boolean;
-            pointerLock?: boolean;
-            preventDefault?: boolean;
-            useCapture?: boolean;
-        }): void;
-        static SetLeftJoystickBuffer(leftStickX: number, leftStickY: number, invertY?: boolean): void;
-        static SetRightJoystickBuffer(rightStickX: number, rightStickY: number, invertY?: boolean): void;
-        /** Disables user input state in the scene. */
-        static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
-        /** Locks user pointer state in the scene. */
-        static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
-        private static PointerLockedFlag;
-        static IsPointerLocked(): boolean;
-        private static LockMousePointerObserver;
-        static IsPointerLockHandled(): boolean;
-        /** Get user input state from the scene. */
-        static GetUserInput(input: UNITY.UserInputAxis, player?: UNITY.PlayerNumber): number;
-        /** Set a keyboard up event handler. */
-        static OnKeyboardUp(callback: (keycode: number) => void): void;
-        /** Set a keyboard down event handler. */
-        static OnKeyboardDown(callback: (keycode: number) => void): void;
-        /** Set a keyboard press event handler. */
-        static OnKeyboardPress(keycode: number, callback: () => void): void;
-        /** Get the specified keyboard input by keycode. */
-        static GetKeyboardInput(keycode: number): boolean;
-        /** Set a pointer up event handler. */
-        static OnPointerUp(callback: (button: number) => void): void;
-        /** Set a pointer down event handler. */
-        static OnPointerDown(callback: (button: number) => void): void;
-        /** Set a pointer press event handler. */
-        static OnPointerPress(button: number, callback: () => void): void;
-        /** Get the specified pointer input by button. */
-        static GetPointerInput(button: number): boolean;
-        /** Is the mouse wheel scrollng this frame. */
-        static IsWheelScrolling(): boolean;
-        /** Set on gamepad button up event handler. */
-        static OnGamepadButtonUp(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad button down event handler. */
-        static OnGamepadButtonDown(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad button press event handler. */
-        static OnGamepadButtonPress(button: number, callback: () => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad input by button. */
-        static GetGamepadButtonInput(button: number, player?: UNITY.PlayerNumber): boolean;
-        /** Set on gamepad direction pad up event handler. */
-        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad direction pad down event handler. */
-        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad direction pad press event handler. */
-        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad direction input by number. */
-        static GetGamepadDirectionInput(direction: number, player?: UNITY.PlayerNumber): boolean;
-        /** Set on gamepad trigger left event handler. */
-        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad trigger right event handler. */
-        static OnGamepadTriggerRight(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad trigger input by number. */
-        static GetGamepadTriggerInput(trigger: number, player?: UNITY.PlayerNumber): number;
-        /** Get the specified gamepad type. */
-        static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
-        /** Get the specified gamepad. */
-        static GetGamepad(player?: UNITY.PlayerNumber): BABYLON.Gamepad;
-        private static input;
-        private static keymap;
-        private static scroll;
-        private static wheel;
-        private static mousex;
-        private static mousey;
-        private static vertical;
-        private static horizontal;
-        private static mousex2;
-        private static mousey2;
-        private static vertical2;
-        private static horizontal2;
-        private static mousex3;
-        private static mousey3;
-        private static vertical3;
-        private static horizontal3;
-        private static mousex4;
-        private static mousey4;
-        private static vertical4;
-        private static horizontal4;
-        private static a_mousex;
-        private static x_scroll;
-        private static x_wheel;
-        private static x_mousex;
-        private static x_mousey;
-        private static x_vertical;
-        private static x_horizontal;
-        private static k_mousex;
-        private static k_mousey;
-        private static k_vertical;
-        private static k_horizontal;
-        private static j_mousex;
-        private static j_mousey;
-        private static j_vertical;
-        private static j_horizontal;
-        private static g_mousex1;
-        private static g_mousey1;
-        private static g_vertical1;
-        private static g_horizontal1;
-        private static g_mousex2;
-        private static g_mousey2;
-        private static g_vertical2;
-        private static g_horizontal2;
-        private static g_mousex3;
-        private static g_mousey3;
-        private static g_vertical3;
-        private static g_horizontal3;
-        private static g_mousex4;
-        private static g_mousey4;
-        private static g_vertical4;
-        private static g_horizontal4;
-        private static mouseButtonPress;
-        private static mouseButtonDown;
-        private static mouseButtonUp;
-        private static keyButtonPress;
-        private static keyButtonDown;
-        private static keyButtonUp;
-        private static previousPosition;
-        private static preventDefault;
-        private static rightHanded;
-        private static gamepad1;
-        private static gamepad1Type;
-        private static gamepad1ButtonPress;
-        private static gamepad1ButtonDown;
-        private static gamepad1ButtonUp;
-        private static gamepad1DpadPress;
-        private static gamepad1DpadDown;
-        private static gamepad1DpadUp;
-        private static gamepad1LeftTrigger;
-        private static gamepad1RightTrigger;
-        private static gamepad2;
-        private static gamepad2Type;
-        private static gamepad2ButtonPress;
-        private static gamepad2ButtonDown;
-        private static gamepad2ButtonUp;
-        private static gamepad2DpadPress;
-        private static gamepad2DpadDown;
-        private static gamepad2DpadUp;
-        private static gamepad2LeftTrigger;
-        private static gamepad2RightTrigger;
-        private static gamepad3;
-        private static gamepad3Type;
-        private static gamepad3ButtonPress;
-        private static gamepad3ButtonDown;
-        private static gamepad3ButtonUp;
-        private static gamepad3DpadPress;
-        private static gamepad3DpadDown;
-        private static gamepad3DpadUp;
-        private static gamepad3LeftTrigger;
-        private static gamepad3RightTrigger;
-        private static gamepad4;
-        private static gamepad4Type;
-        private static gamepad4ButtonPress;
-        private static gamepad4ButtonDown;
-        private static gamepad4ButtonUp;
-        private static gamepad4DpadPress;
-        private static gamepad4DpadDown;
-        private static gamepad4DpadUp;
-        private static gamepad4LeftTrigger;
-        private static gamepad4RightTrigger;
-        private static tickKeyboardInput;
-        private static updateUserInput;
-        private static resetUserInput;
-        private static resetKeyMapHandler;
-        private static inputKeyDownHandler;
-        private static inputKeyUpHandler;
-        private static inputPointerWheelHandler;
-        private static inputPointerDownHandler;
-        private static inputPointerUpHandler;
-        private static inputPointerMoveHandler;
-        private static inputOneButtonDownHandler;
-        private static inputOneButtonUpHandler;
-        private static inputOneXboxDPadDownHandler;
-        private static inputOneShockDPadDownHandler;
-        private static inputOneXboxDPadUpHandler;
-        private static inputOneShockDPadUpHandler;
-        private static inputOneXboxLeftTriggerHandler;
-        private static inputOneXboxRightTriggerHandler;
-        private static inputOneLeftStickHandler;
-        private static inputOneRightStickHandler;
-        private static inputTwoButtonDownHandler;
-        private static inputTwoButtonUpHandler;
-        private static inputTwoXboxDPadDownHandler;
-        private static inputTwoShockDPadDownHandler;
-        private static inputTwoXboxDPadUpHandler;
-        private static inputTwoShockDPadUpHandler;
-        private static inputTwoXboxLeftTriggerHandler;
-        private static inputTwoXboxRightTriggerHandler;
-        private static inputTwoLeftStickHandler;
-        private static inputTwoRightStickHandler;
-        private static inputThreeButtonDownHandler;
-        private static inputThreeButtonUpHandler;
-        private static inputThreeXboxDPadDownHandler;
-        private static inputThreeShockDPadDownHandler;
-        private static inputThreeXboxDPadUpHandler;
-        private static inputThreeShockDPadUpHandler;
-        private static inputThreeXboxLeftTriggerHandler;
-        private static inputThreeXboxRightTriggerHandler;
-        private static inputThreeLeftStickHandler;
-        private static inputThreeRightStickHandler;
-        private static inputFourButtonDownHandler;
-        private static inputFourButtonUpHandler;
-        private static inputFourXboxDPadDownHandler;
-        private static inputFourShockDPadDownHandler;
-        private static inputFourXboxDPadUpHandler;
-        private static inputFourShockDPadUpHandler;
-        private static inputFourXboxLeftTriggerHandler;
-        private static inputFourXboxRightTriggerHandler;
-        private static inputFourLeftStickHandler;
-        private static inputFourRightStickHandler;
-        private static inputManagerGamepadConnected;
-        private static inputManagerGamepadDisconnected;
-    }
-    /**
-     * Touch Joystick Classes (https://www.cssscript.com/touch-joystick-controller/)
-     * @class TouchJoystickHandler - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class TouchJoystickHandler {
-        private active;
-        private touchId;
-        private dragStart;
-        private maxDistance;
-        private deadZone;
-        private xvalue;
-        private yvalue;
-        private stick;
-        getValueX(): number;
-        getValueY(): number;
-        getStickElement(): HTMLElement;
-        constructor(stickid: string, maxdistance: number, deadzone: number);
-        dispose(): void;
-        protected handleDown(event: any): void;
-        protected handleMove(event: any): void;
-        protected handleUp(event: any): void;
-    }
-}
-/**
- * Babylon Input Controller Alias
- */
-declare const IC: typeof UNITY.InputController;
-
-declare namespace UNITY {
-    class WindowManager {
-        /** Are unversial windows platform services available. */
-        static IsWindows(): boolean;
-        /** Are mobile cordova platform services available. */
-        static IsCordova(): boolean;
-        /** Are web assembly platform services available. */
-        static IsWebAssembly(): boolean;
-        /** Is oculus browser platform agent. */
-        static IsOculusBrowser(): boolean;
-        /** Is samsung browser platform agent. */
-        static IsSamsungBrowser(): boolean;
-        /** Is windows phone platform agent. */
-        static IsWindowsPhone(): boolean;
-        /** Is blackberry web platform agent. */
-        static IsBlackBerry(): boolean;
-        /** Is opera web platform agent. */
-        static IsOperaMini(): boolean;
-        /** Is android web platform agent. */
-        static IsAndroid(): boolean;
-        /** Is web os platform agent. */
-        static IsWebOS(): boolean;
-        /** Is ios web platform agent. */
-        static IsIOS(): boolean;
-        /** Is iphone web platform agent. */
-        static IsIPHONE(): boolean;
-        /** Is ipad web platform agent. */
-        static IsIPAD(): boolean;
-        /** Is ipod web platform agent. */
-        static IsIPOD(): boolean;
-        /** Is internet explorer 11 platform agent. */
-        static IsIE11(): boolean;
-        /** Is mobile web platform agent. */
-        static IsMobile(): boolean;
-        /** Are playstation services available. */
-        static IsPlaystation(): boolean;
-        /** Are xbox console services available. */
-        static IsXboxConsole(): boolean;
-        /** Are xbox live platform services available. */
-        static IsXboxLive(): boolean;
-        /** Is content running in a frame window */
-        static IsFrameWindow(): boolean;
-        /** Open alert message dialog. */
-        static AlertMessage(text: string, title?: string): any;
-        /**  Gets the names query string from page url. */
-        static GetQueryStringParam(name: string, url: string): string;
-        /** Post a safe message to the top browser window */
-        static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
-        /** Store data object of function on the parent game window state. */
-        static SetGameWindowState(name: string, data: any): void;
-        /** Retrieve data object or function from the parent game window state. */
-        static GetGameWindowState<T>(name: string): T;
-        /** Validates the parent game window state. */
-        static IsGameWindowEnabled(): boolean;
-        /** Loads a babylon gltf scene file (game.html) */
-        static LoadSceneFile(sceneFile: string, queryString?: string): void;
-        /** Popup debug layer in window. */
-        static PopupDebug(scene: BABYLON.Scene): void;
-        /** Toggle debug layer on and off. */
-        static ToggleDebug(scene: BABYLON.Scene, embed?: boolean, parent?: HTMLElement): void;
-        private static debugLayerVisible;
-        /** Get an item from window local storage. */
-        static GetLocalStorageItem(key: string): string;
-        /** Set an item to window local storage. */
-        static SetLocalStorageItem(key: string, value: string): void;
-        /** Get an item from window session storage. */
-        static GetSessionStorageItem(key: string): string;
-        /** Set an item to window session storage. */
-        static SetSessionStorageItem(key: string, value: string): void;
-        static GetFilenameFromUrl(url: string): string;
-        static GetUrlParameter(key: string): string;
-        /** Get the system virtual reality local storage setting. */
-        static GetVirtualRealityEnabled(): boolean;
-        /** Set the system virtual reality local storage setting. */
-        static SetVirtualRealityEnabled(enabled: boolean): void;
-        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
-        static SetWindowsLaunchMode(mode?: number): void;
-        /** Quit the Windows Runtime host application. */
-        static QuitWindowsApplication(): void;
-        static PrintToScreen(text: string, color?: string): void;
-        private static PrintElement;
-    }
-}
-/**
- * Babylon Window Manager Alias
- */
-declare const WM: typeof UNITY.WindowManager;
-
-declare namespace UNITY {
-    /**
      * Babylon scene manager class
      * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -3004,6 +1630,7 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _lightmapMap;
     private _reflectionMap;
     private _reflectionCache;
+    private _scriptBundleCache;
     private _assetContainer;
     private _activeMeshes;
     private _parseScene;
@@ -3116,4 +1743,1378 @@ declare class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension 
     constructor(loader: BABYLON.GLTF2.GLTFLoader);
     /** @hidden */
     dispose(): void;
+}
+
+declare namespace UNITY {
+    class InputController {
+        static MOUSE_DAMPENER: number;
+        /** Global gamepad manager */
+        static GamepadManager: BABYLON.GamepadManager;
+        /** Global gamepad connect event handler */
+        static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
+        /** Global gamepad disconnect event handler */
+        static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
+        /** Configure user input state in the scene. */
+        static ConfigureUserInput(scene: BABYLON.Scene, options?: {
+            contextMenu?: boolean;
+            pointerLock?: boolean;
+            preventDefault?: boolean;
+            useCapture?: boolean;
+        }): void;
+        static SetLeftJoystickBuffer(leftStickX: number, leftStickY: number, invertY?: boolean): void;
+        static SetRightJoystickBuffer(rightStickX: number, rightStickY: number, invertY?: boolean): void;
+        /** Disables user input state in the scene. */
+        static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
+        /** Locks user pointer state in the scene. */
+        static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
+        private static PointerLockedFlag;
+        static IsPointerLocked(): boolean;
+        private static LockMousePointerObserver;
+        static IsPointerLockHandled(): boolean;
+        /** Get user input state from the scene. */
+        static GetUserInput(input: UNITY.UserInputAxis, player?: UNITY.PlayerNumber): number;
+        /** Set a keyboard up event handler. */
+        static OnKeyboardUp(callback: (keycode: number) => void): void;
+        /** Set a keyboard down event handler. */
+        static OnKeyboardDown(callback: (keycode: number) => void): void;
+        /** Set a keyboard press event handler. */
+        static OnKeyboardPress(keycode: number, callback: () => void): void;
+        /** Get the specified keyboard input by keycode. */
+        static GetKeyboardInput(keycode: number): boolean;
+        /** Set a pointer up event handler. */
+        static OnPointerUp(callback: (button: number) => void): void;
+        /** Set a pointer down event handler. */
+        static OnPointerDown(callback: (button: number) => void): void;
+        /** Set a pointer press event handler. */
+        static OnPointerPress(button: number, callback: () => void): void;
+        /** Get the specified pointer input by button. */
+        static GetPointerInput(button: number): boolean;
+        /** Is the mouse wheel scrollng this frame. */
+        static IsWheelScrolling(): boolean;
+        /** Set on gamepad button up event handler. */
+        static OnGamepadButtonUp(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad button down event handler. */
+        static OnGamepadButtonDown(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad button press event handler. */
+        static OnGamepadButtonPress(button: number, callback: () => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad input by button. */
+        static GetGamepadButtonInput(button: number, player?: UNITY.PlayerNumber): boolean;
+        /** Set on gamepad direction pad up event handler. */
+        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad direction pad down event handler. */
+        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad direction pad press event handler. */
+        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad direction input by number. */
+        static GetGamepadDirectionInput(direction: number, player?: UNITY.PlayerNumber): boolean;
+        /** Set on gamepad trigger left event handler. */
+        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad trigger right event handler. */
+        static OnGamepadTriggerRight(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad trigger input by number. */
+        static GetGamepadTriggerInput(trigger: number, player?: UNITY.PlayerNumber): number;
+        /** Get the specified gamepad type. */
+        static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
+        /** Get the specified gamepad. */
+        static GetGamepad(player?: UNITY.PlayerNumber): BABYLON.Gamepad;
+        private static input;
+        private static keymap;
+        private static scroll;
+        private static wheel;
+        private static mousex;
+        private static mousey;
+        private static vertical;
+        private static horizontal;
+        private static mousex2;
+        private static mousey2;
+        private static vertical2;
+        private static horizontal2;
+        private static mousex3;
+        private static mousey3;
+        private static vertical3;
+        private static horizontal3;
+        private static mousex4;
+        private static mousey4;
+        private static vertical4;
+        private static horizontal4;
+        private static a_mousex;
+        private static x_scroll;
+        private static x_wheel;
+        private static x_mousex;
+        private static x_mousey;
+        private static x_vertical;
+        private static x_horizontal;
+        private static k_mousex;
+        private static k_mousey;
+        private static k_vertical;
+        private static k_horizontal;
+        private static j_mousex;
+        private static j_mousey;
+        private static j_vertical;
+        private static j_horizontal;
+        private static g_mousex1;
+        private static g_mousey1;
+        private static g_vertical1;
+        private static g_horizontal1;
+        private static g_mousex2;
+        private static g_mousey2;
+        private static g_vertical2;
+        private static g_horizontal2;
+        private static g_mousex3;
+        private static g_mousey3;
+        private static g_vertical3;
+        private static g_horizontal3;
+        private static g_mousex4;
+        private static g_mousey4;
+        private static g_vertical4;
+        private static g_horizontal4;
+        private static mouseButtonPress;
+        private static mouseButtonDown;
+        private static mouseButtonUp;
+        private static keyButtonPress;
+        private static keyButtonDown;
+        private static keyButtonUp;
+        private static previousPosition;
+        private static preventDefault;
+        private static rightHanded;
+        private static gamepad1;
+        private static gamepad1Type;
+        private static gamepad1ButtonPress;
+        private static gamepad1ButtonDown;
+        private static gamepad1ButtonUp;
+        private static gamepad1DpadPress;
+        private static gamepad1DpadDown;
+        private static gamepad1DpadUp;
+        private static gamepad1LeftTrigger;
+        private static gamepad1RightTrigger;
+        private static gamepad2;
+        private static gamepad2Type;
+        private static gamepad2ButtonPress;
+        private static gamepad2ButtonDown;
+        private static gamepad2ButtonUp;
+        private static gamepad2DpadPress;
+        private static gamepad2DpadDown;
+        private static gamepad2DpadUp;
+        private static gamepad2LeftTrigger;
+        private static gamepad2RightTrigger;
+        private static gamepad3;
+        private static gamepad3Type;
+        private static gamepad3ButtonPress;
+        private static gamepad3ButtonDown;
+        private static gamepad3ButtonUp;
+        private static gamepad3DpadPress;
+        private static gamepad3DpadDown;
+        private static gamepad3DpadUp;
+        private static gamepad3LeftTrigger;
+        private static gamepad3RightTrigger;
+        private static gamepad4;
+        private static gamepad4Type;
+        private static gamepad4ButtonPress;
+        private static gamepad4ButtonDown;
+        private static gamepad4ButtonUp;
+        private static gamepad4DpadPress;
+        private static gamepad4DpadDown;
+        private static gamepad4DpadUp;
+        private static gamepad4LeftTrigger;
+        private static gamepad4RightTrigger;
+        private static tickKeyboardInput;
+        private static updateUserInput;
+        private static resetUserInput;
+        private static resetKeyMapHandler;
+        private static inputKeyDownHandler;
+        private static inputKeyUpHandler;
+        private static inputPointerWheelHandler;
+        private static inputPointerDownHandler;
+        private static inputPointerUpHandler;
+        private static inputPointerMoveHandler;
+        private static inputOneButtonDownHandler;
+        private static inputOneButtonUpHandler;
+        private static inputOneXboxDPadDownHandler;
+        private static inputOneShockDPadDownHandler;
+        private static inputOneXboxDPadUpHandler;
+        private static inputOneShockDPadUpHandler;
+        private static inputOneXboxLeftTriggerHandler;
+        private static inputOneXboxRightTriggerHandler;
+        private static inputOneLeftStickHandler;
+        private static inputOneRightStickHandler;
+        private static inputTwoButtonDownHandler;
+        private static inputTwoButtonUpHandler;
+        private static inputTwoXboxDPadDownHandler;
+        private static inputTwoShockDPadDownHandler;
+        private static inputTwoXboxDPadUpHandler;
+        private static inputTwoShockDPadUpHandler;
+        private static inputTwoXboxLeftTriggerHandler;
+        private static inputTwoXboxRightTriggerHandler;
+        private static inputTwoLeftStickHandler;
+        private static inputTwoRightStickHandler;
+        private static inputThreeButtonDownHandler;
+        private static inputThreeButtonUpHandler;
+        private static inputThreeXboxDPadDownHandler;
+        private static inputThreeShockDPadDownHandler;
+        private static inputThreeXboxDPadUpHandler;
+        private static inputThreeShockDPadUpHandler;
+        private static inputThreeXboxLeftTriggerHandler;
+        private static inputThreeXboxRightTriggerHandler;
+        private static inputThreeLeftStickHandler;
+        private static inputThreeRightStickHandler;
+        private static inputFourButtonDownHandler;
+        private static inputFourButtonUpHandler;
+        private static inputFourXboxDPadDownHandler;
+        private static inputFourShockDPadDownHandler;
+        private static inputFourXboxDPadUpHandler;
+        private static inputFourShockDPadUpHandler;
+        private static inputFourXboxLeftTriggerHandler;
+        private static inputFourXboxRightTriggerHandler;
+        private static inputFourLeftStickHandler;
+        private static inputFourRightStickHandler;
+        private static inputManagerGamepadConnected;
+        private static inputManagerGamepadDisconnected;
+    }
+    /**
+     * Touch Joystick Classes (https://www.cssscript.com/touch-joystick-controller/)
+     * @class TouchJoystickHandler - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class TouchJoystickHandler {
+        private active;
+        private touchId;
+        private dragStart;
+        private maxDistance;
+        private deadZone;
+        private xvalue;
+        private yvalue;
+        private stick;
+        getValueX(): number;
+        getValueY(): number;
+        getStickElement(): HTMLElement;
+        constructor(stickid: string, maxdistance: number, deadzone: number);
+        dispose(): void;
+        protected handleDown(event: any): void;
+        protected handleMove(event: any): void;
+        protected handleUp(event: any): void;
+    }
+}
+/**
+ * Babylon Input Controller Alias
+ */
+declare const IC: typeof UNITY.InputController;
+
+declare namespace UNITY {
+    class WindowManager {
+        /** Are unversial windows platform services available. */
+        static IsWindows(): boolean;
+        /** Are mobile cordova platform services available. */
+        static IsCordova(): boolean;
+        /** Are web assembly platform services available. */
+        static IsWebAssembly(): boolean;
+        /** Is oculus browser platform agent. */
+        static IsOculusBrowser(): boolean;
+        /** Is samsung browser platform agent. */
+        static IsSamsungBrowser(): boolean;
+        /** Is windows phone platform agent. */
+        static IsWindowsPhone(): boolean;
+        /** Is blackberry web platform agent. */
+        static IsBlackBerry(): boolean;
+        /** Is opera web platform agent. */
+        static IsOperaMini(): boolean;
+        /** Is android web platform agent. */
+        static IsAndroid(): boolean;
+        /** Is web os platform agent. */
+        static IsWebOS(): boolean;
+        /** Is ios web platform agent. */
+        static IsIOS(): boolean;
+        /** Is iphone web platform agent. */
+        static IsIPHONE(): boolean;
+        /** Is ipad web platform agent. */
+        static IsIPAD(): boolean;
+        /** Is ipod web platform agent. */
+        static IsIPOD(): boolean;
+        /** Is internet explorer 11 platform agent. */
+        static IsIE11(): boolean;
+        /** Is mobile web platform agent. */
+        static IsMobile(): boolean;
+        /** Are playstation services available. */
+        static IsPlaystation(): boolean;
+        /** Are xbox console services available. */
+        static IsXboxConsole(): boolean;
+        /** Are xbox live platform services available. */
+        static IsXboxLive(): boolean;
+        /** Is content running in a frame window */
+        static IsFrameWindow(): boolean;
+        /** Open alert message dialog. */
+        static AlertMessage(text: string, title?: string): any;
+        /**  Gets the names query string from page url. */
+        static GetQueryStringParam(name: string, url: string): string;
+        /** Post a safe message to the top browser window */
+        static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
+        /** Store data object of function on the parent game window state. */
+        static SetGameWindowState(name: string, data: any): void;
+        /** Retrieve data object or function from the parent game window state. */
+        static GetGameWindowState<T>(name: string): T;
+        /** Validates the parent game window state. */
+        static IsGameWindowEnabled(): boolean;
+        /** Loads a babylon gltf scene file (game.html) */
+        static LoadSceneFile(sceneFile: string, queryString?: string): void;
+        /** Popup debug layer in window. */
+        static PopupDebug(scene: BABYLON.Scene): void;
+        /** Toggle debug layer on and off. */
+        static ToggleDebug(scene: BABYLON.Scene, embed?: boolean, parent?: HTMLElement): void;
+        private static debugLayerVisible;
+        /** Get an item from window local storage. */
+        static GetLocalStorageItem(key: string): string;
+        /** Set an item to window local storage. */
+        static SetLocalStorageItem(key: string, value: string): void;
+        /** Get an item from window session storage. */
+        static GetSessionStorageItem(key: string): string;
+        /** Set an item to window session storage. */
+        static SetSessionStorageItem(key: string, value: string): void;
+        static GetFilenameFromUrl(url: string): string;
+        static GetUrlParameter(key: string): string;
+        /** Get the system virtual reality local storage setting. */
+        static GetVirtualRealityEnabled(): boolean;
+        /** Set the system virtual reality local storage setting. */
+        static SetVirtualRealityEnabled(enabled: boolean): void;
+        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
+        static SetWindowsLaunchMode(mode?: number): void;
+        /** Quit the Windows Runtime host application. */
+        static QuitWindowsApplication(): void;
+        static PrintToScreen(text: string, color?: string): void;
+        private static PrintElement;
+    }
+}
+/**
+ * Babylon Window Manager Alias
+ */
+declare const WM: typeof UNITY.WindowManager;
+
+declare namespace UNITY {
+    /**
+     * Babylon animation state pro class (Unity Style Mechanim Animation System)
+     * @class AnimationState - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class AnimationState extends UNITY.ScriptComponent {
+        static FPS: number;
+        static EXIT: string;
+        static TIME: number;
+        static SPEED: number;
+        private _looptime;
+        private _loopblend;
+        private _frametime;
+        private _layercount;
+        private _updatemode;
+        private _hasrootmotion;
+        private _animationplaying;
+        private _initialtargetblending;
+        private _hastransformhierarchy;
+        private _leftfeetbottomheight;
+        private _rightfeetbottomheight;
+        private _runtimecontroller;
+        private _executed;
+        private _awakened;
+        private _initialized;
+        private _checkers;
+        private _source;
+        private _machine;
+        private _animationmode;
+        private _animationrig;
+        private _deltaPosition;
+        private _deltaRotation;
+        private _angularVelocity;
+        private _rootMotionSpeed;
+        private _lastMotionSpeed;
+        private _loopMotionSpeed;
+        private _lastRotateSpeed;
+        private _loopRotateSpeed;
+        private _lastMotionRotation;
+        private _lastMotionPosition;
+        private _positionWeight;
+        private _rootBoneWeight;
+        private _rotationWeight;
+        private _rootQuatWeight;
+        private _rootBoneTransform;
+        private _positionHolder;
+        private _rootBoneHolder;
+        private _rotationHolder;
+        private _rootQuatHolder;
+        private _rootMotionMatrix;
+        private _rootMotionScaling;
+        private _rootMotionRotation;
+        private _rootMotionPosition;
+        private _dirtyMotionMatrix;
+        private _dirtyBlenderMatrix;
+        private _targetPosition;
+        private _targetRotation;
+        private _targetScaling;
+        private _updateMatrix;
+        private _blenderMatrix;
+        private _blendWeights;
+        private _emptyScaling;
+        private _emptyPosition;
+        private _emptyRotation;
+        private _ikFrameEanbled;
+        private _data;
+        private _anims;
+        private _clips;
+        private _timers;
+        private _starts;
+        private _stops;
+        private _numbers;
+        private _booleans;
+        private _triggers;
+        private _parameters;
+        speedRatio: number;
+        delayUpdateUntilReady: boolean;
+        enableAnimation: boolean;
+        applyRootMotion: boolean;
+        awakened(): boolean;
+        initialized(): boolean;
+        hasRootMotion(): boolean;
+        isFirstFrame(): boolean;
+        isLastFrame(): boolean;
+        ikFrameEnabled(): boolean;
+        getAnimationTime(): number;
+        getFrameLoopTime(): boolean;
+        getFrameLoopBlend(): boolean;
+        getAnimationPlaying(): boolean;
+        getRuntimeController(): string;
+        getRootBoneTransform(): BABYLON.TransformNode;
+        getDeltaRootMotionAngle(): number;
+        getDeltaRootMotionSpeed(): number;
+        getDeltaRootMotionPosition(): BABYLON.Vector3;
+        getDeltaRootMotionRotation(): BABYLON.Quaternion;
+        getFixedRootMotionPosition(): BABYLON.Vector3;
+        getFixedRootMotionRotation(): BABYLON.Quaternion;
+        /** Register handler that is triggered when the animation state machine has been awakened */
+        onAnimationAwakeObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the animation state machine has been initialized */
+        onAnimationInitObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the animation ik setup has been triggered */
+        onAnimationIKObservable: BABYLON.Observable<number>;
+        /** Register handler that is triggered when the animation end has been triggered */
+        onAnimationEndObservable: BABYLON.Observable<number>;
+        /** Register handler that is triggered when the animation loop has been triggered */
+        onAnimationLoopObservable: BABYLON.Observable<number>;
+        /** Register handler that is triggered when the animation event has been triggered */
+        onAnimationEventObservable: BABYLON.Observable<IAnimatorEvent>;
+        /** Register handler that is triggered when the animation frame has been updated */
+        onAnimationUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the animation state is going to transition */
+        onAnimationTransitionObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        protected m_zeroVector: BABYLON.Vector3;
+        protected m_defaultGroup: BABYLON.AnimationGroup;
+        protected m_animationTargets: BABYLON.TargetedAnimation[];
+        protected m_rotationIdentity: BABYLON.Quaternion;
+        protected awake(): void;
+        protected update(): void;
+        protected destroy(): void;
+        playDefaultAnimation(transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
+        playAnimation(state: string, transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
+        stopAnimation(animationLayer?: number): boolean;
+        hasBool(name: string): boolean;
+        getBool(name: string): boolean;
+        setBool(name: string, value: boolean): void;
+        hasFloat(name: string): boolean;
+        getFloat(name: string): number;
+        setFloat(name: string, value: number): void;
+        hasInteger(name: string): boolean;
+        getInteger(name: string): number;
+        setInteger(name: string, value: number): void;
+        hasTrigger(name: string): boolean;
+        getTrigger(name: string): boolean;
+        setTrigger(name: string): void;
+        resetTrigger(name: string): void;
+        setSmoothFloat(name: string, targetValue: number, dampTime: number, deltaTime: number): void;
+        setSmoothInteger(name: string, targetValue: number, dampTime: number, deltaTime: number): void;
+        resetSmoothProperty(name: string): void;
+        private getMachineState;
+        private setMachineState;
+        getCurrentState(layer: number): UNITY.MachineState;
+        getDefaultClips(): any[];
+        getDefaultSource(): string;
+        fixAnimationGroup(group: BABYLON.AnimationGroup): string;
+        getAnimationGroup(name: string): BABYLON.AnimationGroup;
+        getAnimationGroups(): BABYLON.AnimationGroup[];
+        setAnimationGroups(groups: BABYLON.AnimationGroup[]): void;
+        private updateAnimationGroups;
+        private awakeStateMachine;
+        private sourceAnimationGroups;
+        private updateStateMachine;
+        private setupSourceAnimationGroups;
+        private destroyStateMachine;
+        private updateAnimationState;
+        private updateAnimationTargets;
+        private updateBlendableTargets;
+        private finalizeAnimationTargets;
+        private checkStateMachine;
+        private checkStateTransitions;
+        private playCurrentAnimationState;
+        private stopCurrentAnimationState;
+        private checkAvatarTransformPath;
+        private filterTargetAvatarMask;
+        private sortWeightedBlendingList;
+        private computeWeightedFrameRatio;
+        private setupTreeBranches;
+        private parseTreeBranches;
+        private parse1DSimpleTreeBranches;
+        private parse2DSimpleDirectionalTreeBranches;
+        private parse2DFreeformDirectionalTreeBranches;
+        private parse2DFreeformCartesianTreeBranches;
+    }
+    class BlendTreeValue {
+        source: UNITY.IBlendTreeChild;
+        motion: string;
+        posX: number;
+        posY: number;
+        weight: number;
+        constructor(config: {
+            source: UNITY.IBlendTreeChild;
+            motion: string;
+            posX?: number;
+            posY?: number;
+            weight?: number;
+        });
+    }
+    class BlendTreeUtils {
+        static ClampValue(num: number, min: number, max: number): number;
+        static GetSignedAngle(a: BABYLON.Vector2, b: BABYLON.Vector2): number;
+        static GetLinearInterpolation(x0: number, y0: number, x1: number, y1: number, x: number): number;
+        static GetRightNeighbourIndex(inputX: number, blendTreeArray: UNITY.BlendTreeValue[]): number;
+    }
+    class BlendTreeSystem {
+        static Calculate1DSimpleBlendTree(inputX: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
+        static Calculate2DFreeformDirectional(inputX: number, inputY: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
+        static Calculate2DFreeformCartesian(inputX: number, inputY: number, blendTreeArray: UNITY.BlendTreeValue[]): void;
+        private static TempVector2_IP;
+        private static TempVector2_POSI;
+        private static TempVector2_POSJ;
+        private static TempVector2_POSIP;
+        private static TempVector2_POSIJ;
+    }
+    class MachineState {
+        hash: number;
+        name: string;
+        tag: string;
+        time: number;
+        type: UNITY.MotionType;
+        rate: number;
+        length: number;
+        layer: string;
+        layerIndex: number;
+        played: number;
+        machine: string;
+        motionid: number;
+        interrupted: boolean;
+        apparentSpeed: number;
+        averageAngularSpeed: number;
+        averageDuration: number;
+        averageSpeed: number[];
+        cycleOffset: number;
+        cycleOffsetParameter: string;
+        cycleOffsetParameterActive: boolean;
+        iKOnFeet: boolean;
+        mirror: boolean;
+        mirrorParameter: string;
+        mirrorParameterActive: boolean;
+        speed: number;
+        speedParameter: string;
+        speedParameterActive: boolean;
+        blendtree: UNITY.IBlendTree;
+        transitions: UNITY.ITransition[];
+        behaviours: UNITY.IBehaviour[];
+        events: UNITY.IAnimatorEvent[];
+        ccurves: UNITY.IUnityCurve[];
+        tcurves: BABYLON.Animation[];
+        constructor();
+    }
+    class TransitionCheck {
+        result: string;
+        offest: number;
+        blending: number;
+        triggered: string[];
+    }
+    class AnimationMixer {
+        influenceBuffer: number;
+        positionBuffer: BABYLON.Vector3;
+        rotationBuffer: BABYLON.Quaternion;
+        scalingBuffer: BABYLON.Vector3;
+        originalMatrix: BABYLON.Matrix;
+        blendingFactor: number;
+        blendingSpeed: number;
+        rootPosition: BABYLON.Vector3;
+        rootRotation: BABYLON.Quaternion;
+    }
+    class BlendingWeights {
+        primary: UNITY.IBlendTreeChild;
+        secondary: UNITY.IBlendTreeChild;
+    }
+    enum MotionType {
+        Clip = 0,
+        Tree = 1
+    }
+    enum ConditionMode {
+        If = 1,
+        IfNot = 2,
+        Greater = 3,
+        Less = 4,
+        Equals = 6,
+        NotEqual = 7
+    }
+    enum InterruptionSource {
+        None = 0,
+        Source = 1,
+        Destination = 2,
+        SourceThenDestination = 3,
+        DestinationThenSource = 4
+    }
+    enum BlendTreeType {
+        Simple1D = 0,
+        SimpleDirectional2D = 1,
+        FreeformDirectional2D = 2,
+        FreeformCartesian2D = 3,
+        Direct = 4,
+        Clip = 5
+    }
+    enum BlendTreePosition {
+        Lower = 0,
+        Upper = 1
+    }
+    enum AnimatorParameterType {
+        Float = 1,
+        Int = 3,
+        Bool = 4,
+        Trigger = 9
+    }
+    interface IAnimatorEvent {
+        id: number;
+        clip: string;
+        time: number;
+        function: string;
+        intParameter: number;
+        floatParameter: number;
+        stringParameter: string;
+        objectIdParameter: string;
+        objectNameParameter: string;
+    }
+    interface IAvatarMask {
+        hash: number;
+        maskName: string;
+        maskType: string;
+        transformCount: number;
+        transformPaths: string[];
+    }
+    interface IAnimationLayer {
+        owner: string;
+        hash: number;
+        name: string;
+        index: number;
+        entry: string;
+        machine: string;
+        iKPass: boolean;
+        avatarMask: UNITY.IAvatarMask;
+        blendingMode: number;
+        defaultWeight: number;
+        syncedLayerIndex: number;
+        syncedLayerAffectsTiming: boolean;
+        animationTime: number;
+        animationNormal: number;
+        animationMaskMap: Map<string, number>;
+        animationFirstRun: boolean;
+        animationEndFrame: boolean;
+        animationLoopFrame: boolean;
+        animationLoopCount: number;
+        animationLoopEvents: any;
+        animationStateMachine: UNITY.MachineState;
+    }
+    interface IAnimationCurve {
+        length: number;
+        preWrapMode: string;
+        postWrapMode: string;
+        keyframes: UNITY.IAnimationKeyframe[];
+    }
+    interface IAnimationKeyframe {
+        time: number;
+        value: number;
+        inTangent: number;
+        outTangent: number;
+        tangentMode: number;
+    }
+    interface IBehaviour {
+        hash: number;
+        name: string;
+        layerIndex: number;
+        properties: any;
+    }
+    interface ITransition {
+        hash: number;
+        anyState: boolean;
+        layerIndex: number;
+        machineLayer: string;
+        machineName: string;
+        canTransitionToSelf: boolean;
+        destination: string;
+        duration: number;
+        exitTime: number;
+        hasExitTime: boolean;
+        fixedDuration: boolean;
+        intSource: UNITY.InterruptionSource;
+        isExit: boolean;
+        mute: boolean;
+        name: string;
+        offset: number;
+        orderedInt: boolean;
+        solo: boolean;
+        conditions: UNITY.ICondition[];
+    }
+    interface ICondition {
+        hash: number;
+        mode: UNITY.ConditionMode;
+        parameter: string;
+        threshold: number;
+    }
+    interface IBlendTree {
+        hash: number;
+        name: string;
+        state: string;
+        children: UNITY.IBlendTreeChild[];
+        layerIndex: number;
+        apparentSpeed: number;
+        averageAngularSpeed: number;
+        averageDuration: number;
+        averageSpeed: number[];
+        blendParameterX: string;
+        blendParameterY: string;
+        blendType: UNITY.BlendTreeType;
+        isAnimatorMotion: boolean;
+        isHumanMotion: boolean;
+        isLooping: boolean;
+        minThreshold: number;
+        maxThreshold: number;
+        useAutomaticThresholds: boolean;
+        valueParameterX: number;
+        valueParameterY: number;
+    }
+    interface IBlendTreeChild {
+        hash: number;
+        layerIndex: number;
+        cycleOffset: number;
+        directBlendParameter: string;
+        apparentSpeed: number;
+        averageAngularSpeed: number;
+        averageDuration: number;
+        averageSpeed: number[];
+        mirror: boolean;
+        type: UNITY.MotionType;
+        motion: string;
+        positionX: number;
+        positionY: number;
+        threshold: number;
+        timescale: number;
+        subtree: UNITY.IBlendTree;
+        weight: number;
+        ratio: number;
+        track: BABYLON.AnimationGroup;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon audio source manager standard class
+     * @class AudioSource - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class AudioSource extends UNITY.ScriptComponent implements UNITY.IAssetPreloader {
+        /** The default volume for the audio source if volume is at max level */
+        static MAX_VOLUME: number;
+        static DEFAULT_LEVEL: number;
+        static DEFAULT_ROLLOFF: number;
+        private _audio;
+        private _name;
+        private _loop;
+        private _mute;
+        private _pitch;
+        private _volume;
+        private _preload;
+        private _playonawake;
+        private _spatialblend;
+        private _preloaderUrl;
+        private _lastmutedvolume;
+        private _priority;
+        private _panstereo;
+        private _mindistance;
+        private _maxdistance;
+        private _rolloffmode;
+        private _reverbzonemix;
+        private _bypasseffects;
+        private _bypassreverbzones;
+        private _bypasslistenereffects;
+        private _initializedReadyInstance;
+        getSoundClip(): BABYLON.Sound;
+        getAudioElement(): HTMLAudioElement;
+        /** Register handler that is triggered when the audio clip is ready */
+        onReadyObservable: BABYLON.Observable<BABYLON.Sound>;
+        protected awake(): void;
+        protected start(): void;
+        protected destroy(): void;
+        protected awakeAudioSource(): void;
+        protected startAudioSource(): void;
+        protected destroyAudioSource(): void;
+        /**
+         * Gets the ready status for track
+         */
+        isReady(): boolean;
+        /**
+         * Gets the playing status for track
+         */
+        isPlaying(): boolean;
+        /**
+         * Gets the paused status for track
+         */
+        isPaused(): boolean;
+        /**
+         * Play the sound track
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         * @param offset (optional) Start the sound at a specific time in seconds
+         * @param length (optional) Sound duration (in seconds)
+         */
+        play(time?: number, offset?: number, length?: number): boolean;
+        private internalPlay;
+        /**
+         * Pause the sound track
+         */
+        pause(): boolean;
+        /**
+         * Stop the sound track
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         */
+        stop(time?: number): boolean;
+        /**
+         * Mute the sound track
+         * @param time (optional) Mute the sound after X seconds. Start immediately (0) by default.
+         */
+        mute(time?: number): boolean;
+        /**
+         * Unmute the sound track
+         * @param time (optional) Unmute the sound after X seconds. Start immediately (0) by default.
+         */
+        unmute(time?: number): boolean;
+        /**
+         * Gets the volume of the track
+         */
+        getVolume(): number;
+        /**
+         * Sets the volume of the track
+         * @param volume Define the new volume of the sound
+         * @param time Define time for gradual change to new volume
+         */
+        setVolume(volume: number, time?: number): boolean;
+        /**
+         * Gets the spatial sound option of the track
+         */
+        getSpatialSound(): boolean;
+        /**
+         * Gets the spatial sound option of the track
+         * @param value Define the value of the spatial sound
+         */
+        setSpatialSound(value: boolean): void;
+        /**
+         * Sets the sound track playback speed
+         * @param rate the audio playback rate
+         */
+        setPlaybackSpeed(rate: number): void;
+        /**
+         * Gets the current time of the track
+         */
+        getCurrentTrackTime(): number;
+        /** Set audio data source */
+        setDataSource(source: string | ArrayBuffer | MediaStream): void;
+        /** Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
+        addPreloaderTasks(assetsManager: UNITY.PreloadAssetsManager): void;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
+     * https://forum.babylonjs.com/u/raggar
+     * @script HavokRaycastVehicle
+     */
+    class HavokRaycastVehicle {
+        chassisBody: BABYLON.PhysicsBody;
+        wheelInfos: UNITY.HavokWheelInfo[];
+        sliding: boolean;
+        world: BABYLON.PhysicsEngine;
+        indexRightAxis: number;
+        indexForwardAxis: number;
+        indexUpAxis: number;
+        smoothFlyingImpulse: number;
+        currentVehicleSpeedKmHour: number;
+        constructor(options: any);
+        addWheel(options: any): number;
+        getNumWheels(): number;
+        getWheelInfo(wheelIndex: number): UNITY.HavokWheelInfo;
+        getSteeringValue(wheelIndex: number): number;
+        setSteeringValue(value: number, wheelIndex: number): void;
+        applyEngineForce(value: number, wheelIndex: number): void;
+        setBrake(brake: number, wheelIndex: number): void;
+        addToWorld(world: BABYLON.PhysicsEngine): void;
+        getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
+        getCurrentSpeedKmHour(): number;
+        updateVehicle(timeStep: number): void;
+        updateSuspension(deltaTime: number): void;
+        removeFromWorld(world: any): void;
+        castRay2(wheel: UNITY.HavokWheelInfo): number;
+        castRay(wheel: UNITY.HavokWheelInfo): number;
+        updateWheelTransformWorld(wheel: UNITY.HavokWheelInfo): void;
+        updateWheelTransform(wheelIndex: number): void;
+        getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
+        updateFriction(timeStep: number): void;
+    }
+    /**
+     * Babylon JavaScript File
+     * @script HavokWheelInfo
+     */
+    class HavokWheelInfo {
+        maxSuspensionTravel: number;
+        customSlidingRotationalSpeed: number;
+        useCustomSlidingRotationalSpeed: number;
+        sliding: boolean;
+        chassisConnectionPointLocal: BABYLON.Vector3;
+        chassisConnectionPointWorld: BABYLON.Vector3;
+        directionLocal: BABYLON.Vector3;
+        directionWorld: BABYLON.Vector3;
+        axleLocal: BABYLON.Vector3;
+        axleWorld: BABYLON.Vector3;
+        suspensionRestLength: number;
+        suspensionMaxLength: number;
+        radius: number;
+        suspensionStiffness: number;
+        dampingCompression: number;
+        dampingRelaxation: number;
+        frictionSlip: number;
+        steering: number;
+        rotation: number;
+        deltaRotation: number;
+        rollInfluence: number;
+        maxSuspensionForce: number;
+        engineForce: number;
+        brake: number;
+        isFrontWheel: boolean;
+        clippedInvContactDotSuspension: number;
+        suspensionRelativeVelocity: number;
+        suspensionForce: number;
+        skidInfo: number;
+        slipInfo: number;
+        suspensionLength: number;
+        sideImpulse: number;
+        forwardImpulse: number;
+        raycastResult: BABYLON.PhysicsRaycastResult;
+        worldTransform: BABYLON.TransformNode;
+        isInContact: boolean;
+        hub: BABYLON.TransformNode;
+        spinner: BABYLON.TransformNode;
+        defaultFriction: number;
+        steeringAngle: number;
+        rotationBoost: number;
+        locked: boolean;
+        constructor(options: any);
+        updateWheel(chassis: any): void;
+    }
+    /**
+     * Babylon JavaScript File
+     * @script HavokVehicleUtilities
+     */
+    class HavokVehicleUtilities {
+        static directions: BABYLON.Vector3[];
+        static calcRollingFriction_vel1: BABYLON.Vector3;
+        static calcRollingFriction_vel2: BABYLON.Vector3;
+        static calcRollingFriction_vel: BABYLON.Vector3;
+        static updateFriction_surfNormalWS_scaled_proj: BABYLON.Vector3;
+        static updateFriction_axle: BABYLON.Vector3[];
+        static updateFriction_forwardWS: BABYLON.Vector3[];
+        static sideFrictionStiffness2: number;
+        static castRay_rayvector: BABYLON.Vector3;
+        static castRay_target: BABYLON.Vector3;
+        static torque: BABYLON.Vector3;
+        static tmpVec1: BABYLON.Vector3;
+        static tmpVec2: BABYLON.Vector3;
+        static tmpVec3: BABYLON.Vector3;
+        static tmpVec4: BABYLON.Vector3;
+        static tmpVec5: BABYLON.Vector3;
+        static tmpVec6: BABYLON.Vector3;
+        static tmpVel2: BABYLON.Vector3;
+        static tmpMat1: BABYLON.Matrix;
+        static velocityAt: (body: BABYLON.PhysicsBody, pos: any, res: any) => any;
+        static bodyPosition: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyLinearVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyAngularVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyTransform: (body: BABYLON.PhysicsBody, res: any) => any;
+        static addImpulseAt: (body: BABYLON.PhysicsBody, impulse: any, point: any) => void;
+        static addForceAt: (body: BABYLON.PhysicsBody, force: any, point: any) => void;
+        static bodyOrientation: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyMass: (body: BABYLON.PhysicsBody) => number;
+        static bodyInvMass: (body: BABYLON.PhysicsBody) => number;
+        static bodyInertiaWorld: (body: BABYLON.PhysicsBody, res: any) => any;
+        static calcRollingFriction(body0: BABYLON.PhysicsBody, body1: BABYLON.PhysicsBody, frictionPosWorld: any, frictionDirectionWorld: any, maxImpulse: any): number;
+        static computeImpulseDenominator_r0: BABYLON.Vector3;
+        static computeImpulseDenominator_c0: BABYLON.Vector3;
+        static computeImpulseDenominator_vec: BABYLON.Vector3;
+        static computeImpulseDenominator_m: BABYLON.Vector3;
+        static computeImpulseDenominator(body: BABYLON.PhysicsBody, pos: any, normal: any): number;
+        static resolveSingleBilateral_vel1: BABYLON.Vector3;
+        static resolveSingleBilateral_vel2: BABYLON.Vector3;
+        static resolveSingleBilateral_vel: BABYLON.Vector3;
+        static resolveSingleBilateral(body1: BABYLON.PhysicsBody, pos1: any, body2: BABYLON.PhysicsBody, pos2: any, normal: any): number;
+        static chassis_velocity_at_contactPoint: BABYLON.Vector3;
+        static relpos: BABYLON.Vector3;
+        static Utilsdefaults: (options: any, defaults: any) => any;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon navigation agent pro class (Unity Style Navigation Agent System)
+     * @class NavigationAgent - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class NavigationAgent extends UNITY.ScriptComponent {
+        private static TARGET_ANGLE_FACTOR;
+        private static ANGULAR_SPEED_RATIO;
+        private type;
+        private speed;
+        private baseOffset;
+        private avoidRadius;
+        private avoidHeight;
+        private acceleration;
+        private areaMask;
+        private autoRepath;
+        private autoBraking;
+        private autoTraverseOffMeshLink;
+        private avoidancePriority;
+        private obstacleAvoidanceType;
+        private distanceToTarget;
+        private teleporting;
+        private moveDirection;
+        private resetPosition;
+        private lastPosition;
+        private distancePosition;
+        private currentPosition;
+        private currentRotation;
+        private currentVelocity;
+        private currentWaypoint;
+        heightOffset: number;
+        angularSpeed: number;
+        updatePosition: boolean;
+        updateRotation: boolean;
+        distanceEpsilon: number;
+        velocityEpsilon: number;
+        offMeshVelocity: number;
+        stoppingDistance: number;
+        isReady(): boolean;
+        isNavigating(): boolean;
+        isTeleporting(): boolean;
+        isOnOffMeshLink(): boolean;
+        getAgentType(): number;
+        getAgentState(): number;
+        getAgentIndex(): number;
+        getAgentOffset(): number;
+        getTargetDistance(): number;
+        getCurrentPosition(): BABYLON.Vector3;
+        getCurrentRotation(): BABYLON.Quaternion;
+        getCurrentVelocity(): BABYLON.Vector3;
+        getAgentParameters(): BABYLON.IAgentParameters;
+        setAgentParameters(parameters: BABYLON.IAgentParameters): void;
+        /** Register handler that is triggered when the agent is ready for navigation */
+        onReadyObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered before the navigation update */
+        onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered after the navigation update */
+        onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the navigation is complete */
+        onNavCompleteObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        protected m_agentState: number;
+        protected m_agentIndex: number;
+        protected m_agentReady: boolean;
+        protected m_agentGhost: BABYLON.TransformNode;
+        protected m_agentParams: BABYLON.IAgentParameters;
+        protected m_agentMovement: BABYLON.Vector3;
+        protected m_agentDirection: BABYLON.Vector3;
+        protected m_agentQuaternion: BABYLON.Quaternion;
+        protected m_agentDestination: BABYLON.Vector3;
+        protected awake(): void;
+        protected update(): void;
+        protected destroy(): void;
+        private awakeNavigationAgent;
+        private updateNavigationAgent;
+        private updateAgentParameters;
+        private destroyNavigationAgent;
+        /** Move agent relative to current position. */
+        move(offset: BABYLON.Vector3, closetPoint?: boolean): void;
+        /** Teleport agent to destination point. */
+        teleport(destination: BABYLON.Vector3, closetPoint?: boolean): void;
+        /** Sets agent current destination point. */
+        setDestination(destination: BABYLON.Vector3, closetPoint?: boolean): void;
+        /** Gets agent current world space velocity. */
+        getAgentVelocity(): BABYLON.Vector3;
+        /** Gets agent current world space velocity. */
+        getAgentVelocityToRef(result: BABYLON.Vector3): void;
+        /** Gets agent current world space position. */
+        getAgentPosition(): BABYLON.Vector3;
+        /** Gets agent current world space position. */
+        getAgentPositionToRef(result: BABYLON.Vector3): void;
+        /** Gets agent current waypoint position. */
+        getAgentWaypoint(): BABYLON.Vector3;
+        /** Gets agent current waypoint position. */
+        getAgentWaypointToRef(result: BABYLON.Vector3): void;
+        /** Cancel current waypoint path navigation. */
+        cancelNavigation(): void;
+    }
+    /**
+     *  Recast Detour Crowd Agent States
+     */
+    enum CrowdAgentState {
+        DT_CROWDAGENT_STATE_INVALID = 0,///< The agent is not in a valid state.
+        DT_CROWDAGENT_STATE_WALKING = 1,///< The agent is traversing a normal navigation mesh polygon.
+        DT_CROWDAGENT_STATE_OFFMESH = 2
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon raycast vehicle pro class (Unity Style Wheeled Vehicle System)
+     * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class RaycastVehicle {
+        private _centerMass;
+        private _chassisMesh;
+        private _tempVectorPos;
+        lockedWheelIndexes: number[];
+        getNumWheels(): number;
+        getWheelInfo(wheel: number): UNITY.HavokWheelInfo;
+        setEngineForce(power: number, wheel: number): void;
+        setBrakingForce(brake: number, wheel: number): void;
+        getWheelTransform(wheel: number): BABYLON.TransformNode;
+        updateWheelTransform(wheel: number): void;
+        getRawCurrentSpeedKph(): number;
+        getRawCurrentSpeedMph(): number;
+        getAbsCurrentSpeedKph(): number;
+        getAbsCurrentSpeedMph(): number;
+        protected m_vehicleColliders: any[];
+        protected m_vehicle: UNITY.HavokRaycastVehicle;
+        protected m_scene: BABYLON.Scene;
+        constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
+        dispose(): void;
+        /** Gets the internal wheel index by id string. */
+        getWheelIndexByID(id: string): number;
+        /** Gets the internal wheel index by name string. */
+        getWheelIndexByName(name: string): number;
+        /** Gets the internal wheel collider information. */
+        getWheelColliderInfo(wheel: number): number;
+        getVisualSteeringAngle(wheel: number): number;
+        setVisualSteeringAngle(angle: number, wheel: number): void;
+        getPhysicsSteeringAngle(wheel: number): number;
+        setPhysicsSteeringAngle(angle: number, wheel: number): void;
+        /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
+        getStabilizingForce(): number;
+        /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
+        setStabilizingForce(force: number): void;
+        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
+        getSmoothFlyingImpulse(): number;
+        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
+        setSmoothFlyingImpulse(impulse: number): void;
+        protected setupWheelInformation(): void;
+        tickVehicleController(step: number): void;
+        updateWheelInformation(): void;
+        protected lockedWheelInformation(wheel: number): boolean;
+        protected deleteWheelInformation(): void;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon full rigidbody physics standard class (Native Havok Physics Engine)
+     * @class RigidbodyPhysics - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class RigidbodyPhysics extends UNITY.ScriptComponent {
+        static PHYSICS_STEP_TIME: number;
+        private _isKinematic;
+        private _centerOfMass;
+        protected m_raycastVehicle: UNITY.RaycastVehicle;
+        protected awake(): void;
+        protected update(): void;
+        protected late(): void;
+        protected destroy(): void;
+        protected awakeRigidbodyState(): void;
+        protected updateRigidbodyState(): void;
+        protected lateRigidbodyState(): void;
+        protected destroyRigidbodyState(): void;
+        /** Checks if rigidbody is kinematic. */
+        isKinematic(): boolean;
+        /** Checks if rigidbody has wheel collider metadata for the entity. Note: Wheel collider metadata informaion is required for vehicle control. */
+        hasWheelColliders(): boolean;
+        /** Get the raycast vehicle component */
+        getRaycastVehicle(): UNITY.RaycastVehicle;
+        /** Get the current havok instance from the global stack */
+        static GetHavokInstance(): any;
+        /** Get the current havok plugin from the global stack */
+        static GetHavokPlugin(): BABYLON.HavokPlugin;
+        /** Perform a physics engine raycast */
+        static RaycastToRef(from: BABYLON.Vector3, to: BABYLON.Vector3, result: BABYLON.PhysicsRaycastResult, query?: BABYLON.IRaycastQuery): void;
+        /** Set the maximum physics velocites */
+        static SetMaxVelocities(maxLinVel: number, maxAngVel: number): void;
+        static PhysicsShapeCache: any;
+        static NewPhysicsShapeCount: number;
+        static CachedPhysicsShapeCount: number;
+        static DebugPhysicsViewer: any;
+        static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
+        static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
+        static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh): void;
+        protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
+        protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, meshkey: string, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeConvexHull;
+        protected static GetCachedPhysicsBoxShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeBox;
+        protected static GetCachedPhysicsSphereShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeSphere;
+        protected static GetCachedPhysicsCapsuleShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCapsule;
+        protected static GetCachedPhysicsCylinderShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCylinder;
+        protected static CreateStandardPhysicsShapeAndBody(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, metadata: any, impostortype: number, istrigger: boolean, istruestatic: boolean, motiontype: BABYLON.PhysicsMotionType, mass: number, staticfriction: number, dynamicfriction: number, restitution: number, terraindata: any, com: any, persist: boolean, layer: number, filter: number): void;
+        protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.AbstractMesh, element: any, impostortype: number, dynamicfriction: number, restitution: number, sitems: UNITY.PhyscisContainerData[], item: UNITY.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
+        protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
+        static GetPhysicsHeapSize(): number;
+        static ConfigRigidbodyPhysics(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, child: boolean, trigger: boolean, physics: any, mass: number, com: BABYLON.Vector3): void;
+        static CreatePhysicsMetadata(mass: number, drag?: number, angularDrag?: number, centerMass?: BABYLON.Vector3): any;
+        static CreateCollisionMetadata(type: string, trigger?: boolean, convexmesh?: boolean, restitution?: number, dynamicfriction?: number, staticfriction?: number): any;
+        static CreatePhysicsProperties(mass: number, drag?: number, angularDrag?: number, useGravity?: boolean, isKinematic?: boolean): any;
+        /**
+         * Utility to add a child shape to the specified container,
+         * automatically computing the relative transform between
+         * the container shape and the child instance.
+         *
+         * @param containerShape The specified physics shape container
+         * @param parentTransform The transform node associated with the shape
+         * @param newChild The new PhysicsShape to add
+         * @param childTransform The transform node associated with the child shape
+         */
+        protected static AddChildShapeFromParent(containerShape: BABYLON.PhysicsShape, parentTransform: BABYLON.TransformNode, newChild: BABYLON.PhysicsShape, childTransform: BABYLON.TransformNode): void;
+    }
+    class PhyscisContainerData {
+        shape: BABYLON.PhysicsShape;
+        translation: BABYLON.Vector3;
+        rotation: BABYLON.Quaternion;
+        scale: BABYLON.Vector3;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon shuriken particle system pro class (Unity Style Shuriken Particle System)
+     * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShurikenParticles extends UNITY.ScriptComponent {
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected destroy(): void;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon terrain generator pro class (Unity Terrain Builder System)
+     * @class TerrainGenerator - All rights reserved (c) 2024 Mackey Kinard
+    */
+    class TerrainGenerator extends UNITY.ScriptComponent {
+        protected awake(): void;
+        protected start(): void;
+        protected fixed(): void;
+        protected update(): void;
+        protected late(): void;
+        protected after(): void;
+        protected ready(): void;
+        protected destroy(): void;
+    }
+}
+
+declare namespace UNITY {
+    /**
+     * Babylon web video player standard class (Unity Style Shuriken Particle System)
+     * @class WebVideoPlayer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class WebVideoPlayer extends UNITY.ScriptComponent implements UNITY.IAssetPreloader {
+        private videoLoop;
+        private videoMuted;
+        private videoAlpha;
+        private videoFaded;
+        private videoPoster;
+        private videoInvert;
+        private videoSample;
+        private videoVolume;
+        private videoMipmaps;
+        private videoPlayback;
+        private videoPlayOnAwake;
+        private videoPreloaderUrl;
+        private videoBlobUrl;
+        private videoPreload;
+        private _initializedReadyInstance;
+        getVideoMaterial(): BABYLON.StandardMaterial;
+        getVideoTexture(): BABYLON.VideoTexture;
+        getVideoElement(): HTMLVideoElement;
+        getVideoScreen(): BABYLON.AbstractMesh;
+        getVideoBlobUrl(): string;
+        /** Register handler that is triggered when the video clip is ready */
+        onReadyObservable: BABYLON.Observable<BABYLON.VideoTexture>;
+        protected m_abstractMesh: BABYLON.AbstractMesh;
+        protected m_videoTexture: BABYLON.VideoTexture;
+        protected m_videoMaterial: BABYLON.StandardMaterial;
+        protected m_diffuseIntensity: number;
+        protected awake(): void;
+        protected destroy(): void;
+        protected awakeWebVideoPlayer(): void;
+        protected destroyWebVideoPlayer(): void;
+        /**
+         * Gets the video ready status
+         */
+        isReady(): boolean;
+        /**
+         * Gets the video playing status
+         */
+        isPlaying(): boolean;
+        /**
+         * Gets the video paused status
+         */
+        isPaused(): boolean;
+        /**
+         * Play the video track
+         */
+        play(): boolean;
+        private internalPlay;
+        private checkedPlay;
+        private checkedRePlay;
+        /**
+         * Pause the video track
+         */
+        pause(): boolean;
+        /**
+         * Mute the video track
+         */
+        mute(): boolean;
+        /**
+         * Unmute the video track
+         */
+        unmute(): boolean;
+        /**
+         * Gets the video volume
+         */
+        getVolume(): number;
+        /**
+         * Sets the video volume
+         * @param volume Define the new volume of the sound
+         */
+        setVolume(volume: number): boolean;
+        /** Set video data source */
+        setDataSource(source: string | string[] | HTMLVideoElement): void;
+        /** Revokes the current video blob url and releases resouces */
+        revokeVideoBlobUrl(): void;
+        /** Add video preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
+        addPreloaderTasks(assetsManager: UNITY.PreloadAssetsManager): void;
+    }
 }
