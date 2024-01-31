@@ -2040,6 +2040,7 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _processShaderMaterials;
     private preProcessSceneProperties;
     private postProcessSceneProperties;
+    private _preloadScriptBundleAsync;
     private _preloadRawMaterialsAsync;
     private _parseMultiMaterialAsync;
     private _parseNodeMaterialPropertiesAsync;
