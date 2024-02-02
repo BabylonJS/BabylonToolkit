@@ -83,11 +83,26 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
-        /** Initialize the unity toolkit playground environment */
+        /**
+         * Initialize the unity toolkit playground environment
+         * Documentation : https://doc.babylonjs.com/communityExtensions/Unity
+         * @param engine The engine instance.
+         * @param showLoadingScreen Show the engine loading screen. Default false.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. You can set to false and manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         */
         static InitializePlayground(engine: BABYLON.Engine, showLoadingScreen?: boolean, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /** Show default loading screen panel */
+        /**
+         * Show default loading screen panel
+         * @param engine The engine instance.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. You can set to false and manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         */
         static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /** Hide default loading screen panel */
+        /**
+         * Show default loading screen panel
+         * @param engine The engine instance.
+         */
         static HideLoadingScreen(engine: BABYLON.Engine): void;
         private static SceneParsingEnabled;
         /** Enable scene loader parsing plugin */
@@ -257,9 +272,17 @@ declare namespace UNITY {
         static CloneAbstractMesh(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.AbstractMesh;
         /** Creates an instance of the specified mesh asset into the scene. (Mesh Instance) */
         static CreateInstancedMesh(container: BABYLON.AssetContainer, meshName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.InstancedMesh;
-        /** Registers a script componment with the scene manager. */
-        static RegisterScriptComponent(instance: UNITY.ScriptComponent, alias: string, validate?: boolean): void;
-        /** Destroys a script component instance. */
+        /**
+         * Attach a script componment instance to the scene manager
+         * @param instance an instance of a UNITY.ScriptComponent class
+         * @param alias the full class name alias. Example PROJECT.MyCustomComponent
+         * @param validate validate the instance klass on next frame. Default true.
+         */
+        static AttachScriptComponent(instance: UNITY.ScriptComponent, alias: string, validate?: boolean): void;
+        /**
+         * Destroy a script componment instance
+         * @param instance an instance of a UNITY.ScriptComponent class
+         */
         static DestroyScriptComponent(instance: UNITY.ScriptComponent): void;
         /** Finds a script component on the transform with the specfied class name. */
         static FindScriptComponent<T extends UNITY.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T;
