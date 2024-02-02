@@ -84,9 +84,9 @@ declare namespace UNITY {
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
         /** Initialize the unity toolkit playground environment */
-        static InitializePlayground(engine: BABYLON.Engine, showLoadingScreen?: boolean, hideLoadingUIWithEngine?: boolean): void;
+        static InitializePlayground(engine: BABYLON.Engine, showLoadingScreen?: boolean, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
         /** Show default loading screen panel */
-        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean): void;
+        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
         /** Hide default loading screen panel */
         static HideLoadingScreen(engine: BABYLON.Engine): void;
         private static SceneParsingEnabled;
