@@ -61,10 +61,6 @@ declare namespace UNITY {
         static ParseScriptComponents: boolean;
         /** Set the auto load script bundles flag */
         static AutoLoadScriptBundles: boolean;
-        /** Set the playground loading div inner html markup */
-        static PlaygroundLoadingDivText: string;
-        /** Set the playground loading div inner style markup */
-        static PlaygroundLoadingDivStyle: string;
         /** Gets the running status of the default audio context */
         static HasAudioContext(): boolean;
         /** Returns a Promise that resolves after the specfied time */
@@ -83,6 +79,11 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        /** Gets the babylon toolkit playground repo address
+         * Contains interactive exported unity demo asset files (gltf/glb/js)
+         * @address https://www.babylontoolkit.com/playground/
+         */
+        static get PlaygroundRepo(): string;
         /**
          * Initialize the unity toolkit playground environment
          * Documentation : https://doc.babylonjs.com/communityExtensions/Unity
@@ -2100,13 +2101,13 @@ declare namespace UNITY {
         static GetQueryStringParam(name: string, url: string): string;
         /** Post a safe message to the top browser window */
         static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
-        /** Store data object of function on the parent game window state. */
+        /** Store data object of function on the parent scene viewer game window state. */
         static SetGameWindowState(name: string, data: any): void;
-        /** Retrieve data object or function from the parent game window state. */
+        /** Retrieve data object or function from the parent scene viewer game window state. */
         static GetGameWindowState<T>(name: string): T;
-        /** Validates the parent game window state. */
+        /** Validates the parent scene viewer game window state. */
         static IsGameWindowEnabled(): boolean;
-        /** Loads a babylon gltf scene file (game.html) */
+        /** Loads a babylon toolkit gltf file into the scene viewer game window (index.html) */
         static LoadSceneFile(sceneFile: string, queryString?: string): void;
         /** Popup debug layer in window. */
         static PopupDebug(scene: BABYLON.Scene): void;
