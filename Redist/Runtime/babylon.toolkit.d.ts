@@ -1705,6 +1705,8 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     onReady(): void;
     /** @hidden */
     onComplete(): void;
+    getScriptBundleTag(): string;
+    getScriptBundleUrl(): string;
     finishComplete(): void;
     /** @hidden */
     onValidate(): void;
@@ -1714,8 +1716,6 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     setupLoader(): void;
     /** @hidden */
     startParsing(): void;
-    getScriptBundleTag(): string;
-    getScriptBundleUrl(): string;
     /** @hidden */
     loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
     private loadSceneExAsync;
