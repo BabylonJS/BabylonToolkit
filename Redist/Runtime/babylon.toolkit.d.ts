@@ -1,345 +1,4 @@
 declare namespace UNITY {
-    class InputController {
-        static MOUSE_DAMPENER: number;
-        /** Global gamepad manager */
-        static GamepadManager: BABYLON.GamepadManager;
-        /** Global gamepad connect event handler */
-        static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
-        /** Global gamepad disconnect event handler */
-        static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
-        /** Configure user input state in the scene. */
-        static ConfigureUserInput(scene: BABYLON.Scene, options?: {
-            contextMenu?: boolean;
-            pointerLock?: boolean;
-            preventDefault?: boolean;
-            useCapture?: boolean;
-        }): void;
-        static SetLeftJoystickBuffer(leftStickX: number, leftStickY: number, invertY?: boolean): void;
-        static SetRightJoystickBuffer(rightStickX: number, rightStickY: number, invertY?: boolean): void;
-        /** Disables user input state in the scene. */
-        static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
-        /** Locks user pointer state in the scene. */
-        static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
-        private static PointerLockedFlag;
-        static IsPointerLocked(): boolean;
-        private static LockMousePointerObserver;
-        static IsPointerLockHandled(): boolean;
-        /** Get user input state from the scene. */
-        static GetUserInput(input: UNITY.UserInputAxis, player?: UNITY.PlayerNumber): number;
-        /** Set a keyboard up event handler. */
-        static OnKeyboardUp(callback: (keycode: number) => void): void;
-        /** Set a keyboard down event handler. */
-        static OnKeyboardDown(callback: (keycode: number) => void): void;
-        /** Set a keyboard press event handler. */
-        static OnKeyboardPress(keycode: number, callback: () => void): void;
-        /** Get the specified keyboard input by keycode. */
-        static GetKeyboardInput(keycode: number): boolean;
-        /** Set a pointer up event handler. */
-        static OnPointerUp(callback: (button: number) => void): void;
-        /** Set a pointer down event handler. */
-        static OnPointerDown(callback: (button: number) => void): void;
-        /** Set a pointer press event handler. */
-        static OnPointerPress(button: number, callback: () => void): void;
-        /** Get the specified pointer input by button. */
-        static GetPointerInput(button: number): boolean;
-        /** Is the mouse wheel scrollng this frame. */
-        static IsWheelScrolling(): boolean;
-        /** Set on gamepad button up event handler. */
-        static OnGamepadButtonUp(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad button down event handler. */
-        static OnGamepadButtonDown(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad button press event handler. */
-        static OnGamepadButtonPress(button: number, callback: () => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad input by button. */
-        static GetGamepadButtonInput(button: number, player?: UNITY.PlayerNumber): boolean;
-        /** Set on gamepad direction pad up event handler. */
-        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad direction pad down event handler. */
-        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad direction pad press event handler. */
-        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad direction input by number. */
-        static GetGamepadDirectionInput(direction: number, player?: UNITY.PlayerNumber): boolean;
-        /** Set on gamepad trigger left event handler. */
-        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Set on gamepad trigger right event handler. */
-        static OnGamepadTriggerRight(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
-        /** Get the specified gamepad trigger input by number. */
-        static GetGamepadTriggerInput(trigger: number, player?: UNITY.PlayerNumber): number;
-        /** Get the specified gamepad type. */
-        static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
-        /** Get the specified gamepad. */
-        static GetGamepad(player?: UNITY.PlayerNumber): BABYLON.Gamepad;
-        private static input;
-        private static keymap;
-        private static scroll;
-        private static wheel;
-        private static mousex;
-        private static mousey;
-        private static vertical;
-        private static horizontal;
-        private static mousex2;
-        private static mousey2;
-        private static vertical2;
-        private static horizontal2;
-        private static mousex3;
-        private static mousey3;
-        private static vertical3;
-        private static horizontal3;
-        private static mousex4;
-        private static mousey4;
-        private static vertical4;
-        private static horizontal4;
-        private static a_mousex;
-        private static x_scroll;
-        private static x_wheel;
-        private static x_mousex;
-        private static x_mousey;
-        private static x_vertical;
-        private static x_horizontal;
-        private static k_mousex;
-        private static k_mousey;
-        private static k_vertical;
-        private static k_horizontal;
-        private static j_mousex;
-        private static j_mousey;
-        private static j_vertical;
-        private static j_horizontal;
-        private static g_mousex1;
-        private static g_mousey1;
-        private static g_vertical1;
-        private static g_horizontal1;
-        private static g_mousex2;
-        private static g_mousey2;
-        private static g_vertical2;
-        private static g_horizontal2;
-        private static g_mousex3;
-        private static g_mousey3;
-        private static g_vertical3;
-        private static g_horizontal3;
-        private static g_mousex4;
-        private static g_mousey4;
-        private static g_vertical4;
-        private static g_horizontal4;
-        private static mouseButtonPress;
-        private static mouseButtonDown;
-        private static mouseButtonUp;
-        private static keyButtonPress;
-        private static keyButtonDown;
-        private static keyButtonUp;
-        private static previousPosition;
-        private static preventDefault;
-        private static rightHanded;
-        private static gamepad1;
-        private static gamepad1Type;
-        private static gamepad1ButtonPress;
-        private static gamepad1ButtonDown;
-        private static gamepad1ButtonUp;
-        private static gamepad1DpadPress;
-        private static gamepad1DpadDown;
-        private static gamepad1DpadUp;
-        private static gamepad1LeftTrigger;
-        private static gamepad1RightTrigger;
-        private static gamepad2;
-        private static gamepad2Type;
-        private static gamepad2ButtonPress;
-        private static gamepad2ButtonDown;
-        private static gamepad2ButtonUp;
-        private static gamepad2DpadPress;
-        private static gamepad2DpadDown;
-        private static gamepad2DpadUp;
-        private static gamepad2LeftTrigger;
-        private static gamepad2RightTrigger;
-        private static gamepad3;
-        private static gamepad3Type;
-        private static gamepad3ButtonPress;
-        private static gamepad3ButtonDown;
-        private static gamepad3ButtonUp;
-        private static gamepad3DpadPress;
-        private static gamepad3DpadDown;
-        private static gamepad3DpadUp;
-        private static gamepad3LeftTrigger;
-        private static gamepad3RightTrigger;
-        private static gamepad4;
-        private static gamepad4Type;
-        private static gamepad4ButtonPress;
-        private static gamepad4ButtonDown;
-        private static gamepad4ButtonUp;
-        private static gamepad4DpadPress;
-        private static gamepad4DpadDown;
-        private static gamepad4DpadUp;
-        private static gamepad4LeftTrigger;
-        private static gamepad4RightTrigger;
-        private static tickKeyboardInput;
-        private static updateUserInput;
-        private static resetUserInput;
-        private static resetKeyMapHandler;
-        private static inputKeyDownHandler;
-        private static inputKeyUpHandler;
-        private static inputPointerWheelHandler;
-        private static inputPointerDownHandler;
-        private static inputPointerUpHandler;
-        private static inputPointerMoveHandler;
-        private static inputOneButtonDownHandler;
-        private static inputOneButtonUpHandler;
-        private static inputOneXboxDPadDownHandler;
-        private static inputOneShockDPadDownHandler;
-        private static inputOneXboxDPadUpHandler;
-        private static inputOneShockDPadUpHandler;
-        private static inputOneXboxLeftTriggerHandler;
-        private static inputOneXboxRightTriggerHandler;
-        private static inputOneLeftStickHandler;
-        private static inputOneRightStickHandler;
-        private static inputTwoButtonDownHandler;
-        private static inputTwoButtonUpHandler;
-        private static inputTwoXboxDPadDownHandler;
-        private static inputTwoShockDPadDownHandler;
-        private static inputTwoXboxDPadUpHandler;
-        private static inputTwoShockDPadUpHandler;
-        private static inputTwoXboxLeftTriggerHandler;
-        private static inputTwoXboxRightTriggerHandler;
-        private static inputTwoLeftStickHandler;
-        private static inputTwoRightStickHandler;
-        private static inputThreeButtonDownHandler;
-        private static inputThreeButtonUpHandler;
-        private static inputThreeXboxDPadDownHandler;
-        private static inputThreeShockDPadDownHandler;
-        private static inputThreeXboxDPadUpHandler;
-        private static inputThreeShockDPadUpHandler;
-        private static inputThreeXboxLeftTriggerHandler;
-        private static inputThreeXboxRightTriggerHandler;
-        private static inputThreeLeftStickHandler;
-        private static inputThreeRightStickHandler;
-        private static inputFourButtonDownHandler;
-        private static inputFourButtonUpHandler;
-        private static inputFourXboxDPadDownHandler;
-        private static inputFourShockDPadDownHandler;
-        private static inputFourXboxDPadUpHandler;
-        private static inputFourShockDPadUpHandler;
-        private static inputFourXboxLeftTriggerHandler;
-        private static inputFourXboxRightTriggerHandler;
-        private static inputFourLeftStickHandler;
-        private static inputFourRightStickHandler;
-        private static inputManagerGamepadConnected;
-        private static inputManagerGamepadDisconnected;
-    }
-    /**
-     * Touch Joystick Classes (https://www.cssscript.com/touch-joystick-controller/)
-     * @class TouchJoystickHandler - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class TouchJoystickHandler {
-        private active;
-        private touchId;
-        private dragStart;
-        private maxDistance;
-        private deadZone;
-        private xvalue;
-        private yvalue;
-        private stick;
-        getValueX(): number;
-        getValueY(): number;
-        getStickElement(): HTMLElement;
-        constructor(stickid: string, maxdistance: number, deadzone: number);
-        dispose(): void;
-        protected handleDown(event: any): void;
-        protected handleMove(event: any): void;
-        protected handleUp(event: any): void;
-    }
-}
-/**
- * Babylon Input Controller Alias
- */
-declare const IC: typeof UNITY.InputController;
-
-declare namespace UNITY {
-    class WindowManager {
-        /** Are unversial windows platform services available. */
-        static IsWindows(): boolean;
-        /** Are mobile cordova platform services available. */
-        static IsCordova(): boolean;
-        /** Are web assembly platform services available. */
-        static IsWebAssembly(): boolean;
-        /** Is oculus browser platform agent. */
-        static IsOculusBrowser(): boolean;
-        /** Is samsung browser platform agent. */
-        static IsSamsungBrowser(): boolean;
-        /** Is windows phone platform agent. */
-        static IsWindowsPhone(): boolean;
-        /** Is blackberry web platform agent. */
-        static IsBlackBerry(): boolean;
-        /** Is opera web platform agent. */
-        static IsOperaMini(): boolean;
-        /** Is android web platform agent. */
-        static IsAndroid(): boolean;
-        /** Is web os platform agent. */
-        static IsWebOS(): boolean;
-        /** Is ios web platform agent. */
-        static IsIOS(): boolean;
-        /** Is iphone web platform agent. */
-        static IsIPHONE(): boolean;
-        /** Is ipad web platform agent. */
-        static IsIPAD(): boolean;
-        /** Is ipod web platform agent. */
-        static IsIPOD(): boolean;
-        /** Is internet explorer 11 platform agent. */
-        static IsIE11(): boolean;
-        /** Is mobile web platform agent. */
-        static IsMobile(): boolean;
-        /** Are playstation services available. */
-        static IsPlaystation(): boolean;
-        /** Are xbox console services available. */
-        static IsXboxConsole(): boolean;
-        /** Are xbox live platform services available. */
-        static IsXboxLive(): boolean;
-        /** Is content running in a frame window */
-        static IsFrameWindow(): boolean;
-        /** Open alert message dialog. */
-        static AlertMessage(text: string, title?: string): any;
-        /**  Gets the names query string from page url. */
-        static GetQueryStringParam(name: string, url: string): string;
-        /** Post a safe message to the top browser window */
-        static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
-        /** Store data object of function on the parent scene viewer game window state. */
-        static SetGameWindowState(name: string, data: any): void;
-        /** Retrieve data object or function from the parent scene viewer game window state. */
-        static GetGameWindowState<T>(name: string): T;
-        /** Validates the parent scene viewer game window state. */
-        static IsGameWindowEnabled(): boolean;
-        /** Loads a babylon toolkit gltf file into the scene viewer game window (index.html) */
-        static LoadSceneFile(sceneFile: string, queryString?: string): void;
-        /** Popup debug layer in window. */
-        static PopupDebug(scene: BABYLON.Scene): void;
-        /** Toggle debug layer on and off. */
-        static ToggleDebug(scene: BABYLON.Scene, embed?: boolean, parent?: HTMLElement): void;
-        private static debugLayerVisible;
-        /** Get an item from window local storage. */
-        static GetLocalStorageItem(key: string): string;
-        /** Set an item to window local storage. */
-        static SetLocalStorageItem(key: string, value: string): void;
-        /** Get an item from window session storage. */
-        static GetSessionStorageItem(key: string): string;
-        /** Set an item to window session storage. */
-        static SetSessionStorageItem(key: string, value: string): void;
-        static GetFilenameFromUrl(url: string): string;
-        static GetUrlParameter(key: string): string;
-        /** Get the system virtual reality local storage setting. */
-        static GetVirtualRealityEnabled(): boolean;
-        /** Set the system virtual reality local storage setting. */
-        static SetVirtualRealityEnabled(enabled: boolean): void;
-        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
-        static SetWindowsLaunchMode(mode?: number): void;
-        /** Quit the Windows Runtime host application. */
-        static QuitWindowsApplication(): void;
-        static PrintToScreen(text: string, color?: string): void;
-        private static PrintElement;
-    }
-}
-/**
- * Babylon Window Manager Alias
- */
-declare const WM: typeof UNITY.WindowManager;
-
-declare namespace UNITY {
     /**
      * Babylon scene manager class
      * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
@@ -351,9 +10,8 @@ declare namespace UNITY {
         static get Copyright(): string;
         /** Set global window state */
         static WindowState: any;
-        /** Set global window options */
+        /** Set global system options */
         static GlobalOptions: any;
-        /** Defines the local player avatar url */
         /** Default network game server endpoint (without slash suffix) */
         static ServerEndPoint: string;
         /** Set the allow debug mode flag */
@@ -420,13 +78,13 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
-        /** Gets the babylon toolkit playground repo address
+        /** Gets the babylon toolkit for unity playground repo address
          * Contains interactive exported unity demo asset files (gltf/glb/js)
          * @address https://www.babylontoolkit.com/playground/
          */
         static get PlaygroundRepo(): string;
         /**
-         * Initialize the unity toolkit playground environment
+         * Initialize the babylon toolkit for unity playground environment
          * Documentation : https://doc.babylonjs.com/communityExtensions/Unity
          * @param engine The engine instance.
          * @param showLoadingScreen Show the engine loading screen. Default false.
@@ -434,18 +92,6 @@ declare namespace UNITY {
          * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
          */
         static InitializePlayground(engine: BABYLON.Engine, showLoadingScreen?: boolean, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /**
-         * Show default loading screen panel
-         * @param engine The engine instance.
-         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. You can set to false and manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
-         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
-         */
-        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /**
-         * Show default loading screen panel
-         * @param engine The engine instance.
-         */
-        static HideLoadingScreen(engine: BABYLON.Engine): void;
         /**
          * Load a project script bundle (identified by an url). When the url returns, the
          * content of the project script bundle is added into a new script element, attached to the DOM (body element)
@@ -495,28 +141,6 @@ declare namespace UNITY {
         static LogWarning(warning: string): void;
         /** Logs a error to the console using babylon logging system. */
         static LogError(error: string): void;
-        /** Shows the default page scene loader. */
-        static ShowSceneLoader(): void;
-        /** Hides the default page scene loader. */
-        static HideSceneLoader(): void;
-        /** Update the default page scene loader full status. */
-        static UpdateLoaderStatus(status: string, details: string, state: number): void;
-        /** Update the default page scene loader details only. */
-        static UpdateLoaderDetails(details: string, state: number): void;
-        /** Update the default page scene loader progress only. */
-        static UpdateLoaderProgress(progress: string, state: number): void;
-        /** Show the default page error message. */
-        static ShowPageErrorMessage(message: string, title?: string, timeout?: number): void;
-        /** Delays a function call using browser window timeout. Returns a handle object (Milliseconds) */
-        static SetTimeout(timeout: number, func: () => void): number;
-        /** Clears browser window timeout delay with handle to cancel pending timeout call */
-        static ClearTimeout(handle: number): void;
-        /** Repeats a function call using browser window interval. Retuns a handle object (Milliseconds) */
-        static SetInterval(interval: number, func: () => void): number;
-        /** Clears browser window interval with handle to clear pending interval call. */
-        static ClearInterval(handle: number): void;
-        /** Get system time in milleseconds */
-        private static GetTimeMilliseconds;
         /** Get the current time in seconds */
         static GetTime(): number;
         /** Get the current time in milliseconds */
@@ -634,9 +258,9 @@ declare namespace UNITY {
          */
         static DestroyScriptComponent(instance: UNITY.ScriptComponent): void;
         /** Finds a script component on the transform with the specfied class name. */
-        static FindScriptComponent<T extends UNITY.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T;
+        static FindScriptComponent<T extends UNITY.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
         /** Finds all script components on the transform with the specfied class name. */
-        static FindAllScriptComponents<T extends UNITY.ScriptComponent>(transform: BABYLON.TransformNode, klass: string): T[];
+        static FindAllScriptComponents<T extends UNITY.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
         /** Finds the transform object metedata in the scene. */
         static FindSceneMetadata(transform: BABYLON.TransformNode): any;
         /** Finds the specfied camera rig in the scene. */
@@ -804,9 +428,9 @@ declare namespace UNITY {
         /** Get the transform object metedata in the scene. */
         getMetadata(): any;
         /** Get a script component on the transform with the specfied class name. */
-        getComponent<T extends UNITY.ScriptComponent>(klass: string): T;
+        getComponent<T extends UNITY.ScriptComponent>(klass: string, recursive?: boolean): T;
         /** Get all script components on the transform with the specfied class name. */
-        getComponents<T extends UNITY.ScriptComponent>(klass: string): T[];
+        getComponents<T extends UNITY.ScriptComponent>(klass: string, recursive?: boolean): T[];
         /** Gets the attached transform light rig */
         getLightRig(): BABYLON.Light;
         /** Gets the attached transform camera rig */
@@ -2149,6 +1773,385 @@ declare class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension 
 }
 
 declare namespace UNITY {
+    class InputController {
+        static MOUSE_DAMPENER: number;
+        /** Global gamepad manager */
+        static GamepadManager: BABYLON.GamepadManager;
+        /** Global gamepad connect event handler */
+        static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
+        /** Global gamepad disconnect event handler */
+        static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
+        /** Configure user input state in the scene. */
+        static ConfigureUserInput(scene: BABYLON.Scene, options?: {
+            contextMenu?: boolean;
+            pointerLock?: boolean;
+            preventDefault?: boolean;
+            useCapture?: boolean;
+        }): void;
+        static SetLeftJoystickBuffer(leftStickX: number, leftStickY: number, invertY?: boolean): void;
+        static SetRightJoystickBuffer(rightStickX: number, rightStickY: number, invertY?: boolean): void;
+        /** Disables user input state in the scene. */
+        static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
+        /** Locks user pointer state in the scene. */
+        static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
+        private static PointerLockedFlag;
+        static IsPointerLocked(): boolean;
+        private static LockMousePointerObserver;
+        static IsPointerLockHandled(): boolean;
+        /** Get user input state from the scene. */
+        static GetUserInput(input: UNITY.UserInputAxis, player?: UNITY.PlayerNumber): number;
+        /** Set a keyboard up event handler. */
+        static OnKeyboardUp(callback: (keycode: number) => void): void;
+        /** Set a keyboard down event handler. */
+        static OnKeyboardDown(callback: (keycode: number) => void): void;
+        /** Set a keyboard press event handler. */
+        static OnKeyboardPress(keycode: number, callback: () => void): void;
+        /** Get the specified keyboard input by keycode. */
+        static GetKeyboardInput(keycode: number): boolean;
+        /** Set a pointer up event handler. */
+        static OnPointerUp(callback: (button: number) => void): void;
+        /** Set a pointer down event handler. */
+        static OnPointerDown(callback: (button: number) => void): void;
+        /** Set a pointer press event handler. */
+        static OnPointerPress(button: number, callback: () => void): void;
+        /** Get the specified pointer input by button. */
+        static GetPointerInput(button: number): boolean;
+        /** Is the mouse wheel scrollng this frame. */
+        static IsWheelScrolling(): boolean;
+        /** Set on gamepad button up event handler. */
+        static OnGamepadButtonUp(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad button down event handler. */
+        static OnGamepadButtonDown(callback: (button: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad button press event handler. */
+        static OnGamepadButtonPress(button: number, callback: () => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad input by button. */
+        static GetGamepadButtonInput(button: number, player?: UNITY.PlayerNumber): boolean;
+        /** Set on gamepad direction pad up event handler. */
+        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad direction pad down event handler. */
+        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad direction pad press event handler. */
+        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad direction input by number. */
+        static GetGamepadDirectionInput(direction: number, player?: UNITY.PlayerNumber): boolean;
+        /** Set on gamepad trigger left event handler. */
+        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Set on gamepad trigger right event handler. */
+        static OnGamepadTriggerRight(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
+        /** Get the specified gamepad trigger input by number. */
+        static GetGamepadTriggerInput(trigger: number, player?: UNITY.PlayerNumber): number;
+        /** Get the specified gamepad type. */
+        static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
+        /** Get the specified gamepad. */
+        static GetGamepad(player?: UNITY.PlayerNumber): BABYLON.Gamepad;
+        private static input;
+        private static keymap;
+        private static scroll;
+        private static wheel;
+        private static mousex;
+        private static mousey;
+        private static vertical;
+        private static horizontal;
+        private static mousex2;
+        private static mousey2;
+        private static vertical2;
+        private static horizontal2;
+        private static mousex3;
+        private static mousey3;
+        private static vertical3;
+        private static horizontal3;
+        private static mousex4;
+        private static mousey4;
+        private static vertical4;
+        private static horizontal4;
+        private static a_mousex;
+        private static x_scroll;
+        private static x_wheel;
+        private static x_mousex;
+        private static x_mousey;
+        private static x_vertical;
+        private static x_horizontal;
+        private static k_mousex;
+        private static k_mousey;
+        private static k_vertical;
+        private static k_horizontal;
+        private static j_mousex;
+        private static j_mousey;
+        private static j_vertical;
+        private static j_horizontal;
+        private static g_mousex1;
+        private static g_mousey1;
+        private static g_vertical1;
+        private static g_horizontal1;
+        private static g_mousex2;
+        private static g_mousey2;
+        private static g_vertical2;
+        private static g_horizontal2;
+        private static g_mousex3;
+        private static g_mousey3;
+        private static g_vertical3;
+        private static g_horizontal3;
+        private static g_mousex4;
+        private static g_mousey4;
+        private static g_vertical4;
+        private static g_horizontal4;
+        private static mouseButtonPress;
+        private static mouseButtonDown;
+        private static mouseButtonUp;
+        private static keyButtonPress;
+        private static keyButtonDown;
+        private static keyButtonUp;
+        private static previousPosition;
+        private static preventDefault;
+        private static rightHanded;
+        private static gamepad1;
+        private static gamepad1Type;
+        private static gamepad1ButtonPress;
+        private static gamepad1ButtonDown;
+        private static gamepad1ButtonUp;
+        private static gamepad1DpadPress;
+        private static gamepad1DpadDown;
+        private static gamepad1DpadUp;
+        private static gamepad1LeftTrigger;
+        private static gamepad1RightTrigger;
+        private static gamepad2;
+        private static gamepad2Type;
+        private static gamepad2ButtonPress;
+        private static gamepad2ButtonDown;
+        private static gamepad2ButtonUp;
+        private static gamepad2DpadPress;
+        private static gamepad2DpadDown;
+        private static gamepad2DpadUp;
+        private static gamepad2LeftTrigger;
+        private static gamepad2RightTrigger;
+        private static gamepad3;
+        private static gamepad3Type;
+        private static gamepad3ButtonPress;
+        private static gamepad3ButtonDown;
+        private static gamepad3ButtonUp;
+        private static gamepad3DpadPress;
+        private static gamepad3DpadDown;
+        private static gamepad3DpadUp;
+        private static gamepad3LeftTrigger;
+        private static gamepad3RightTrigger;
+        private static gamepad4;
+        private static gamepad4Type;
+        private static gamepad4ButtonPress;
+        private static gamepad4ButtonDown;
+        private static gamepad4ButtonUp;
+        private static gamepad4DpadPress;
+        private static gamepad4DpadDown;
+        private static gamepad4DpadUp;
+        private static gamepad4LeftTrigger;
+        private static gamepad4RightTrigger;
+        private static tickKeyboardInput;
+        private static updateUserInput;
+        private static resetUserInput;
+        private static resetKeyMapHandler;
+        private static inputKeyDownHandler;
+        private static inputKeyUpHandler;
+        private static inputPointerWheelHandler;
+        private static inputPointerDownHandler;
+        private static inputPointerUpHandler;
+        private static inputPointerMoveHandler;
+        private static inputOneButtonDownHandler;
+        private static inputOneButtonUpHandler;
+        private static inputOneXboxDPadDownHandler;
+        private static inputOneShockDPadDownHandler;
+        private static inputOneXboxDPadUpHandler;
+        private static inputOneShockDPadUpHandler;
+        private static inputOneXboxLeftTriggerHandler;
+        private static inputOneXboxRightTriggerHandler;
+        private static inputOneLeftStickHandler;
+        private static inputOneRightStickHandler;
+        private static inputTwoButtonDownHandler;
+        private static inputTwoButtonUpHandler;
+        private static inputTwoXboxDPadDownHandler;
+        private static inputTwoShockDPadDownHandler;
+        private static inputTwoXboxDPadUpHandler;
+        private static inputTwoShockDPadUpHandler;
+        private static inputTwoXboxLeftTriggerHandler;
+        private static inputTwoXboxRightTriggerHandler;
+        private static inputTwoLeftStickHandler;
+        private static inputTwoRightStickHandler;
+        private static inputThreeButtonDownHandler;
+        private static inputThreeButtonUpHandler;
+        private static inputThreeXboxDPadDownHandler;
+        private static inputThreeShockDPadDownHandler;
+        private static inputThreeXboxDPadUpHandler;
+        private static inputThreeShockDPadUpHandler;
+        private static inputThreeXboxLeftTriggerHandler;
+        private static inputThreeXboxRightTriggerHandler;
+        private static inputThreeLeftStickHandler;
+        private static inputThreeRightStickHandler;
+        private static inputFourButtonDownHandler;
+        private static inputFourButtonUpHandler;
+        private static inputFourXboxDPadDownHandler;
+        private static inputFourShockDPadDownHandler;
+        private static inputFourXboxDPadUpHandler;
+        private static inputFourShockDPadUpHandler;
+        private static inputFourXboxLeftTriggerHandler;
+        private static inputFourXboxRightTriggerHandler;
+        private static inputFourLeftStickHandler;
+        private static inputFourRightStickHandler;
+        private static inputManagerGamepadConnected;
+        private static inputManagerGamepadDisconnected;
+    }
+    /**
+     * Touch Joystick Classes (https://www.cssscript.com/touch-joystick-controller/)
+     * @class TouchJoystickHandler - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class TouchJoystickHandler {
+        private active;
+        private touchId;
+        private dragStart;
+        private maxDistance;
+        private deadZone;
+        private xvalue;
+        private yvalue;
+        private stick;
+        getValueX(): number;
+        getValueY(): number;
+        getStickElement(): HTMLElement;
+        constructor(stickid: string, maxdistance: number, deadzone: number);
+        dispose(): void;
+        protected handleDown(event: any): void;
+        protected handleMove(event: any): void;
+        protected handleUp(event: any): void;
+    }
+}
+/**
+ * Babylon Input Controller Alias
+ */
+declare const IC: typeof UNITY.InputController;
+
+declare namespace UNITY {
+    class WindowManager {
+        /** Are unversial windows platform services available. */
+        static IsWindows(): boolean;
+        /** Are mobile cordova platform services available. */
+        static IsCordova(): boolean;
+        /** Are web assembly platform services available. */
+        static IsWebAssembly(): boolean;
+        /** Is oculus browser platform agent. */
+        static IsOculusBrowser(): boolean;
+        /** Is samsung browser platform agent. */
+        static IsSamsungBrowser(): boolean;
+        /** Is windows phone platform agent. */
+        static IsWindowsPhone(): boolean;
+        /** Is blackberry web platform agent. */
+        static IsBlackBerry(): boolean;
+        /** Is opera web platform agent. */
+        static IsOperaMini(): boolean;
+        /** Is android web platform agent. */
+        static IsAndroid(): boolean;
+        /** Is web os platform agent. */
+        static IsWebOS(): boolean;
+        /** Is ios web platform agent. */
+        static IsIOS(): boolean;
+        /** Is iphone web platform agent. */
+        static IsIPHONE(): boolean;
+        /** Is ipad web platform agent. */
+        static IsIPAD(): boolean;
+        /** Is ipod web platform agent. */
+        static IsIPOD(): boolean;
+        /** Is internet explorer 11 platform agent. */
+        static IsIE11(): boolean;
+        /** Is mobile web platform agent. */
+        static IsMobile(): boolean;
+        /** Are playstation services available. */
+        static IsPlaystation(): boolean;
+        /** Are xbox console services available. */
+        static IsXboxConsole(): boolean;
+        /** Are xbox live platform services available. */
+        static IsXboxLive(): boolean;
+        /** Is content running in a frame window */
+        static IsFrameWindow(): boolean;
+        /** Open alert message dialog. */
+        static AlertMessage(text: string, title?: string): any;
+        /**  Gets the names query string from page url. */
+        static GetQueryStringParam(name: string, url: string): string;
+        /** Get system time in milleseconds */
+        static GetTimeMilliseconds(): number;
+        /** Post a safe message to the top browser window */
+        static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
+        /** Store data object of function on the parent scene viewer game window state. */
+        static SetGameWindowState(name: string, data: any): void;
+        /** Retrieve data object or function from the parent scene viewer game window state. */
+        static GetGameWindowState<T>(name: string): T;
+        /** Validates the parent scene viewer game window state. */
+        static IsGameWindowEnabled(): boolean;
+        /** Loads a babylon toolkit gltf file into the scene viewer game window (index.html) */
+        static LoadSceneFile(sceneFile: string, queryString?: string): void;
+        /**
+         * Show default loading screen panel
+         * @param engine The engine instance.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. You can set to false and manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         */
+        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
+        /**
+         * Hide default loading screen panel
+         * @param engine The engine instance.
+         */
+        static HideLoadingScreen(engine: BABYLON.Engine): void;
+        /** Shows the default page scene loader. */
+        static ShowSceneLoader(): void;
+        /** Hides the default page scene loader. */
+        static HideSceneLoader(): void;
+        /** Update the default page scene loader full status. */
+        static UpdateLoaderStatus(status: string, details: string, state: number): void;
+        /** Update the default page scene loader details only. */
+        static UpdateLoaderDetails(details: string, state: number): void;
+        /** Update the default page scene loader progress only. */
+        static UpdateLoaderProgress(progress: string, state: number): void;
+        /** Show the default page error message. */
+        static ShowPageErrorMessage(message: string, title?: string, timeout?: number): void;
+        /** Delays a function call using browser window timeout. Returns a handle object (Milliseconds) */
+        static SetTimeout(timeout: number, func: () => void): number;
+        /** Clears browser window timeout delay with handle to cancel pending timeout call */
+        static ClearTimeout(handle: number): void;
+        /** Repeats a function call using browser window interval. Retuns a handle object (Milliseconds) */
+        static SetInterval(interval: number, func: () => void): number;
+        /** Clears browser window interval with handle to clear pending interval call. */
+        static ClearInterval(handle: number): void;
+        /** The atob() function decodes a string of data which has been encoded using Base64 encoding. */
+        static Atob(data: string): string;
+        /** The btoa() method creates a Base64-encoded ASCII string from a binary string */
+        static Btoa(data: string): string;
+        /** Popup debug layer in window. */
+        static PopupDebug(scene: BABYLON.Scene): void;
+        /** Toggle debug layer on and off. */
+        static ToggleDebug(scene: BABYLON.Scene, embed?: boolean, parent?: HTMLElement): void;
+        private static debugLayerVisible;
+        /** Get an item from window local storage. */
+        static GetLocalStorageItem(key: string): string;
+        /** Set an item to window local storage. */
+        static SetLocalStorageItem(key: string, value: string): void;
+        /** Get an item from window session storage. */
+        static GetSessionStorageItem(key: string): string;
+        /** Set an item to window session storage. */
+        static SetSessionStorageItem(key: string, value: string): void;
+        static GetFilenameFromUrl(url: string): string;
+        static GetUrlParameter(key: string): string;
+        /** Get the system virtual reality local storage setting. */
+        static GetVirtualRealityEnabled(): boolean;
+        /** Set the system virtual reality local storage setting. */
+        static SetVirtualRealityEnabled(enabled: boolean): void;
+        /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
+        static SetWindowsLaunchMode(mode?: number): void;
+        /** Quit the Windows Runtime host application. */
+        static QuitWindowsApplication(): void;
+        static PrintToScreen(text: string, color?: string): void;
+        private static PrintElement;
+    }
+}
+/**
+ * Babylon Window Manager Alias
+ */
+declare const WM: typeof UNITY.WindowManager;
+
+declare namespace UNITY {
     /**
      * Babylon animation state pro class (Unity Style Mechanim Animation System)
      * @class AnimationState - All rights reserved (c) 2024 Mackey Kinard
@@ -2995,6 +2998,7 @@ declare namespace UNITY {
      */
     class RigidbodyPhysics extends UNITY.ScriptComponent {
         static PHYSICS_STEP_TIME: number;
+        private static RaycastResult;
         private _isKinematic;
         private _centerOfMass;
         protected m_raycastVehicle: UNITY.RaycastVehicle;
@@ -3017,7 +3021,26 @@ declare namespace UNITY {
         /** Get the current havok plugin from the global stack */
         static GetHavokPlugin(): BABYLON.HavokPlugin;
         /** Perform a physics engine raycast */
+        static Raycast(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, query?: BABYLON.IRaycastQuery): BABYLON.PhysicsRaycastResult;
+        /**
+         * Performs a raycast from a given start point to a given end point and stores the result in a given PhysicsRaycastResult object.
+         *
+         * @param from - The start point of the raycast.
+         * @param to - The end point of the raycast.
+         * @param result - The PhysicsRaycastResult object to store the result of the raycast.
+         * @param query - The raycast query options. See [[IRaycastQuery]] for more information.
+         *
+         * Performs a raycast. It takes in two points, from and to, and a PhysicsRaycastResult object to store the result of the raycast.
+         * It then performs the raycast and stores the hit data in the PhysicsRaycastResult object.
+         */
         static RaycastToRef(from: BABYLON.Vector3, to: BABYLON.Vector3, result: BABYLON.PhysicsRaycastResult, query?: BABYLON.IRaycastQuery): void;
+        /**
+         * Given a shape in a specific orientation, cast it from the start to end position specified by the query, and return the first hit.
+         * @param query the query to perform. @see IPhysicsShapeCastQuery
+         * @param inputShapeResult contact point on input shape, in input shape space
+         * @param hitShapeResult contact point on hit shape, in world space
+         */
+        static ShapecastToRef(query: BABYLON.IPhysicsShapeCastQuery, inputShapeResult: BABYLON.ShapeCastResult, hitShapeResult: BABYLON.ShapeCastResult): void;
         /** Set the maximum physics velocites */
         static SetMaxVelocities(maxLinVel: number, maxAngVel: number): void;
         static PhysicsShapeCache: any;
@@ -3087,11 +3110,12 @@ declare namespace UNITY {
     class TerrainGenerator extends UNITY.ScriptComponent {
         protected awake(): void;
         protected start(): void;
-        protected fixed(): void;
+        protected ready(): void;
         protected update(): void;
         protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
         protected after(): void;
-        protected ready(): void;
         protected destroy(): void;
     }
 }
