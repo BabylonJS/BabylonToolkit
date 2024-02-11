@@ -863,7 +863,7 @@ declare namespace PROJECT {
         topSpeedDampener: number;
         lowSpeedSteering: number;
         highSpeedSteering: number;
-        stableGravityFactor: number;
+        gravitationalForce: number;
         smoothFlyingForce: number;
         transmissionRatio: number;
         differentialRatio: number;
@@ -1867,12 +1867,9 @@ declare namespace PROJECT {
         freeLooking: boolean;
         requireSprintButton: boolean;
         gravitationalForce: number;
-        terminalVelocity: number;
         minFallVelocity: number;
+        rigidBodyMass: number;
         airbornTimeout: number;
-        detectionRadius: number;
-        verticalOffset: number;
-        forwardOffset: number;
         maxAngle: number;
         speedFactor: number;
         rootMotion: boolean;
@@ -1963,13 +1960,10 @@ declare namespace PROJECT {
         getHeightContactNormal(): BABYLON.Vector3;
         getHeightContactDistance(): number;
         setGavityForce(gravity: number): void;
-        setFallingSpeed(velocity: number): void;
-        private physicsWorld;
         private abstractMesh;
         private cameraDistance;
         private forwardCamera;
         private avatarRadius;
-        private groundingMesh;
         private groundingObject;
         private groundingCallback;
         private dollyDirection;
@@ -1980,6 +1974,7 @@ declare namespace PROJECT {
         private cameraRightVector;
         private desiredForwardVector;
         private desiredRightVector;
+        private lastRotationQuaternion;
         private scaledCamDirection;
         private scaledMaxDirection;
         private parentNodePosition;
@@ -2233,15 +2228,13 @@ declare namespace PROJECT {
         attachCamera: boolean;
         rotateCamera: boolean;
         mouseWheel: boolean;
+        freeCamera: BABYLON.FreeCamera;
         freeLooking: boolean;
         requireSprintButton: boolean;
         gravitationalForce: number;
-        terminalVelocity: number;
         minFallVelocity: number;
+        rigidBodyMass: number;
         airbornTimeout: number;
-        detectionRadius: number;
-        verticalOffset: number;
-        forwardOffset: number;
         maxAngle: number;
         speedFactor: number;
         rootMotion: boolean;
@@ -2331,13 +2324,10 @@ declare namespace PROJECT {
         getHeightContactNormal(): BABYLON.Vector3;
         getHeightContactDistance(): number;
         setGavityForce(gravity: number): void;
-        setFallingSpeed(velocity: number): void;
-        private physicsWorld;
         private abstractMesh;
         private cameraDistance;
         private forwardCamera;
         private avatarRadius;
-        private groundingMesh;
         private groundingObject;
         private groundingCallback;
         private dollyDirection;
@@ -2348,6 +2338,7 @@ declare namespace PROJECT {
         private cameraRightVector;
         private desiredForwardVector;
         private desiredRightVector;
+        private lastRotationQuaternion;
         private scaledCamDirection;
         private scaledMaxDirection;
         private parentNodePosition;
@@ -2820,48 +2811,56 @@ declare namespace UNITY {
         private _centerOffset;
         private _slopeLimit;
         private _skinWidth;
-        private _stepOffset;
+        private _stepHeight;
         private _capsuleSegments;
         private _minMoveDistance;
-        private _isPhysicsReady;
-        private _maxCollisions;
-        private _createCylinderShape;
         private _movementVelocity;
-        private _tmpPositionBuffer;
-        updatePosition: boolean;
-        syncGhostToTransform: boolean;
-        preCreateCylinderShape(): void;
+        private _currentVelocity;
+        private _jumpingVelocity;
+        private _isGrounded;
+        private _hitColor;
+        private _noHitColor;
+        private _groundRay;
+        private _groundRayHelper;
+        private _groundCollisionNode;
+        protected m_moveDeltaX: number;
+        protected m_moveDeltaZ: number;
         getAvatarRadius(): number;
         getAvatarHeight(): number;
-        getSkinWidth(): number;
-        getStepOffset(): number;
         getCenterOffset(): BABYLON.Vector3;
+        getSkinWidth(): number;
+        getStepHeight(): number;
+        getGroundCollisionNode(): BABYLON.TransformNode;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
-        getVerticalVelocity(): number;
-        getAddedMargin(): number;
-        setAddedMargin(margin: number): void;
-        setMaxJumpHeight(maxJumpHeight: number): void;
-        setFallingSpeed(fallSpeed: number): void;
+        getGravityFactor(): number;
+        setGravityFactor(factor: number): void;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
-        setUpAxis(axis: number): void;
-        getGravity(): number;
-        setGravity(gravity: number): void;
         isGrounded(): boolean;
-        isReady(): boolean;
         canJump(): boolean;
-        syncMovementState(): void;
-        syncTransformToGhostPosition(): void;
-        syncGhostToTransformPosition(): void;
-        setGhostCollisionState(collision: boolean): void;
-        /** Sets the kinematic character position to the specified location. */
+        getVerticalVelocity(): number;
+        /** Register handler that is triggered when the transform position has been updated */
+        onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        protected awake(): void;
+        protected fixed(): void;
+        /** Sets the character position to the specified location. */
         set(x: number, y: number, z: number): void;
-        /** Translates the kinematic character with the specfied velocity. */
+        /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
-        /** Jumps the kinematic chacracter with the specified speed. */
+        /** Jumps the chacracter with the specified speed. */
         jump(speed: number): void;
-        /** Warps the kinematic chacracter to the specified position. */
-        warp(position: BABYLON.Vector3): void;
+        /** Sets the character controller rigidbody mass property */
+        setRigidBodyMass(mass: number): void;
+        /** Set the character controller rigidbody collision type */
+        setCollisionState(collision: boolean): void;
+        /** Update the character controller grounded state */
+        private updateGroundedState;
+        /** Handle character controller slopes and steps */
+        private handleSlopesAndSteps;
+        /** Create character controller physics body */
+        private createPhysicsBodyAndShape;
+        /** Create character controller physics shape */
+        private createPhysicsShapeCapsule;
     }
 }

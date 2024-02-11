@@ -78,6 +78,8 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        /** Loads a new level scene file into the scene viewer (engine.html) */
+        static LoadNewLevel(sceneFile: string, queryString?: string): boolean;
         /** Gets the babylon toolkit for unity playground repo address
          * Contains interactive exported unity demo asset files (gltf/glb/js)
          * @address https://www.babylontoolkit.com/playground/
@@ -2075,14 +2077,6 @@ declare namespace UNITY {
         static GetTimeMilliseconds(): number;
         /** Post a safe message to the top browser window */
         static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
-        /** Store data object of function on the parent scene viewer game window state. */
-        static SetGameWindowState(name: string, data: any): void;
-        /** Retrieve data object or function from the parent scene viewer game window state. */
-        static GetGameWindowState<T>(name: string): T;
-        /** Validates the parent scene viewer game window state. */
-        static IsGameWindowEnabled(): boolean;
-        /** Loads a babylon toolkit gltf file into the scene viewer game window (index.html) */
-        static LoadSceneFile(sceneFile: string, queryString?: string): void;
         /**
          * Show default loading screen panel
          * @param engine The engine instance.
@@ -2709,7 +2703,10 @@ declare namespace UNITY {
         indexRightAxis: number;
         indexForwardAxis: number;
         indexUpAxis: number;
+        minimumWheelContacts: number;
         smoothFlyingImpulse: number;
+        stabilizingForce: number;
+        maxImpulseForce: number;
         currentVehicleSpeedKmHour: number;
         constructor(options: any);
         addWheel(options: any): number;
@@ -2999,6 +2996,8 @@ declare namespace UNITY {
     class RigidbodyPhysics extends UNITY.ScriptComponent {
         static PHYSICS_STEP_TIME: number;
         private static RaycastResult;
+        private static HitShapeResult;
+        private static InputShapeResult;
         private _isKinematic;
         private _centerOfMass;
         protected m_raycastVehicle: UNITY.RaycastVehicle;
@@ -3020,8 +3019,21 @@ declare namespace UNITY {
         static GetHavokInstance(): any;
         /** Get the current havok plugin from the global stack */
         static GetHavokPlugin(): BABYLON.HavokPlugin;
-        /** Perform a physics engine raycast */
+        /**
+         * Performs a raycast from a given start point in the given direction and length and stores the result in a reusable PhysicsRaycastResult object.
+         * @param origin - The start point of the raycast.
+         * @param direction - The direction of the raycast.
+         * @param length - The lenght of the raycast.
+         * @param query - The raycast query options. @see IRaycastQuery
+         * @returns a reused raycast result @see PhysicsRaycastResult
+         */
         static Raycast(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, query?: BABYLON.IRaycastQuery): BABYLON.PhysicsRaycastResult;
+        /**
+         * Performs a shapecast with a specific orientation, cast it from the start to end position specified by the query given and stores the result in a reusable ShapeCastResult objects.
+         * @param query the query to perform. @see IPhysicsShapeCastQuery
+         * @returns a reused shapecast result @see UNITY.IPhysicsShapeCastResult
+         */
+        static Shapecast(query: BABYLON.IPhysicsShapeCastQuery): UNITY.IPhysicsShapeCastResult;
         /**
          * Performs a raycast from a given start point to a given end point and stores the result in a given PhysicsRaycastResult object.
          *
@@ -3081,6 +3093,10 @@ declare namespace UNITY {
         translation: BABYLON.Vector3;
         rotation: BABYLON.Quaternion;
         scale: BABYLON.Vector3;
+    }
+    interface IPhysicsShapeCastResult {
+        input: BABYLON.ShapeCastResult;
+        hit: BABYLON.ShapeCastResult;
     }
 }
 
