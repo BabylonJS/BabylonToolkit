@@ -1908,7 +1908,6 @@ declare namespace PROJECT {
         playerMouseX: number;
         playerMouseY: number;
         runKeyRequired: boolean;
-        ignoreTriggerTags: string;
         buttonRun: number;
         keyboardRun: number;
         buttonJump: number;
@@ -1959,7 +1958,6 @@ declare namespace PROJECT {
         getHeightContactAngle(): number;
         getHeightContactNormal(): BABYLON.Vector3;
         getHeightContactDistance(): number;
-        setGavityForce(gravity: number): void;
         private abstractMesh;
         private cameraDistance;
         private forwardCamera;
@@ -2272,7 +2270,6 @@ declare namespace PROJECT {
         playerMouseX: number;
         playerMouseY: number;
         runKeyRequired: boolean;
-        ignoreTriggerTags: string;
         buttonRun: number;
         keyboardRun: number;
         buttonJump: number;
@@ -2323,7 +2320,6 @@ declare namespace PROJECT {
         getHeightContactAngle(): number;
         getHeightContactNormal(): BABYLON.Vector3;
         getHeightContactDistance(): number;
-        setGavityForce(gravity: number): void;
         private abstractMesh;
         private cameraDistance;
         private forwardCamera;
@@ -2344,10 +2340,8 @@ declare namespace PROJECT {
         private parentNodePosition;
         private maximumCameraPos;
         private tempWorldPosition;
+        private cameraRaycastResult;
         private cameraRaycastShape;
-        private defaultRaycastGroup;
-        private defaultRaycastMask;
-        private cameraRaycastMask;
         private avatarSkins;
         private cameraNode;
         private cameraPivot;
@@ -2805,6 +2799,19 @@ declare namespace UNITY {
      * @class CharacterController - All rights reserved (c) 2020 Mackey Kinard
      */
     class CharacterController extends UNITY.ScriptComponent {
+        static TERMINAL_VELOCITY: number;
+        static MIN_MOVEMENT_DISTANCE: number;
+        static SLOPE_GRAVITY_FORCE: number;
+        static UPHILL_GRAVITY_FORCE: number;
+        static STATIC_GRAVITY_FORCE: number;
+        static DEFAULT_GRAVITY_FORCE: number;
+        static DEFAULT_JUMPING_TIMER: number;
+        static DEFAULT_SLIDING_TIMER: number;
+        static DEFAULT_CHARACTER_MASS: number;
+        static MIN_CAMERA_CHECK_DISTANCE: number;
+        static MIN_GROUND_CHECK_DISTANCE: number;
+        static MIN_GROUND_CHECK_SKINWIDTH: number;
+        static MIN_GROUND_CHECK_SLOPEANGLE: number;
         private _abstractMesh;
         private _avatarRadius;
         private _avatarHeight;
@@ -2814,15 +2821,41 @@ declare namespace UNITY {
         private _stepHeight;
         private _capsuleSegments;
         private _minMoveDistance;
-        private _movementVelocity;
+        private _slopeSlideSpeed;
+        private _slopeAngleRadians;
+        private _slopeAngleDegrees;
+        private _slopeMoveDirection;
+        private _verticalVelocity;
         private _currentVelocity;
-        private _jumpingVelocity;
+        private _inputVelocity;
+        private _gravityFactor;
+        private _minJumpTimer;
+        private _maxSlopeTimer;
+        private _isSliding;
         private _isGrounded;
         private _hitColor;
         private _noHitColor;
         private _groundRay;
         private _groundRayHelper;
+        private _groundRaycastShape;
+        private _groundHitPointMesh;
         private _groundCollisionNode;
+        private _groundRaycastOffset;
+        private _groundRaycastOrigin;
+        private _groundRaycastDirection;
+        private _groundRaycastDestination;
+        private _localGroundShapecastResult;
+        private _worldGroundShapecastResult;
+        private _stepCheckRaycastOffset;
+        private _stepCheckRaycastOrigin;
+        private _stepCheckRaycastDirection;
+        private _stepCheckRaycastDestination;
+        private _stepCheckRaycastContactNode;
+        private _stepCheckRaycastHitPoint;
+        private _stepCheckHitPointMesh;
+        private _stepCheckRaycastResult;
+        private _stepCheckRayHelper;
+        private _stepCheckRay;
         protected m_moveDeltaX: number;
         protected m_moveDeltaZ: number;
         getAvatarRadius(): number;
@@ -2830,19 +2863,26 @@ declare namespace UNITY {
         getCenterOffset(): BABYLON.Vector3;
         getSkinWidth(): number;
         getStepHeight(): number;
+        getGravityFactor(): number;
+        setGravityFactor(factor: number): void;
+        getVerticalVelocity(): number;
+        getSlopeAngleRadians(): number;
+        getSlopeAngleDegrees(): number;
         getGroundCollisionNode(): BABYLON.TransformNode;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
-        getGravityFactor(): number;
-        setGravityFactor(factor: number): void;
+        getSlopeSlideSpeed(): number;
+        setSlopeSlideSpeed(speed: number): void;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
         isGrounded(): boolean;
+        isSliding(): boolean;
+        canSlide(): boolean;
         canJump(): boolean;
-        getVerticalVelocity(): number;
         /** Register handler that is triggered when the transform position has been updated */
         onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         protected awake(): void;
+        protected update(): void;
         protected fixed(): void;
         /** Sets the character position to the specified location. */
         set(x: number, y: number, z: number): void;
@@ -2857,10 +2897,12 @@ declare namespace UNITY {
         /** Update the character controller grounded state */
         private updateGroundedState;
         /** Handle character controller slopes and steps */
-        private handleSlopesAndSteps;
+        private updateSlopesAndSlides;
         /** Create character controller physics body */
         private createPhysicsBodyAndShape;
         /** Create character controller physics shape */
         private createPhysicsShapeCapsule;
+        /** Create character controller physics shape */
+        private createPhysicsShapeCylinder;
     }
 }
