@@ -1201,6 +1201,7 @@ declare namespace PROJECT {
         protected initVehicleController(): void;
         protected updateVehicleController(): void;
         protected updateManualInputDrive(): void;
+        private autoDriveRaycastResult;
         protected updateAutoPilotDrive(): void;
         protected getDriverSkillFactor(): number;
         protected getCurrentTrackNode(index: number): PROJECT.ITrackNode;
@@ -1868,6 +1869,8 @@ declare namespace PROJECT {
         requireSprintButton: boolean;
         gravitationalForce: number;
         minFallVelocity: number;
+        verticalStepSpeed: number;
+        minStepUpHeight: number;
         rigidBodyMass: number;
         airbornTimeout: number;
         maxAngle: number;
@@ -2005,6 +2008,7 @@ declare namespace PROJECT {
         private animationStateParams;
         private sphereCollisionShape;
         private hasGroundedContact;
+        private showDebugRaycasts;
         private showDebugColliders;
         private colliderVisibility;
         private colliderRenderGroup;
@@ -2231,6 +2235,8 @@ declare namespace PROJECT {
         requireSprintButton: boolean;
         gravitationalForce: number;
         minFallVelocity: number;
+        verticalStepSpeed: number;
+        minStepUpHeight: number;
         rigidBodyMass: number;
         airbornTimeout: number;
         maxAngle: number;
@@ -2368,6 +2374,7 @@ declare namespace PROJECT {
         private showDebugColliders;
         private colliderVisibility;
         private colliderRenderGroup;
+        private showDebugRaycasts;
         private deltaTime;
         private minJumpTimer;
         private delayJumpTimer;
@@ -2800,7 +2807,6 @@ declare namespace UNITY {
      */
     class CharacterController extends UNITY.ScriptComponent {
         static TERMINAL_VELOCITY: number;
-        static MIN_MOVEMENT_DISTANCE: number;
         static SLOPE_GRAVITY_FORCE: number;
         static UPHILL_GRAVITY_FORCE: number;
         static STATIC_GRAVITY_FORCE: number;
@@ -2808,7 +2814,6 @@ declare namespace UNITY {
         static DEFAULT_JUMPING_TIMER: number;
         static DEFAULT_SLIDING_TIMER: number;
         static DEFAULT_CHARACTER_MASS: number;
-        static MIN_CAMERA_CHECK_DISTANCE: number;
         static MIN_GROUND_CHECK_DISTANCE: number;
         static MIN_GROUND_CHECK_SKINWIDTH: number;
         static MIN_GROUND_CHECK_SLOPEANGLE: number;
@@ -2819,13 +2824,14 @@ declare namespace UNITY {
         private _slopeLimit;
         private _skinWidth;
         private _stepHeight;
-        private _capsuleSegments;
         private _minMoveDistance;
         private _slopeSlideSpeed;
         private _slopeAngleRadians;
         private _slopeAngleDegrees;
         private _slopeMoveDirection;
         private _verticalVelocity;
+        private _verticalStepSpeed;
+        private _minimumStepHeight;
         private _currentVelocity;
         private _inputVelocity;
         private _gravityFactor;
@@ -2833,6 +2839,7 @@ declare namespace UNITY {
         private _maxSlopeTimer;
         private _isSliding;
         private _isGrounded;
+        private _isSteppingUp;
         private _hitColor;
         private _noHitColor;
         private _groundRay;
@@ -2846,14 +2853,13 @@ declare namespace UNITY {
         private _groundRaycastDestination;
         private _localGroundShapecastResult;
         private _worldGroundShapecastResult;
-        private _stepCheckRaycastOffset;
         private _stepCheckRaycastOrigin;
-        private _stepCheckRaycastDirection;
         private _stepCheckRaycastDestination;
-        private _stepCheckRaycastContactNode;
         private _stepCheckRaycastHitPoint;
-        private _stepCheckHitPointMesh;
         private _stepCheckRaycastResult;
+        private _stepCheckOriginMesh;
+        private _stepCheckHitPointMesh;
+        private _stepCheckDestinationMesh;
         private _stepCheckRayHelper;
         private _stepCheckRay;
         protected m_moveDeltaX: number;
@@ -2865,22 +2871,36 @@ declare namespace UNITY {
         getStepHeight(): number;
         getGravityFactor(): number;
         setGravityFactor(factor: number): void;
+        getInputVelocity(): BABYLON.Vector3;
         getVerticalVelocity(): number;
         getSlopeAngleRadians(): number;
         getSlopeAngleDegrees(): number;
         getGroundCollisionNode(): BABYLON.TransformNode;
+        getVerticalStepSpeed(): number;
+        setVerticalStepSpeed(speed: number): void;
+        getMinimumStepHeight(): number;
+        setMinimumStepHeight(height: number): void;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
         getSlopeSlideSpeed(): number;
         setSlopeSlideSpeed(speed: number): void;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
+        isSteppingUp(): boolean;
         isGrounded(): boolean;
         isSliding(): boolean;
         canSlide(): boolean;
         canJump(): boolean;
-        /** Register handler that is triggered when the transform position has been updated */
+        /** Register handler that is triggered when the character position has been updated */
         onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the character velocity will be updated */
+        onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Current vertical velocity offset */
+        verticalVelocityOffset: number;
+        /** Enable character step offset feature */
+        enableStepOffset: boolean;
+        /** Sets the character controller to debug mode (show ray lines) */
+        showRaycasts: boolean;
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
