@@ -176,6 +176,8 @@ declare namespace UNITY {
         static GetLastCreatedEngine(): BABYLON.Engine;
         /** Get the last created scene instance */
         static GetLastCreatedScene(): BABYLON.Scene;
+        /** Add a shadow castor mesh to a shadow light. */
+        static AddShadowCaster(light: BABYLON.ShadowLight, mesh: BABYLON.AbstractMesh): void;
         /** Get managed asset container. */
         static GetImportMeshes(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh[];
         /** Get managed asset container map. */
@@ -247,14 +249,14 @@ declare namespace UNITY {
         /** Creates an instance of the specified mesh asset into the scene. (Mesh Instance) */
         static CreateInstancedMesh(container: BABYLON.AssetContainer, meshName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.InstancedMesh;
         /**
-         * Attach a script componment instance to the scene manager
+         * Attach a script component instance to the scene manager life cycle
          * @param instance an instance of a UNITY.ScriptComponent class
          * @param alias the full class name alias. Example PROJECT.MyCustomComponent
          * @param validate validate the instance klass on next frame. Default true.
          */
         static AttachScriptComponent(instance: UNITY.ScriptComponent, alias: string, validate?: boolean): void;
         /**
-         * Destroy a script componment instance
+         * Destroy a script component instance
          * @param instance an instance of a UNITY.ScriptComponent class
          */
         static DestroyScriptComponent(instance: UNITY.ScriptComponent): void;

@@ -2255,7 +2255,7 @@ declare namespace PROJECT {
         downLookLimit: number;
         lowTurnSpeed: number;
         highTurnSpeed: number;
-        smoothMotionTime: number;
+        smoothInputTime: number;
         smoothInputVectors: boolean;
         smoothAcceleration: boolean;
         accelerationSpeed: number;
@@ -2298,6 +2298,7 @@ declare namespace PROJECT {
         getPlayerGrounded(): boolean;
         getFallTriggered(): boolean;
         getMovementSpeed(): number;
+        getAnimationSpeed(): number;
         getCameraBoomNode(): BABYLON.TransformNode;
         getCameraTransform(): BABYLON.TransformNode;
         getAnimationState(): UNITY.AnimationState;
@@ -2354,6 +2355,9 @@ declare namespace PROJECT {
         private navigationAgent;
         private characterController;
         private verticalVelocity;
+        private smoothMotionSpeed;
+        private smoothChangeRate;
+        private animationSpeed;
         private movementSpeed;
         private isRunPressed;
         private isJumpPressed;
@@ -2783,21 +2787,6 @@ declare namespace PROJECT {
         protected destroy(): void;
         protected initSpectatorView(): void;
         protected startSpectatorView(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Shader Material
-    * @class VertexSplat
-    */
-    class VertexSplat extends UNITY.UniversalAlbedoMaterial {
-        constructor(name: string, scene: BABYLON.Scene);
-        getShaderName(): string;
-        getShaderChunk(): string;
-        getCustomAttributes(): string[];
-        protected updateShaderChunks(): void;
-        protected awake(): void;
-        protected after(): void;
     }
 }
 declare namespace UNITY {
