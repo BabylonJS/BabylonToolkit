@@ -79,27 +79,34 @@ declare namespace UNITY {
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
         /** Gets the babylon toolkit for unity playground default project script bundle cdn address
-         * @documentation : https://doc.babylonjs.com/communityExtensions/Unity
-         * @address https://cdn.jsdelivr.net/gh/BabylonJS/UnityExporter@master/Redist/Runtime/unity.playground.js
+         * @address https://cdn.jsdelivr.net/gh/BabylonJS/UnityExporter@master/Redist/Runtime/
          */
         static get PlaygroundCdn(): string;
         /** Gets the babylon toolkit for unity playground repo address
-         * Contains interactive exported unity demo asset files (gltf/glb/js)
-         * @documentation : https://doc.babylonjs.com/communityExtensions/Unity
+         * Contains interactive exported unity demo asset files
          * @address https://www.babylontoolkit.com/playground/
          */
         static get PlaygroundRepo(): string;
         /**
          * Initialize the babylon toolkit for unity playground environment
-         * @environment Loads the babylon.toolkit.js runtime library
-         * @environment Loads the exported unity project script bundle (Default: unity.playground.js)
-         * @environment Enables babylon toolkit declaration files for playground code completion
-         * @documentation : https://doc.babylonjs.com/communityExtensions/Unity
          * @param engine The engine instance.
-         * @param options The playground options
-         * @returns a waitable promise
+         * @param options The playground options.
+         * @returns a waitable promise.
+         * @documentation : https://doc.babylonjs.com/communityExtensions/Unity
          */
         static InitializePlayground(engine: BABYLON.Engine, options?: UNITY.IPlaygroundOptions): Promise<void>;
+        /**
+         * Shows the default loading screen panel
+         * @param engine The engine instance.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         */
+        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
+        /**
+         * Hides the default loading screen panel
+         * @param engine The engine instance.
+         */
+        static HideLoadingScreen(engine: BABYLON.Engine): void;
         private static SceneParsingEnabled;
         /** Enable scene loader parsing plugin */
         static EnableSceneParsing(enabled: boolean): void;
@@ -888,11 +895,19 @@ declare namespace UNITY {
         static UseArrowKeyRotation: boolean;
     }
     /**
-     * Unity Playground Options
+     * Unity playground initialization options
+     * @param loadProjectScriptBundle load a project script bundle. Default true.
+     * @param projectScriptBundleUrl specified project script bundle. Default bundle.
+     * @param showDefaultLoadingScreen show the default loading screen. Default false.
+     * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+     * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
     interface IPlaygroundOptions {
         loadProjectScriptBundle?: boolean;
         projectScriptBundleUrl?: string;
+        showDefaultLoadingScreen?: boolean;
+        hideLoadingUIWithEngine?: boolean;
+        defaultLoadingUIMarginTop?: string;
     }
     /**
      * Asset Preloader Interface (https://doc.babylonjs.com/divingDeeper/importers/assetManager)
@@ -2103,19 +2118,7 @@ declare namespace UNITY {
         /** Post a safe message to the top browser window */
         static PostWindowMessage(msg: UNITY.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
         /** Loads a new level scene file into the scene viewer (engine.html) */
-        static LoadNewLevel(sceneFile: string, queryString?: string): boolean;
-        /**
-         * Show default loading screen panel
-         * @param engine The engine instance.
-         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. You can set to false and manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
-         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
-         */
-        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /**
-         * Hide default loading screen panel
-         * @param engine The engine instance.
-         */
-        static HideLoadingScreen(engine: BABYLON.Engine): void;
+        static LoadLevel(sceneFile: string, queryString?: string): boolean;
         /** Shows the default page scene loader. */
         static ShowSceneLoader(): void;
         /** Hides the default page scene loader. */
