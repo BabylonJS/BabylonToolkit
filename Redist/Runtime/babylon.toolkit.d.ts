@@ -2298,6 +2298,7 @@ declare namespace UNITY {
         playDefaultAnimation(transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
         playAnimation(state: string, transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
         stopAnimation(animationLayer?: number): boolean;
+        killAnimations(): boolean;
         hasBool(name: string): boolean;
         getBool(name: string): boolean;
         setBool(name: string, value: boolean): void;
