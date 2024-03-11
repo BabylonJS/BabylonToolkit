@@ -107,6 +107,16 @@ declare namespace UNITY {
          * @param engine The engine instance.
          */
         static HideLoadingScreen(engine: BABYLON.Engine): void;
+        private static SceneLoaderFileNames;
+        private static SceneLoaderPropertyBag;
+        private static SceneLoaderHandledFlag;
+        /**
+         * Registers a handler that executes when all required scene files are ready
+         * @param filenames The list of required scene filenames to check ready state.
+         * @param handler The function that will be called when all scene files are ready
+         * @param timeout The timeout value to wait for all required scene files to fully load. Default 30 seconds.
+         */
+        static RegisterOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
         private static SceneParsingEnabled;
         /** Enable scene loader parsing plugin */
         static EnableSceneParsing(enabled: boolean): void;
