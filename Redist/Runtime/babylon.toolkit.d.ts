@@ -96,6 +96,15 @@ declare namespace UNITY {
          */
         static InitializePlayground(engine: BABYLON.Engine, options?: UNITY.IPlaygroundOptions): Promise<void>;
         /**
+         * Sets the on scene ready handler then starts the assets manager loadAsync function
+         * @param assetsManager The list of required scene filenames to check ready state.
+         * @param requiredFilenames The list of required scene filenames to check ready state.
+         * @param readyHandler The function that will be called when all scene files are ready.
+         * @param maxTimeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
+         * @param debugMode The flag to enable on scene ready debug messages. Default false.
+         */
+        static LoadRuntimeAssets(assetsManager: BABYLON.AssetsManager, requiredFilenames: string[], readyHandler: () => void, maxTimeout?: number, debugMode?: boolean): Promise<void>;
+        /**
          * Shows the default loading screen panel
          * @param engine The engine instance.
          * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
