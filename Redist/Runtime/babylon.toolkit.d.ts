@@ -8,10 +8,10 @@ declare namespace UNITY {
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
-        /** Set global window state */
-        static WindowState: any;
         /** Set global system options */
         static GlobalOptions: any;
+        /** Set global window state */
+        static WindowState: any;
         /** Default network game server endpoint (without slash suffix) */
         static ServerEndPoint: string;
         /** Set the allow debug mode flag */
@@ -78,6 +78,20 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        private static _EventBus;
+        /** Default global event message bus
+         * @example
+         * ```typescript
+         * // Handle myevent message
+         * SM.EventBus.OnMessage("myevent", (data:string) => {
+         *    console.log("My Event Data: " + data);
+         * });
+         *
+         * // Post myevent message
+         * SM.EventBus.PostMessage("myevent", "Hello World!");
+         * ```
+        */
+        static get EventBus(): UNITY.PostMessageBus;
         /** Gets the babylon toolkit for unity playground default project script bundle cdn address
          * @address https://cdn.jsdelivr.net/gh/BabylonJS/UnityExporter@master/Redist/Runtime/
          */
@@ -1095,13 +1109,70 @@ declare namespace UNITY {
         hasLoadingDiv(): boolean;
     }
     /**
-     * Event Message Bus (Should Use As A Singleton Instance )
+     * Local Event Message Bus (Singleton Instance Pattern)
      * @class EventMessageBus - All rights reserved (c) 2024 Mackey Kinard
      */
     class EventMessageBus {
-        AddListener<T>(messageName: string, handler: (data: T) => void): void;
-        RemoveListener(messageName: string, handler: (data: any) => void): void;
-        RaiseMessage(messageName: string, data?: any): void;
+        /** Handle event bus message
+         * @param message The message to handle
+         * @param data The data to handle
+         * @returns void
+         */
+        OnMessage<T>(messageName: string, handler: (data: T) => void): void;
+        /** Post event bus message
+         * @param message The message to post
+         * @param data The data to post
+         * @returns void
+         */
+        PostMessage(messageName: string, data?: any): void;
+        /** Remove event bus message handler
+         * @param message The message to remove
+         * @param handler The handler to remove
+         * @returns void
+         */
+        RemoveHandler(messageName: string, handler: (data: any) => void): void;
+        /** Clear and reset all event bus message handlers
+         * @returns void
+         */
+        ResetHandlers(): void;
+        private ListenerDictionary;
+    }
+    /**
+     * Global Event Message Bus (Safe Window Message Communication)
+     * @class PostMessageBus - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class PostMessageBus {
+        constructor();
+        /** Handle event bus message
+         * @param message The message to handle
+         * @param data The data to handle
+         * @returns void
+         */
+        OnMessage<T>(message: string, handler: (data: T) => void): void;
+        /** Post event bus message
+         * @param message The message to post
+         * @param data The data to post
+         * @param target The target to post
+         * @param transfer The transfer to post
+         * @returns void
+         */
+        PostMessage(message: string, data?: any, target?: string, transfer?: Transferable[] | undefined): void;
+        /** Remove event bus message handler
+         * @param message The message to remove
+         * @param handler The handler to remove
+         * @returns void
+         */
+        RemoveHandler(message: string, handler: (data: any) => void): void;
+        /** Clear and reset all event bus message handlers
+         * @returns void
+         */
+        ResetHandlers(): void;
+        /** Dispatch internal event bus message
+         * @param message The message to dispatch
+         * @param data The data to dispatch
+         * @returns void
+         */
+        private OnDispatchMessage;
         private ListenerDictionary;
     }
     /**
