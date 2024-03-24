@@ -91,7 +91,7 @@ declare namespace UNITY {
          * SM.EventBus.PostMessage("myevent", "Hello World!");
          * ```
         */
-        static get EventBus(): UNITY.PostMessageBus;
+        static get EventBus(): UNITY.GlobalMessageBus;
         /** Gets the babylon toolkit for unity playground default project script bundle cdn address
          * @address https://cdn.jsdelivr.net/gh/BabylonJS/UnityExporter@master/Redist/Runtime/
          */
@@ -1109,10 +1109,10 @@ declare namespace UNITY {
         hasLoadingDiv(): boolean;
     }
     /**
-     * Local Event Message Bus (Singleton Instance Pattern)
-     * @class EventMessageBus - All rights reserved (c) 2024 Mackey Kinard
+     * Local Message Bus (Safe Local Instance Communication)
+     * @class LocalMessageBus - All rights reserved (c) 2024 Mackey Kinard
      */
-    class EventMessageBus {
+    class LocalMessageBus {
         /** Handle event bus message
          * @param message The message to handle
          * @param data The data to handle
@@ -1138,10 +1138,10 @@ declare namespace UNITY {
         private ListenerDictionary;
     }
     /**
-     * Global Event Message Bus (Safe Window Message Communication)
-     * @class PostMessageBus - All rights reserved (c) 2024 Mackey Kinard
+     * Global Message Bus (Safe Post Window Message Communication)
+     * @class GlobalMessageBus - All rights reserved (c) 2024 Mackey Kinard
      */
-    class PostMessageBus {
+    class GlobalMessageBus {
         constructor();
         /** Handle event bus message
          * @param message The message to handle
