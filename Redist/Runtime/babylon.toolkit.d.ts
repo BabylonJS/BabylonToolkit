@@ -3092,6 +3092,7 @@ declare namespace UNITY {
         forwardImpulse: number;
         raycastResult: BABYLON.PhysicsRaycastResult;
         worldTransform: BABYLON.TransformNode;
+        visualTravelRange: number;
         invertDirection: boolean;
         isInContact: boolean;
         hub: BABYLON.TransformNode;
