@@ -508,7 +508,7 @@ declare namespace PROJECT {
         private p3n;
         private i;
         private static _EventBus;
-        static get Bus(): UNITY.EventMessageBus;
+        static get EventBus(): UNITY.LocalMessageBus;
         drawDebugLines: boolean;
         getTrackNodes(): PROJECT.ITrackNode[];
         getControlPoints(line: number): PROJECT.IControlPoint[];
@@ -724,12 +724,14 @@ declare namespace PROJECT {
     class StandardCarController extends UNITY.ScriptComponent {
         static DEFAULT_SPEED_FACTOR: number;
         static DEFAULT_PITCH_FACTOR: number;
+        static SimplexNoise2D: SIMPLEX.NoiseFunction2D;
         MIN_RPM: number;
         MAX_RPM: number;
         private _animator;
         private _rigidbody;
         private _engineAudioSource;
         private _skidAudioSource;
+        private _nosAudioSource;
         private steeringWheelHub;
         private steeringWheelAxis;
         private maxSteeringAngle;
@@ -738,6 +740,7 @@ declare namespace PROJECT {
         private downShift;
         private skiddingTime;
         private shiftingTime;
+        private shiftingSide;
         private shiftingBrake;
         private engineForce;
         private handBraking;
@@ -784,6 +787,11 @@ declare namespace PROJECT {
         private visualSteerAngleR;
         private visualSteerBoostL;
         private visualSteerBoostR;
+        private idleNoiseDelta;
+        private driveNoiseDelta;
+        private boostSpeedTimer;
+        private burnoutMeter;
+        private donutMeter;
         private wheelRadius;
         private clutchSlip;
         private engineRPM;
@@ -802,10 +810,13 @@ declare namespace PROJECT {
         private BACK_LEFT;
         private BACK_RIGHT;
         private WHEEL_SKID_PITCH;
+        private POWER_BOOST_PITCH;
         private SPIN_FL_Rotation;
         private SPIN_FR_Rotation;
         private SPIN_RL_Rotation;
         private SPIN_RR_Rotation;
+        isBraking(): boolean;
+        isBoosting(): boolean;
         getFootBraking(): boolean;
         getHandBraking(): boolean;
         getLinearVelocity(): BABYLON.Vector3;
@@ -827,8 +838,8 @@ declare namespace PROJECT {
         getForwardSpeed(): number;
         getAbsoluteSpeed(): number;
         getAmericanSpeed(): number;
-        getNormalizedSpeed(): number;
         getTopEngineSpeed(): number;
+        getNormalizedSpeed(): number;
         getMaxReversePower(): number;
         getCurrentGearIndex(): number;
         getCurrentEngineRPM(): number;
@@ -853,20 +864,29 @@ declare namespace PROJECT {
         smokeIntensity: number;
         smokeOpacity: number;
         smokeDonuts: number;
+        noiseTimeScale: number;
+        noiseTimeFactor: number;
         maxBurnoutFactor: number;
         maxSteerBoost: number;
         overSteerSpeed: number;
         overSteerTimeout: number;
         topEngineSpeed: number;
+        topBoosterSpeed: number;
+        powerChangeRate: number;
         powerCoefficient: number;
+        boosterCoefficient: number;
         frictionLerpSpeed: number;
         topSpeedDampener: number;
         lowSpeedSteering: number;
         highSpeedSteering: number;
+        donutTurningRadius: number;
         gravitationalForce: number;
         smoothFlyingForce: number;
         transmissionRatio: number;
         differentialRatio: number;
+        minBoosterSpeed: number;
+        maxBoosterTime: number;
+        maxPitchControl: number;
         maxFrontBraking: number;
         maxReversePower: number;
         minBrakingForce: number;
@@ -880,12 +900,13 @@ declare namespace PROJECT {
         burnoutWheelPitch: number;
         burnoutCoefficient: number;
         burnoutTriggerMark: number;
-        enableBurnouts: boolean;
+        enableAutoBurnouts: boolean;
         penaltyGroundTag: string;
         minPenaltySpeed: number;
         linearWheelDrag: number;
         frictionWheelSlip: number;
         showSensorLines: boolean;
+        powerBooster: boolean;
         linkTrackManager: boolean;
         playVehicleSounds: boolean;
         postNetworkAttributes: boolean;
@@ -905,7 +926,40 @@ declare namespace PROJECT {
         ackermanWheelBase: number;
         ackermanRearTrack: number;
         ackermanTurnRadius: number;
+        ackermanMaxRadius: number;
         ackermanTurnFactor: number;
+        readBurnoutMeter(): number;
+        resetBurnoutMeter(): void;
+        readDonutMeter(): number;
+        resetDonutMeter(): void;
+        getBoosterTime(): number;
+        setBoosterTime(time: number): void;
+        resetBoosterTime(): void;
+        roadSurfaceFactor: number;
+        movementTilting: boolean;
+        surfaceDetection: boolean;
+        idleShakeRate: number;
+        idleShakeNoise: number;
+        maxForwardAngle: number;
+        maxLateralAngle: number;
+        lerpForwardFactor: number;
+        lerpLateralFactor: number;
+        shiftForwardExtra: number;
+        shiftLateralExtra: number;
+        forwardPitchFactor: number;
+        lateralRollFactor: number;
+        forwardRecoverRate: number;
+        lateralRecoverRate: number;
+        lowSpeedScale: number;
+        highSpeedScale: number;
+        lowForwardNoise: number;
+        highForwardNoise: number;
+        lowLateralNoise: number;
+        highLateralNoise: number;
+        speedThreashold: number;
+        boosterTransform: BABYLON.TransformNode;
+        chassisTransform: BABYLON.TransformNode;
+        tiltChassisEulers: BABYLON.Vector3;
         protected m_frontLeftWheel: UNITY.HavokWheelInfo;
         protected m_frontRightWheel: UNITY.HavokWheelInfo;
         protected m_backLeftWheel: UNITY.HavokWheelInfo;
@@ -936,12 +990,20 @@ declare namespace PROJECT {
         private donutSpinTime;
         private currentForward;
         private currentTurning;
+        private currentBoosting;
         private currentSkidding;
         private currentDonuts;
+        private currentDrivePower;
+        private targetDrivePower;
         private animatorSteerAngle;
         /** Drives the raycast vehicle with the specfied movement properties. */
-        drive(throttle: number, steering: number, braking: boolean, donuts: boolean, booster?: number, autopilot?: boolean): void;
+        drive(throttle: number, steering: number, braking: boolean, donuts: boolean, booster?: number, autopilot?: boolean, nos?: boolean): void;
         private syncVehicleState;
+        private currentPitch;
+        private currentRoll;
+        private previousSpeed;
+        private angularVelocity;
+        private syncVehicleTilting;
         private writeTransformMetadata;
         private getVehicleEngineTorque;
         private createSmokeParticleSystem;
@@ -1019,12 +1081,23 @@ declare namespace PROJECT {
         buttonCamera: number;
         keyboardCamera: number;
         tickRemoteEntities: boolean;
+        fastMotionBlur: boolean;
+        lowSpeedBlurring: number;
+        highSpeedBlurring: number;
+        motionBlurSamples: number;
+        isObjectBasedBlur: boolean;
+        fastCameraShake: boolean;
+        lowSpeedShaking: number;
+        highSpeedShaking: number;
         private firstPerson;
         private cameraPivot;
         private targetEulers;
         private cameraRotation;
         private cameraPivotOffset;
         private autoAttachCamera;
+        private motionBlurAttached;
+        protected m_freeCamera: BABYLON.FreeCamera;
+        protected m_motionBlur: BABYLON.MotionBlurPostProcess;
         protected m_cameraTransform: BABYLON.TransformNode;
         protected m_inputController: PROJECT.VehicleInputController;
         protected m_standardController: PROJECT.StandardCarController;
@@ -1135,12 +1208,16 @@ declare namespace PROJECT {
         triggerBackwards: number;
         keyboardBackwards: number;
         auxKeyboardBackwards: number;
+        pedalBooster: number;
+        keyboardBooster: number;
+        buttonBooster: number;
         buttonHandbrake: number;
         keyboardHandbrake: number;
         leftWheelHandbrake: number;
         rightWheelHandbrake: number;
-        buttonDonut: number;
         keyboardDonut: number;
+        leftButtonDonut: number;
+        rightButtonDonut: number;
         leftWheelDonut: number;
         rightWheelDonut: number;
         raceLineNode: number;
@@ -1434,6 +1511,17 @@ declare namespace PROJECT {
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
+        protected openFullscreen(elem: any): void;
+        protected closeFullscreen(): void;
+        /**
+         * Ask the browser to promote the current element to fullscreen rendering mode
+         * @param element defines the DOM element to promote
+         */
+        static _RequestFullscreen(element: HTMLElement): void;
+        /**
+         * Asks the browser to exit fullscreen mode
+         */
+        static _ExitFullscreen(): void;
     }
 }
 declare namespace PROJECT {
@@ -2650,56 +2738,6 @@ declare namespace BABYLON {
 }
 declare namespace PROJECT {
     /**
-    * Babylon Script Component
-    * @class PaintShop
-    */
-    class PaintShop extends UNITY.ScriptComponent {
-        static CAR_MATERIAL_01: string;
-        static CAR_MATERIAL_02: string;
-        static CAR_MATERIAL_03: string;
-        static CAR_MATERIAL_04: string;
-        static CAR_MATERIAL_05: string;
-        static CAR_MATERIAL_06: string;
-        static CAR_MATERIAL_07: string;
-        static CAR_MATERIAL_08: string;
-        static CAR_MATERIAL_09: string;
-        static CAR_MATERIAL_10: string;
-        static CAR_MATERIAL_11: string;
-        static CAR_MATERIAL_12: string;
-        static CAR_MATERIAL_13: string;
-        static CAR_MATERIAL_14: string;
-        static CAR_MATERIAL_15: string;
-        static CAR_MATERIAL_16: string;
-        static CAR_MATERIAL_17: string;
-        static CAR_MATERIAL_18: string;
-        static CAR_MATERIAL_19: string;
-        static CAR_MATERIAL_20: string;
-        private carMaterial;
-        private raceCarBody;
-        private raceCarDriver;
-        protected awake(): void;
-        protected destroy(): void;
-        setCarMaterial(oneBasedIndex: number): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class RacingHud
-    */
-    class RacingHud extends UNITY.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected fixed(): void;
-        protected update(): void;
-        protected late(): void;
-        protected after(): void;
-        protected ready(): void;
-        protected destroy(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
     * Babylon Script Component (Written By: Mackey Kinard)
     * @class Camera_BigScreens
     */
@@ -2789,129 +2827,86 @@ declare namespace PROJECT {
         protected startSpectatorView(): void;
     }
 }
-declare namespace UNITY {
+declare namespace PROJECT {
     /**
-     * Babylon character controller pro class (Unity Style Character Controller System)
-     * @class CharacterController - All rights reserved (c) 2020 Mackey Kinard
-     */
-    class CharacterController extends UNITY.ScriptComponent {
-        static TERMINAL_VELOCITY: number;
-        static SLOPE_GRAVITY_FORCE: number;
-        static UPHILL_GRAVITY_FORCE: number;
-        static STATIC_GRAVITY_FORCE: number;
-        static DEFAULT_GRAVITY_FORCE: number;
-        static DEFAULT_JUMPING_TIMER: number;
-        static DEFAULT_SLIDING_TIMER: number;
-        static DEFAULT_CHARACTER_MASS: number;
-        static MIN_GROUND_CHECK_DISTANCE: number;
-        static MIN_GROUND_CHECK_SKINWIDTH: number;
-        static MIN_GROUND_CHECK_SLOPEANGLE: number;
-        private _abstractMesh;
-        private _avatarRadius;
-        private _avatarHeight;
-        private _centerOffset;
-        private _slopeLimit;
-        private _skinWidth;
-        private _stepHeight;
-        private _minMoveDistance;
-        private _slopeSlideSpeed;
-        private _slopeAngleRadians;
-        private _slopeAngleDegrees;
-        private _slopeMoveDirection;
-        private _verticalVelocity;
-        private _verticalStepSpeed;
-        private _minimumStepHeight;
-        private _currentVelocity;
-        private _inputVelocity;
-        private _gravityFactor;
-        private _minJumpTimer;
-        private _maxSlopeTimer;
-        private _isSliding;
-        private _isGrounded;
-        private _isSteppingUp;
-        private _hitColor;
-        private _noHitColor;
-        private _groundRay;
-        private _groundRayHelper;
-        private _groundRaycastShape;
-        private _groundHitPointMesh;
-        private _groundCollisionNode;
-        private _groundRaycastOffset;
-        private _groundRaycastOrigin;
-        private _groundRaycastDirection;
-        private _groundRaycastDestination;
-        private _localGroundShapecastResult;
-        private _worldGroundShapecastResult;
-        private _stepCheckRaycastOrigin;
-        private _stepCheckRaycastDestination;
-        private _stepCheckRaycastHitPoint;
-        private _stepCheckRaycastResult;
-        private _stepCheckOriginMesh;
-        private _stepCheckHitPointMesh;
-        private _stepCheckDestinationMesh;
-        private _stepCheckRayHelper;
-        private _stepCheckRay;
-        protected m_moveDeltaX: number;
-        protected m_moveDeltaZ: number;
-        getAvatarRadius(): number;
-        getAvatarHeight(): number;
-        getCenterOffset(): BABYLON.Vector3;
-        getSkinWidth(): number;
-        getStepHeight(): number;
-        getGravityFactor(): number;
-        setGravityFactor(factor: number): void;
-        getInputVelocity(): BABYLON.Vector3;
-        getVerticalVelocity(): number;
-        getSlopeAngleRadians(): number;
-        getSlopeAngleDegrees(): number;
-        getGroundCollisionNode(): BABYLON.TransformNode;
-        getVerticalStepSpeed(): number;
-        setVerticalStepSpeed(speed: number): void;
-        getMinimumStepHeight(): number;
-        setMinimumStepHeight(height: number): void;
-        getMinMoveDistance(): number;
-        setMinMoveDistance(distance: number): void;
-        getSlopeSlideSpeed(): number;
-        setSlopeSlideSpeed(speed: number): void;
-        getSlopeLimit(): number;
-        setSlopeLimit(slopeRadians: number): void;
-        isSteppingUp(): boolean;
-        isGrounded(): boolean;
-        isSliding(): boolean;
-        canSlide(): boolean;
-        canJump(): boolean;
-        /** Register handler that is triggered when the character position has been updated */
-        onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when the character velocity will be updated */
-        onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Current vertical velocity offset */
-        verticalVelocityOffset: number;
-        /** Enable character step offset feature */
-        enableStepOffset: boolean;
-        /** Sets the character controller to debug mode (show ray lines) */
-        showRaycasts: boolean;
+    * Babylon Shader Material
+    * @class VertexSplat
+    */
+    class VertexSplat extends UNITY.UniversalAlbedoMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+        getShaderChunk(): string;
+        getCustomAttributes(): string[];
+        protected updateShaderChunks(): void;
         protected awake(): void;
+        protected after(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class TestTerrain
+    */
+    class TestTerrain extends UNITY.ScriptComponent {
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
         protected update(): void;
+        protected late(): void;
+        protected step(): void;
         protected fixed(): void;
-        /** Sets the character position to the specified location. */
-        set(x: number, y: number, z: number): void;
-        /** Translates the character with the specfied velocity. */
-        move(velocity: BABYLON.Vector3): void;
-        /** Jumps the chacracter with the specified speed. */
-        jump(speed: number): void;
-        /** Sets the character controller rigidbody mass property */
-        setRigidBodyMass(mass: number): void;
-        /** Set the character controller rigidbody collision type */
-        setCollisionState(collision: boolean): void;
-        /** Update the character controller grounded state */
-        private updateGroundedState;
-        /** Handle character controller slopes and steps */
-        private updateSlopesAndSlides;
-        /** Create character controller physics body */
-        private createPhysicsBodyAndShape;
-        /** Create character controller physics shape */
-        private createPhysicsShapeCapsule;
-        /** Create character controller physics shape */
-        private createPhysicsShapeCylinder;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class PaintShop
+    */
+    class PaintShop extends UNITY.ScriptComponent {
+        static CAR_MATERIAL_01: string;
+        static CAR_MATERIAL_02: string;
+        static CAR_MATERIAL_03: string;
+        static CAR_MATERIAL_04: string;
+        static CAR_MATERIAL_05: string;
+        static CAR_MATERIAL_06: string;
+        static CAR_MATERIAL_07: string;
+        static CAR_MATERIAL_08: string;
+        static CAR_MATERIAL_09: string;
+        static CAR_MATERIAL_10: string;
+        static CAR_MATERIAL_11: string;
+        static CAR_MATERIAL_12: string;
+        static CAR_MATERIAL_13: string;
+        static CAR_MATERIAL_14: string;
+        static CAR_MATERIAL_15: string;
+        static CAR_MATERIAL_16: string;
+        static CAR_MATERIAL_17: string;
+        static CAR_MATERIAL_18: string;
+        static CAR_MATERIAL_19: string;
+        static CAR_MATERIAL_20: string;
+        private carMaterial;
+        private raceCarBody;
+        private raceCarDriver;
+        protected awake(): void;
+        protected destroy(): void;
+        setCarMaterial(oneBasedIndex: number): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class RacingHud
+    */
+    class RacingHud extends UNITY.ScriptComponent {
+        protected awake(): void;
+        protected start(): void;
+        protected fixed(): void;
+        protected update(): void;
+        protected late(): void;
+        protected after(): void;
+        protected ready(): void;
+        protected destroy(): void;
     }
 }
