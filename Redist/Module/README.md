@@ -1,8 +1,18 @@
 This module will add the gzip response header to any file served if the requested file name has .gz.gltf, .gz.glb, or .gz.bin in it.
 
-A compiled version is available in the bin folder.
+You must copy the **GZipHttpModule.dll** to the web application **bin** folder and register it in the **web.config**:
 
-To create you own module, create a new class for the HttpModule:
+```xml
+<configuration>
+  <system.webServer>
+    <modules>
+      <add name="GZipHttpModule" type="Mackey.GZipHttpModule, GZipHttpModule"/>
+    </modules>
+  </system.webServer>
+</configuration>
+```
+
+The **source code** is listed here for review:
 
 ```csharp
 using System;
@@ -35,16 +45,4 @@ namespace Mackey
         public void Dispose() { }
     }
 }
-```
-
-Then, register this HttpModule in your web.config:
-
-```xml
-<configuration>
-  <system.webServer>
-    <modules>
-      <add name="GZipHttpModule" type="Mackey.GZipHttpModule, GZipHttpModule"/>
-    </modules>
-  </system.webServer>
-</configuration>
 ```
