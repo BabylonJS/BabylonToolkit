@@ -39,7 +39,7 @@ Then, register this HttpModule in your web.config:
 <configuration>
   <system.webServer>
     <modules>
-      <add name="GZipHttpModule" type="Mackey.GZipHttpModule, GZipHttpModule.dll"/>
+      <add name="GZipHttpModule" type="Mackey.GZipHttpModule, GZipHttpModule"/>
     </modules>
   </system.webServer>
 </configuration>
