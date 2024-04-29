@@ -1,4 +1,8 @@
-First, create a new class for the HttpModule:
+This module will add the gzip response header to any file served if the requested file name has .gz.gltf, .gz.glb, or .gz.bin in it.
+
+A compiled version is available in the bin folder.
+
+To create you own module, create a new class for the HttpModule:
 
 ```csharp
 using System;
@@ -44,5 +48,3 @@ Then, register this HttpModule in your web.config:
   </system.webServer>
 </configuration>
 ```
-
-This module will add the gzip response header to any file served if the requested file name has .gz.gltf, .gz.glb, or .gz.bin in it.
