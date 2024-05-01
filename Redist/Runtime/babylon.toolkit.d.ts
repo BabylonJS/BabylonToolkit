@@ -78,6 +78,7 @@ declare namespace UNITY {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
         private static _EventBus;
         /** Default global event message bus
          * @example
@@ -108,7 +109,7 @@ declare namespace UNITY {
          * @returns a waitable promise.
          * @documentation : https://doc.babylonjs.com/communityExtensions/Unity
          */
-        static InitializePlayground(engine: BABYLON.Engine, options?: UNITY.IPlaygroundOptions): Promise<void>;
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine, options?: UNITY.IPlaygroundOptions): Promise<void>;
         /**
          * Sets the on scene ready handler then starts the assets manager loadAsync function
          * @param assetsManager The list of required scene filenames to check ready state.
@@ -124,12 +125,12 @@ declare namespace UNITY {
          * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
          * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
          */
-        static ShowLoadingScreen(engine: BABYLON.Engine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
+        static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
         /**
          * Hides the default loading screen panel
          * @param engine The engine instance.
          */
-        static HideLoadingScreen(engine: BABYLON.Engine): void;
+        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine): void;
         /** Focus the scene rendering canvas
          * @param scene The scene instance.
          */
@@ -162,10 +163,8 @@ declare namespace UNITY {
         static GetRenderQuality(): UNITY.RenderQuality;
         /** Set the system render quality local storage setting. */
         static SetRenderQuality(quality: UNITY.RenderQuality): void;
-        /** Gets the current engine WebGL version string info. */
-        static GetWebGLVersionString(scene: BABYLON.Scene): string;
-        /** Gets the current engine WebGL version number info. */
-        static GetWebGLVersionNumber(scene: BABYLON.Scene): number;
+        /** Gets the current engine version string info. */
+        static GetEngineVersionString(scene: BABYLON.Scene): string;
         /** Store data object of function on the local window state. */
         static SetWindowState(name: string, data: any): void;
         /** Retrieve data object or function from the local window state. */
