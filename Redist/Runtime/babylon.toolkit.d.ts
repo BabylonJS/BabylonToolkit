@@ -1980,8 +1980,14 @@ declare class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension 
 }
 
 declare namespace UNITY {
+    interface KeymapState {
+        result: boolean | number;
+        pressTime: number;
+        releaseTime: number;
+    }
     class InputController {
         static MOUSE_DAMPENER: number;
+        static TAP_THRESHOLD_MS: number;
         /** Global gamepad manager */
         static GamepadManager: BABYLON.GamepadManager;
         /** Global gamepad connect event handler */
@@ -2015,6 +2021,12 @@ declare namespace UNITY {
         static OnKeyboardPress(keycode: number, callback: () => void): void;
         /** Get the specified keyboard input by keycode. */
         static GetKeyboardInput(keycode: number): boolean;
+        /** Is the specified keyboard button held. */
+        static IsKeyboardButtonHeld(keycode: number): boolean;
+        /** Is the specified keyboard button tapped. */
+        static IsKeyboardButtonTapped(keycode: number): boolean;
+        /** Reset the specified keyboard button tapped state. */
+        static ResetKeyboardButtonTapped(keycode: number): void;
         /** Set a pointer up event handler. */
         static OnPointerUp(callback: (button: number) => void): void;
         /** Set a pointer down event handler. */
@@ -2023,6 +2035,12 @@ declare namespace UNITY {
         static OnPointerPress(button: number, callback: () => void): void;
         /** Get the specified pointer input by button. */
         static GetPointerInput(button: number): boolean;
+        /** Is the specified Pointer button held. */
+        static IsPointerButtonHeld(button: number): boolean;
+        /** Is the specified pointer button tapped. */
+        static IsPointerButtonTapped(number: number): boolean;
+        /** Reset the specified pointer button tapped state. */
+        static ResetPointerButtonTapped(button: number): void;
         /** Is the mouse wheel scrollng this frame. */
         static IsWheelScrolling(): boolean;
         /** Set on gamepad button up event handler. */
@@ -2033,6 +2051,12 @@ declare namespace UNITY {
         static OnGamepadButtonPress(button: number, callback: () => void, player?: UNITY.PlayerNumber): void;
         /** Get the specified gamepad input by button. */
         static GetGamepadButtonInput(button: number, player?: UNITY.PlayerNumber): boolean;
+        /** Is the specified gamepad button held. */
+        static IsGamepadButtonHeld(button: number, player?: UNITY.PlayerNumber): boolean;
+        /** Is the specified gamepad button tapped. */
+        static IsGamepadButtonTapped(button: number, player?: UNITY.PlayerNumber): boolean;
+        /** Reset the specified gamepad button tapped state. */
+        static ResetGamepadButtonTapped(button: number, player?: UNITY.PlayerNumber): void;
         /** Set on gamepad direction pad up event handler. */
         static OnGamepadDirectionUp(callback: (direction: number) => void, player?: UNITY.PlayerNumber): void;
         /** Set on gamepad direction pad down event handler. */
@@ -2041,12 +2065,24 @@ declare namespace UNITY {
         static OnGamepadDirectionPress(direction: number, callback: () => void, player?: UNITY.PlayerNumber): void;
         /** Get the specified gamepad direction input by number. */
         static GetGamepadDirectionInput(direction: number, player?: UNITY.PlayerNumber): boolean;
+        /** Is the specified gamepad direction input held. */
+        static IsGamepadDirectionHeld(direction: number, player?: UNITY.PlayerNumber): boolean;
+        /** Is the specified gamepad direction input tapped. */
+        static IsGamepadDirectionTapped(direction: number, player?: UNITY.PlayerNumber): boolean;
+        /** Reset the specified gamepad direction tapped state. */
+        static ResetGamepadDirectionTapped(direction: number, player?: UNITY.PlayerNumber): void;
         /** Set on gamepad trigger left event handler. */
         static OnGamepadTriggerLeft(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
         /** Set on gamepad trigger right event handler. */
         static OnGamepadTriggerRight(callback: (value: number) => void, player?: UNITY.PlayerNumber): void;
         /** Get the specified gamepad trigger input by number. */
         static GetGamepadTriggerInput(trigger: number, player?: UNITY.PlayerNumber): number;
+        /** Is the specified gamepad trigger input held. */
+        static IsGamepadTriggerHeld(trigger: number, player?: UNITY.PlayerNumber): boolean;
+        /** Is the specified gamepad trigger input tapped. */
+        static IsGamepadTriggerTapped(trigger: number, player?: UNITY.PlayerNumber): boolean;
+        /** Reset the specified gamepad trigger tapped state. */
+        static ResetGamepadTriggerTapped(trigger: number, player?: UNITY.PlayerNumber): void;
         /** Get the specified gamepad type. */
         static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
         /** Get the specified gamepad. */
@@ -2206,7 +2242,7 @@ declare namespace UNITY {
     }
     /**
      * Touch Joystick Classes (https://www.cssscript.com/touch-joystick-controller/)
-     * @class TouchJoystickHandler - All rights reserved (c) 2024 Mackey Kinard
+     * @class TouchJoystickHandler - All rights reserved (c) 2020 Mackey Kinard
      */
     class TouchJoystickHandler {
         private active;
@@ -2227,10 +2263,6 @@ declare namespace UNITY {
         protected handleUp(event: any): void;
     }
 }
-/**
- * Babylon Input Controller Alias
- */
-declare const IC: typeof UNITY.InputController;
 
 declare namespace UNITY {
     class WindowManager {
@@ -3013,151 +3045,6 @@ declare namespace UNITY {
 
 declare namespace UNITY {
     /**
-     * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
-     * https://forum.babylonjs.com/u/raggar
-     * @script HavokRaycastVehicle
-     */
-    class HavokRaycastVehicle {
-        chassisBody: BABYLON.PhysicsBody;
-        wheelInfos: UNITY.HavokWheelInfo[];
-        sliding: boolean;
-        world: BABYLON.PhysicsEngine;
-        indexRightAxis: number;
-        indexForwardAxis: number;
-        indexUpAxis: number;
-        minimumWheelContacts: number;
-        smoothFlyingImpulse: number;
-        stabilizingForce: number;
-        maxImpulseForce: number;
-        currentVehicleSpeedKmHour: number;
-        constructor(options: any);
-        addWheel(options: any): number;
-        getNumWheels(): number;
-        getWheelInfo(wheelIndex: number): UNITY.HavokWheelInfo;
-        getSteeringValue(wheelIndex: number): number;
-        setSteeringValue(value: number, wheelIndex: number): void;
-        applyEngineForce(value: number, wheelIndex: number): void;
-        setBrake(brake: number, wheelIndex: number): void;
-        addToWorld(world: BABYLON.PhysicsEngine): void;
-        getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
-        getCurrentSpeedKmHour(): number;
-        updateVehicle(timeStep: number): void;
-        updateSuspension(deltaTime: number): void;
-        removeFromWorld(world: any): void;
-        castRay2(wheel: UNITY.HavokWheelInfo): number;
-        castRay(wheel: UNITY.HavokWheelInfo): number;
-        updateWheelTransformWorld(wheel: UNITY.HavokWheelInfo): void;
-        updateWheelTransform(wheelIndex: number): void;
-        getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
-        updateFriction(timeStep: number): void;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokWheelInfo
-     */
-    class HavokWheelInfo {
-        maxSuspensionTravel: number;
-        customSlidingRotationalSpeed: number;
-        useCustomSlidingRotationalSpeed: number;
-        sliding: boolean;
-        chassisConnectionPointLocal: BABYLON.Vector3;
-        chassisConnectionPointWorld: BABYLON.Vector3;
-        directionLocal: BABYLON.Vector3;
-        directionWorld: BABYLON.Vector3;
-        axleLocal: BABYLON.Vector3;
-        axleWorld: BABYLON.Vector3;
-        suspensionRestLength: number;
-        suspensionMaxLength: number;
-        radius: number;
-        suspensionStiffness: number;
-        dampingCompression: number;
-        dampingRelaxation: number;
-        frictionSlip: number;
-        steering: number;
-        rotation: number;
-        deltaRotation: number;
-        rollInfluence: number;
-        maxSuspensionForce: number;
-        engineForce: number;
-        brake: number;
-        isFrontWheel: boolean;
-        clippedInvContactDotSuspension: number;
-        suspensionRelativeVelocity: number;
-        suspensionForce: number;
-        skidInfo: number;
-        slipInfo: number;
-        suspensionLength: number;
-        sideImpulse: number;
-        forwardImpulse: number;
-        raycastResult: BABYLON.PhysicsRaycastResult;
-        worldTransform: BABYLON.TransformNode;
-        visualTravelRange: number;
-        invertDirection: boolean;
-        isInContact: boolean;
-        hub: BABYLON.TransformNode;
-        spinner: BABYLON.TransformNode;
-        defaultFriction: number;
-        steeringAngle: number;
-        rotationBoost: number;
-        locked: boolean;
-        constructor(options: any);
-        updateWheel(chassis: any): void;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokVehicleUtilities
-     */
-    class HavokVehicleUtilities {
-        static directions: BABYLON.Vector3[];
-        static calcRollingFriction_vel1: BABYLON.Vector3;
-        static calcRollingFriction_vel2: BABYLON.Vector3;
-        static calcRollingFriction_vel: BABYLON.Vector3;
-        static updateFriction_surfNormalWS_scaled_proj: BABYLON.Vector3;
-        static updateFriction_axle: BABYLON.Vector3[];
-        static updateFriction_forwardWS: BABYLON.Vector3[];
-        static sideFrictionStiffness2: number;
-        static castRay_rayvector: BABYLON.Vector3;
-        static castRay_target: BABYLON.Vector3;
-        static torque: BABYLON.Vector3;
-        static tmpVec1: BABYLON.Vector3;
-        static tmpVec2: BABYLON.Vector3;
-        static tmpVec3: BABYLON.Vector3;
-        static tmpVec4: BABYLON.Vector3;
-        static tmpVec5: BABYLON.Vector3;
-        static tmpVec6: BABYLON.Vector3;
-        static tmpVel2: BABYLON.Vector3;
-        static tmpMat1: BABYLON.Matrix;
-        static velocityAt: (body: BABYLON.PhysicsBody, pos: any, res: any) => any;
-        static bodyPosition: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyLinearVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyAngularVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyTransform: (body: BABYLON.PhysicsBody, res: any) => any;
-        static addImpulseAt: (body: BABYLON.PhysicsBody, impulse: any, point: any) => void;
-        static addForceAt: (body: BABYLON.PhysicsBody, force: any, point: any) => void;
-        static bodyOrientation: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInvMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInertiaWorld: (body: BABYLON.PhysicsBody, res: any) => any;
-        static calcRollingFriction(body0: BABYLON.PhysicsBody, body1: BABYLON.PhysicsBody, frictionPosWorld: any, frictionDirectionWorld: any, maxImpulse: any): number;
-        static computeImpulseDenominator_r0: BABYLON.Vector3;
-        static computeImpulseDenominator_c0: BABYLON.Vector3;
-        static computeImpulseDenominator_vec: BABYLON.Vector3;
-        static computeImpulseDenominator_m: BABYLON.Vector3;
-        static bodyPositionVec: BABYLON.Vector3;
-        static bodyInertiaVec: BABYLON.Vector3;
-        static computeImpulseDenominator(body: BABYLON.PhysicsBody, pos: any, normal: any): number;
-        static resolveSingleBilateral_vel1: BABYLON.Vector3;
-        static resolveSingleBilateral_vel2: BABYLON.Vector3;
-        static resolveSingleBilateral_vel: BABYLON.Vector3;
-        static resolveSingleBilateral(body1: BABYLON.PhysicsBody, pos1: any, body2: BABYLON.PhysicsBody, pos2: any, normal: any): number;
-        static chassis_velocity_at_contactPoint: BABYLON.Vector3;
-        static relpos: BABYLON.Vector3;
-        static Utilsdefaults: (options: any, defaults: any) => any;
-    }
-}
-
-declare namespace UNITY {
-    /**
      * Babylon navigation agent pro class (Unity Style Navigation Agent System)
      * @class NavigationAgent - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -3265,57 +3152,6 @@ declare namespace UNITY {
 
 declare namespace UNITY {
     /**
-     * Babylon raycast vehicle pro class (Unity Style Wheeled Vehicle System)
-     * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class RaycastVehicle {
-        private _centerMass;
-        private _chassisMesh;
-        private _tempVectorPos;
-        lockedWheelIndexes: number[];
-        getNumWheels(): number;
-        getWheelInfo(wheel: number): UNITY.HavokWheelInfo;
-        setEngineForce(power: number, wheel: number): void;
-        setBrakingForce(brake: number, wheel: number): void;
-        getWheelTransform(wheel: number): BABYLON.TransformNode;
-        updateWheelTransform(wheel: number): void;
-        getRawCurrentSpeedKph(): number;
-        getRawCurrentSpeedMph(): number;
-        getAbsCurrentSpeedKph(): number;
-        getAbsCurrentSpeedMph(): number;
-        protected m_vehicleColliders: any[];
-        protected m_vehicle: UNITY.HavokRaycastVehicle;
-        protected m_scene: BABYLON.Scene;
-        constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
-        dispose(): void;
-        /** Gets the internal wheel index by id string. */
-        getWheelIndexByID(id: string): number;
-        /** Gets the internal wheel index by name string. */
-        getWheelIndexByName(name: string): number;
-        /** Gets the internal wheel collider information. */
-        getWheelColliderInfo(wheel: number): number;
-        getVisualSteeringAngle(wheel: number): number;
-        setVisualSteeringAngle(angle: number, wheel: number): void;
-        getPhysicsSteeringAngle(wheel: number): number;
-        setPhysicsSteeringAngle(angle: number, wheel: number): void;
-        /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        getStabilizingForce(): number;
-        /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        setStabilizingForce(force: number): void;
-        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
-        getSmoothFlyingImpulse(): number;
-        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
-        setSmoothFlyingImpulse(impulse: number): void;
-        protected setupWheelInformation(): void;
-        tickVehicleController(step: number): void;
-        updateWheelInformation(): void;
-        protected lockedWheelInformation(wheel: number): boolean;
-        protected deleteWheelInformation(): void;
-    }
-}
-
-declare namespace UNITY {
-    /**
      * Babylon full rigidbody physics standard class (Native Havok Physics Engine)
      * @class RigidbodyPhysics - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -3327,7 +3163,7 @@ declare namespace UNITY {
         private static RaycastDestination;
         private _isKinematic;
         private _centerOfMass;
-        protected m_raycastVehicle: UNITY.RaycastVehicle;
+        protected m_raycastVehicle: any;
         protected awake(): void;
         protected update(): void;
         protected late(): void;
@@ -3341,7 +3177,7 @@ declare namespace UNITY {
         /** Checks if rigidbody has wheel collider metadata for the entity. Note: Wheel collider metadata informaion is required for vehicle control. */
         hasWheelColliders(): boolean;
         /** Get the raycast vehicle component */
-        getRaycastVehicle(): UNITY.RaycastVehicle;
+        getRaycastVehicle(): any;
         /** Get the current havok instance from the global stack */
         static GetHavokInstance(): any;
         /** Get the current havok plugin from the global stack */

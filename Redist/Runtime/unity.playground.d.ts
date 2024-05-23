@@ -2910,3 +2910,197 @@ declare namespace PROJECT {
         protected destroy(): void;
     }
 }
+declare namespace UNITY {
+    /**
+     * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
+     * https://forum.babylonjs.com/u/raggar
+     * @script HavokRaycastVehicle
+     */
+    class HavokRaycastVehicle {
+        chassisBody: BABYLON.PhysicsBody;
+        wheelInfos: UNITY.HavokWheelInfo[];
+        sliding: boolean;
+        world: BABYLON.PhysicsEngine;
+        indexRightAxis: number;
+        indexForwardAxis: number;
+        indexUpAxis: number;
+        minimumWheelContacts: number;
+        smoothFlyingImpulse: number;
+        stabilizingForce: number;
+        maxImpulseForce: number;
+        currentVehicleSpeedKmHour: number;
+        constructor(options: any);
+        addWheel(options: any): number;
+        getNumWheels(): number;
+        getWheelInfo(wheelIndex: number): UNITY.HavokWheelInfo;
+        getSteeringValue(wheelIndex: number): number;
+        setSteeringValue(value: number, wheelIndex: number): void;
+        applyEngineForce(value: number, wheelIndex: number): void;
+        setBrake(brake: number, wheelIndex: number): void;
+        addToWorld(world: BABYLON.PhysicsEngine): void;
+        getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
+        getCurrentSpeedKmHour(): number;
+        updateVehicle(timeStep: number): void;
+        updateSuspension(deltaTime: number): void;
+        removeFromWorld(world: any): void;
+        castRay2(wheel: UNITY.HavokWheelInfo): number;
+        castRay(wheel: UNITY.HavokWheelInfo): number;
+        updateWheelTransformWorld(wheel: UNITY.HavokWheelInfo): void;
+        updateWheelTransform(wheelIndex: number): void;
+        getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
+        updateFriction(timeStep: number): void;
+    }
+    /**
+     * Babylon JavaScript File
+     * @script HavokWheelInfo
+     */
+    class HavokWheelInfo {
+        maxSuspensionTravel: number;
+        customSlidingRotationalSpeed: number;
+        useCustomSlidingRotationalSpeed: number;
+        sliding: boolean;
+        chassisConnectionPointLocal: BABYLON.Vector3;
+        chassisConnectionPointWorld: BABYLON.Vector3;
+        directionLocal: BABYLON.Vector3;
+        directionWorld: BABYLON.Vector3;
+        axleLocal: BABYLON.Vector3;
+        axleWorld: BABYLON.Vector3;
+        suspensionRestLength: number;
+        suspensionMaxLength: number;
+        radius: number;
+        suspensionStiffness: number;
+        dampingCompression: number;
+        dampingRelaxation: number;
+        frictionSlip: number;
+        steering: number;
+        rotation: number;
+        deltaRotation: number;
+        rollInfluence: number;
+        maxSuspensionForce: number;
+        engineForce: number;
+        brake: number;
+        isFrontWheel: boolean;
+        clippedInvContactDotSuspension: number;
+        suspensionRelativeVelocity: number;
+        suspensionForce: number;
+        skidInfo: number;
+        slipInfo: number;
+        suspensionLength: number;
+        sideImpulse: number;
+        forwardImpulse: number;
+        raycastResult: BABYLON.PhysicsRaycastResult;
+        worldTransform: BABYLON.TransformNode;
+        visualTravelRange: number;
+        invertDirection: boolean;
+        isInContact: boolean;
+        hub: BABYLON.TransformNode;
+        spinner: BABYLON.TransformNode;
+        defaultFriction: number;
+        steeringAngle: number;
+        rotationBoost: number;
+        locked: boolean;
+        constructor(options: any);
+        updateWheel(chassis: any): void;
+    }
+    /**
+     * Babylon JavaScript File
+     * @script HavokVehicleUtilities
+     */
+    class HavokVehicleUtilities {
+        static directions: BABYLON.Vector3[];
+        static calcRollingFriction_vel1: BABYLON.Vector3;
+        static calcRollingFriction_vel2: BABYLON.Vector3;
+        static calcRollingFriction_vel: BABYLON.Vector3;
+        static updateFriction_surfNormalWS_scaled_proj: BABYLON.Vector3;
+        static updateFriction_axle: BABYLON.Vector3[];
+        static updateFriction_forwardWS: BABYLON.Vector3[];
+        static sideFrictionStiffness2: number;
+        static castRay_rayvector: BABYLON.Vector3;
+        static castRay_target: BABYLON.Vector3;
+        static torque: BABYLON.Vector3;
+        static tmpVec1: BABYLON.Vector3;
+        static tmpVec2: BABYLON.Vector3;
+        static tmpVec3: BABYLON.Vector3;
+        static tmpVec4: BABYLON.Vector3;
+        static tmpVec5: BABYLON.Vector3;
+        static tmpVec6: BABYLON.Vector3;
+        static tmpVel2: BABYLON.Vector3;
+        static tmpMat1: BABYLON.Matrix;
+        static velocityAt: (body: BABYLON.PhysicsBody, pos: any, res: any) => any;
+        static bodyPosition: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyLinearVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyAngularVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyTransform: (body: BABYLON.PhysicsBody, res: any) => any;
+        static addImpulseAt: (body: BABYLON.PhysicsBody, impulse: any, point: any) => void;
+        static addForceAt: (body: BABYLON.PhysicsBody, force: any, point: any) => void;
+        static bodyOrientation: (body: BABYLON.PhysicsBody, res: any) => any;
+        static bodyMass: (body: BABYLON.PhysicsBody) => number;
+        static bodyInvMass: (body: BABYLON.PhysicsBody) => number;
+        static bodyInertiaWorld: (body: BABYLON.PhysicsBody, res: any) => any;
+        static calcRollingFriction(body0: BABYLON.PhysicsBody, body1: BABYLON.PhysicsBody, frictionPosWorld: any, frictionDirectionWorld: any, maxImpulse: any): number;
+        static computeImpulseDenominator_r0: BABYLON.Vector3;
+        static computeImpulseDenominator_c0: BABYLON.Vector3;
+        static computeImpulseDenominator_vec: BABYLON.Vector3;
+        static computeImpulseDenominator_m: BABYLON.Vector3;
+        static bodyPositionVec: BABYLON.Vector3;
+        static bodyInertiaVec: BABYLON.Vector3;
+        static computeImpulseDenominator(body: BABYLON.PhysicsBody, pos: any, normal: any): number;
+        static resolveSingleBilateral_vel1: BABYLON.Vector3;
+        static resolveSingleBilateral_vel2: BABYLON.Vector3;
+        static resolveSingleBilateral_vel: BABYLON.Vector3;
+        static resolveSingleBilateral(body1: BABYLON.PhysicsBody, pos1: any, body2: BABYLON.PhysicsBody, pos2: any, normal: any): number;
+        static chassis_velocity_at_contactPoint: BABYLON.Vector3;
+        static relpos: BABYLON.Vector3;
+        static Utilsdefaults: (options: any, defaults: any) => any;
+    }
+}
+declare namespace UNITY {
+    /**
+     * Babylon raycast vehicle pro class (Unity Style Wheeled Vehicle System)
+     * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class RaycastVehicle {
+        private _centerMass;
+        private _chassisMesh;
+        private _tempVectorPos;
+        lockedWheelIndexes: number[];
+        getNumWheels(): number;
+        getWheelInfo(wheel: number): UNITY.HavokWheelInfo;
+        setEngineForce(power: number, wheel: number): void;
+        setBrakingForce(brake: number, wheel: number): void;
+        getWheelTransform(wheel: number): BABYLON.TransformNode;
+        updateWheelTransform(wheel: number): void;
+        getRawCurrentSpeedKph(): number;
+        getRawCurrentSpeedMph(): number;
+        getAbsCurrentSpeedKph(): number;
+        getAbsCurrentSpeedMph(): number;
+        protected m_vehicleColliders: any[];
+        protected m_vehicle: UNITY.HavokRaycastVehicle;
+        protected m_scene: BABYLON.Scene;
+        constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
+        dispose(): void;
+        /** Gets the internal wheel index by id string. */
+        getWheelIndexByID(id: string): number;
+        /** Gets the internal wheel index by name string. */
+        getWheelIndexByName(name: string): number;
+        /** Gets the internal wheel collider information. */
+        getWheelColliderInfo(wheel: number): number;
+        getVisualSteeringAngle(wheel: number): number;
+        setVisualSteeringAngle(angle: number, wheel: number): void;
+        getPhysicsSteeringAngle(wheel: number): number;
+        setPhysicsSteeringAngle(angle: number, wheel: number): void;
+        /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
+        getStabilizingForce(): number;
+        /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
+        setStabilizingForce(force: number): void;
+        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
+        getSmoothFlyingImpulse(): number;
+        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
+        setSmoothFlyingImpulse(impulse: number): void;
+        protected setupWheelInformation(): void;
+        tickVehicleController(step: number): void;
+        updateWheelInformation(): void;
+        protected lockedWheelInformation(wheel: number): boolean;
+        protected deleteWheelInformation(): void;
+    }
+}
