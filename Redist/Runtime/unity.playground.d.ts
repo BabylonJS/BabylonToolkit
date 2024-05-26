@@ -1678,13 +1678,27 @@ declare namespace PROJECT {
         static get Instance(): PROJECT.MobileInputController;
         private static StaticInstance;
         private controlType;
+        private elementIndex;
+        private readyTimeout;
         private sideMargins;
         private bottomMargins;
-        private readyTimeout;
+        private maxMoveDistance;
+        private maxMoveDeadzone;
+        private joystickBallTop;
+        private joystickBallSize;
+        private joystickBaseSize;
         private leftBaseElement;
         private rightBaseElement;
+        private buttonBaseElement;
+        private virtualButtons;
+        private buttonGroupClass;
+        private virtualButtonGroup;
+        private leftStickClass;
+        private rightStickClass;
         private leftStickStyle;
         private rightStickStyle;
+        private leftStickFactor;
+        private rightStickFactor;
         private invertLeftStickY;
         private invertRightStickY;
         private centerLeftJoystick;
@@ -1692,6 +1706,9 @@ declare namespace PROJECT {
         private enableRightJoystick;
         private disableMouseRotation;
         private updateCameraInput;
+        protected m_leftStick: UNITY.TouchJoystickHandler;
+        protected m_rightStick: UNITY.TouchJoystickHandler;
+        protected m_mobileDevice: boolean;
         getLeftStick(): UNITY.TouchJoystickHandler;
         getRightStick(): UNITY.TouchJoystickHandler;
         getLeftStickEnabled(): boolean;
@@ -1701,13 +1718,14 @@ declare namespace PROJECT {
         showLeftStickElement(show: boolean): void;
         showRightStickElement(show: boolean): void;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
-        protected m_leftStick: UNITY.TouchJoystickHandler;
-        protected m_rightStick: UNITY.TouchJoystickHandler;
+        protected awake(): void;
         protected start(): void;
         protected ready(): void;
         protected update(): void;
         protected destroy(): void;
         protected createHtmlElements(): void;
+        static InputKeyDownHandler(event: MouseEvent | TouchEvent, keyCode: number): any;
+        static InputKeyUpHandler(event: any, keyCode: number): any;
     }
     /**
      * Manage the joystick inputs to control a free camera.
