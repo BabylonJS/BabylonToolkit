@@ -1994,6 +1994,10 @@ declare namespace UNITY {
         static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
         /** Global gamepad disconnect event handler */
         static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
+        /** Are mobile input controls allowed */
+        static AllowMobileControls: boolean;
+        /** Are mobile input controls currently active */
+        static MobileControlsActive: boolean;
         /** Configure user input state in the scene. */
         static ConfigureUserInput(scene: BABYLON.Scene, options?: {
             contextMenu?: boolean;
