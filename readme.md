@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The Unity Exporter is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture.
+The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture.
 
 
 # Documentation
@@ -22,12 +22,12 @@ The **babylon.toolkit.js** runtime library **must** be loaded on your host html 
 <script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
 ```
 
-Or At Runtime:
+Or at runtime:
 ```
 await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 ```
 
-Or On Playgrounds:
+Or on playgrounds:
 ```
  await UNITY.SceneManager.InitializePlayground(engine);
 ```
