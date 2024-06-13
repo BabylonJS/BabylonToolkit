@@ -16,7 +16,7 @@ https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Runtime
 
 # Runtime Library
 
-The **babylon.toolkit.js** runtime library **must** be loaded on your html page with other BabylonJS javascript libraries.
+The **babylon.toolkit.js** runtime library **must** be loaded on your host html page:
 
 ```
 <script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
@@ -40,7 +40,7 @@ The **UNITY.SceneManager** extension provides runtime life cycle management for 
 
 # Script Component Class
 
-The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class.
+The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class:
 ```
 module PROJECT {
     export class MyScript extends UNITY.ScriptComponent {
