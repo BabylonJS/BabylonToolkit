@@ -1,14 +1,121 @@
-Babylon.js EditorToolkit for Unity3D
+Babylon Toolkit
+================
+The Unity Exporter is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture.
+
+# Documentation
+https://doc.babylonjs.com/communityExtensions/Unity/Intro
+
+# Download Files
+https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Editors
+https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Runtime
+
+# Runtime Library
+The **babylon.toolkit.js** runtime library **must** be loaded on your html page with other BabylonJS javascript libraries.
+
+Script Tag:
+```
+<script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
+```
+
+Or At Runtime:
+```
+await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
+```
+
+Or On Playgrounds:
+```
+ await UNITY.SceneManager.InitializePlayground(engine);
+```
+
+# Scene Manager Class
+The **UNITY.SceneManager** extension provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
+
+# Script Component Class
+The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class.
+
+```
+module PROJECT {
+    export class MyScript extends UNITY.ScriptComponent {
+
+        protected awake(): void {
+            /* Init component function */
+        }
+
+        protected start(): void {
+            /* Start component function */
+        }
+
+        protected ready(): void {
+            /* Execute when ready function */
+        }
+
+        protected update(): void {
+            /* Update render loop function */
+        }
+
+        protected late(): void {
+            /* Late update render loop function */
+        }
+
+        protected step(): void {
+            /* Before physics step function (remove empty function for performance) */
+        }
+
+        protected fixed(): void {
+            /* After physics step function (remove empty function for performance) */
+        }
+
+        protected after(): void {
+            /* After update render loop function */
+        }
+
+        protected reset(): void {
+            /* Reset component function */
+        }
+
+        protected destroy(): void {
+            /* Destroy component function */
+        }
+    }
+}
+```
+
+Example Playground: https://playground.babylonjs.com/index.html?UnityToolkit#00G5R9
+
+
+
+Getting Started
+================
+Some verbage about using the Unity Editor and its eco system goes here
+
+[ Getting Started Video Goes Here ]
+
+
+
+Unity Starter Assets (Pro Features)
 ====================================
+Some verbage about using the Pro Features goes here
 
-Please visit our main documentation site: http://doc.babylonjs.com/resources/intro
+[ Pro Feature List Goes Here]
 
-Note: The toolkit requires Unity 2020.1 or greater. 
+[ Unity Assets Video Goes Here ]
 
-Newtonsoft Json.NET
-====================
+Example Playground: https://playground.babylonjs.com/index.html?UnityToolkit#RNACBR
 
-Unity 2020.3 and greater now ship with Newtonsoft Json.NET.
-If your Unity project already includes Json.NET, you may get errors in the Unity Console due to
-duplicate function/class definitions. In most cases, removing the Babylon Toolkit copy of the of
-the Json folder (**Assets/[Babylon]/Plugins/Json**) should solve the issue.
+
+
+Example Racing System (Premium Addons)
+=======================================
+Some verbage about using the Premium Addons goes here
+
+[ Premium Addons List Goes Here]
+
+[ Example Vehicle Video Goes Here ]
+
+Vehicle Project Demo: https://www.babylontoolkit.com/racer
+
+
+
+Unity Editor Versions
+======================
+The minimum recommended editor version is 2022 LTS or greater.

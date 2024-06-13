@@ -376,6 +376,9 @@ declare namespace UNITY {
         static EnterFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Exit full screen scene mode. */
         static ExitFullscreenMode(scene: BABYLON.Scene): void;
+        private static GotoFullscreenBrowser;
+        private static RequestBrowserPointerLock;
+        private static ExitFromFullscreenBrowser;
     }
 }
 /**
@@ -2091,6 +2094,10 @@ declare namespace UNITY {
         static GetGamepadType(player?: UNITY.PlayerNumber): UNITY.GamepadType;
         /** Get the specified gamepad. */
         static GetGamepad(player?: UNITY.PlayerNumber): BABYLON.Gamepad;
+        /** Process the specified input key down request */
+        static InputKeyDownHandler(keyCode: number, event?: MouseEvent | TouchEvent | PointerEvent | KeyboardEvent): any;
+        /** Process the specified input key down request */
+        static InputKeyUpHandler(keyCode: number, event?: MouseEvent | TouchEvent | PointerEvent | KeyboardEvent): any;
         private static input;
         private static keymap;
         private static scroll;
@@ -2310,6 +2317,20 @@ declare namespace UNITY {
         static IsXboxLive(): boolean;
         /** Is content running in a frame window */
         static IsFrameWindow(): boolean;
+        /** Is content running in a portrait window */
+        static IsPortraitWindow(): boolean;
+        /** Is content running in a landscape window */
+        static IsLandscapeWindow(): boolean;
+        /** Is content running in a standalone progressive window */
+        static IsStandaloneWindow(): boolean;
+        /** Is content running in a fullscreen progressive window */
+        static IsFullscreenWindow(): boolean;
+        /** Is content running in a standalone or fullscreen progressive window */
+        static IsProgressiveWindow(): boolean;
+        /** Get the browser application display mode */
+        static GetDisplayMode(): string;
+        /** Get the current window orientation */
+        static GetOrientation(): string;
         /** Open alert message dialog. */
         static AlertMessage(text: string, title?: string): any;
         /**  Gets the names query string from page url. */
