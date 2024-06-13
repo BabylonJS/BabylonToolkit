@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture.
+The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture. The minimum recommended editor version is 2022 LTS or greater.
 
 
 # Documentation
@@ -118,7 +118,3 @@ Some verbage about using the Premium Addons goes here
 
 Vehicle Project Demo: https://www.babylontoolkit.com/racer
 
-
-# Unity Editor Versions
-
-The minimum recommended editor version is 2022 LTS or greater.
