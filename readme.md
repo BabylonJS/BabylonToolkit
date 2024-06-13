@@ -1,18 +1,23 @@
-Babylon Toolkit
-================
+# Babylon Toolkit
+
 The Unity Exporter is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture.
 
+
 # Documentation
+
 https://doc.babylonjs.com/communityExtensions/Unity/Intro
 
+
 # Download Files
+
 https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Editors
 https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Runtime
 
+
 # Runtime Library
+
 The **babylon.toolkit.js** runtime library **must** be loaded on your html page with other BabylonJS javascript libraries.
 
-Script Tag:
 ```
 <script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
 ```
@@ -27,12 +32,15 @@ Or On Playgrounds:
  await UNITY.SceneManager.InitializePlayground(engine);
 ```
 
+
 # Scene Manager Class
+
 The **UNITY.SceneManager** extension provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
 
-# Script Component Class
-The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class.
 
+# Script Component Class
+
+The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class.
 ```
 module PROJECT {
     export class MyScript extends UNITY.ScriptComponent {
@@ -79,21 +87,18 @@ module PROJECT {
     }
 }
 ```
-
 Example Playground: https://playground.babylonjs.com/index.html?UnityToolkit#00G5R9
 
 
+# Getting Started
 
-Getting Started
-================
 Some verbage about using the Unity Editor and its eco system goes here
 
 [ Getting Started Video Goes Here ]
 
 
+# Unity Starter Assets (Pro Features)
 
-Unity Starter Assets (Pro Features)
-====================================
 Some verbage about using the Pro Features goes here
 
 [ Pro Feature List Goes Here]
@@ -103,9 +108,8 @@ Some verbage about using the Pro Features goes here
 Example Playground: https://playground.babylonjs.com/index.html?UnityToolkit#RNACBR
 
 
+# Example Racing System (Premium Addons)
 
-Example Racing System (Premium Addons)
-=======================================
 Some verbage about using the Premium Addons goes here
 
 [ Premium Addons List Goes Here]
@@ -115,7 +119,6 @@ Some verbage about using the Premium Addons goes here
 Vehicle Project Demo: https://www.babylontoolkit.com/racer
 
 
+# Unity Editor Versions
 
-Unity Editor Versions
-======================
 The minimum recommended editor version is 2022 LTS or greater.
