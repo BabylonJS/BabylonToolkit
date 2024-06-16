@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture. The minimum editor version for Babylon Toolkit 2024 is Unity 6000.0.5f1 or greater. Legacy toolkits require editor versions 2021, 2022 or 2023.
+The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture. The minimum editor version for the latest Babylon Toolkit is Unity 2022.3.33f1 or greater. Legacy toolkits require editor versions 2021, 2022 or 2023.
 
 
 # Documentation
