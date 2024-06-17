@@ -1341,6 +1341,7 @@ declare namespace PROJECT {
         private arcRotateConfig;
         private multiPlayerSetup;
         private fullScreenToggle;
+        private setPointerLock;
         private editorPostProcessing;
         isMainCamera(): boolean;
         getCameraType(): number;
@@ -1677,35 +1678,29 @@ declare namespace PROJECT {
     class MobileInputController extends UNITY.ScriptComponent {
         static get Instance(): PROJECT.MobileInputController;
         private static StaticInstance;
+        private styleSheet;
         private controlType;
-        private elementIndex;
-        private readyTimeout;
-        private sideMargins;
-        private bottomMargins;
+        private parentElement;
+        private maxReadyTimeout;
         private maxMoveDistance;
         private maxMoveDeadzone;
-        private joystickBallTop;
-        private joystickBallSize;
-        private joystickBaseSize;
+        private uiParentElement;
         private leftBaseElement;
         private rightBaseElement;
         private buttonBaseElement;
-        private virtualButtons;
-        private buttonGroupClass;
-        private virtualButtonGroup;
-        private leftStickClass;
-        private rightStickClass;
         private leftStickStyle;
         private rightStickStyle;
         private leftStickFactor;
         private rightStickFactor;
         private invertLeftStickY;
-        private invertRightStickY;
         private centerLeftJoystick;
         private enableLeftJoystick;
+        private invertRightStickY;
+        private centerRightJoystick;
         private enableRightJoystick;
-        private disableMouseRotation;
-        private updateCameraInput;
+        private enableMouseAxes;
+        private enableVirtualButtons;
+        private virtualButtonControls;
         protected m_leftStick: UNITY.TouchJoystickHandler;
         protected m_rightStick: UNITY.TouchJoystickHandler;
         protected m_mobileDevice: boolean;
@@ -1723,9 +1718,9 @@ declare namespace PROJECT {
         protected ready(): void;
         protected update(): void;
         protected destroy(): void;
+        protected loadStyleSheet(): void;
+        protected loadHtmlMarkup(): void;
         protected createHtmlElements(): void;
-        static InputKeyDownHandler(event: MouseEvent | TouchEvent, keyCode: number): any;
-        static InputKeyUpHandler(event: any, keyCode: number): any;
     }
     /**
      * Manage the joystick inputs to control a free camera.
@@ -2752,180 +2747,6 @@ declare namespace BABYLON {
         static ResetXboxLivePropertyContexts(): void;
         /** Sets the Xbox User Sign Out Complete Handler (WinRT) */
         static SetXboxLiveSignOutHandler(handler?: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component (Written By: Mackey Kinard)
-    * @class Camera_BigScreens
-    */
-    class Camera_BigScreens extends UNITY.ScriptComponent {
-        private static _StaticInstance;
-        static get Instance(): Camera_BigScreens;
-        private static FRONT_CAMERA_PADDING;
-        private static REAR_CAMERA_PADDING;
-        private resolution;
-        private interval;
-        private cycle;
-        private timer;
-        private points;
-        private screens;
-        private player;
-        private camera;
-        private main;
-        private rearCamera;
-        private frontCamera;
-        private currentPoint;
-        private currentMount;
-        private currentPlayer;
-        private keepAspectRatio;
-        private setFixedLocations;
-        private renderTexture;
-        private screenMaterial;
-        private focusPlayerVehicle;
-        private syncCameraTransform;
-        private lookCameraTransform;
-        private positionVectorBuffer;
-        private positionOffsetBuffer;
-        private relativePositionBuffer;
-        private relativeRotationBuffer;
-        AutoSwitchCamera: boolean;
-        SwitchActiveView(updatePlayer?: number, updateMount?: number): void;
-        ActivateMainCamera(): void;
-        ActivatePlayerCamera(): void;
-        GetPlayerFocusVehicle(): BABYLON.TransformNode;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
-        protected start(): void;
-        protected update(): void;
-        protected late(): void;
-        protected destroy(): void;
-        protected initCameraSetup(): void;
-        private canvasWidth;
-        private canvasHeight;
-        private static RTT_RATIO;
-        protected initScreenTextures(): void;
-        protected updateCamerTimer(): void;
-        protected updateCurrentPoint(updatePoint?: number): void;
-        protected updateCurrentPlayer(updatePlayer?: number): void;
-        protected updateCurrentMount(updateMount?: number): void;
-        protected updateCameraPosition(): void;
-        protected switchCameraLocation(updatePlayer?: number, updateMount?: number): void;
-        protected setFixedCameraLocation(updatePoint?: number): void;
-        protected setCameraClosestToPlayer(): void;
-        protected setPlayerFocusCameraMount(): void;
-        protected getCameraClosestToPlayer(player: BABYLON.TransformNode): number;
-        protected getDistanceToClosestCamera(player: BABYLON.TransformNode, camera: number): number;
-        protected getTransformNodesWithName(scene: BABYLON.Scene, name: string): BABYLON.TransformNode[];
-    }
-    interface ICameraMount {
-        positionOffset: number;
-        positionSpeed: number;
-        rotationSpeed: number;
-        lookAtVehicle: boolean;
-        smoothSpeeds: boolean;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class SpectatorCameraView
-    */
-    class SpectatorCameraView extends UNITY.ScriptComponent {
-        private attachPlayerCamera;
-        private autoSwitchCameras;
-        protected awake(): void;
-        protected start(): void;
-        protected fixed(): void;
-        protected update(): void;
-        protected late(): void;
-        protected after(): void;
-        protected ready(): void;
-        protected destroy(): void;
-        protected initSpectatorView(): void;
-        protected startSpectatorView(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Shader Material
-    * @class VertexSplat
-    */
-    class VertexSplat extends UNITY.UniversalAlbedoMaterial {
-        constructor(name: string, scene: BABYLON.Scene);
-        getShaderName(): string;
-        getShaderChunk(): string;
-        getCustomAttributes(): string[];
-        protected updateShaderChunks(): void;
-        protected awake(): void;
-        protected after(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class TestTerrain
-    */
-    class TestTerrain extends UNITY.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected reset(): void;
-        protected destroy(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class PaintShop
-    */
-    class PaintShop extends UNITY.ScriptComponent {
-        static CAR_MATERIAL_01: string;
-        static CAR_MATERIAL_02: string;
-        static CAR_MATERIAL_03: string;
-        static CAR_MATERIAL_04: string;
-        static CAR_MATERIAL_05: string;
-        static CAR_MATERIAL_06: string;
-        static CAR_MATERIAL_07: string;
-        static CAR_MATERIAL_08: string;
-        static CAR_MATERIAL_09: string;
-        static CAR_MATERIAL_10: string;
-        static CAR_MATERIAL_11: string;
-        static CAR_MATERIAL_12: string;
-        static CAR_MATERIAL_13: string;
-        static CAR_MATERIAL_14: string;
-        static CAR_MATERIAL_15: string;
-        static CAR_MATERIAL_16: string;
-        static CAR_MATERIAL_17: string;
-        static CAR_MATERIAL_18: string;
-        static CAR_MATERIAL_19: string;
-        static CAR_MATERIAL_20: string;
-        private carMaterial;
-        private raceCarBody;
-        private raceCarDriver;
-        protected awake(): void;
-        protected destroy(): void;
-        setCarMaterial(oneBasedIndex: number): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class RacingHud
-    */
-    class RacingHud extends UNITY.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected fixed(): void;
-        protected update(): void;
-        protected late(): void;
-        protected after(): void;
-        protected ready(): void;
-        protected destroy(): void;
     }
 }
 declare namespace UNITY {
