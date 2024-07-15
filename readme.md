@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The <a href="https://www.babylontoolkit.com" target="_blank">Babylon Toolkit</a> is an extended game development framework that provide advanced mechanics for BabylonJS.
+The <a href="https://www.babylontoolkit.com">Babylon Toolkit Extension</a> is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
 
 
 # Documentation
@@ -10,10 +10,9 @@ https://doc.babylonjs.com/communityExtensions/BabylonToolkit
 
 # Download Files
 
-https://github.com/BabylonJS/UnityExporter/tree/master/Runtime
-https://github.com/BabylonJS/UnityExporter/tree/master/Editors
-https://github.com/BabylonJS/UnityExporter/tree/master/Modules
-https://github.com/BabylonJS/UnityExporter/tree/master/Template
+https://github.com/BabylonJS/BabylonToolkit/tree/master/Runtime
+https://github.com/BabylonJS/BabylonToolkit/tree/master/Modules
+https://github.com/BabylonJS/BabylonToolkit/tree/master/Snippets
 
 
 # Runtime Library
@@ -33,6 +32,11 @@ Or on playgrounds:
 ```
  await BABYLON.Toolkit.SceneManager.InitializePlayground(engine);
 ```
+
+
+# Content Creation Tools
+
+The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Editor</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
 
 
 # Entity Component System
@@ -87,7 +91,7 @@ module PROJECT {
     }
 }
 ```
-<a href="https://playground.babylonjs.com/index.html?UnityToolkit#9SDE5Q" target="_blank">Example Playground</a>
+<a href="https://playground.babylonjs.com/index.html?UnityToolkit#9SDE5Q">Your First Example Playground</a>
 
 
 # Scene Manager Class
@@ -103,9 +107,4 @@ The **BABYLON.Toolkit.WindowManager** class provides DOM Level helper functions.
 # Input Controller Class
 
 The **BABYLON.Toolkit.InputController** class provides game engine style user input functions.
-
-
-# Content Creation Plugins
-
-The <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unity" target="_blank">Unity Editor</a> and <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unreal" target="_blank">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
 

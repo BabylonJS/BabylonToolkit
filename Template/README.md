@@ -1,1 +1,0 @@
-Babylon Toolkit Code Templates
