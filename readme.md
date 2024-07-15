@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The **Babylon Toolkit** is an extended game development framework that provide advanced mechanics for BabylonJS.
+The <a href="https://www.babylontoolkit.com" target="_blank">Babylon Toolkit</a> is an extended game development framework that provide advanced mechanics for BabylonJS.
 
 
 # Documentation
@@ -41,6 +41,9 @@ The **Script Component** is the foundation of the babylon toolkit extended frame
 ```
 module PROJECT {
     export class SampleScript extends BABYLON.Toolkit.ScriptComponent {
+        constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any={}) {
+           super(transform, scene, properties, "PROJECT.SampleScript");
+        }
 
         protected awake(): void {
             /* Init component function */
@@ -104,5 +107,5 @@ The **BABYLON.Toolkit.InputController** class provides game engine style user in
 
 # Content Creation Plugins
 
-The <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unity">Unity Editor</a> and <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unreal">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
+The <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unity" target="_blank">Unity Editor</a> and <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unreal" target="_blank">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
 
