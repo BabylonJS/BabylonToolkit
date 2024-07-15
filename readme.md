@@ -1,22 +1,24 @@
-# Babylon Toolkit For Unity
+# Babylon Toolkit
 
-The **Unity Exporter** is host to a set of tools designed to provide a small subset of native game editor features to export scene content files. You can create your games using a design time script component based architecture. The minimum editor version for the latest Babylon Toolkit is Unity 2022.3.33f1 or greater. Legacy toolkits require editor versions 2021, 2022 or 2023.
+The **Babylon Toolkit** is an extended game development framework that provide advanced mechanics for BabylonJS.
 
 
 # Documentation
 
-https://doc.babylonjs.com/communityExtensions/Unity/Intro
+https://doc.babylonjs.com/communityExtensions/BabylonToolkit
 
 
 # Download Files
 
-https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Editors
-https://github.com/BabylonJS/UnityExporter/tree/master/Redist/Runtime
+https://github.com/BabylonJS/UnityExporter/tree/master/Runtime
+https://github.com/BabylonJS/UnityExporter/tree/master/Editors
+https://github.com/BabylonJS/UnityExporter/tree/master/Modules
+https://github.com/BabylonJS/UnityExporter/tree/master/Template
 
 
 # Runtime Library
 
-The **babylon.toolkit.js** runtime library **must** be loaded on your host html page:
+The **babylon.toolkit.js** runtime library **must** be loaded in your host environment:
 
 ```
 <script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
@@ -29,21 +31,16 @@ await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 
 Or on playgrounds:
 ```
- await UNITY.SceneManager.InitializePlayground(engine);
+ await BABYLON.Toolkit.SceneManager.InitializePlayground(engine);
 ```
 
 
-# Scene Manager Class
+# Entity Component System
 
-The **UNITY.SceneManager** extension provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
-
-
-# Script Component Class
-
-The **UNITY.ScriptComponent** is the foundation of the babylon toolkit scripting system. It was modeled after Unity's MonoBehavior class:
+The **Script Component** is the foundation of the babylon toolkit extended framework. It was modeled after Unity's MonoBehavior class:
 ```
 module PROJECT {
-    export class MyScript extends UNITY.ScriptComponent {
+    export class SampleScript extends BABYLON.Toolkit.ScriptComponent {
 
         protected awake(): void {
             /* Init component function */
@@ -89,44 +86,23 @@ module PROJECT {
 ```
 <a href="https://playground.babylonjs.com/index.html?UnityToolkit#9SDE5Q" target="_blank">Example Playground</a>
 
-# Getting Started
 
-The Unity Editor plugin lets BabylonJS artists, designers, and developers collaborate to create amazing immersive and interactive experiences.
+# Scene Manager Class
 
-<a href="https://www.youtube.com/watch?v=d1spQKztIZI&list=PLQjLia99I6qDtO16j-ia64xC5r8ps09bB&index=1&pp=gAQBiAQB" target="_blank">Getting Started Video</a>
-
-
-# Unity Starter Assets (Pro Features)
-
-The Babylon Toolkit Pro Classes allows out of the box features that help you jump start your next project.
-
-- Rigidbody physics system
-- Animation state machines
-- Player character controllers
-- Recast navigation meshes
-- Detour path following
-- Raycast wheeled vehicles
-- Audio source components
-- Video player components
-- Terrain building tools
-
-<a href="https://www.youtube.com/watch?v=qrXDwPhQNfY&list=PLQjLia99I6qDtO16j-ia64xC5r8ps09bB&index=2&t=53s&pp=gAQBiAQB" target="_blank">Using Starter Assets Video</a>
-
-<a href="https://www.youtube.com/watch?v=YTlp_ut53wo&list=PLQjLia99I6qDtO16j-ia64xC5r8ps09bB&index=3&pp=gAQBiAQB" target="_blank">Pro Edition Features Video</a>
-
-<a href="https://playground.babylonjs.com/index.html?UnityToolkit#V93DXU" target="_blank">Starter Assets Playground</a>
+The **BABYLON.Toolkit.SceneManager** class provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
 
 
-# Advanced Game Development (Premium Addons)
+# Window Manager Class
 
-The Babylon Toolkit Premium Addons provide more advanced script components for that next level game development experience. 
+The **BABYLON.Toolkit.WindowManager** class provides DOM Level helper functions.
 
-- Networking components
-- Player avatar components
-- Managed racing components
 
-<a href="https://www.youtube.com/watch?v=jsMJp00d1E8&list=PLQjLia99I6qAaof4M3KDkL59jQ2oqAHUb&index=1&t=665s&pp=gAQBiAQB" target="_blank">Burnout Dev Blog: Part One</a>
+# Input Controller Class
 
-<a href="https://www.youtube.com/watch?v=d25x5hlhL4A&list=PLQjLia99I6qAaof4M3KDkL59jQ2oqAHUb&index=2&t=571s&pp=gAQBiAQB" target="_blank">Burnout Dev Blog: Part Two</a>
+The **BABYLON.Toolkit.InputController** class provides game engine style user input functions.
 
-<a href="https://www.babylontoolkit.com/racer" target="_blank">Burnout Project Demo</a>
+
+# Content Creation Plugins
+
+The <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unity">Unity Editor</a> and <a href="https://github.com/BabylonJS/UnityExporter/tree/master/Editors/Unreal">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
+
