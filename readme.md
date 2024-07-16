@@ -36,7 +36,7 @@ Or on playgrounds:
 
 # Content Creation Tools
 
-The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Editor</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine</a> exporter plugins allow you to export GLTF content from the specfied eco system
+The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity GLTF Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal GLTF Exporter</a> plugins allow you to export interactive content from the game engine editor
 
 
 # Entity Component System
