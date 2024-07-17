@@ -18,7 +18,7 @@ declare namespace BABYLON.Toolkit {
         /** Are mobile input controls currently active */
         static MobileControlsActive: boolean;
         /** Configure user input state in the scene. */
-        static ConfigureUserInput(scene: BABYLON.Scene, options?: {
+        static ConfigureUserInput(engine: BABYLON.AbstractEngine, scene: BABYLON.Scene, options?: {
             contextMenu?: boolean;
             pointerLock?: boolean;
             preventDefault?: boolean;

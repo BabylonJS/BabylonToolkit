@@ -2785,3 +2785,40 @@ declare namespace BABYLON {
         static SetXboxLiveSignOutHandler(handler?: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void): void;
     }
 }
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class TestController
+    */
+    class TestController extends BABYLON.Toolkit.ScriptComponent {
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class TestMover
+    */
+    class TestMover extends BABYLON.Toolkit.ScriptComponent {
+        private characterController;
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+    }
+}
