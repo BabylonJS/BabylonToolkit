@@ -2791,16 +2791,10 @@ declare namespace PROJECT {
     * @class TestController
     */
     class TestController extends BABYLON.Toolkit.ScriptComponent {
+        static MOVE_VELOCITY: BABYLON.Vector3;
+        static MyCharacterController: BABYLON.Toolkit.CharacterController;
         protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
         protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected reset(): void;
-        protected destroy(): void;
     }
 }
 declare namespace PROJECT {
