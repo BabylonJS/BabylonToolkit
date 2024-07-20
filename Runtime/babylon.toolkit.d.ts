@@ -220,6 +220,9 @@ declare namespace BABYLON.Toolkit {
         static GetLastCreatedScene(): BABYLON.Scene;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
+        private static PhysicsViewersEnabled;
+        static IsPhysicsViewerEnabled(): boolean;
+        static TogglePhysicsViewer(scene: BABYLON.Scene): void;
         /** Get managed asset container. */
         static GetImportMeshes(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh[];
         /** Get managed asset container map. */
