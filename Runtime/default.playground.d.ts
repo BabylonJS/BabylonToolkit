@@ -2425,6 +2425,8 @@ declare namespace PROJECT {
         airbornVelocity: BABYLON.Vector3;
         movementVelocity: BABYLON.Vector3;
         targetCameraOffset: BABYLON.Vector3;
+        defaultFreeCamera: BABYLON.FreeCamera;
+        defaultCameraNode: BABYLON.TransformNode;
         isAnimationEnabled(): boolean;
         isRunButtonPressed(): boolean;
         isJumpButtonPressed(): boolean;
