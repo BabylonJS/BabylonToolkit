@@ -91,7 +91,7 @@ module PROJECT {
     }
 }
 ```
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#LYKHXV">Your First Example Playground</a>
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#NVL5A2">Your First Example Playground</a>
 
 
 # Scene Manager Class
