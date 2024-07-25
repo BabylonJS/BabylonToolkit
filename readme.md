@@ -45,7 +45,7 @@ The **Script Component** is the foundation of the babylon toolkit extended frame
 ```
 module PROJECT {
     export class SampleScript extends BABYLON.Toolkit.ScriptComponent {
-        constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any={}) {
+        constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any=null) {
            super(transform, scene, properties, "PROJECT.SampleScript");
         }
 
@@ -91,7 +91,7 @@ module PROJECT {
     }
 }
 ```
-<a href="https://playground.babylonjs.com/index.html?UnityToolkit#9SDE5Q">Your First Example Playground</a>
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#LYKHXV">Your First Example Playground</a>
 
 
 # Scene Manager Class
