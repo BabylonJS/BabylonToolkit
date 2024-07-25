@@ -32,7 +32,9 @@ The Babylon Toolkit Pro Classes allows out of the box features that help you jum
 
 <a href="https://www.youtube.com/watch?v=YTlp_ut53wo&list=PLQjLia99I6qDtO16j-ia64xC5r8ps09bB&index=3&pp=gAQBiAQB">Pro Edition Features Video</a>
 
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#N1FY3E">Starter Assets Playground</a>
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#EI0V1I">TypeScript Starter Playground (TS)</a>
+
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#N1FY3E">JavaScript Starter Playground (JS)</a>
 
 
 # Advanced Game Development (Premium Addons)
