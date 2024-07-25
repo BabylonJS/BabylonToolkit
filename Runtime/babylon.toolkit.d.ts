@@ -3048,7 +3048,7 @@ declare namespace BABYLON.Toolkit {
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position to the specified location. */
-        set(x: number, y: number, z: number): void;
+        set(x: number, y: number, z: number, resetPreStep?: boolean): void;
         /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
         /** Jumps the chacracter with the specified speed. */
