@@ -3047,10 +3047,12 @@ declare namespace BABYLON.Toolkit {
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
-        /** Sets the character position to the specified location. */
-        set(x: number, y: number, z: number, resetPreStep?: boolean): void;
+        /** Sets the character position and rotation to the specfied values. */
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetPreStep?: boolean, useBeforeRender?: boolean): void;
         /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
+        /** Rotates the chacracter to the specified angle. */
+        turn(angle: number, addRotation?: boolean): void;
         /** Jumps the chacracter with the specified speed. */
         jump(speed: number): void;
         /** Sets the character controller rigidbody mass property */
