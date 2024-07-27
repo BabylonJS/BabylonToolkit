@@ -114,7 +114,7 @@ declare namespace BABYLON.Toolkit {
          * @param assetsManager The list of required scene filenames to check ready state.
          * @param requiredFilenames The list of required scene filenames to check ready state.
          * @param readyHandler The function that will be called when all scene files are ready.
-         * @param maxTimeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
+         * @param maxTimeout The timeout value to wait for all required scene files to fully load. Default 10 seconds.
          * @param debugMode The flag to enable on scene ready debug messages. Default false.
          */
         static LoadRuntimeAssets(assetsManager: BABYLON.AssetsManager, requiredFilenames: string[], readyHandler: () => void, maxTimeout?: number, debugMode?: boolean): Promise<void>;
@@ -141,7 +141,7 @@ declare namespace BABYLON.Toolkit {
          * Sets the handler that executes when all required scene files are ready
          * @param filenames The list of required scene filenames to check ready state.
          * @param handler The function that will be called when all scene files are ready
-         * @param timeout The timeout value to wait for all required scene files to fully load. Default 30 seconds.
+         * @param timeout The timeout value to wait for all required scene files to fully load. Default 10 seconds.
          */
         static SetOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
         private static SceneParsingEnabled;
