@@ -3048,7 +3048,7 @@ declare namespace BABYLON.Toolkit {
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position and rotation to the specfied values. */
-        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetPreStep?: boolean, useBeforeRender?: boolean): void;
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetPreStep?: boolean): void;
         /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
         /** Rotates the chacracter to the specified angle. */
