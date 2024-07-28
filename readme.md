@@ -10,6 +10,7 @@ https://doc.babylonjs.com/communityExtensions/BabylonToolkit
 
 # Download Files
 
+https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors
 https://github.com/BabylonJS/BabylonToolkit/tree/master/Runtime
 https://github.com/BabylonJS/BabylonToolkit/tree/master/Modules
 https://github.com/BabylonJS/BabylonToolkit/tree/master/Snippets
