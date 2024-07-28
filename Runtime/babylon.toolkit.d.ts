@@ -2977,6 +2977,8 @@ declare namespace BABYLON.Toolkit {
         private _minimumStepHeight;
         private _currentVelocity;
         private _inputVelocity;
+        private _angluarVelocity;
+        private _eulerAngles;
         private _gravityFactor;
         private _minJumpTimer;
         private _maxSlopeTimer;
@@ -3007,6 +3009,7 @@ declare namespace BABYLON.Toolkit {
         private _stepCheckRay;
         protected m_moveDeltaX: number;
         protected m_moveDeltaZ: number;
+        protected m_havokplugin: any;
         getAvatarRadius(): number;
         getAvatarHeight(): number;
         getCenterOffset(): BABYLON.Vector3;
@@ -3048,11 +3051,11 @@ declare namespace BABYLON.Toolkit {
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position and rotation to the specfied values. */
-        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetPreStep?: boolean): void;
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
+        /** Rotates the chacracter to the specified angle. */
+        turn(angle: number): void;
         /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
-        /** Rotates the chacracter to the specified angle. */
-        turn(angle: number, addRotation?: boolean): void;
         /** Jumps the chacracter with the specified speed. */
         jump(speed: number): void;
         /** Sets the character controller rigidbody mass property */
