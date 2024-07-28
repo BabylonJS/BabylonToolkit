@@ -3045,19 +3045,23 @@ declare namespace BABYLON.Toolkit {
         verticalVelocityOffset: number;
         /** Enable character step offset feature */
         enableStepOffset: boolean;
+        /** Enable character gravity feature */
+        enableGravity: boolean;
         /** Sets the character controller to debug mode (show ray lines) */
         showRaycasts: boolean;
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position and rotation to the specfied values. */
-        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
-        /** Rotates the chacracter to the specified angle. */
-        turn(angle: number): void;
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetPreStep?: boolean): void;
         /** Translates the character with the specfied velocity. */
         move(velocity: BABYLON.Vector3): void;
         /** Jumps the chacracter with the specified speed. */
         jump(speed: number): void;
+        /** Turns the chacracter to the specified angle. */
+        turn(angle: number): void;
+        /** Rotates the chacracter to the specified quaternion. */
+        rotate(x: number, y: number, z: number, w: number): void;
         /** Sets the character controller rigidbody mass property */
         setRigidBodyMass(mass: number): void;
         /** Set the character controller rigidbody collision type */
