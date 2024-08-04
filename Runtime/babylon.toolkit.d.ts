@@ -384,7 +384,7 @@ declare namespace BABYLON.Toolkit {
     }
 }
 /**
- * Babylon Scene Manager Alias
+ * Babylon Toolkit Scene Manager Alias
  */
 declare const SM: typeof BABYLON.Toolkit.SceneManager;
 
@@ -1829,7 +1829,7 @@ declare namespace BABYLON.Toolkit {
     }
 }
 /**
- * Babylon Utilties Alias
+ * Babylon Toolkit Utilties Alias
  */
 declare const UTIL: typeof BABYLON.Toolkit.Utilities;
 
@@ -1881,6 +1881,8 @@ declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtensi
     private _hideLoader;
     private _rootUrl;
     private _fileName;
+    private _licenseName;
+    private _licenseType;
     private static ScriptBundleCache;
     /** @hidden */
     constructor(loader: BABYLON.GLTF2.GLTFLoader);
@@ -2008,8 +2010,8 @@ declare namespace BABYLON.Toolkit {
         static GamepadConnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
         /** Global gamepad disconnect event handler */
         static GamepadDisconnected: (pad: BABYLON.Gamepad, state: BABYLON.EventState) => void;
-        /** Get the current pointer down state. */
-        static GetPointerDownState(): BABYLON.Toolkit.PointerDownState;
+        /** Get the value of all mouse buttons down. */
+        static GetMouseButtonsDown(): number;
         /** Are mobile input controls allowed */
         static AllowMobileControls: boolean;
         /** Are mobile input controls currently active */
@@ -2162,7 +2164,7 @@ declare namespace BABYLON.Toolkit {
         private static g_mousey4;
         private static g_vertical4;
         private static g_horizontal4;
-        private static pointerDownState;
+        private static mouseButtonsDown;
         private static mouseButtonPress;
         private static mouseButtonDown;
         private static mouseButtonUp;
@@ -2288,6 +2290,10 @@ declare namespace BABYLON.Toolkit {
         protected handleUp(event: any): void;
     }
 }
+/**
+ * Babylon Toolkit Input Controller Alias
+ */
+declare const IC: typeof BABYLON.Toolkit.InputController;
 
 declare namespace BABYLON.Toolkit {
     class WindowManager {
@@ -2407,7 +2413,7 @@ declare namespace BABYLON.Toolkit {
     }
 }
 /**
- * Babylon Window Manager Alias
+ * Babylon Toolkit Window Manager Alias
  */
 declare const WM: typeof BABYLON.Toolkit.WindowManager;
 
