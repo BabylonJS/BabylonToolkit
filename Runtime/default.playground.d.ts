@@ -726,7 +726,7 @@ declare namespace PROJECT {
         static DEFAULT_PITCH_FACTOR: number;
         static DEFAULT_SPEED_FACTOR: number;
         static DEFAULT_DONUT_FACTOR: number;
-        static SimplexNoise2D: SIMPLEX.NoiseFunction2D;
+        static SimplexNoise2D: BABYLON.Toolkit.Simplex.NoiseFunction2D;
         MIN_RPM: number;
         MAX_RPM: number;
         private _animator;
@@ -2785,36 +2785,5 @@ declare namespace BABYLON {
         static ResetXboxLivePropertyContexts(): void;
         /** Sets the Xbox User Sign Out Complete Handler (WinRT) */
         static SetXboxLiveSignOutHandler(handler?: (result: Microsoft.Xbox.Services.System.SignOutCompletedEventArgs) => void): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class TestController
-    */
-    class TestController extends BABYLON.Toolkit.ScriptComponent {
-        static MOVE_VELOCITY: BABYLON.Vector3;
-        static MyCharacterController: BABYLON.Toolkit.CharacterController;
-        protected awake(): void;
-        protected update(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class TestMover
-    */
-    class TestMover extends BABYLON.Toolkit.ScriptComponent {
-        private characterController;
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected reset(): void;
-        protected destroy(): void;
     }
 }
