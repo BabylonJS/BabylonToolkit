@@ -387,6 +387,10 @@ declare namespace BABYLON.Toolkit {
     }
 }
 /**
+ * Babylon Toolkit Namespace Alias
+ */
+declare const BT: typeof BABYLON.Toolkit;
+/**
  * Babylon Toolkit Scene Manager Alias
  */
 declare const SM: typeof BABYLON.Toolkit.SceneManager;
@@ -690,7 +694,7 @@ declare namespace BABYLON.Toolkit {
     }
 }
 
-declare namespace SIMPLEX {
+declare namespace BABYLON.Toolkit.Simplex {
     /**
      * A random() function, must return a number in the interval [0,1), just like Math.random().
      */
@@ -2331,6 +2335,8 @@ declare namespace BABYLON.Toolkit {
         getStickElement(): HTMLElement;
         isFixedJoystick(): boolean;
         updateElements: boolean;
+        baseElementOpacity: string;
+        stickElementOpacity: string;
         constructor(stickid: string, maxdistance: number, deadzone: number, fixed?: boolean, button?: BABYLON.Toolkit.TouchMouseButton, baseid?: string);
         dispose(): void;
         protected handleDown(event: any): void;
