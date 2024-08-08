@@ -108,7 +108,7 @@ declare namespace BABYLON.Toolkit {
          * @param options The playground options.
          * @returns a waitable promise.
          */
-        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine, options?: BABYLON.Toolkit.IPlaygroundOptions): Promise<void>;
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: BABYLON.Toolkit.IPlaygroundOptions): Promise<void>;
         /**
          * Sets the on scene ready handler then starts the assets manager loadAsync function
          * @param assetsManager The list of required scene filenames to check ready state.
@@ -124,12 +124,15 @@ declare namespace BABYLON.Toolkit {
          * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
          * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
          */
-        static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
+        static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
         /**
          * Hides the default loading screen panel
          * @param engine The engine instance.
          */
-        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine): void;
+        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine): void;
+        /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
+        static ForceHideLoadingScreen(): void;
+        private static DoForceHideLoadingScreen;
         /** Focus the scene rendering canvas
          * @param scene The scene instance.
          */
@@ -2007,6 +2010,11 @@ declare namespace BABYLON.Toolkit {
         ZoomIn = 1,
         ZoomOut = 2
     }
+    enum TouchMouseButton {
+        Any = -1,
+        Left = 0,
+        Right = 1
+    }
     class InputController {
         static MOUSE_DAMPENER: number;
         static TAP_THRESHOLD_MS: number;
@@ -2317,11 +2325,11 @@ declare namespace BABYLON.Toolkit {
         private active;
         getValueX(): number;
         getValueY(): number;
-        getMouseButton(): number;
+        getMouseButton(): BABYLON.Toolkit.TouchMouseButton;
         getBaseElement(): HTMLElement;
         getStickElement(): HTMLElement;
         isFixedJoystick(): boolean;
-        constructor(stickid: string, maxdistance: number, deadzone: number, fixed?: boolean, button?: number, baseid?: string);
+        constructor(stickid: string, maxdistance: number, deadzone: number, fixed?: boolean, button?: BABYLON.Toolkit.TouchMouseButton, baseid?: string);
         dispose(): void;
         protected handleDown(event: any): void;
         protected handleMove(event: any): void;
