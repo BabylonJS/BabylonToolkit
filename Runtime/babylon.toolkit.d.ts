@@ -2014,6 +2014,11 @@ declare namespace BABYLON.Toolkit {
         ZoomIn = 1,
         ZoomOut = 2
     }
+    enum MouseButtonMode {
+        Pan = 0,
+        Look = 1,
+        Move = 2
+    }
     enum TouchMouseButton {
         Any = -1,
         Left = 0,
