@@ -1,8 +1,8 @@
 declare namespace BABYLON.Toolkit {
     /**
-     * Babylon toolkit scene manager class
-     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
-     */
+    * Babylon toolkit scene manager class
+    * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
+    */
     class SceneManager {
         /** Gets the toolkit framework version number */
         static get Version(): string;
