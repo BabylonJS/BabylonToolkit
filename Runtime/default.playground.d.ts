@@ -3,7 +3,7 @@ declare namespace PROJECT {
      * Babylon network entity (Colyseus Universal Game Room)
      * @class ColyseusGameServer - All rights reserved (c) 2020 Mackey Kinard
     */
-    class ColyseusGameServer extends BABYLON.Toolkit.ScriptComponent {
+    class ColyseusGameServer extends TOOLKIT.ScriptComponent {
         static MAX_FRAME_RATE: number;
         projectName: string;
         autoJoinRoom: boolean;
@@ -37,7 +37,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class ColyseusNetworkAvatar
     */
-    class ColyseusNetworkAvatar extends BABYLON.Toolkit.ScriptComponent implements BABYLON.Toolkit.IAssetPreloader {
+    class ColyseusNetworkAvatar extends TOOLKIT.ScriptComponent implements TOOLKIT.IAssetPreloader {
         static FONT_PADDING: number;
         static HEIGHT_PADDING: number;
         private controlMode;
@@ -88,7 +88,7 @@ declare namespace PROJECT {
         /** Load runtime player avatar from specfied location */
         private loadRuntimePlayerAvatar;
         /** Add asset preloader tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: BABYLON.Toolkit.PreloadAssetsManager): void;
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
 declare namespace PROJECT {
@@ -96,7 +96,7 @@ declare namespace PROJECT {
      * Babylon network entity (Colyseus Universal Game Room)
      * @class ColyseusNetworkEntity - All rights reserved (c) 2020 Mackey Kinard
      */
-    class ColyseusNetworkEntity extends BABYLON.Toolkit.ScriptComponent {
+    class ColyseusNetworkEntity extends TOOLKIT.ScriptComponent {
         autoCreate: boolean;
         remotePrefab: string;
         assetContainer: string;
@@ -164,7 +164,7 @@ declare namespace BABYLON {
         static OnRemoveEntityObservable: Observable<IColyseusNetworkEntity>;
         static OnChatMessageObservable: Observable<IColyseusChatMessage>;
         static OnPingReceivedObservable: Observable<any>;
-        static OnErrorMessageObservable: Observable<Toolkit.RoomErrorMessage>;
+        static OnErrorMessageObservable: Observable<TOOLKIT.RoomErrorMessage>;
         static OnRemoteProcedureCallObservable: Observable<any>;
         static RegisterCustomInterpolationHandler(name: string, handler: (entity: BABYLON.IColyseusNetworkEntity, transform: BABYLON.TransformNode, deltaTime: number) => void): void;
         /** Is the colyseus network library is available */
@@ -396,7 +396,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class AutoBodyGarage
     */
-    class AutoBodyGarage extends BABYLON.Toolkit.ScriptComponent {
+    class AutoBodyGarage extends TOOLKIT.ScriptComponent {
         private m_bodyMaterial;
         private m_bodyAbtractMesh;
         protected awake(): void;
@@ -408,7 +408,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class CheckpointManager
     */
-    class CheckpointManager extends BABYLON.Toolkit.ScriptComponent {
+    class CheckpointManager extends TOOLKIT.ScriptComponent {
         private checkPointList;
         private checkPointCount;
         private checkPointIndex;
@@ -441,7 +441,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class NetworkCarPrediction
     */
-    class NetworkCarPrediction extends BABYLON.Toolkit.ScriptComponent {
+    class NetworkCarPrediction extends TOOLKIT.ScriptComponent {
         private autoRegister;
         private handlerName;
         private extrapolateTimeMs;
@@ -454,8 +454,8 @@ declare namespace PROJECT {
 declare namespace PROJECT {
     interface ITrackNode {
         radius: number;
-        position: BABYLON.Toolkit.IUnityVector3;
-        rotation: BABYLON.Toolkit.IUnityVector4;
+        position: TOOLKIT.IUnityVector3;
+        rotation: TOOLKIT.IUnityVector4;
         localPosition: BABYLON.Vector3;
         localRotation: BABYLON.Quaternion;
         localDistance: number;
@@ -463,7 +463,7 @@ declare namespace PROJECT {
     interface IControlPoint {
         speed: number;
         tvalue: number;
-        position: BABYLON.Toolkit.IUnityVector3;
+        position: TOOLKIT.IUnityVector3;
     }
     class RoutePoint {
         position: BABYLON.Vector3;
@@ -478,7 +478,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class BT_RaceTrackManager
     */
-    class RaceTrackManager extends BABYLON.Toolkit.ScriptComponent {
+    class RaceTrackManager extends TOOLKIT.ScriptComponent {
         static TrackLength: number;
         static TotalLapCount: number;
         static WinnerTransform: BABYLON.TransformNode;
@@ -508,7 +508,7 @@ declare namespace PROJECT {
         private p3n;
         private i;
         private static _EventBus;
-        static get EventBus(): BABYLON.Toolkit.LocalMessageBus;
+        static get EventBus(): TOOLKIT.LocalMessageBus;
         drawDebugLines: boolean;
         getTrackNodes(): PROJECT.ITrackNode[];
         getControlPoints(line: number): PROJECT.IControlPoint[];
@@ -549,7 +549,7 @@ declare namespace PROJECT {
      * Babylon remote vehicle controller class (Colyseus Universal Game Room)
     * @class RemoteCarController
     */
-    class RemoteCarController extends BABYLON.Toolkit.ScriptComponent {
+    class RemoteCarController extends TOOLKIT.ScriptComponent {
         private static ShowSensorLines;
         centerOfMass: number;
         burnoutWheelPitch: number;
@@ -683,7 +683,7 @@ declare namespace PROJECT {
      * Babylon Script Component
      * @class SkidMarkManager
      */
-    class SkidMarkManager extends BABYLON.Toolkit.ScriptComponent {
+    class SkidMarkManager extends TOOLKIT.ScriptComponent {
         private static MAX_MARKS;
         private static GROUND_OFFSET;
         private static GPU_TRIANGLES;
@@ -721,12 +721,12 @@ declare namespace PROJECT {
      * Babylon standard rigidbody vehicle controller class (Havok Physics Engine)
      * @class StandardCarController
      */
-    class StandardCarController extends BABYLON.Toolkit.ScriptComponent {
+    class StandardCarController extends TOOLKIT.ScriptComponent {
         static DEFAULT_SKID_FACTOR: number;
         static DEFAULT_PITCH_FACTOR: number;
         static DEFAULT_SPEED_FACTOR: number;
         static DEFAULT_DONUT_FACTOR: number;
-        static SimplexNoise2D: BABYLON.Toolkit.Simplex.NoiseFunction2D;
+        static SimplexNoise2D: TOOLKIT.Simplex.NoiseFunction2D;
         MIN_RPM: number;
         MAX_RPM: number;
         private _animator;
@@ -836,8 +836,8 @@ declare namespace PROJECT {
         getBackLeftSkid(): number;
         getBackRightSkid(): number;
         getWheelSkidPitch(): number;
-        getRigidbodyPhysics(): BABYLON.Toolkit.RigidbodyPhysics;
-        getRaycastVehicle(): BABYLON.Toolkit.RaycastVehicle;
+        getRigidbodyPhysics(): TOOLKIT.RigidbodyPhysics;
+        getRaycastVehicle(): TOOLKIT.RaycastVehicle;
         getGradientSpeed(): number;
         getForwardSpeed(): number;
         getAbsoluteSpeed(): number;
@@ -973,10 +973,10 @@ declare namespace PROJECT {
         boosterTransform: BABYLON.TransformNode;
         chassisTransform: BABYLON.TransformNode;
         tiltChassisEulers: BABYLON.Vector3;
-        protected m_frontLeftWheel: BABYLON.Toolkit.HavokWheelInfo;
-        protected m_frontRightWheel: BABYLON.Toolkit.HavokWheelInfo;
-        protected m_backLeftWheel: BABYLON.Toolkit.HavokWheelInfo;
-        protected m_backRightWheel: BABYLON.Toolkit.HavokWheelInfo;
+        protected m_frontLeftWheel: TOOLKIT.HavokWheelInfo;
+        protected m_frontRightWheel: TOOLKIT.HavokWheelInfo;
+        protected m_backLeftWheel: TOOLKIT.HavokWheelInfo;
+        protected m_backRightWheel: TOOLKIT.HavokWheelInfo;
         protected m_frontLeftWheelSkid: number;
         protected m_frontRightWheelSkid: number;
         protected m_backLeftWheelSkid: number;
@@ -1089,7 +1089,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class VehicleCameraManager
     */
-    class VehicleCameraManager extends BABYLON.Toolkit.ScriptComponent {
+    class VehicleCameraManager extends TOOLKIT.ScriptComponent {
         enableCamera: boolean;
         followTarget: boolean;
         followHeight: number;
@@ -1129,7 +1129,7 @@ declare namespace PROJECT {
         protected initCameraManager(): void;
         protected lateUpdateCameraManager(): void;
         protected destroyCameraManager(): void;
-        attachPlayerCamera(player: BABYLON.Toolkit.PlayerNumber): void;
+        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
         togglePlayerCamera(): void;
         firstPersonCamera(): void;
         thirdPersonCamera(): void;
@@ -1149,7 +1149,7 @@ declare namespace PROJECT {
         leftDonutBoost: number;
         rightDonutBoost: number;
     }
-    class VehicleInputController extends BABYLON.Toolkit.ScriptComponent {
+    class VehicleInputController extends TOOLKIT.ScriptComponent {
         private playerDeltaX;
         private playerDeltaY;
         private playerMouseX;
@@ -1218,7 +1218,7 @@ declare namespace PROJECT {
         resetChasePointMesh(): void;
         enableInput: boolean;
         resetTiming: number;
-        playerNumber: BABYLON.Toolkit.PlayerNumber;
+        playerNumber: TOOLKIT.PlayerNumber;
         pedelForward: number;
         triggerForward: number;
         keyboardForawrd: number;
@@ -1286,7 +1286,7 @@ declare namespace PROJECT {
         protected m_circuitRaceLine_3: PROJECT.IControlPoint[];
         protected m_circuitRaceLine_4: PROJECT.IControlPoint[];
         protected m_circuitRaceLine_5: PROJECT.IControlPoint[];
-        protected m_rigidbodyPhysics: BABYLON.Toolkit.RigidbodyPhysics;
+        protected m_rigidbodyPhysics: TOOLKIT.RigidbodyPhysics;
         protected m_checkpointManager: PROJECT.CheckpointManager;
         protected m_standardCarController: PROJECT.StandardCarController;
         protected awake(): void;
@@ -1312,7 +1312,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class VehicleNetworkLabel
     */
-    class VehicleNetworkLabel extends BABYLON.Toolkit.ScriptComponent {
+    class VehicleNetworkLabel extends TOOLKIT.ScriptComponent {
         label: BABYLON.GUI.TextBlock;
         rect: BABYLON.GUI.Rectangle;
         autoCreate: boolean;
@@ -1333,7 +1333,7 @@ declare namespace PROJECT {
      * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
      * https://doc.babylonjs.com/divingDeeper/postProcesses/defaultRenderingPipeline
      */
-    class DefaultCameraSystem extends BABYLON.Toolkit.ScriptComponent {
+    class DefaultCameraSystem extends TOOLKIT.ScriptComponent {
         protected static PlayerOneCamera: BABYLON.FreeCamera;
         protected static PlayerTwoCamera: BABYLON.FreeCamera;
         protected static PlayerThreeCamera: BABYLON.FreeCamera;
@@ -1383,9 +1383,9 @@ declare namespace PROJECT {
         /** Get main camera rig for the scene */
         static GetMainCamera(scene: BABYLON.Scene, detach?: boolean): BABYLON.FreeCamera;
         /** Get universal camera rig for desired player */
-        static GetPlayerCamera(scene: BABYLON.Scene, player?: BABYLON.Toolkit.PlayerNumber, detach?: boolean): BABYLON.FreeCamera;
+        static GetPlayerCamera(scene: BABYLON.Scene, player?: TOOLKIT.PlayerNumber, detach?: boolean): BABYLON.FreeCamera;
         /** Get camera transform node for desired player */
-        static GetCameraTransform(scene: BABYLON.Scene, player?: BABYLON.Toolkit.PlayerNumber): BABYLON.TransformNode;
+        static GetCameraTransform(scene: BABYLON.Scene, player?: TOOLKIT.PlayerNumber): BABYLON.TransformNode;
         /** Are stereo side side camera services available. */
         static IsStereoCameras(): boolean;
         /** Are local multi player view services available. */
@@ -1406,7 +1406,7 @@ declare namespace PROJECT {
         alpha: number;
         beta: number;
         radius: number;
-        target: BABYLON.Toolkit.IUnityVector3;
+        target: TOOLKIT.IUnityVector3;
     }
     interface IEditorPostProcessing {
         usePostProcessing: boolean;
@@ -1510,7 +1510,7 @@ declare namespace PROJECT {
         vignetteCentreX: number;
         vignetteCentreY: number;
         vignetteWeight: number;
-        vignetteColor: BABYLON.Toolkit.IUnityColor;
+        vignetteColor: TOOLKIT.IUnityColor;
         useColorGrading: boolean;
         setGradingTexture: any;
         imagingColorCurves: PROJECT.IEditorColorCurves;
@@ -1521,7 +1521,7 @@ declare namespace PROJECT {
      * Babylon Script Component
      * @class DebugInformation
      */
-    class DebugInformation extends BABYLON.Toolkit.ScriptComponent {
+    class DebugInformation extends TOOLKIT.ScriptComponent {
         private keys;
         private show;
         private popup;
@@ -1549,7 +1549,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class CustomHtmlMarkup
     */
-    class CustomHtmlMarkup extends BABYLON.Toolkit.ScriptComponent {
+    class CustomHtmlMarkup extends TOOLKIT.ScriptComponent {
         private styleSheet;
         private htmlMarkup;
         private parentElement;
@@ -1566,7 +1566,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class UserInterface
     */
-    class UserInterface extends BABYLON.Toolkit.ScriptComponent {
+    class UserInterface extends TOOLKIT.ScriptComponent {
         static IsCanvasReady(): boolean;
         static GetCanvasElement(name: string): BABYLON.GUI.Control;
         static ShowCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
@@ -1614,7 +1614,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class AssetExporter
     */
-    class AssetExporter extends BABYLON.Toolkit.ScriptComponent {
+    class AssetExporter extends TOOLKIT.ScriptComponent {
         protected awake(): void;
         protected start(): void;
         protected fixed(): void;
@@ -1630,13 +1630,13 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class AssetPreloader
     */
-    class AssetPreloader extends BABYLON.Toolkit.ScriptComponent implements BABYLON.Toolkit.IAssetPreloader {
+    class AssetPreloader extends TOOLKIT.ScriptComponent implements TOOLKIT.IAssetPreloader {
         private parentMeshes;
         private importMeshes;
         private assetContainers;
         protected destroy(): void;
         /** Add asset preloader tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: BABYLON.Toolkit.PreloadAssetsManager): void;
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
 declare namespace PROJECT {
@@ -1644,7 +1644,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class NodeMaterialInstance
     */
-    class NodeMaterialInstance extends BABYLON.Toolkit.ScriptComponent {
+    class NodeMaterialInstance extends TOOLKIT.ScriptComponent {
         private nodeMaterialData;
         private setCustomRootUrl;
         getMaterialInstance(): BABYLON.NodeMaterial;
@@ -1658,7 +1658,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class NodeMaterialParticle
     */
-    class NodeMaterialParticle extends BABYLON.Toolkit.ScriptComponent {
+    class NodeMaterialParticle extends TOOLKIT.ScriptComponent {
         private nodeMaterialEditor;
         protected awake(): void;
         protected start(): void;
@@ -1676,7 +1676,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class NodeMaterialProcess
     */
-    class NodeMaterialProcess extends BABYLON.Toolkit.ScriptComponent {
+    class NodeMaterialProcess extends TOOLKIT.ScriptComponent {
         private nodeMaterialEditor;
         private numberOfSamples;
         private samplingMode;
@@ -1696,7 +1696,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class NodeMaterialTexture
     */
-    class NodeMaterialTexture extends BABYLON.Toolkit.ScriptComponent {
+    class NodeMaterialTexture extends TOOLKIT.ScriptComponent {
         private nodeMaterialEditor;
         private textureSize;
         getProceduralTexture(): BABYLON.ProceduralTexture;
@@ -1711,7 +1711,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class MobileInputController
     */
-    class MobileInputController extends BABYLON.Toolkit.ScriptComponent {
+    class MobileInputController extends TOOLKIT.ScriptComponent {
         static get Instance(): PROJECT.MobileInputController;
         private static StaticInstance;
         private styleSheet;
@@ -1737,11 +1737,11 @@ declare namespace PROJECT {
         private enableMouseAxes;
         private enableVirtualButtons;
         private virtualButtonControls;
-        protected m_leftStick: BABYLON.Toolkit.TouchJoystickHandler;
-        protected m_rightStick: BABYLON.Toolkit.TouchJoystickHandler;
+        protected m_leftStick: TOOLKIT.TouchJoystickHandler;
+        protected m_rightStick: TOOLKIT.TouchJoystickHandler;
         protected m_mobileDevice: boolean;
-        getLeftStick(): BABYLON.Toolkit.TouchJoystickHandler;
-        getRightStick(): BABYLON.Toolkit.TouchJoystickHandler;
+        getLeftStick(): TOOLKIT.TouchJoystickHandler;
+        getRightStick(): TOOLKIT.TouchJoystickHandler;
         getLeftStickEnabled(): boolean;
         getRightStickEnabled(): boolean;
         getLeftStickElement(): HTMLDivElement;
@@ -1829,7 +1829,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class MobileOccludeMaterial
     */
-    class MobileOccludeMaterial extends BABYLON.Toolkit.ScriptComponent {
+    class MobileOccludeMaterial extends TOOLKIT.ScriptComponent {
         private applyToMaterial;
         protected awake(): void;
     }
@@ -1839,7 +1839,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class MobileShadowMaterial
     */
-    class MobileShadowMaterial extends BABYLON.Toolkit.ScriptComponent {
+    class MobileShadowMaterial extends TOOLKIT.ScriptComponent {
         private createNewMaterial;
         protected awake(): void;
         protected destroy(): void;
@@ -1850,7 +1850,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class BallSocketJoint
     */
-    class BallSocketJoint extends BABYLON.Toolkit.ScriptComponent {
+    class BallSocketJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1868,7 +1868,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class DistanceJoint
     */
-    class DistanceJoint extends BABYLON.Toolkit.ScriptComponent {
+    class DistanceJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         maxDistance: number;
@@ -1883,7 +1883,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class FixedHingeJoint
     */
-    class FixedHingeJoint extends BABYLON.Toolkit.ScriptComponent {
+    class FixedHingeJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1899,7 +1899,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class LockedJoint
     */
-    class LockedJoint extends BABYLON.Toolkit.ScriptComponent {
+    class LockedJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1917,7 +1917,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class PrismaticJoint
     */
-    class PrismaticJoint extends BABYLON.Toolkit.ScriptComponent {
+    class PrismaticJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1935,7 +1935,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class SixdofJoint
     */
-    class SixdofJoint extends BABYLON.Toolkit.ScriptComponent {
+    class SixdofJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1954,7 +1954,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class SliderJoint
     */
-    class SliderJoint extends BABYLON.Toolkit.ScriptComponent {
+    class SliderJoint extends TOOLKIT.ScriptComponent {
         bodyA: BABYLON.TransformNode;
         bodyB: BABYLON.TransformNode;
         pivotA: BABYLON.Vector3;
@@ -1972,7 +1972,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class RemotePlayerController
     */
-    class RemotePlayerController extends BABYLON.Toolkit.ScriptComponent {
+    class RemotePlayerController extends TOOLKIT.ScriptComponent {
         updateStateParams: boolean;
         smoothMotionTime: number;
         smoothInputVectors: boolean;
@@ -1990,7 +1990,7 @@ declare namespace PROJECT {
      * Babylon toolkit standard player controller class
      * @class StandardPlayerController - All rights reserved (c) 2020 Mackey Kinard
     */
-    class StandardPlayerController extends BABYLON.Toolkit.ScriptComponent {
+    class StandardPlayerController extends TOOLKIT.ScriptComponent {
         static MIN_VERTICAL_VELOCITY: number;
         static MIN_GROUND_DISTANCE: number;
         static MIN_MOVE_EPSILON: number;
@@ -2055,7 +2055,7 @@ declare namespace PROJECT {
         buttonCamera: number;
         keyboardCamera: number;
         postNetworkAttributes: boolean;
-        playerNumber: BABYLON.Toolkit.PlayerNumber;
+        playerNumber: TOOLKIT.PlayerNumber;
         boomPosition: BABYLON.Vector3;
         airbornVelocity: BABYLON.Vector3;
         movementVelocity: BABYLON.Vector3;
@@ -2072,9 +2072,9 @@ declare namespace PROJECT {
         getMovementSpeed(): number;
         getCameraBoomNode(): BABYLON.TransformNode;
         getCameraTransform(): BABYLON.TransformNode;
-        getAnimationState(): BABYLON.Toolkit.AnimationState;
+        getAnimationState(): TOOLKIT.AnimationState;
         getVerticalVelocity(): number;
-        getCharacterController(): BABYLON.Toolkit.CharacterController;
+        getCharacterController(): TOOLKIT.CharacterController;
         getPlayerLookRotation(): BABYLON.Vector3;
         getPlayerMoveDirection(): PROJECT.PlayerMoveDirection;
         getInputMovementVector(): BABYLON.Vector3;
@@ -2246,7 +2246,7 @@ declare namespace PROJECT {
         togglePlayerControl(): void;
         private showAvatarSkins;
         /** TODO */
-        attachPlayerCamera(player: BABYLON.Toolkit.PlayerNumber): void;
+        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
         private _ikLeftController;
         private _ikLeftFootTarget;
         private _ikLeftPoleTarget;
@@ -2356,7 +2356,7 @@ declare namespace PROJECT {
      * Babylon toolkit third person player controller class
      * @class ThirdPersonPlayerController - All rights reserved (c) 2020 Mackey Kinard
     */
-    class ThirdPersonPlayerController extends BABYLON.Toolkit.ScriptComponent {
+    class ThirdPersonPlayerController extends TOOLKIT.ScriptComponent {
         static MIN_VERTICAL_VELOCITY: number;
         static MIN_GROUND_DISTANCE: number;
         static MIN_MOVE_EPSILON: number;
@@ -2420,7 +2420,7 @@ declare namespace PROJECT {
         buttonCamera: number;
         keyboardCamera: number;
         postNetworkAttributes: boolean;
-        playerNumber: BABYLON.Toolkit.PlayerNumber;
+        playerNumber: TOOLKIT.PlayerNumber;
         boomPosition: BABYLON.Vector3;
         airbornVelocity: BABYLON.Vector3;
         movementVelocity: BABYLON.Vector3;
@@ -2440,9 +2440,9 @@ declare namespace PROJECT {
         getAnimationSpeed(): number;
         getCameraBoomNode(): BABYLON.TransformNode;
         getCameraTransform(): BABYLON.TransformNode;
-        getAnimationState(): BABYLON.Toolkit.AnimationState;
+        getAnimationState(): TOOLKIT.AnimationState;
         getVerticalVelocity(): number;
-        getCharacterController(): BABYLON.Toolkit.CharacterController;
+        getCharacterController(): TOOLKIT.CharacterController;
         getPlayerLookRotation(): BABYLON.Vector3;
         getPlayerMoveDirection(): PROJECT.PlayerMoveDirection;
         getInputMovementVector(): BABYLON.Vector3;
@@ -2611,7 +2611,7 @@ declare namespace PROJECT {
         /** Set the player world position */
         setWorldPosition(x: number, y: number, z: number): void;
         /** TODO */
-        attachPlayerCamera(player: BABYLON.Toolkit.PlayerNumber): void;
+        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
         private _ikLeftController;
         private _ikLeftFootTarget;
         private _ikLeftPoleTarget;
@@ -2675,7 +2675,7 @@ declare namespace PROJECT {
     * Babylon Script Component
     * @class FxParticleSystem
     */
-    class FxParticleSystem extends BABYLON.Toolkit.ScriptComponent {
+    class FxParticleSystem extends TOOLKIT.ScriptComponent {
         getParticleEmitter(): BABYLON.AbstractMesh;
         getParticleSystem(): BABYLON.ParticleSystem | BABYLON.GPUParticleSystem;
         protected m_particleEmitter: BABYLON.AbstractMesh;
@@ -2689,7 +2689,7 @@ declare namespace PROJECT {
      * Babylon water material system pro class (Babylon Water Material)
      * @class SkyMaterialSystem - All rights reserved (c) 2020 Mackey Kinard
      */
-    class SkyMaterialSystem extends BABYLON.Toolkit.ScriptComponent {
+    class SkyMaterialSystem extends TOOLKIT.ScriptComponent {
         private skyfog;
         private skysize;
         private probesize;
@@ -2719,7 +2719,7 @@ declare namespace PROJECT {
      * Babylon water material system pro class (Babylon Water Material)
      * @class WaterMaterialSystem - All rights reserved (c) 2020 Mackey Kinard
      */
-    class WaterMaterialSystem extends BABYLON.Toolkit.ScriptComponent {
+    class WaterMaterialSystem extends TOOLKIT.ScriptComponent {
         private waterTag;
         private targetSize;
         private renderSize;
@@ -2760,23 +2760,23 @@ declare namespace BABYLON {
      */
     class WindowsPlatform {
         /** Is xbox live user signed in if platform services enabled. (WinRT) */
-        static IsXboxLiveUserSignedIn(systemUser?: Windows.System.User, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsXboxLiveUserSignedIn(systemUser?: Windows.System.User, player?: TOOLKIT.PlayerNumber): boolean;
         /** Validated sign in xbox live user if platform services available. (WinRT) */
-        static XboxLiveUserSignIn(player?: BABYLON.Toolkit.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): void;
+        static XboxLiveUserSignIn(player?: TOOLKIT.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): void;
         /** Silent sign in xbox live user if platform services available. (WinRT) */
-        static XboxLiveUserSilentSignIn(player?: BABYLON.Toolkit.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
+        static XboxLiveUserSilentSignIn(player?: TOOLKIT.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
         /** Dialog sign in xbox live user if platform services available. (WinRT) */
-        static XboxLiveUserDialogSignIn(player?: BABYLON.Toolkit.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
+        static XboxLiveUserDialogSignIn(player?: TOOLKIT.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.System.SignInResult) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
         /** Loads a xbox live user profile if platform services available. (WinRT) */
-        static LoadXboxLiveUserProfile(player?: BABYLON.Toolkit.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.Social.XboxUserProfile) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
+        static LoadXboxLiveUserProfile(player?: TOOLKIT.PlayerNumber, oncomplete?: (result: Microsoft.Xbox.Services.Social.XboxUserProfile) => void, onerror?: (error: any) => void, onprogress?: (progress: any) => void): Windows.Foundation.Projections.Promise<void>;
         /** Get xbox live user if platform services available. (WinRT) */
-        static GetXboxLiveUser(player?: BABYLON.Toolkit.PlayerNumber): Microsoft.Xbox.Services.System.XboxLiveUser;
+        static GetXboxLiveUser(player?: TOOLKIT.PlayerNumber): Microsoft.Xbox.Services.System.XboxLiveUser;
         /** Get xbox live user if platform services available. (WinRT) */
-        static GetXboxLiveSystemUser(systemUser: Windows.System.User, player?: BABYLON.Toolkit.PlayerNumber): Microsoft.Xbox.Services.System.XboxLiveUser;
+        static GetXboxLiveSystemUser(systemUser: Windows.System.User, player?: TOOLKIT.PlayerNumber): Microsoft.Xbox.Services.System.XboxLiveUser;
         /** Get xbox live user context if platform services available. (WinRT) */
-        static GetXboxLiveUserContext(player?: BABYLON.Toolkit.PlayerNumber): Microsoft.Xbox.Services.XboxLiveContext;
+        static GetXboxLiveUserContext(player?: TOOLKIT.PlayerNumber): Microsoft.Xbox.Services.XboxLiveContext;
         /** Resets xbox live user context if platform services available. (WinRT) */
-        static ResetXboxLiveUserContext(player?: BABYLON.Toolkit.PlayerNumber): void;
+        static ResetXboxLiveUserContext(player?: TOOLKIT.PlayerNumber): void;
         /** Get xbox live context property if platform services available. (WinRT) */
         static GetXboxLiveContextProperty(name: any): any;
         /** Get xbox live context property if platform services available. (WinRT) */

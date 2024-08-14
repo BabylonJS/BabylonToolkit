@@ -4,7 +4,7 @@
         "scope": "javascript",
         "body": [
             "/// Script Component Class: ${1:NAMESPACE}.${2:CLASSNAME}",
-            "${1:NAMESPACE}.${2:CLASSNAME} = class ${2:CLASSNAME}Class extends BABYLON.Toolkit.ScriptComponent",
+            "${1:NAMESPACE}.${2:CLASSNAME} = class ${2:CLASSNAME}Class extends TOOLKIT.ScriptComponent",
             "{",
             "    constructor(transform, scene, properties) {",
             "        super(transform, scene, properties, \"${1:NAMESPACE}.${2:CLASSNAME}\");",

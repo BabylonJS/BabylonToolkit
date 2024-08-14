@@ -31,7 +31,7 @@ await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 
 Or on playgrounds:
 ```
- await BABYLON.Toolkit.SceneManager.InitializePlayground(engine);
+ await TOOLKIT.SceneManager.InitializePlayground(engine);
 ```
 
 
@@ -44,8 +44,8 @@ The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Uni
 
 The **Script Component** is the foundation of the babylon toolkit extended framework. It was modeled after Unity's MonoBehavior class:
 ```
-module PROJECT {
-    export class SampleScript extends BABYLON.Toolkit.ScriptComponent {
+namespace PROJECT {
+    export class SampleScript extends TOOLKIT.ScriptComponent {
         constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any=null) {
            super(transform, scene, properties, "PROJECT.SampleScript");
         }
@@ -92,22 +92,33 @@ module PROJECT {
     }
 }
 ```
+
+
+Getting Started 
+----------------
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#LYKHXV">Your First TypeScript Playground (TS)</a>
 
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#NVL5A2">Your First JavaScript Playground (JS)</a>
 
 
+Unity Starter Content
+----------------------
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#EI0V1I">TypeScript Starter Playground (TS)</a>
+
+<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#N1FY3E">JavaScript Starter Playground (JS)</a>
+
+
 # Scene Manager Class
 
-The **BABYLON.Toolkit.SceneManager** class provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
+The **TOOLKIT.SceneManager** class provides runtime life cycle management for game objects. The extension supports a scene component application programming interface to enable the usage of modern game mechanics to ease web game development and provide a native game editor style development experience.
 
 
 # Window Manager Class
 
-The **BABYLON.Toolkit.WindowManager** class provides DOM Level helper functions.
+The **TOOLKIT.WindowManager** class provides DOM Level helper functions.
 
 
 # Input Controller Class
 
-The **BABYLON.Toolkit.InputController** class provides game engine style user input functions.
+The **TOOLKIT.InputController** class provides game engine style user input functions.
 

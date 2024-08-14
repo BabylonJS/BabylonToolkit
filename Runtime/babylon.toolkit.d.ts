@@ -1,4 +1,5 @@
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
     * Babylon toolkit scene manager class
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
@@ -65,17 +66,17 @@ declare namespace BABYLON.Toolkit {
         /** Returns a Promise that resolves after the specfied time */
         static WaitForSeconds: (seconds: number) => Promise<void>;
         /** Register handler that is triggered before the main scene render loop (engine.html) */
-        static OnPreRenderLoopObservable: Observable<void>;
+        static OnPreRenderLoopObservable: BABYLON.Observable<void>;
         /** Register handler that is triggered before the main scene render loop (engine.html) */
-        static OnPostRenderLoopObservable: Observable<void>;
+        static OnPostRenderLoopObservable: BABYLON.Observable<void>;
         /** Register handler that is triggered when the scene is ready (engine.html) */
-        static OnSceneReadyObservable: Observable<string>;
+        static OnSceneReadyObservable: BABYLON.Observable<string>;
         /** Register handler that is triggered when then engine has been resized (engine.html) */
-        static OnEngineResizeObservable: Observable<Engine>;
+        static OnEngineResizeObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register handler that is triggered when the scene has been loaded (engine.html) */
-        static OnLoadCompleteObservable: Observable<Engine>;
+        static OnLoadCompleteObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register handler that is triggered when then webgl context need to be rebuilt (engine.html) */
-        static OnRebuildContextObservable: Observable<Engine>;
+        static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
         static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
@@ -84,15 +85,15 @@ declare namespace BABYLON.Toolkit {
          * @example
          * ```typescript
          * // Handle myevent message
-         * SM.EventBus.OnMessage("myevent", (data:string) => {
+         * TOOLKIT.SceneManager.EventBus.OnMessage("myevent", (data:string) => {
          *    console.log("My Event Data: " + data);
          * });
          *
          * // Post myevent message
-         * SM.EventBus.PostMessage("myevent", "Hello World!");
+         * TOOLKIT.SceneManager.EventBus.PostMessage("myevent", "Hello World!");
          * ```
         */
-        static get EventBus(): BABYLON.Toolkit.GlobalMessageBus;
+        static get EventBus(): TOOLKIT.GlobalMessageBus;
         /** Gets the babylon toolkit playground default project script bundle cdn address
          * @address https://cdn.jsdelivr.net/gh/BabylonJS/BabylonToolkit@master/Runtime/
          */
@@ -108,7 +109,7 @@ declare namespace BABYLON.Toolkit {
          * @param options The playground options.
          * @returns a waitable promise.
          */
-        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: BABYLON.Toolkit.IPlaygroundOptions): Promise<void>;
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
         /**
          * Sets the on scene ready handler then starts the assets manager loadAsync function
          * @param assetsManager The list of required scene filenames to check ready state.
@@ -121,7 +122,7 @@ declare namespace BABYLON.Toolkit {
         /**
          * Shows the default loading screen panel
          * @param engine The engine instance.
-         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
          * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
          */
         static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
@@ -162,9 +163,9 @@ declare namespace BABYLON.Toolkit {
         /** Get the scene default intenisty factor */
         static GetIntensityFactor(): number;
         /** Get the system render quality local storage setting. */
-        static GetRenderQuality(): BABYLON.Toolkit.RenderQuality;
+        static GetRenderQuality(): TOOLKIT.RenderQuality;
         /** Set the system render quality local storage setting. */
-        static SetRenderQuality(quality: BABYLON.Toolkit.RenderQuality): void;
+        static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
         /** Gets the current engine version string info. */
         static GetEngineVersionString(scene: BABYLON.Scene): string;
         /** Store data object of function on the local window state. */
@@ -199,6 +200,8 @@ declare namespace BABYLON.Toolkit {
         static GetDeltaSeconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
         /** Get the current delta time in milliseconds */
         static GetDeltaMilliseconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
+        /** Get system time in milleseconds */
+        static GetTimeMilliseconds(): number;
         /** Get the delta time animation ratio for 60 fps */
         static GetAnimationRatio(scene: BABYLON.Scene): number;
         /** Run a function on the next render loop. */
@@ -298,20 +301,20 @@ declare namespace BABYLON.Toolkit {
         static CreateInstancedMesh(container: BABYLON.AssetContainer, meshName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.InstancedMesh;
         /**
          * Attach a script component instance to the scene manager life cycle
-         * @param instance an instance of a BABYLON.Toolkit.ScriptComponent class
+         * @param instance an instance of a TOOLKIT.ScriptComponent class
          * @param alias the full class name alias. Example PROJECT.MyCustomComponent
          * @param validate validate the instance klass on next frame. Default true.
          */
-        static AttachScriptComponent(instance: BABYLON.Toolkit.ScriptComponent, alias: string, validate?: boolean): void;
+        static AttachScriptComponent(instance: TOOLKIT.ScriptComponent, alias: string, validate?: boolean): void;
         /**
          * Destroy a script component instance
-         * @param instance an instance of a BABYLON.Toolkit.ScriptComponent class
+         * @param instance an instance of a TOOLKIT.ScriptComponent class
          */
-        static DestroyScriptComponent(instance: BABYLON.Toolkit.ScriptComponent): void;
+        static DestroyScriptComponent(instance: TOOLKIT.ScriptComponent): void;
         /** Finds a script component on the transform with the specfied class name. */
-        static FindScriptComponent<T extends BABYLON.Toolkit.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
+        static FindScriptComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
         /** Finds all script components on the transform with the specfied class name. */
-        static FindAllScriptComponents<T extends BABYLON.Toolkit.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
+        static FindAllScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
         /** Finds the transform object metedata in the scene. */
         static FindSceneMetadata(transform: BABYLON.TransformNode): any;
         /** Finds the specfied camera rig in the scene. */
@@ -323,7 +326,7 @@ declare namespace BABYLON.Toolkit {
         /** Finds all transforms with the specified script component. */
         static FindAllTransformsWithScript(scene: BABYLON.Scene, klass: string): BABYLON.TransformNode[];
         /** Finds the specfied child transform in the scene. */
-        static FindChildTransformNode(parent: BABYLON.TransformNode, name: string, searchType?: BABYLON.Toolkit.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        static FindChildTransformNode(parent: BABYLON.TransformNode, name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
         /** Finds the first child transform with matching tags. */
         static FindChildTransformWithTags(parent: BABYLON.TransformNode, query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
         /** Finds all child transforms with matching tags. */
@@ -333,9 +336,9 @@ declare namespace BABYLON.Toolkit {
         /** Finds all child transforms with the specified script component. */
         static FindAllChildTransformsWithScript(parent: BABYLON.TransformNode, klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
         /** Searches all nodes for the first instance of the specified script component. */
-        static SearchForScriptComponentByName<T extends BABYLON.Toolkit.ScriptComponent>(scene: BABYLON.Scene, klass: string): T;
+        static SearchForScriptComponentByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T;
         /** Searches all nodes for all instances of the specified script component. */
-        static SearchForAllScriptComponentsByName<T extends BABYLON.Toolkit.ScriptComponent>(scene: BABYLON.Scene, klass: string): T[];
+        static SearchForAllScriptComponentsByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T[];
         /** Moves entity using vector position with camera collisions. */
         static MoveWithCollisions(entity: BABYLON.AbstractMesh, velocity: BABYLON.Vector3): void;
         /** Moves entity using vector position using translations. */
@@ -348,7 +351,7 @@ declare namespace BABYLON.Toolkit {
         private static CrowdInterface;
         private static PluginInstance;
         /** Register handler that is triggered when the navigation mesh is ready */
-        static OnNavMeshReadyObservable: Observable<Mesh>;
+        static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
         /** Get recast total memory heap size */
         static GetRecastHeapSize(): number;
         /** Gets the recast navigation plugin tools. (Singleton Instance) */
@@ -386,16 +389,8 @@ declare namespace BABYLON.Toolkit {
         private static ExitFromFullscreenBrowser;
     }
 }
-/**
- * Babylon Toolkit Namespace Alias
- */
-declare const BT: typeof BABYLON.Toolkit;
-/**
- * Babylon Toolkit Scene Manager Alias
- */
-declare const SM: typeof BABYLON.Toolkit.SceneManager;
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit metadata parser class (Internal use only)
      * @class MetadataParser - All rights reserved (c) 2024 Mackey Kinard
@@ -410,7 +405,7 @@ declare namespace BABYLON.Toolkit {
         /** Parse the scene component metadata. Note: Internal use only */
         parseSceneComponents(entity: BABYLON.TransformNode): void;
         /** Post process pending scene components. Note: Internal use only */
-        postProcessSceneComponents(preloadList: Array<BABYLON.Toolkit.ScriptComponent>, readyList: Array<BABYLON.Toolkit.ScriptComponent>): void;
+        postProcessSceneComponents(preloadList: Array<TOOLKIT.ScriptComponent>, readyList: Array<TOOLKIT.ScriptComponent>): void;
         private static DoParseSceneComponents;
         private static DoProcessPendingScripts;
         private static DoProcessPendingShadows;
@@ -420,8 +415,8 @@ declare namespace BABYLON.Toolkit {
         private static SetupLightComponent;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit script component class
      * @class ScriptComponent - All rights reserved (c) 2024 Mackey Kinard
@@ -486,9 +481,9 @@ declare namespace BABYLON.Toolkit {
         /** Get the transform object metedata in the scene. */
         getMetadata(): any;
         /** Get a script component on the transform with the specfied class name. */
-        getComponent<T extends BABYLON.Toolkit.ScriptComponent>(klass: string, recursive?: boolean): T;
+        getComponent<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T;
         /** Get all script components on the transform with the specfied class name. */
-        getComponents<T extends BABYLON.Toolkit.ScriptComponent>(klass: string, recursive?: boolean): T[];
+        getComponents<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T[];
         /** Gets the attached transform light rig */
         getLightRig(): BABYLON.Light;
         /** Gets the attached transform camera rig */
@@ -498,7 +493,7 @@ declare namespace BABYLON.Toolkit {
         /** Check if the transform has the specified query tag match */
         hasTransformTags(query: string): boolean;
         /** Get the specfied child transform in the scene. */
-        getChildNode(name: string, searchType?: BABYLON.Toolkit.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        getChildNode(name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
         /** Get the first child transform with matching tags. */
         getChildWithTags(query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
         /** Get all child transforms with matching tags. */
@@ -515,15 +510,15 @@ declare namespace BABYLON.Toolkit {
         /** Disable physics collision events on the body */
         disableCollisionEvents(): void;
         /** Observable handler that is triggered when a collision contact has entered */
-        onCollisionEnterObservable: Observable<TransformNode>;
+        onCollisionEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Observable handler that is triggered when a collision contact is active */
-        onCollisionStayObservable: Observable<TransformNode>;
+        onCollisionStayObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Observable handler that is triggered when a collision contact has exited */
-        onCollisionExitObservable: Observable<TransformNode>;
+        onCollisionExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Observable handler that is triggered when a pass thru collision contact has entered */
-        onTriggerEnterObservable: Observable<TransformNode>;
+        onTriggerEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Observable handler that is triggered when a pass thru collision contact has exited */
-        onTriggerExitObservable: Observable<TransformNode>;
+        onTriggerExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Manually set the physics transform position */
         setTransformPosition(position: BABYLON.Vector3): void;
         /** Manually set the physics transform rotation */
@@ -552,8 +547,8 @@ declare namespace BABYLON.Toolkit {
         private static UnpackObjectProperty;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit universal shader defines pro class
      * @class UniversalShaderDefines - All rights reserved (c) 2024 Mackey Kinard
@@ -596,7 +591,7 @@ declare namespace BABYLON.Toolkit {
      */
     class UniversalAlbedoMaterial extends BABYLON.PBRMaterial {
         protected universalMaterial: boolean;
-        protected locals: BABYLON.Toolkit.UniversalShaderDefines;
+        protected locals: TOOLKIT.UniversalShaderDefines;
         protected terrainInfo: any;
         private _defines;
         private _uniforms;
@@ -609,7 +604,7 @@ declare namespace BABYLON.Toolkit {
         private _timeInitialized;
         private _createdShaderName;
         protected enableShaderChunks: boolean;
-        protected materialShaderChunks: BABYLON.Toolkit.UniversalAlbedoChunks;
+        protected materialShaderChunks: TOOLKIT.UniversalAlbedoChunks;
         protected updateShaderChunks(): void;
         constructor(name: string, scene: BABYLON.Scene, enableTime?: boolean);
         getShaderName(): string;
@@ -622,9 +617,9 @@ declare namespace BABYLON.Toolkit {
         getTexture(name: string): BABYLON.Texture;
         getVector4(name: string): BABYLON.Vector4;
         getFloat(name: string): number;
-        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): BABYLON.Toolkit.UniversalAlbedoMaterial;
-        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): BABYLON.Toolkit.UniversalAlbedoMaterial;
-        setFloat(name: string, value: number, initialize?: boolean): BABYLON.Toolkit.UniversalAlbedoMaterial;
+        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
+        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
+        setFloat(name: string, value: number, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
         addAttribute(attributeName: string): void;
         checkUniform(uniformName: string): void;
         checkSampler(samplerName: string): void;
@@ -632,9 +627,9 @@ declare namespace BABYLON.Toolkit {
         getActiveTextures(): BABYLON.BaseTexture[];
         hasTexture(texture: BABYLON.BaseTexture): boolean;
         dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
-        clone(cloneName: string): BABYLON.Toolkit.UniversalAlbedoMaterial;
+        clone(cloneName: string): TOOLKIT.UniversalAlbedoMaterial;
         serialize(): any;
-        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): BABYLON.Toolkit.UniversalAlbedoMaterial;
+        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): TOOLKIT.UniversalAlbedoMaterial;
         protected customShaderChunkResolve(): void;
         private _buildCustomShader;
         private _createShaderChunks;
@@ -670,19 +665,19 @@ declare namespace BABYLON.Toolkit {
         getTexture(name: string): BABYLON.Texture;
         getVector4(name: string): BABYLON.Vector4;
         getFloat(name: string): number;
-        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): BABYLON.Toolkit.UniversalNodeMaterial;
-        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): BABYLON.Toolkit.UniversalNodeMaterial;
-        setFloat(name: string, value: number, initialize?: boolean): BABYLON.Toolkit.UniversalNodeMaterial;
+        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
+        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
+        setFloat(name: string, value: number, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
         dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
-        clone(cloneName: string): BABYLON.Toolkit.UniversalNodeMaterial;
+        clone(cloneName: string): TOOLKIT.UniversalNodeMaterial;
         serialize(): any;
-        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): BABYLON.Toolkit.UniversalNodeMaterial;
+        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): TOOLKIT.UniversalNodeMaterial;
     }
     /**
      * Babylon universal terrain material pro class
      * @class UniversalTerrainMaterial
      */
-    class UniversalTerrainMaterial extends BABYLON.Toolkit.UniversalAlbedoMaterial {
+    class UniversalTerrainMaterial extends TOOLKIT.UniversalAlbedoMaterial {
         constructor(name: string, scene: BABYLON.Scene);
         getShaderName(): string;
         getShaderChunk(): string;
@@ -693,8 +688,7 @@ declare namespace BABYLON.Toolkit {
         private formatTerrainFragmentUpdateColor;
     }
 }
-
-declare namespace BABYLON.Toolkit.Simplex {
+declare namespace TOOLKIT.Simplex {
     /**
      * A random() function, must return a number in the interval [0,1), just like Math.random().
      */
@@ -755,8 +749,8 @@ declare namespace BABYLON.Toolkit.Simplex {
      */
     function buildPermutationTable(random: RandomFn): Uint8Array;
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit system class
      * @class System - All rights reserved (c) 2024 Mackey Kinard
@@ -1012,7 +1006,7 @@ declare namespace BABYLON.Toolkit {
      * @param loadProjectScriptBundle load a project script bundle. Default true.
      * @param projectScriptBundleUrl specified project script bundle. Default bundle.
      * @param showDefaultLoadingScreen show the default loading screen. Default false.
-     * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using SM.HideLoadingScreen when the scene is ready. Default true.
+     * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
     interface IPlaygroundOptions {
@@ -1026,7 +1020,7 @@ declare namespace BABYLON.Toolkit {
      * Asset Preloader Interface (https://doc.babylonjs.com/divingDeeper/importers/assetManager)
      */
     interface IAssetPreloader {
-        addPreloaderTasks(assetsManager: BABYLON.Toolkit.PreloadAssetsManager): void;
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
     /**
      * Window Message Interface
@@ -1636,29 +1630,29 @@ declare namespace BABYLON.Toolkit {
         /** TODO */
         static SafeStringPush(array: string[], value: string): void;
         /** TODO */
-        static ParseColor3(source: BABYLON.Toolkit.IUnityColor, defaultValue?: BABYLON.Color3, toLinearSpace?: boolean): BABYLON.Color3;
+        static ParseColor3(source: TOOLKIT.IUnityColor, defaultValue?: BABYLON.Color3, toLinearSpace?: boolean): BABYLON.Color3;
         /** TODO */
-        static ParseColor4(source: BABYLON.Toolkit.IUnityColor, defaultValue?: BABYLON.Color4, toLinearSpace?: boolean): BABYLON.Color4;
+        static ParseColor4(source: TOOLKIT.IUnityColor, defaultValue?: BABYLON.Color4, toLinearSpace?: boolean): BABYLON.Color4;
         /** TODO */
-        static ParseVector2(source: BABYLON.Toolkit.IUnityVector2, defaultValue?: BABYLON.Vector2): BABYLON.Vector2;
+        static ParseVector2(source: TOOLKIT.IUnityVector2, defaultValue?: BABYLON.Vector2): BABYLON.Vector2;
         /** TODO */
-        static ParseVector3(source: BABYLON.Toolkit.IUnityVector3, defaultValue?: BABYLON.Vector3): BABYLON.Vector3;
+        static ParseVector3(source: TOOLKIT.IUnityVector3, defaultValue?: BABYLON.Vector3): BABYLON.Vector3;
         /** TODO */
-        static ParseVector4(source: BABYLON.Toolkit.IUnityVector4, defaultValue?: BABYLON.Vector4): BABYLON.Vector4;
+        static ParseVector4(source: TOOLKIT.IUnityVector4, defaultValue?: BABYLON.Vector4): BABYLON.Vector4;
         /** TODO */
-        static ParseSound(source: BABYLON.Toolkit.IUnityAudioClip, scene: BABYLON.Scene, name: string, callback?: BABYLON.Nullable<() => void>, options?: BABYLON.ISoundOptions): BABYLON.Sound;
+        static ParseSound(source: TOOLKIT.IUnityAudioClip, scene: BABYLON.Scene, name: string, callback?: BABYLON.Nullable<() => void>, options?: BABYLON.ISoundOptions): BABYLON.Sound;
         /** TODO */
-        static ParseTexture(source: BABYLON.Toolkit.IUnityTexture, scene: BABYLON.Scene, noMipmap?: boolean, invertY?: boolean, samplingMode?: number, onLoad?: BABYLON.Nullable<() => void>, onError?: BABYLON.Nullable<(message?: string, exception?: any) => void>, buffer?: BABYLON.Nullable<any>, deleteBuffer?: boolean, format?: number): BABYLON.Texture;
-        static ParseCubemap(source: BABYLON.Toolkit.IUnityCubemap, scene: BABYLON.Scene): BABYLON.CubeTexture;
+        static ParseTexture(source: TOOLKIT.IUnityTexture, scene: BABYLON.Scene, noMipmap?: boolean, invertY?: boolean, samplingMode?: number, onLoad?: BABYLON.Nullable<() => void>, onError?: BABYLON.Nullable<(message?: string, exception?: any) => void>, buffer?: BABYLON.Nullable<any>, deleteBuffer?: boolean, format?: number): BABYLON.Texture;
+        static ParseCubemap(source: TOOLKIT.IUnityCubemap, scene: BABYLON.Scene): BABYLON.CubeTexture;
         /** TODO */
-        static ParseTextAsset(source: BABYLON.Toolkit.IUnityTextAsset, defaultValue?: string): string;
+        static ParseTextAsset(source: TOOLKIT.IUnityTextAsset, defaultValue?: string): string;
         /** TODO */
-        static ParseJsonAsset<T>(source: BABYLON.Toolkit.IUnityTextAsset, defaultValue?: string, reviver?: (this: any, key: string, value: any) => any): T;
+        static ParseJsonAsset<T>(source: TOOLKIT.IUnityTextAsset, defaultValue?: string, reviver?: (this: any, key: string, value: any) => any): T;
         /** TODO */
-        static ParseTransformByID(source: BABYLON.Toolkit.IUnityTransform, scene: BABYLON.Scene, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
-        static ParseTransformByName(source: BABYLON.Toolkit.IUnityTransform, scene: BABYLON.Scene, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
+        static ParseTransformByID(source: TOOLKIT.IUnityTransform, scene: BABYLON.Scene, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
+        static ParseTransformByName(source: TOOLKIT.IUnityTransform, scene: BABYLON.Scene, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
         /** TODO */
-        static ParseChildTransform(parent: BABYLON.TransformNode, source: BABYLON.Toolkit.IUnityTransform, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
+        static ParseChildTransform(parent: BABYLON.TransformNode, source: TOOLKIT.IUnityTransform, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
         /** Sets the transform node abosulte position */
         static SetAbsolutePosition(transform: BABYLON.TransformNode, position: BABYLON.Vector3): void;
         /** Gets the transform node abosulte position */
@@ -1744,20 +1738,20 @@ declare namespace BABYLON.Toolkit {
         /** Load a text based file */
         static LoadTextFileAsync(url: string): Promise<string>;
         /** Get data from server (XmlHttpRequest) */
-        static GetHttpRequest(url: string, headers?: BABYLON.Toolkit.RequestHeader[], onSuccess?: (xhr: XMLHttpRequest) => void, onFailure?: (reason: any) => void, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): XMLHttpRequest;
+        static GetHttpRequest(url: string, headers?: TOOLKIT.RequestHeader[], onSuccess?: (xhr: XMLHttpRequest) => void, onFailure?: (reason: any) => void, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): XMLHttpRequest;
         /** Get data from server asynchronously */
-        static GetHttpRequestAsync(url: string, headers?: BABYLON.Toolkit.RequestHeader[], onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): Promise<XMLHttpRequest>;
+        static GetHttpRequestAsync(url: string, headers?: TOOLKIT.RequestHeader[], onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): Promise<XMLHttpRequest>;
         /** Post data to server (XmlHttpRequest) */
-        static PostHttpRequest(url: string, data: any, headers?: BABYLON.Toolkit.RequestHeader[], contentType?: string, onSuccess?: (xhr: XMLHttpRequest) => void, onFailure?: (reason: any) => void, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): XMLHttpRequest;
+        static PostHttpRequest(url: string, data: any, headers?: TOOLKIT.RequestHeader[], contentType?: string, onSuccess?: (xhr: XMLHttpRequest) => void, onFailure?: (reason: any) => void, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): XMLHttpRequest;
         /** Post data to server asynchronously */
-        static PostHttpRequestAsync(url: string, data: any, headers?: BABYLON.Toolkit.RequestHeader[], contentType?: string, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): Promise<XMLHttpRequest>;
+        static PostHttpRequestAsync(url: string, data: any, headers?: TOOLKIT.RequestHeader[], contentType?: string, onProgress?: (evt: ProgressEvent) => void, useArrayBuffer?: boolean, overrideMimeType?: string): Promise<XMLHttpRequest>;
         /** TODO */
         static RemapValueToRange(value: number, a1: number, a2: number, b1: number, b2: number): number;
         static CloneSkeletonPrefab(scene: BABYLON.Scene, skeleton: BABYLON.Skeleton, name: string, id?: string, root?: BABYLON.TransformNode): BABYLON.Skeleton;
         /** Get all loaded scene transform nodes. */
         static GetSceneTransforms(scene: BABYLON.Scene): BABYLON.TransformNode[];
         /** Parse scene component metadata. */
-        static PostParseSceneComponents(scene: BABYLON.Scene, transforms: BABYLON.TransformNode[], preloadList: Array<BABYLON.Toolkit.ScriptComponent>, readyList: Array<BABYLON.Toolkit.ScriptComponent>): BABYLON.Toolkit.MetadataParser;
+        static PostParseSceneComponents(scene: BABYLON.Scene, transforms: BABYLON.TransformNode[], preloadList: Array<TOOLKIT.ScriptComponent>, readyList: Array<TOOLKIT.ScriptComponent>): TOOLKIT.MetadataParser;
         /**
          * Gets the specified asset container mesh.
          * @param container defines the asset container
@@ -1806,7 +1800,7 @@ declare namespace BABYLON.Toolkit {
         /** TODO */
         static DisposeEntity(entity: BABYLON.AbstractMesh): void;
         /** TODO */
-        static SearchTransformNodes(name: string, nodes: BABYLON.Node[], searchType?: BABYLON.Toolkit.SearchType): BABYLON.Node;
+        static SearchTransformNodes(name: string, nodes: BABYLON.Node[], searchType?: TOOLKIT.SearchType): BABYLON.Node;
         /** TODO */
         static SearchTransformNodeForTags(query: string, nodes: BABYLON.Node[]): BABYLON.Node;
         /** TODO */
@@ -1835,168 +1829,8 @@ declare namespace BABYLON.Toolkit {
         static ValidateTransformMetadata(transform: BABYLON.TransformNode): void;
     }
 }
-/**
- * Babylon Toolkit Utilties Alias
- */
-declare const UTIL: typeof BABYLON.Toolkit.Utilities;
-
-declare const CVTOOLS_NAME = "CVTOOLS_unity_metadata";
-declare const CVTOOLS_MESH = "CVTOOLS_babylon_mesh";
-declare const CVTOOLS_HAND = "CVTOOLS_left_handed";
-/**
- * Babylon Toolkit Unity Editor - Loader Class
- * @class CVTOOLS_unity_metadata - All rights reserved (c) 2024 Mackey Kinard
- * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
- */
-declare class CubeTextureLoader {
-    name: string;
-    mapkey: string;
-    material: BABYLON.Material;
-    extension: string;
-    prefiltered: boolean;
-    boundingBoxSize: BABYLON.Vector3;
-    boundingBoxPosition: BABYLON.Vector3;
-}
-declare class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
-    /** The name of this extension. */
-    readonly name = "CVTOOLS_unity_metadata";
-    /** Defines whether this extension is enabled. */
-    enabled: boolean;
-    private _loader;
-    private _babylonScene;
-    private _metadataParser;
-    private _loaderScene;
-    private _assetsManager;
-    private _parserList;
-    private _masterList;
-    private _detailList;
-    private _shaderList;
-    private _readyList;
-    private _preloadList;
-    private _animationGroups;
-    private _materialMap;
-    private _lightmapMap;
-    private _reflectionMap;
-    private _reflectionCache;
-    private _assetContainer;
-    private _activeMeshes;
-    private _parseScene;
-    private _leftHanded;
-    private _disposeRoot;
-    private _sceneParsed;
-    private _preWarmTime;
-    private _hideLoader;
-    private _rootUrl;
-    private _fileName;
-    private _licenseName;
-    private _licenseType;
-    private static ScriptBundleCache;
-    /** @hidden */
-    constructor(loader: BABYLON.GLTF2.GLTFLoader);
-    /** @hidden */
-    dispose(): void;
-    /** @hidden */
-    onLoading(): void;
-    /** @hidden */
-    onReady(): void;
-    /** @hidden */
-    onComplete(): void;
-    getScriptBundleTag(): string;
-    getScriptBundleUrl(): string;
-    finishComplete(): void;
-    /** @hidden */
-    onValidate(): void;
-    /** @hidden */
-    onCleanup(): void;
-    /** @hidden */
-    setupLoader(): void;
-    /** @hidden */
-    startParsing(): void;
-    /** @hidden */
-    loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
-    private loadSceneExAsync;
-    private _processActiveMeshes;
-    private _processUnityMeshes;
-    private _processPreloadTimeout;
-    /** @hidden */
-    loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
-    /** @hidden */
-    loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
-    private _getCachedMaterialByIndex;
-    private _getCachedLightmapByIndex;
-    /** @hidden */
-    createMaterial(context: string, material: BABYLON.GLTF2.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
-    /**
-     * Loads a glTF animation.
-     * @param context The context when loading the asset
-     * @param animation The glTF animation property
-     * @returns A promise that resolves with the loaded Babylon animation group when the load is complete
-     */
-    loadAnimationAsync(context: string, animation: BABYLON.GLTF2.Loader.IAnimation): Promise<BABYLON.AnimationGroup>;
-    /**
-     * Loads a glTF animation.
-     * @param context The context when loading the asset
-     * @param animation The glTF animation property
-     * @returns A promise that resolves with the loaded Babylon animation group when the load is complete
-     */
-    /**
-     * @hidden Define this method to modify the default behavior when loading data for mesh primitives.
-     * @param context The context when loading the asset
-     * @param name The mesh name when loading the asset
-     * @param node The glTF node when loading the asset
-     * @param mesh The glTF mesh when loading the asset
-     * @param primitive The glTF mesh primitive property
-     * @param assign A function called synchronously after parsing the glTF properties
-     * @returns A promise that resolves with the loaded mesh when the load is complete or null if not handled
-     */
-    _loadMeshPrimitiveAsync(context: string, name: string, node: BABYLON.GLTF2.INode, mesh: BABYLON.GLTF2.IMesh, primitive: any, assign: (babylonMesh: BABYLON.AbstractMesh) => void): Promise<BABYLON.AbstractMesh>;
-    private _setupBabylonMesh;
-    private _setupBabylonMaterials;
-    private _processLevelOfDetail;
-    private _processShaderMaterials;
-    private preProcessSceneProperties;
-    private postProcessSceneProperties;
-    private _preloadRawMaterialsAsync;
-    private _parseMultiMaterialAsync;
-    private _parseNodeMaterialPropertiesAsync;
-    private _parseShaderMaterialPropertiesAsync;
-    private _parseDiffuseMaterialPropertiesAsync;
-    private _parseCommonConstantProperties;
-}
-/**
- * Babylon Toolkit Editor - Loader Class
- * @class CVTOOLS_babylon_mesh - All rights reserved (c) 2024 Mackey Kinard
- * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
- */
-declare class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
-    /** The name of this extension. */
-    readonly name = "CVTOOLS_babylon_mesh";
-    /** Defines whether this extension is enabled. */
-    enabled: boolean;
-    private _loader;
-    /** @hidden */
-    constructor(loader: BABYLON.GLTF2.GLTFLoader);
-    /** @hidden */
-    dispose(): void;
-}
-/**
- * Babylon Toolkit Editor - Loader Class
- * @class CVTOOLS_left_handed - All rights reserved (c) 2024 Mackey Kinard
- * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
- */
-declare class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
-    /** The name of this extension. */
-    readonly name = "CVTOOLS_left_handed";
-    /** Defines whether this extension is enabled. */
-    enabled: boolean;
-    private _loader;
-    /** @hidden */
-    constructor(loader: BABYLON.GLTF2.GLTFLoader);
-    /** @hidden */
-    dispose(): void;
-}
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     interface KeymapState {
         result: boolean | number;
         pressTime: number;
@@ -2042,7 +1876,7 @@ declare namespace BABYLON.Toolkit {
         /** Get the value of the left button down. */
         static GetRightButtonDown(): boolean;
         /** Get the value of the pinch zoom state. */
-        static GetPinchZoomState(): BABYLON.Toolkit.PinchZoomState;
+        static GetPinchZoomState(): TOOLKIT.PinchZoomState;
         /** Are mobile input controls allowed */
         static AllowMobileControls: boolean;
         /** Are mobile input controls currently active */
@@ -2067,7 +1901,7 @@ declare namespace BABYLON.Toolkit {
         private static LockMousePointerObserver;
         static IsPointerLockHandled(): boolean;
         /** Get user input state from the scene. */
-        static GetUserInput(input: BABYLON.Toolkit.UserInputAxis, player?: BABYLON.Toolkit.PlayerNumber): number;
+        static GetUserInput(input: TOOLKIT.UserInputAxis, player?: TOOLKIT.PlayerNumber): number;
         /** Set a keyboard up event handler. */
         static OnKeyboardUp(callback: (keycode: number) => void): void;
         /** Set a keyboard down event handler. */
@@ -2097,55 +1931,55 @@ declare namespace BABYLON.Toolkit {
         /** Reset the specified pointer button tapped state. */
         static ResetPointerButtonTapped(button: number): void;
         /** Gets the specified pointer drag direction. */
-        static GetPointerDragDirection(mousex: number, mousey: number, buttondown: boolean): BABYLON.Toolkit.DragDirection;
+        static GetPointerDragDirection(mousex: number, mousey: number, buttondown: boolean): TOOLKIT.DragDirection;
         /** Resets ths pinch zoom event tracking. */
         static ResetPinchZoomTracking(): void;
         /** Is the mouse wheel scrollng this frame. */
         static IsWheelScrolling(): boolean;
         /** Set on gamepad button up event handler. */
-        static OnGamepadButtonUp(callback: (button: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadButtonUp(callback: (button: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad button down event handler. */
-        static OnGamepadButtonDown(callback: (button: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadButtonDown(callback: (button: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad button press event handler. */
-        static OnGamepadButtonPress(button: number, callback: () => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadButtonPress(button: number, callback: () => void, player?: TOOLKIT.PlayerNumber): void;
         /** Get the specified gamepad input by button. */
-        static GetGamepadButtonInput(button: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static GetGamepadButtonInput(button: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Is the specified gamepad button held. */
-        static IsGamepadButtonHeld(button: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadButtonHeld(button: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Is the specified gamepad button tapped. */
-        static IsGamepadButtonTapped(button: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadButtonTapped(button: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Reset the specified gamepad button tapped state. */
-        static ResetGamepadButtonTapped(button: number, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static ResetGamepadButtonTapped(button: number, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad direction pad up event handler. */
-        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadDirectionUp(callback: (direction: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad direction pad down event handler. */
-        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadDirectionDown(callback: (direction: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad direction pad press event handler. */
-        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadDirectionPress(direction: number, callback: () => void, player?: TOOLKIT.PlayerNumber): void;
         /** Get the specified gamepad direction input by number. */
-        static GetGamepadDirectionInput(direction: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static GetGamepadDirectionInput(direction: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Is the specified gamepad direction input held. */
-        static IsGamepadDirectionHeld(direction: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadDirectionHeld(direction: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Is the specified gamepad direction input tapped. */
-        static IsGamepadDirectionTapped(direction: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadDirectionTapped(direction: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Reset the specified gamepad direction tapped state. */
-        static ResetGamepadDirectionTapped(direction: number, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static ResetGamepadDirectionTapped(direction: number, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad trigger left event handler. */
-        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadTriggerLeft(callback: (value: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Set on gamepad trigger right event handler. */
-        static OnGamepadTriggerRight(callback: (value: number) => void, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static OnGamepadTriggerRight(callback: (value: number) => void, player?: TOOLKIT.PlayerNumber): void;
         /** Get the specified gamepad trigger input by number. */
-        static GetGamepadTriggerInput(trigger: number, player?: BABYLON.Toolkit.PlayerNumber): number;
+        static GetGamepadTriggerInput(trigger: number, player?: TOOLKIT.PlayerNumber): number;
         /** Is the specified gamepad trigger input held. */
-        static IsGamepadTriggerHeld(trigger: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadTriggerHeld(trigger: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Is the specified gamepad trigger input tapped. */
-        static IsGamepadTriggerTapped(trigger: number, player?: BABYLON.Toolkit.PlayerNumber): boolean;
+        static IsGamepadTriggerTapped(trigger: number, player?: TOOLKIT.PlayerNumber): boolean;
         /** Reset the specified gamepad trigger tapped state. */
-        static ResetGamepadTriggerTapped(trigger: number, player?: BABYLON.Toolkit.PlayerNumber): void;
+        static ResetGamepadTriggerTapped(trigger: number, player?: TOOLKIT.PlayerNumber): void;
         /** Get the specified gamepad type. */
-        static GetGamepadType(player?: BABYLON.Toolkit.PlayerNumber): BABYLON.Toolkit.GamepadType;
+        static GetGamepadType(player?: TOOLKIT.PlayerNumber): TOOLKIT.GamepadType;
         /** Get the specified gamepad. */
-        static GetGamepad(player?: BABYLON.Toolkit.PlayerNumber): BABYLON.Gamepad;
+        static GetGamepad(player?: TOOLKIT.PlayerNumber): BABYLON.Gamepad;
         /** Process the specified input key down request */
         static InputKeyDownHandler(keyCode: number, event?: MouseEvent | TouchEvent | PointerEvent | KeyboardEvent): any;
         /** Process the specified input key down request */
@@ -2335,14 +2169,14 @@ declare namespace BABYLON.Toolkit {
         enabled: boolean;
         getValueX(): number;
         getValueY(): number;
-        getMouseButton(): BABYLON.Toolkit.TouchMouseButton;
+        getMouseButton(): TOOLKIT.TouchMouseButton;
         getBaseElement(): HTMLElement;
         getStickElement(): HTMLElement;
         isFixedJoystick(): boolean;
         updateElements: boolean;
         baseElementOpacity: string;
         stickElementOpacity: string;
-        constructor(stickid: string, maxdistance: number, deadzone: number, fixed?: boolean, button?: BABYLON.Toolkit.TouchMouseButton, baseid?: string);
+        constructor(stickid: string, maxdistance: number, deadzone: number, fixed?: boolean, button?: TOOLKIT.TouchMouseButton, baseid?: string);
         dispose(): void;
         protected handleDown(event: any): void;
         protected handleMove(event: any): void;
@@ -2351,12 +2185,8 @@ declare namespace BABYLON.Toolkit {
         hideBaseElement(): void;
     }
 }
-/**
- * Babylon Toolkit Input Controller Alias
- */
-declare const IC: typeof BABYLON.Toolkit.InputController;
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     class WindowManager {
         /** Are unversial windows platform services available. */
         static IsWindows(): boolean;
@@ -2416,10 +2246,8 @@ declare namespace BABYLON.Toolkit {
         static AlertMessage(text: string, title?: string): any;
         /**  Gets the names query string from page url. */
         static GetQueryStringParam(name: string, url: string): string;
-        /** Get system time in milleseconds */
-        static GetTimeMilliseconds(): number;
         /** Post a safe message to the top browser window */
-        static PostWindowMessage(msg: BABYLON.Toolkit.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
+        static PostWindowMessage(msg: TOOLKIT.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
         /** Loads a new level scene file into the scene viewer (engine.html) */
         static LoadLevel(sceneFile: string, queryString?: string): boolean;
         /** Shows the default page scene loader. */
@@ -2473,17 +2301,13 @@ declare namespace BABYLON.Toolkit {
         private static PrintElement;
     }
 }
-/**
- * Babylon Toolkit Window Manager Alias
- */
-declare const WM: typeof BABYLON.Toolkit.WindowManager;
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit animation state pro class (Unity Style Mechanim Animation System)
      * @class AnimationState - All rights reserved (c) 2024 Mackey Kinard
      */
-    class AnimationState extends BABYLON.Toolkit.ScriptComponent {
+    class AnimationState extends TOOLKIT.ScriptComponent {
         static FPS: number;
         static EXIT: string;
         static TIME: number;
@@ -2576,21 +2400,21 @@ declare namespace BABYLON.Toolkit {
         getFixedRootMotionPosition(): BABYLON.Vector3;
         getFixedRootMotionRotation(): BABYLON.Quaternion;
         /** Register handler that is triggered when the animation state machine has been awakened */
-        onAnimationAwakeObservable: Observable<TransformNode>;
+        onAnimationAwakeObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the animation state machine has been initialized */
-        onAnimationInitObservable: Observable<TransformNode>;
+        onAnimationInitObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the animation ik setup has been triggered */
-        onAnimationIKObservable: Observable<number>;
+        onAnimationIKObservable: BABYLON.Observable<number>;
         /** Register handler that is triggered when the animation end has been triggered */
-        onAnimationEndObservable: Observable<number>;
+        onAnimationEndObservable: BABYLON.Observable<number>;
         /** Register handler that is triggered when the animation loop has been triggered */
-        onAnimationLoopObservable: Observable<number>;
+        onAnimationLoopObservable: BABYLON.Observable<number>;
         /** Register handler that is triggered when the animation event has been triggered */
-        onAnimationEventObservable: Observable<IAnimatorEvent>;
+        onAnimationEventObservable: BABYLON.Observable<IAnimatorEvent>;
         /** Register handler that is triggered when the animation frame has been updated */
-        onAnimationUpdateObservable: Observable<TransformNode>;
+        onAnimationUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the animation state is going to transition */
-        onAnimationTransitionObservable: Observable<TransformNode>;
+        onAnimationTransitionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         protected m_zeroVector: BABYLON.Vector3;
         protected m_defaultGroup: BABYLON.AnimationGroup;
         protected m_animationTargets: BABYLON.TargetedAnimation[];
@@ -2620,7 +2444,7 @@ declare namespace BABYLON.Toolkit {
         resetSmoothProperty(name: string): void;
         private getMachineState;
         private setMachineState;
-        getCurrentState(layer: number): BABYLON.Toolkit.MachineState;
+        getCurrentState(layer: number): TOOLKIT.MachineState;
         getDefaultClips(): any[];
         getDefaultSource(): string;
         fixAnimationGroup(group: BABYLON.AnimationGroup): string;
@@ -2653,13 +2477,13 @@ declare namespace BABYLON.Toolkit {
         private parse2DFreeformCartesianTreeBranches;
     }
     class BlendTreeValue {
-        source: BABYLON.Toolkit.IBlendTreeChild;
+        source: TOOLKIT.IBlendTreeChild;
         motion: string;
         posX: number;
         posY: number;
         weight: number;
         constructor(config: {
-            source: BABYLON.Toolkit.IBlendTreeChild;
+            source: TOOLKIT.IBlendTreeChild;
             motion: string;
             posX?: number;
             posY?: number;
@@ -2670,12 +2494,12 @@ declare namespace BABYLON.Toolkit {
         static ClampValue(num: number, min: number, max: number): number;
         static GetSignedAngle(a: BABYLON.Vector2, b: BABYLON.Vector2): number;
         static GetLinearInterpolation(x0: number, y0: number, x1: number, y1: number, x: number): number;
-        static GetRightNeighbourIndex(inputX: number, blendTreeArray: BABYLON.Toolkit.BlendTreeValue[]): number;
+        static GetRightNeighbourIndex(inputX: number, blendTreeArray: TOOLKIT.BlendTreeValue[]): number;
     }
     class BlendTreeSystem {
-        static Calculate1DSimpleBlendTree(inputX: number, blendTreeArray: BABYLON.Toolkit.BlendTreeValue[]): void;
-        static Calculate2DFreeformDirectional(inputX: number, inputY: number, blendTreeArray: BABYLON.Toolkit.BlendTreeValue[]): void;
-        static Calculate2DFreeformCartesian(inputX: number, inputY: number, blendTreeArray: BABYLON.Toolkit.BlendTreeValue[]): void;
+        static Calculate1DSimpleBlendTree(inputX: number, blendTreeArray: TOOLKIT.BlendTreeValue[]): void;
+        static Calculate2DFreeformDirectional(inputX: number, inputY: number, blendTreeArray: TOOLKIT.BlendTreeValue[]): void;
+        static Calculate2DFreeformCartesian(inputX: number, inputY: number, blendTreeArray: TOOLKIT.BlendTreeValue[]): void;
         private static TempVector2_IP;
         private static TempVector2_POSI;
         private static TempVector2_POSJ;
@@ -2687,7 +2511,7 @@ declare namespace BABYLON.Toolkit {
         name: string;
         tag: string;
         time: number;
-        type: BABYLON.Toolkit.MotionType;
+        type: TOOLKIT.MotionType;
         rate: number;
         length: number;
         layer: string;
@@ -2710,11 +2534,11 @@ declare namespace BABYLON.Toolkit {
         speed: number;
         speedParameter: string;
         speedParameterActive: boolean;
-        blendtree: BABYLON.Toolkit.IBlendTree;
-        transitions: BABYLON.Toolkit.ITransition[];
-        behaviours: BABYLON.Toolkit.IBehaviour[];
-        events: BABYLON.Toolkit.IAnimatorEvent[];
-        ccurves: BABYLON.Toolkit.IUnityCurve[];
+        blendtree: TOOLKIT.IBlendTree;
+        transitions: TOOLKIT.ITransition[];
+        behaviours: TOOLKIT.IBehaviour[];
+        events: TOOLKIT.IAnimatorEvent[];
+        ccurves: TOOLKIT.IUnityCurve[];
         tcurves: BABYLON.Animation[];
         constructor();
     }
@@ -2736,8 +2560,8 @@ declare namespace BABYLON.Toolkit {
         rootRotation: BABYLON.Quaternion;
     }
     class BlendingWeights {
-        primary: BABYLON.Toolkit.IBlendTreeChild;
-        secondary: BABYLON.Toolkit.IBlendTreeChild;
+        primary: TOOLKIT.IBlendTreeChild;
+        secondary: TOOLKIT.IBlendTreeChild;
     }
     enum MotionType {
         Clip = 0,
@@ -2802,7 +2626,7 @@ declare namespace BABYLON.Toolkit {
         entry: string;
         machine: string;
         iKPass: boolean;
-        avatarMask: BABYLON.Toolkit.IAvatarMask;
+        avatarMask: TOOLKIT.IAvatarMask;
         blendingMode: number;
         defaultWeight: number;
         syncedLayerIndex: number;
@@ -2815,13 +2639,13 @@ declare namespace BABYLON.Toolkit {
         animationLoopFrame: boolean;
         animationLoopCount: number;
         animationLoopEvents: any;
-        animationStateMachine: BABYLON.Toolkit.MachineState;
+        animationStateMachine: TOOLKIT.MachineState;
     }
     interface IAnimationCurve {
         length: number;
         preWrapMode: string;
         postWrapMode: string;
-        keyframes: BABYLON.Toolkit.IAnimationKeyframe[];
+        keyframes: TOOLKIT.IAnimationKeyframe[];
     }
     interface IAnimationKeyframe {
         time: number;
@@ -2848,18 +2672,18 @@ declare namespace BABYLON.Toolkit {
         exitTime: number;
         hasExitTime: boolean;
         fixedDuration: boolean;
-        intSource: BABYLON.Toolkit.InterruptionSource;
+        intSource: TOOLKIT.InterruptionSource;
         isExit: boolean;
         mute: boolean;
         name: string;
         offset: number;
         orderedInt: boolean;
         solo: boolean;
-        conditions: BABYLON.Toolkit.ICondition[];
+        conditions: TOOLKIT.ICondition[];
     }
     interface ICondition {
         hash: number;
-        mode: BABYLON.Toolkit.ConditionMode;
+        mode: TOOLKIT.ConditionMode;
         parameter: string;
         threshold: number;
     }
@@ -2867,7 +2691,7 @@ declare namespace BABYLON.Toolkit {
         hash: number;
         name: string;
         state: string;
-        children: BABYLON.Toolkit.IBlendTreeChild[];
+        children: TOOLKIT.IBlendTreeChild[];
         layerIndex: number;
         apparentSpeed: number;
         averageAngularSpeed: number;
@@ -2875,7 +2699,7 @@ declare namespace BABYLON.Toolkit {
         averageSpeed: number[];
         blendParameterX: string;
         blendParameterY: string;
-        blendType: BABYLON.Toolkit.BlendTreeType;
+        blendType: TOOLKIT.BlendTreeType;
         isAnimatorMotion: boolean;
         isHumanMotion: boolean;
         isLooping: boolean;
@@ -2895,25 +2719,25 @@ declare namespace BABYLON.Toolkit {
         averageDuration: number;
         averageSpeed: number[];
         mirror: boolean;
-        type: BABYLON.Toolkit.MotionType;
+        type: TOOLKIT.MotionType;
         motion: string;
         positionX: number;
         positionY: number;
         threshold: number;
         timescale: number;
-        subtree: BABYLON.Toolkit.IBlendTree;
+        subtree: TOOLKIT.IBlendTree;
         weight: number;
         ratio: number;
         track: BABYLON.AnimationGroup;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit audio source manager standard class
      * @class AudioSource - All rights reserved (c) 2024 Mackey Kinard
      */
-    class AudioSource extends BABYLON.Toolkit.ScriptComponent implements BABYLON.Toolkit.IAssetPreloader {
+    class AudioSource extends TOOLKIT.ScriptComponent implements TOOLKIT.IAssetPreloader {
         /** The default volume for the audio source if volume is at max level */
         static MAX_VOLUME: number;
         static DEFAULT_LEVEL: number;
@@ -2942,7 +2766,7 @@ declare namespace BABYLON.Toolkit {
         getSoundClip(): BABYLON.Sound;
         getAudioElement(): HTMLAudioElement;
         /** Register handler that is triggered when the audio clip is ready */
-        onReadyObservable: Observable<Sound>;
+        onReadyObservable: BABYLON.Observable<BABYLON.Sound>;
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -3019,16 +2843,16 @@ declare namespace BABYLON.Toolkit {
         /** Set audio data source */
         setDataSource(source: string | ArrayBuffer | MediaStream): void;
         /** Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: BABYLON.Toolkit.PreloadAssetsManager): void;
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit default character controller pro class (Unity Style Physics Based Character Controller System)
      * @class CharacterController - All rights reserved (c) 2020 Mackey Kinard
      */
-    class CharacterController extends BABYLON.Toolkit.ScriptComponent {
+    class CharacterController extends TOOLKIT.ScriptComponent {
         static TERMINAL_VELOCITY: number;
         static SLOPE_GRAVITY_FORCE: number;
         static UPHILL_GRAVITY_FORCE: number;
@@ -3117,9 +2941,9 @@ declare namespace BABYLON.Toolkit {
         canSlide(): boolean;
         canJump(): boolean;
         /** Register handler that is triggered when the character position has been updated */
-        onUpdatePositionObservable: Observable<TransformNode>;
+        onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the character velocity will be updated */
-        onUpdateVelocityObservable: Observable<TransformNode>;
+        onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Current vertical velocity offset */
         verticalVelocityOffset: number;
         /** Enable character step offset feature */
@@ -3162,7 +2986,7 @@ declare namespace BABYLON.Toolkit {
      * Babylon toolkit simple character controller pro class (Simple Non Physics Based Character Controller System)
      * @class SimpleCharacterController - All rights reserved (c) 2020 Mackey Kinard
      */
-    class SimpleCharacterController extends BABYLON.Toolkit.ScriptComponent {
+    class SimpleCharacterController extends TOOLKIT.ScriptComponent {
         private _eulerAngles;
         protected start(): void;
         /** Sets the character position and rotation to the specfied values. Aux is not used. */
@@ -3180,12 +3004,12 @@ declare namespace BABYLON.Toolkit {
      * Babylon toolkit nav mesh character controller pro class (Nav Mesh Based Character Controller System)
      * @class RecastCharacterController - All rights reserved (c) 2020 Mackey Kinard
      */
-    class RecastCharacterController extends BABYLON.Toolkit.ScriptComponent {
+    class RecastCharacterController extends TOOLKIT.ScriptComponent {
         private _eulerAngles;
         private _teleportVector;
         private _navigationAgent;
-        getNavigationAgent(): BABYLON.Toolkit.NavigationAgent;
-        setNavigationAgent(agent: BABYLON.Toolkit.NavigationAgent): void;
+        getNavigationAgent(): TOOLKIT.NavigationAgent;
+        setNavigationAgent(agent: TOOLKIT.NavigationAgent): void;
         setDestinationPoint(destination: BABYLON.Vector3, closetPoint?: boolean): void;
         protected start(): void;
         /** Sets the character position and rotation to the specfied values. Aux is closest point option. */
@@ -3202,10 +3026,10 @@ declare namespace BABYLON.Toolkit {
     /**
      * Babylon toolkit universal character controller pro class (Universal Character Controller System)
      */
-    type UniversalCharacterController = BABYLON.Toolkit.CharacterController | BABYLON.Toolkit.SimpleCharacterController | BABYLON.Toolkit.RecastCharacterController;
+    type UniversalCharacterController = TOOLKIT.CharacterController | TOOLKIT.SimpleCharacterController | TOOLKIT.RecastCharacterController;
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
      * https://forum.babylonjs.com/u/raggar
@@ -3213,7 +3037,7 @@ declare namespace BABYLON.Toolkit {
      */
     class HavokRaycastVehicle {
         chassisBody: BABYLON.PhysicsBody;
-        wheelInfos: BABYLON.Toolkit.HavokWheelInfo[];
+        wheelInfos: TOOLKIT.HavokWheelInfo[];
         sliding: boolean;
         world: BABYLON.PhysicsEngine;
         indexRightAxis: number;
@@ -3227,7 +3051,7 @@ declare namespace BABYLON.Toolkit {
         constructor(options: any);
         addWheel(options: any): number;
         getNumWheels(): number;
-        getWheelInfo(wheelIndex: number): BABYLON.Toolkit.HavokWheelInfo;
+        getWheelInfo(wheelIndex: number): TOOLKIT.HavokWheelInfo;
         getSteeringValue(wheelIndex: number): number;
         setSteeringValue(value: number, wheelIndex: number): void;
         applyEngineForce(value: number, wheelIndex: number): void;
@@ -3238,9 +3062,9 @@ declare namespace BABYLON.Toolkit {
         updateVehicle(timeStep: number): void;
         updateSuspension(deltaTime: number): void;
         removeFromWorld(world: any): void;
-        castRay2(wheel: BABYLON.Toolkit.HavokWheelInfo): number;
-        castRay(wheel: BABYLON.Toolkit.HavokWheelInfo): number;
-        updateWheelTransformWorld(wheel: BABYLON.Toolkit.HavokWheelInfo): void;
+        castRay2(wheel: TOOLKIT.HavokWheelInfo): number;
+        castRay(wheel: TOOLKIT.HavokWheelInfo): number;
+        updateWheelTransformWorld(wheel: TOOLKIT.HavokWheelInfo): void;
         updateWheelTransform(wheelIndex: number): void;
         getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
         updateFriction(timeStep: number): void;
@@ -3349,13 +3173,13 @@ declare namespace BABYLON.Toolkit {
         static Utilsdefaults: (options: any, defaults: any) => any;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit navigation agent pro class (Unity Style Navigation Agent System)
      * @class NavigationAgent - All rights reserved (c) 2024 Mackey Kinard
      */
-    class NavigationAgent extends BABYLON.Toolkit.ScriptComponent {
+    class NavigationAgent extends TOOLKIT.ScriptComponent {
         private static TARGET_ANGLE_FACTOR;
         private static ANGULAR_SPEED_RATIO;
         private type;
@@ -3403,13 +3227,13 @@ declare namespace BABYLON.Toolkit {
         getAgentParameters(): BABYLON.IAgentParameters;
         setAgentParameters(parameters: BABYLON.IAgentParameters): void;
         /** Register handler that is triggered when the agent is ready for navigation */
-        onReadyObservable: Observable<TransformNode>;
+        onReadyObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered before the navigation update */
-        onPreUpdateObservable: Observable<TransformNode>;
+        onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered after the navigation update */
-        onPostUpdateObservable: Observable<TransformNode>;
+        onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the navigation is complete */
-        onNavCompleteObservable: Observable<TransformNode>;
+        onNavCompleteObservable: BABYLON.Observable<BABYLON.TransformNode>;
         protected m_agentState: number;
         protected m_agentIndex: number;
         protected m_agentReady: boolean;
@@ -3456,8 +3280,8 @@ declare namespace BABYLON.Toolkit {
         DT_CROWDAGENT_STATE_OFFMESH = 2
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon toolkit raycast vehicle pro class (Unity Style Wheeled Vehicle System)
      * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
@@ -3468,7 +3292,7 @@ declare namespace BABYLON.Toolkit {
         private _tempVectorPos;
         lockedWheelIndexes: number[];
         getNumWheels(): number;
-        getWheelInfo(wheel: number): BABYLON.Toolkit.HavokWheelInfo;
+        getWheelInfo(wheel: number): TOOLKIT.HavokWheelInfo;
         setEngineForce(power: number, wheel: number): void;
         setBrakingForce(brake: number, wheel: number): void;
         getWheelTransform(wheel: number): BABYLON.TransformNode;
@@ -3478,7 +3302,7 @@ declare namespace BABYLON.Toolkit {
         getAbsCurrentSpeedKph(): number;
         getAbsCurrentSpeedMph(): number;
         protected m_vehicleColliders: any[];
-        protected m_vehicle: BABYLON.Toolkit.HavokRaycastVehicle;
+        protected m_vehicle: TOOLKIT.HavokRaycastVehicle;
         protected m_scene: BABYLON.Scene;
         constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
         dispose(): void;
@@ -3507,13 +3331,13 @@ declare namespace BABYLON.Toolkit {
         protected deleteWheelInformation(): void;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon full rigidbody physics standard class (Native Havok Physics Engine)
      * @class RigidbodyPhysics - All rights reserved (c) 2024 Mackey Kinard
      */
-    class RigidbodyPhysics extends BABYLON.Toolkit.ScriptComponent {
+    class RigidbodyPhysics extends TOOLKIT.ScriptComponent {
         static PHYSICS_STEP_TIME: number;
         private static RaycastResult;
         private static LocalShapeResult;
@@ -3552,9 +3376,9 @@ declare namespace BABYLON.Toolkit {
         /**
          * Performs a shapecast with a specific orientation, cast it from the start to end position specified by the query given and stores the result in a reusable ShapeCastResult objects.
          * @param query the query to perform. @see IPhysicsShapeCastQuery
-         * @returns a reused shapecast result @see BABYLON.Toolkit.IPhysicsShapeCastResult
+         * @returns a reused shapecast result @see TOOLKIT.IPhysicsShapeCastResult
          */
-        static Shapecast(query: BABYLON.IPhysicsShapeCastQuery): BABYLON.Toolkit.IPhysicsShapeCastResult;
+        static Shapecast(query: BABYLON.IPhysicsShapeCastQuery): TOOLKIT.IPhysicsShapeCastResult;
         /**
          * Performs a raycast from a given start point to a given end point and stores the result in a given PhysicsRaycastResult object.
          *
@@ -3590,7 +3414,7 @@ declare namespace BABYLON.Toolkit {
         protected static GetCachedPhysicsCapsuleShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCapsule;
         protected static GetCachedPhysicsCylinderShape(scene: BABYLON.Scene, trigger: boolean, friction: number, restitution: number, layer: number, filter: number): BABYLON.PhysicsShapeCylinder;
         protected static CreateStandardPhysicsShapeAndBody(scene: BABYLON.Scene, entity: BABYLON.TransformNode, metadata: any, impostortype: number, istrigger: boolean, istruestatic: boolean, motiontype: BABYLON.PhysicsMotionType, mass: number, staticfriction: number, dynamicfriction: number, restitution: number, terraindata: any, com: any, persist: boolean, layer: number, filter: number): void;
-        protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.TransformNode, element: any, impostortype: number, dynamicfriction: number, restitution: number, sitems: BABYLON.Toolkit.PhyscisContainerData[], item: BABYLON.Toolkit.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
+        protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.TransformNode, element: any, impostortype: number, dynamicfriction: number, restitution: number, sitems: TOOLKIT.PhyscisContainerData[], item: TOOLKIT.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
         protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
         static GetPhysicsHeapSize(): number;
         static ConfigRigidbodyPhysics(scene: BABYLON.Scene, entity: BABYLON.TransformNode, child: boolean, trigger: boolean, physics: any, mass: number, com: BABYLON.Vector3): void;
@@ -3620,13 +3444,13 @@ declare namespace BABYLON.Toolkit {
         world: BABYLON.ShapeCastResult;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon shuriken particle system pro class (Unity Style Shuriken Particle System)
      * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
      */
-    class ShurikenParticles extends BABYLON.Toolkit.ScriptComponent {
+    class ShurikenParticles extends TOOLKIT.ScriptComponent {
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -3638,13 +3462,13 @@ declare namespace BABYLON.Toolkit {
         protected destroy(): void;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon terrain generator pro class (Unity Terrain Builder System)
      * @class TerrainGenerator - All rights reserved (c) 2024 Mackey Kinard
     */
-    class TerrainGenerator extends BABYLON.Toolkit.ScriptComponent {
+    class TerrainGenerator extends TOOLKIT.ScriptComponent {
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -3656,13 +3480,13 @@ declare namespace BABYLON.Toolkit {
         protected destroy(): void;
     }
 }
-
-declare namespace BABYLON.Toolkit {
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Babylon web video player standard class (Unity Style Shuriken Particle System)
      * @class WebVideoPlayer - All rights reserved (c) 2024 Mackey Kinard
      */
-    class WebVideoPlayer extends BABYLON.Toolkit.ScriptComponent implements BABYLON.Toolkit.IAssetPreloader {
+    class WebVideoPlayer extends TOOLKIT.ScriptComponent implements TOOLKIT.IAssetPreloader {
         private videoLoop;
         private videoMuted;
         private videoAlpha;
@@ -3684,7 +3508,7 @@ declare namespace BABYLON.Toolkit {
         getVideoScreen(): BABYLON.AbstractMesh;
         getVideoBlobUrl(): string;
         /** Register handler that is triggered when the video clip is ready */
-        onReadyObservable: Observable<VideoTexture>;
+        onReadyObservable: BABYLON.Observable<BABYLON.VideoTexture>;
         protected m_abstractMesh: BABYLON.AbstractMesh;
         protected m_videoTexture: BABYLON.VideoTexture;
         protected m_videoMaterial: BABYLON.StandardMaterial;
@@ -3738,6 +3562,6 @@ declare namespace BABYLON.Toolkit {
         /** Revokes the current video blob url and releases resouces */
         revokeVideoBlobUrl(): void;
         /** Add video preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
-        addPreloaderTasks(assetsManager: BABYLON.Toolkit.PreloadAssetsManager): void;
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }

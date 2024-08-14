@@ -4,9 +4,9 @@
         "scope": "typescript",
         "body": [
             "/// Script Component Class: ${1:NAMESPACE}.${2:CLASSNAME}",
-            "module ${1:NAMESPACE}",
+            "namespace ${1:NAMESPACE}",
             "{",
-            "   export class ${2:CLASSNAME} extends BABYLON.Toolkit.ScriptComponent",
+            "   export class ${2:CLASSNAME} extends TOOLKIT.ScriptComponent",
             "   {",
             "       constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any=null) {",
             "           super(transform, scene, properties, \"${1:NAMESPACE}.${2:CLASSNAME}\");",
