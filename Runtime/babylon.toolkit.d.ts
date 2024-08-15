@@ -1,4 +1,4 @@
-/** Babylon Toolkit Namespace */
+/** UMD Global Module Definitions */ /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
     * Babylon toolkit scene manager class
