@@ -1,4 +1,5 @@
-/** UMD Global Module Definitions */ /** Babylon Toolkit Namespace */
+/** UMD Type References */
+/** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
     * Babylon toolkit scene manager class
@@ -79,6 +80,9 @@ declare namespace TOOLKIT {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        static CVTOOLS_NAME: string;
+        static CVTOOLS_MESH: string;
+        static CVTOOLS_HAND: string;
         static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
         private static _EventBus;
         /** Default global event message bus
@@ -155,9 +159,6 @@ declare namespace TOOLKIT {
         static IsSceneParsingEnabled(): boolean;
         /** Has the specfied scene already been preloaded */
         static HasSceneBeenPreLoaded(scene: BABYLON.Scene): boolean;
-        private static AdvDynamicTexture;
-        /** Get the default fullscreen user interface advanced dynamic texture */
-        static GetFullscreenUI(scene: BABYLON.Scene, sampling?: number): BABYLON.GUI.AdvancedDynamicTexture;
         /** Get the scene default skybox mesh */
         static GetDefaultSkybox(scene: BABYLON.Scene): BABYLON.AbstractMesh;
         /** Get the scene default intenisty factor */
@@ -168,6 +169,7 @@ declare namespace TOOLKIT {
         static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
         /** Gets the current engine version string info. */
         static GetEngineVersionString(scene: BABYLON.Scene): string;
+        static RegisterLoaderPlugins(): void;
         /** Store data object of function on the local window state. */
         static SetWindowState(name: string, data: any): void;
         /** Retrieve data object or function from the local window state. */
@@ -1829,6 +1831,160 @@ declare namespace TOOLKIT {
         static ValidateTransformMetadata(transform: BABYLON.TransformNode): void;
     }
 }
+declare namespace TOOLKIT {
+    /**
+     * Babylon Toolkit Unity Editor - Loader Class
+     * @class CVTOOLS_unity_metadata - All rights reserved (c) 2024 Mackey Kinard
+     * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
+     */
+    class CubeTextureLoader {
+        name: string;
+        mapkey: string;
+        material: BABYLON.Material;
+        extension: string;
+        prefiltered: boolean;
+        boundingBoxSize: BABYLON.Vector3;
+        boundingBoxPosition: BABYLON.Vector3;
+    }
+    class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
+        /** The name of this extension. */
+        readonly name: string;
+        /** Defines whether this extension is enabled. */
+        enabled: boolean;
+        private _loader;
+        private _babylonScene;
+        private _metadataParser;
+        private _loaderScene;
+        private _assetsManager;
+        private _parserList;
+        private _masterList;
+        private _detailList;
+        private _shaderList;
+        private _readyList;
+        private _preloadList;
+        private _animationGroups;
+        private _materialMap;
+        private _lightmapMap;
+        private _reflectionMap;
+        private _reflectionCache;
+        private _assetContainer;
+        private _activeMeshes;
+        private _parseScene;
+        private _leftHanded;
+        private _disposeRoot;
+        private _sceneParsed;
+        private _preWarmTime;
+        private _hideLoader;
+        private _rootUrl;
+        private _fileName;
+        private _licenseName;
+        private _licenseType;
+        private static ScriptBundleCache;
+        /** @hidden */
+        constructor(loader: BABYLON.GLTF2.GLTFLoader);
+        /** @hidden */
+        dispose(): void;
+        /** @hidden */
+        onLoading(): void;
+        /** @hidden */
+        onReady(): void;
+        /** @hidden */
+        onComplete(): void;
+        getScriptBundleTag(): string;
+        getScriptBundleUrl(): string;
+        finishComplete(): void;
+        /** @hidden */
+        onValidate(): void;
+        /** @hidden */
+        onCleanup(): void;
+        /** @hidden */
+        setupLoader(): void;
+        /** @hidden */
+        startParsing(): void;
+        /** @hidden */
+        loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
+        private loadSceneExAsync;
+        private _processActiveMeshes;
+        private _processUnityMeshes;
+        private _processPreloadTimeout;
+        /** @hidden */
+        loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
+        /** @hidden */
+        loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
+        private _getCachedMaterialByIndex;
+        private _getCachedLightmapByIndex;
+        /** @hidden */
+        createMaterial(context: string, material: BABYLON.GLTF2.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
+        /**
+         * Loads a glTF animation.
+         * @param context The context when loading the asset
+         * @param animation The glTF animation property
+         * @returns A promise that resolves with the loaded Babylon animation group when the load is complete
+         */
+        loadAnimationAsync(context: string, animation: BABYLON.GLTF2.Loader.IAnimation): Promise<BABYLON.AnimationGroup>;
+        /**
+         * Loads a glTF animation.
+         * @param context The context when loading the asset
+         * @param animation The glTF animation property
+         * @returns A promise that resolves with the loaded Babylon animation group when the load is complete
+         */
+        /**
+         * @hidden Define this method to modify the default behavior when loading data for mesh primitives.
+         * @param context The context when loading the asset
+         * @param name The mesh name when loading the asset
+         * @param node The glTF node when loading the asset
+         * @param mesh The glTF mesh when loading the asset
+         * @param primitive The glTF mesh primitive property
+         * @param assign A function called synchronously after parsing the glTF properties
+         * @returns A promise that resolves with the loaded mesh when the load is complete or null if not handled
+         */
+        _loadMeshPrimitiveAsync(context: string, name: string, node: BABYLON.GLTF2.INode, mesh: BABYLON.GLTF2.IMesh, primitive: any, assign: (babylonMesh: BABYLON.AbstractMesh) => void): Promise<BABYLON.AbstractMesh>;
+        private _setupBabylonMesh;
+        private _setupBabylonMaterials;
+        private _processLevelOfDetail;
+        private _processShaderMaterials;
+        private preProcessSceneProperties;
+        private postProcessSceneProperties;
+        private _preloadRawMaterialsAsync;
+        private _parseMultiMaterialAsync;
+        private _parseNodeMaterialPropertiesAsync;
+        private _parseShaderMaterialPropertiesAsync;
+        private _parseDiffuseMaterialPropertiesAsync;
+        private _parseCommonConstantProperties;
+    }
+    /**
+     * Babylon Toolkit Editor - Loader Class
+     * @class CVTOOLS_babylon_mesh - All rights reserved (c) 2024 Mackey Kinard
+     * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
+     */
+    class CVTOOLS_babylon_mesh implements BABYLON.GLTF2.IGLTFLoaderExtension {
+        /** The name of this extension. */
+        readonly name: string;
+        /** Defines whether this extension is enabled. */
+        enabled: boolean;
+        private _loader;
+        /** @hidden */
+        constructor(loader: BABYLON.GLTF2.GLTFLoader);
+        /** @hidden */
+        dispose(): void;
+    }
+    /**
+     * Babylon Toolkit Editor - Loader Class
+     * @class CVTOOLS_left_handed - All rights reserved (c) 2024 Mackey Kinard
+     * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
+     */
+    class CVTOOLS_left_handed implements BABYLON.GLTF2.IGLTFLoaderExtension {
+        /** The name of this extension. */
+        readonly name: string;
+        /** Defines whether this extension is enabled. */
+        enabled: boolean;
+        private _loader;
+        /** @hidden */
+        constructor(loader: BABYLON.GLTF2.GLTFLoader);
+        /** @hidden */
+        dispose(): void;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     interface KeymapState {
@@ -1875,6 +2031,10 @@ declare namespace TOOLKIT {
         static GetMiddleButtonDown(): boolean;
         /** Get the value of the left button down. */
         static GetRightButtonDown(): boolean;
+        /** Get the target of mouse button down event. */
+        static GetMouseDownTarget(): any;
+        /** Get the target of mouse button drag event. */
+        static GetMouseDragTarget(): any;
         /** Get the value of the pinch zoom state. */
         static GetPinchZoomState(): TOOLKIT.PinchZoomState;
         /** Are mobile input controls allowed */
@@ -2039,6 +2199,8 @@ declare namespace TOOLKIT {
         private static pinchZoomState;
         private static pinchZoomEvents;
         private static pinchZoomDistance;
+        private static mouseDownTarget;
+        private static mouseDragTarget;
         private static leftButtonDown;
         private static middleButtonDown;
         private static rightButtonDown;
@@ -3375,10 +3537,10 @@ declare namespace TOOLKIT {
         static Raycast(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, query?: BABYLON.IRaycastQuery): BABYLON.PhysicsRaycastResult;
         /**
          * Performs a shapecast with a specific orientation, cast it from the start to end position specified by the query given and stores the result in a reusable ShapeCastResult objects.
-         * @param query the query to perform. @see IPhysicsShapeCastQuery
+         * @param query the query to perform. @see TOOLKIT.IPhysicsShapeCastQuery
          * @returns a reused shapecast result @see TOOLKIT.IPhysicsShapeCastResult
          */
-        static Shapecast(query: BABYLON.IPhysicsShapeCastQuery): TOOLKIT.IPhysicsShapeCastResult;
+        static Shapecast(query: TOOLKIT.IPhysicsShapeCastQuery): TOOLKIT.IPhysicsShapeCastResult;
         /**
          * Performs a raycast from a given start point to a given end point and stores the result in a given PhysicsRaycastResult object.
          *
@@ -3393,11 +3555,11 @@ declare namespace TOOLKIT {
         static RaycastToRef(from: BABYLON.Vector3, to: BABYLON.Vector3, result: BABYLON.PhysicsRaycastResult, query?: BABYLON.IRaycastQuery): void;
         /**
          * Given a shape in a specific orientation, cast it from the start to end position specified by the query, and return the first hit.
-         * @param query the query to perform. @see IPhysicsShapeCastQuery
+         * @param query the query to perform. @see TOOLKIT.IPhysicsShapeCastQuery
          * @param localShapeResult contact point on input shape, in input shape space
          * @param worldShapeResult contact point on hit shape, in world space
          */
-        static ShapecastToRef(query: BABYLON.IPhysicsShapeCastQuery, localShapeResult: BABYLON.ShapeCastResult, worldShapeResult: BABYLON.ShapeCastResult): void;
+        static ShapecastToRef(query: TOOLKIT.IPhysicsShapeCastQuery, localShapeResult: BABYLON.ShapeCastResult, worldShapeResult: BABYLON.ShapeCastResult): void;
         /** Set the maximum physics velocites */
         static SetMaxVelocities(maxLinVel: number, maxAngVel: number): void;
         static PhysicsShapeCache: any;
@@ -3442,6 +3604,32 @@ declare namespace TOOLKIT {
     interface IPhysicsShapeCastResult {
         local: BABYLON.ShapeCastResult;
         world: BABYLON.ShapeCastResult;
+    }
+    interface IPhysicsShapeCastQuery {
+        /**
+         * The shape to query with
+         */
+        shape: BABYLON.PhysicsShape;
+        /**
+         * The rotation of the shape
+         */
+        rotation: BABYLON.Quaternion;
+        /**
+         * The start position of the query
+         */
+        startPosition: BABYLON.Vector3;
+        /**
+         * The end position of the query
+         */
+        endPosition: BABYLON.Vector3;
+        /**
+         * Should trigger collisions be considered in the query?
+         */
+        shouldHitTriggers: boolean;
+        /**
+         * Ignores the body passed if it is in the query
+         */
+        ignoreBody?: BABYLON.PhysicsBody;
     }
 }
 /** Babylon Toolkit Namespace */
