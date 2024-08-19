@@ -1837,6 +1837,20 @@ declare namespace TOOLKIT {
      * @class CVTOOLS_unity_metadata - All rights reserved (c) 2024 Mackey Kinard
      * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
      */
+    const enum MaterialAlphaMode {
+        /**
+         * The alpha value is ignored and the rendered output is fully opaque
+         */
+        OPAQUE = "OPAQUE",
+        /**
+         * The rendered output is either fully opaque or fully transparent depending on the alpha value and the specified alpha cutoff value
+         */
+        MASK = "MASK",
+        /**
+         * The alpha value is used to composite the source and destination areas. The rendered output is combined with the background using the normal painting operation (i.e. the Porter and Duff over operator)
+         */
+        BLEND = "BLEND"
+    }
     class CubeTextureLoader {
         name: string;
         mapkey: string;
