@@ -34,6 +34,17 @@ Or on playgrounds:
  await TOOLKIT.SceneManager.InitializePlayground(engine);
 ```
 
+Or node package manager:
+```
+ npm install babylon-toolkit
+```
+
+# Node Package Manager
+
+A universal runtime library packaged for UMD and ES6 projects.
+
+https://www.npmjs.com/package/babylon-toolkit
+
 
 # Content Creation Tools
 
