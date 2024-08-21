@@ -283,8 +283,7 @@ declare namespace TOOLKIT {
         static UnregisterClickAction(mesh: BABYLON.AbstractMesh, action: BABYLON.IAction): boolean;
         /** Starts a targeted float animation for tweening.  */
         static StartTweenAnimation(scene: BABYLON.Scene, name: string, targetObject: any, targetProperty: string, startValue: number, endValue: number, defaultSpeedRatio?: number, defaultFrameRate?: number, defaultLoopMode?: number, defaultEasingFunction?: BABYLON.EasingFunction, onAnimationComplete?: () => void): BABYLON.Animatable;
-        /** Starts a native javascript tween animation (https://createjs.com/docs/tweenjs/modules/TweenJS.html) */
-        static StartNativeTween(target: any, props?: createjs.TweenProps): createjs.Tween;
+        /** DEPRECATED: Starts a native javascript tween animation (https://createjs.com/docs/tweenjs/modules/TweenJS.html) */
         /** Get first material with name. (Uses starts with text searching) */
         static GetMaterialWithName(scene: BABYLON.Scene, name: string): BABYLON.Material;
         /** Get all materials with name. (Uses starts with text searching) */
@@ -2343,6 +2342,7 @@ declare namespace TOOLKIT {
         private base;
         private active;
         enabled: boolean;
+        isActive(): boolean;
         getValueX(): number;
         getValueY(): number;
         getMouseButton(): TOOLKIT.TouchMouseButton;
