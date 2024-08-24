@@ -2627,19 +2627,24 @@ declare namespace PROJECT {
         private rightFootTransform;
         private rightFootPoleOffset;
         private rightFootMaxAngle;
+        private ikLeftController;
+        private ikRightController;
         onAnimatorIK: () => void;
-        getPlayerMesh(): BABYLON.TransformNode;
-        getRootHipBone(): BABYLON.TransformNode;
-        getLeftFootBone(): BABYLON.TransformNode;
-        getRightFootBone(): BABYLON.TransformNode;
-        getLeftFootTarget(): BABYLON.TransformNode;
-        getRightFootTarget(): BABYLON.TransformNode;
+        getPlayerMesh(): BABYLON.AbstractMesh;
+        getRootHipBone(): BABYLON.Bone;
+        getLeftFootBone(): BABYLON.Bone;
+        getRightFootBone(): BABYLON.Bone;
+        getLeftFootTarget(): BABYLON.Mesh;
+        getRightFootTarget(): BABYLON.Mesh;
         getRootBoneTransform(): BABYLON.TransformNode;
         getLeftFootTransform(): BABYLON.TransformNode;
         getRightFootTransform(): BABYLON.TransformNode;
+        getLeftFootController(): BABYLON.BoneIKController;
+        getRightFootController(): BABYLON.BoneIKController;
         isGroundedFootIKActive(): boolean;
-        attachBoneControllers(): void;
+        setupBoneControllers(): void;
         private attachAnimationController;
+        private updateAnimatorTargetMeshes;
         /** TODO */
         enableCharacterController(state: boolean): void;
         /** TODO */
