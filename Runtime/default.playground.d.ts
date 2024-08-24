@@ -2430,7 +2430,6 @@ declare namespace PROJECT {
         targetCameraOffset: BABYLON.Vector3;
         defaultFreeCamera: BABYLON.FreeCamera;
         defaultCameraNode: BABYLON.TransformNode;
-        isGroundedFootIKFrame(): boolean;
         isAnimationEnabled(): boolean;
         isRunButtonPressed(): boolean;
         isJumpButtonPressed(): boolean;
@@ -2616,6 +2615,30 @@ declare namespace PROJECT {
         setWorldPosition(x: number, y: number, z: number): void;
         /** TODO */
         attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
+        private ikLeftFootTarget;
+        private ikLeftPoleTarget;
+        private ikRightFootTarget;
+        private ikRightPoleTarget;
+        private abstractSkinMesh;
+        private rootBoneTransform;
+        private leftFootTransform;
+        private leftFootPoleOffset;
+        private leftFootMaxAngle;
+        private rightFootTransform;
+        private rightFootPoleOffset;
+        private rightFootMaxAngle;
+        onAnimatorIK: () => void;
+        getPlayerMesh(): BABYLON.TransformNode;
+        getRootHipBone(): BABYLON.TransformNode;
+        getLeftFootBone(): BABYLON.TransformNode;
+        getRightFootBone(): BABYLON.TransformNode;
+        getLeftFootTarget(): BABYLON.TransformNode;
+        getRightFootTarget(): BABYLON.TransformNode;
+        getRootBoneTransform(): BABYLON.TransformNode;
+        getLeftFootTransform(): BABYLON.TransformNode;
+        getRightFootTransform(): BABYLON.TransformNode;
+        isGroundedFootIKActive(): boolean;
+        attachBoneControllers(): void;
         private attachAnimationController;
         /** TODO */
         enableCharacterController(state: boolean): void;
