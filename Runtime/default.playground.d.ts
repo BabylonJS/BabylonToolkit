@@ -1325,6 +1325,9 @@ declare namespace PROJECT {
         protected update(): void;
         createLabel(name: string): void;
         protected destroy(): void;
+        private static AdvDynamicTexture;
+        /** Get the default fullscreen user interface advanced dynamic texture */
+        static GetFullscreenUI(scene: BABYLON.Scene, sampling?: number): BABYLON.GUI.AdvancedDynamicTexture;
     }
 }
 declare namespace PROJECT {
@@ -2427,6 +2430,7 @@ declare namespace PROJECT {
         targetCameraOffset: BABYLON.Vector3;
         defaultFreeCamera: BABYLON.FreeCamera;
         defaultCameraNode: BABYLON.TransformNode;
+        isGroundedFootIKFrame(): boolean;
         isAnimationEnabled(): boolean;
         isRunButtonPressed(): boolean;
         isJumpButtonPressed(): boolean;
@@ -2612,29 +2616,6 @@ declare namespace PROJECT {
         setWorldPosition(x: number, y: number, z: number): void;
         /** TODO */
         attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
-        private _ikLeftController;
-        private _ikLeftFootTarget;
-        private _ikLeftPoleTarget;
-        private _ikRightController;
-        private _ikRightFootTarget;
-        private _ikRightPoleTarget;
-        private abstractSkinMesh;
-        private rootBoneTransform;
-        private leftFootTransform;
-        private leftFootPolePos;
-        private leftFootBendAxis;
-        private leftFootPoleAngle;
-        private leftFootMaxAngle;
-        private rightFootTransform;
-        private rightFootPolePos;
-        private rightFootBendAxis;
-        private rightFootPoleAngle;
-        private rightFootMaxAngle;
-        getLeftFootTarget(): BABYLON.TransformNode;
-        getRightFootTarget(): BABYLON.TransformNode;
-        getLeftFootController(): BABYLON.BoneIKController;
-        getRightFootController(): BABYLON.BoneIKController;
-        attachBoneControllers(): void;
         private attachAnimationController;
         /** TODO */
         enableCharacterController(state: boolean): void;
