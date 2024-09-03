@@ -2503,10 +2503,10 @@ declare namespace TOOLKIT {
         static OnKeyboardPress(keycode: number, callback: () => void): void;
         /** Get the specified keyboard input by keycode. */
         static GetKeyboardInput(keycode: number): boolean;
-        /** Is the specified keyboard button held. */
+        /** Is the specified keyboard button held down. */
         static IsKeyboardButtonHeld(keycode: number): boolean;
-        /** Is the specified keyboard button tapped. */
-        static IsKeyboardButtonTapped(keycode: number): boolean;
+        /** Was the specified keyboard button tapped. */
+        static WasKeyboardButtonTapped(keycode: number, reset?: boolean): boolean;
         /** Reset the specified keyboard button tapped state. */
         static ResetKeyboardButtonTapped(keycode: number): void;
         /** Set a pointer up event handler. */
@@ -2517,10 +2517,10 @@ declare namespace TOOLKIT {
         static OnPointerPress(button: number, callback: () => void): void;
         /** Get the specified pointer input by button. */
         static GetPointerInput(button: number): boolean;
-        /** Is the specified Pointer button held. */
+        /** Is the specified pointer button held down. */
         static IsPointerButtonHeld(button: number): boolean;
-        /** Is the specified pointer button tapped. */
-        static IsPointerButtonTapped(number: number): boolean;
+        /** Was the specified pointer button tapped. */
+        static WasPointerButtonTapped(number: number, reset?: boolean): boolean;
         /** Reset the specified pointer button tapped state. */
         static ResetPointerButtonTapped(button: number): void;
         /** Gets the specified pointer drag direction. */
