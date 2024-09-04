@@ -5,8 +5,7 @@ The <a href="https://www.babylontoolkit.com">Babylon Toolkit Extension</a> is an
 
 # Documentation
 
-https://doc.babylonjs.com/communityExtensions/BabylonToolkit
-
+https://https://doc.babylonjs.com/journey
 
 # Download Files
 
