@@ -3474,6 +3474,7 @@ declare namespace TOOLKIT {
         private _verticalVelocity;
         private _verticalStepSpeed;
         private _minimumStepHeight;
+        private _collisionEvents;
         private _currentVelocity;
         private _inputVelocity;
         private _angluarVelocity;
