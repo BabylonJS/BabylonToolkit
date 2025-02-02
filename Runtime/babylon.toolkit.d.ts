@@ -80,6 +80,7 @@ declare namespace TOOLKIT {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        private static _HideLoadingScreen;
         static CVTOOLS_NAME: string;
         static CVTOOLS_MESH: string;
         static CVTOOLS_HAND: string;
@@ -2853,6 +2854,7 @@ declare namespace TOOLKIT {
         private active;
         enabled: boolean;
         updateElements: boolean;
+        preventDefault: boolean;
         baseElementOpacity: string;
         stickElementOpacity: string;
         onHandleDown: (event: any) => void;
