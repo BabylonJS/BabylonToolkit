@@ -2855,6 +2855,7 @@ declare namespace TOOLKIT {
         enabled: boolean;
         updateElements: boolean;
         preventDefault: boolean;
+        stopPropagation: boolean;
         baseElementOpacity: string;
         stickElementOpacity: string;
         onHandleDown: (event: any) => void;
