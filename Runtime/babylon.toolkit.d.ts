@@ -3565,6 +3565,8 @@ declare namespace TOOLKIT {
         static SetAudioOptions(options: BABYLON.IWebAudioEngineOptions): void;
         /** Gets The Current Audo Engine V2 */
         static GetAudioEngine(): Promise<BABYLON.AudioEngineV2>;
+        /** Unlocks The Current Audio Engine */
+        static UnlockAudioEngine(): Promise<void>;
         /** Create Audio Engine Version 2 Buffered Sound Instance */
         static CreateSoundBuffer(source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options?: Partial<BABYLON.IStaticSoundBufferOptions>): Promise<BABYLON.StaticSoundBuffer>;
         /** Create Audio Engine Version 2 Static Sound Instance */
