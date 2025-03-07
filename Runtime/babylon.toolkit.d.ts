@@ -62,8 +62,6 @@ declare namespace TOOLKIT {
         static ParseScriptComponents: boolean;
         /** Set the auto load script bundles flag */
         static AutoLoadScriptBundles: boolean;
-        /** Gets the running status of the default audio context */
-        static HasAudioContext(): boolean;
         /** Returns a Promise that resolves after the specfied time */
         static WaitForSeconds: (seconds: number) => Promise<void>;
         /** Register handler that is triggered before the main scene render loop (engine.html) */
@@ -73,11 +71,11 @@ declare namespace TOOLKIT {
         /** Register handler that is triggered when the scene is ready (engine.html) */
         static OnSceneReadyObservable: BABYLON.Observable<string>;
         /** Register handler that is triggered when then engine has been resized (engine.html) */
-        static OnEngineResizeObservable: BABYLON.Observable<BABYLON.Engine>;
+        static OnEngineResizeObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register handler that is triggered when the scene has been loaded (engine.html) */
-        static OnLoadCompleteObservable: BABYLON.Observable<BABYLON.Engine>;
+        static OnLoadCompleteObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register handler that is triggered when then webgl context need to be rebuilt (engine.html) */
-        static OnRebuildContextObservable: BABYLON.Observable<BABYLON.Engine>;
+        static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
         private static _HideLoadingScreen;
@@ -2150,7 +2148,7 @@ declare namespace TOOLKIT {
         /** TODO */
         static ParseVector4(source: TOOLKIT.IUnityVector4, defaultValue?: BABYLON.Vector4): BABYLON.Vector4;
         /** TODO */
-        static ParseSound(source: TOOLKIT.IUnityAudioClip, scene: BABYLON.Scene, name: string, callback?: BABYLON.Nullable<() => void>, options?: BABYLON.ISoundOptions): BABYLON.Sound;
+        static ParseSound(source: TOOLKIT.IUnityAudioClip, scene: BABYLON.Scene, name: string, callback?: BABYLON.Nullable<() => void>, options?: BABYLON.IStaticSoundOptions): Promise<BABYLON.StaticSound>;
         /** TODO */
         static ParseTexture(source: TOOLKIT.IUnityTexture, scene: BABYLON.Scene, noMipmap?: boolean, invertY?: boolean, samplingMode?: number, onLoad?: BABYLON.Nullable<() => void>, onError?: BABYLON.Nullable<(message?: string, exception?: any) => void>, buffer?: BABYLON.Nullable<any>, deleteBuffer?: boolean, format?: number): BABYLON.Texture;
         static ParseCubemap(source: TOOLKIT.IUnityCubemap, scene: BABYLON.Scene): BABYLON.CubeTexture;
@@ -2374,6 +2372,7 @@ declare namespace TOOLKIT {
         readonly name: string;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
+        private _webgpu;
         private _loader;
         private _babylonScene;
         private _metadataParser;
@@ -3442,6 +3441,8 @@ declare namespace TOOLKIT {
         static MAX_VOLUME: number;
         static DEFAULT_LEVEL: number;
         static DEFAULT_ROLLOFF: number;
+        private static AUDIO_ENGINE_V2;
+        private static AUDIO_ENGINE_V2_OPTIONS;
         private _audio;
         private _name;
         private _loop;
@@ -3463,14 +3464,15 @@ declare namespace TOOLKIT {
         private _bypassreverbzones;
         private _bypasslistenereffects;
         private _initializedReadyInstance;
-        getSoundClip(): BABYLON.Sound;
-        getAudioElement(): HTMLAudioElement;
+        private _isAudioPlaying;
+        private _isAudioPaused;
+        getSoundClip(): BABYLON.StaticSound;
         /** Register handler that is triggered when the audio clip is ready */
-        onReadyObservable: BABYLON.Observable<BABYLON.Sound>;
+        onReadyObservable: BABYLON.Observable<BABYLON.StaticSound>;
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
-        protected awakeAudioSource(): void;
+        protected awakeAudioSource(): Promise<void>;
         protected startAudioSource(): void;
         protected destroyAudioSource(): void;
         /**
@@ -3491,7 +3493,7 @@ declare namespace TOOLKIT {
          * @param offset (optional) Start the sound at a specific time in seconds
          * @param length (optional) Sound duration (in seconds)
          */
-        play(time?: number, offset?: number, length?: number): boolean;
+        play(time?: number, offset?: number, length?: number): Promise<boolean>;
         private internalPlay;
         /**
          * Pause the sound track
@@ -3513,6 +3515,15 @@ declare namespace TOOLKIT {
          */
         unmute(time?: number): boolean;
         /**
+         * Gets the sound track pitch value
+         */
+        getPitch(): number;
+        /**
+         * Sets the sound track pitch value
+         * @param rate the audio playback rate
+         */
+        setPitch(value: number): void;
+        /**
          * Gets the volume of the track
          */
         getVolume(): number;
@@ -3523,14 +3534,9 @@ declare namespace TOOLKIT {
          */
         setVolume(volume: number, time?: number): boolean;
         /**
-         * Gets the spatial sound option of the track
+         * Gets the sound track playback speed
          */
-        getSpatialSound(): boolean;
-        /**
-         * Gets the spatial sound option of the track
-         * @param value Define the value of the spatial sound
-         */
-        setSpatialSound(value: boolean): void;
+        getPlaybackSpeed(): number;
         /**
          * Sets the sound track playback speed
          * @param rate the audio playback rate
@@ -3540,10 +3546,31 @@ declare namespace TOOLKIT {
          * Gets the current time of the track
          */
         getCurrentTrackTime(): number;
+        /**
+         * Gets the spatial sound option of the track
+         */
+        getSpatialSound(): BABYLON.AbstractSpatialAudio;
+        /**
+         * Sets the spatial sound option of the track
+         * @param value Define the value of the spatial sound
+         */
+        setSpatialSound(value: BABYLON.AbstractSpatialAudio): void;
         /** Set audio data source */
-        setDataSource(source: string | ArrayBuffer | MediaStream): void;
+        setDataSource(source: string | ArrayBuffer): Promise<void>;
         /** Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        /** Gets The Current Audo Engine Options */
+        static GetAudioOptions(): BABYLON.IWebAudioEngineOptions;
+        /** Sets The Current Audo Engine Options */
+        static SetAudioOptions(options: BABYLON.IWebAudioEngineOptions): void;
+        /** Gets The Current Audo Engine V2 */
+        static GetAudioEngine(): Promise<BABYLON.AudioEngineV2>;
+        /** Create Audio Engine Version 2 Buffered Sound Instance */
+        static CreateSoundBuffer(source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options?: Partial<BABYLON.IStaticSoundBufferOptions>): Promise<BABYLON.StaticSoundBuffer>;
+        /** Create Audio Engine Version 2 Static Sound Instance */
+        static CreateStaticSound(name: string, source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options: Partial<BABYLON.IStaticSoundOptions>): Promise<BABYLON.StaticSound>;
+        /** Create Audio Engine Version 2 Streaming Sound Instance */
+        static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -4280,7 +4307,7 @@ declare namespace TOOLKIT {
         /**
          * Play the video track
          */
-        play(): boolean;
+        play(): Promise<boolean>;
         private internalPlay;
         private checkedPlay;
         private checkedRePlay;
