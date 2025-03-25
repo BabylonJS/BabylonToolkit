@@ -1058,143 +1058,123 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-     * Babylon toolkit universal shader defines pro class
-     * @class UniversalShaderDefines - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class UniversalShaderDefines {
-        private _defines;
-        constructor();
-        getDefines(): any;
-        defineBoolean(name: string): void;
-        defineNumeric(name: string, value: number): void;
-        static ShaderIndexer: number;
-    }
-    /**
-     * Babylon universal albedo chunks pro class
-     * @class UniversalAlbedoChunks - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class UniversalAlbedoChunks {
-        constructor();
-        Vertex_Begin: string;
-        Vertex_Definitions: string;
-        Vertex_MainBegin: string;
-        Vertex_Before_PositionUpdated: string;
-        Vertex_Before_NormalUpdated: string;
-        Vertex_After_WorldPosComputed: string;
-        Vertex_MainEnd: string;
-        Fragment_Begin: string;
-        Fragment_Definitions: string;
-        Fragment_MainBegin: string;
-        Fragment_Custom_Albedo: string;
-        Fragment_Custom_Alpha: string;
-        Fragment_Before_Lights: string;
-        Fragment_Before_Fog: string;
-        Fragment_Before_FragColor: string;
-        Fragment_MetallicRoughness: string;
-        Fragment_MicroSurface: string;
-    }
-    /**
-     * Babylon universal albedo material pro class
-     * @class UniversalAlbedoMaterial - All rights reserved (c) 2024 Mackey Kinard
-     */
-    class UniversalAlbedoMaterial extends BABYLON.PBRMaterial {
-        protected universalMaterial: boolean;
-        protected locals: TOOLKIT.UniversalShaderDefines;
-        protected terrainInfo: any;
+      * GLTF Custom Shader Material (BABYLON.PBRMaterial)
+      * @class CustomShaderMaterial - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class CustomShaderMaterial extends BABYLON.PBRMaterial {
+        universalMaterial: boolean;
         private _defines;
         private _uniforms;
         private _samplers;
         private _attributes;
         private _textures;
         private _vectors4;
+        private _vectors3;
+        private _vectors2;
         private _floats;
-        private _enableTime;
-        private _timeInitialized;
-        private _createdShaderName;
-        protected enableShaderChunks: boolean;
-        protected materialShaderChunks: TOOLKIT.UniversalAlbedoChunks;
-        protected updateShaderChunks(): void;
-        constructor(name: string, scene: BABYLON.Scene, enableTime?: boolean);
-        getShaderName(): string;
-        getShaderChunk(): string;
-        getShaderDefines(): BABYLON.PBRMaterialDefines;
-        getCustomAttributes(): string[];
-        get enableTime(): boolean;
-        set enableTime(state: boolean);
-        private updateGlobalTime;
-        getTexture(name: string): BABYLON.Texture;
-        getVector4(name: string): BABYLON.Vector4;
-        getFloat(name: string): number;
-        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
-        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
-        setFloat(name: string, value: number, initialize?: boolean): TOOLKIT.UniversalAlbedoMaterial;
-        addAttribute(attributeName: string): void;
-        checkUniform(uniformName: string): void;
-        checkSampler(samplerName: string): void;
-        getAnimatables(): BABYLON.IAnimatable[];
-        getActiveTextures(): BABYLON.BaseTexture[];
-        hasTexture(texture: BABYLON.BaseTexture): boolean;
-        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
-        clone(cloneName: string): TOOLKIT.UniversalAlbedoMaterial;
-        serialize(): any;
-        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): TOOLKIT.UniversalAlbedoMaterial;
-        protected customShaderChunkResolve(): void;
-        private _buildCustomShader;
-        private _createShaderChunks;
-        private dumpEffect;
-        private _attachAfterBind;
-    }
-    /**
-     * Babylon universal shader material pro class
-     * @class UniversalShaderMaterial
-     */
-    class UniversalShaderMaterial extends BABYLON.ShaderMaterial {
-        private _enableTime;
-        constructor(name: string, scene?: BABYLON.Scene, options?: Partial<BABYLON.IShaderMaterialOptions>);
-        get enableTime(): boolean;
-        set enableTime(state: boolean);
-        private updateGlobalTime;
-    }
-    /**
-     * Babylon universal node material pro class
-     * @class UniversalNodeMaterial
-     */
-    class UniversalNodeMaterial extends BABYLON.NodeMaterial {
-        private _textures;
-        private _vectors4;
-        private _floats;
-        private _enableTime;
-        private _timeInitialized;
-        protected compile(): void;
-        constructor(name: string, scene?: BABYLON.Scene, options?: Partial<BABYLON.INodeMaterialOptions>);
-        get enableTime(): boolean;
-        set enableTime(state: boolean);
-        private updateGlobalTime;
-        getTexture(name: string): BABYLON.Texture;
-        getVector4(name: string): BABYLON.Vector4;
-        getFloat(name: string): number;
-        setTexture(name: string, texture: BABYLON.Texture, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
-        setVector4(name: string, value: BABYLON.Vector4, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
-        setFloat(name: string, value: number, initialize?: boolean): TOOLKIT.UniversalNodeMaterial;
-        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
-        clone(cloneName: string): TOOLKIT.UniversalNodeMaterial;
-        serialize(): any;
-        static Parse(source: any, scene: BABYLON.Scene, rootUrl: string): TOOLKIT.UniversalNodeMaterial;
-    }
-    /**
-     * Babylon universal terrain material pro class
-     * @class UniversalTerrainMaterial
-     */
-    class UniversalTerrainMaterial extends TOOLKIT.UniversalAlbedoMaterial {
+        private _bools;
+        private _ubos;
+        protected shader: string;
+        protected plugin: BABYLON.MaterialPluginBase;
         constructor(name: string, scene: BABYLON.Scene);
-        getShaderName(): string;
-        getShaderChunk(): string;
-        protected updateShaderChunks(): void;
-        private formatTerrainVertexDefintions;
-        private formatTerrainVertexMainEnd;
-        private formatTerrainFragmentDefintions;
-        private formatTerrainFragmentUpdateColor;
+        /** Adds a custom attribute property */
+        addAttribute(attributeName: string): void;
+        /** Checks uniform values. Internal Use Only */
+        checkUniform(uniformName: string, type: string, value?: any): void;
+        /** Checks sampler values. Internal Use Only */
+        checkSampler(samplerName: string, texture?: any): void;
+        /** Adds a texture uniform property */
+        addTextureUniform(name: string, texture: BABYLON.Texture): TOOLKIT.CustomShaderMaterial;
+        /** Sets the texture uniform value */
+        setTextureValue(name: string, texture: BABYLON.Texture): TOOLKIT.CustomShaderMaterial;
+        /** Gets the texture uniform value */
+        getTextureValue(name: string): BABYLON.Texture;
+        /** Adds a vector4 uniform property */
+        addVector4Uniform(name: string, value: BABYLON.Vector4): TOOLKIT.CustomShaderMaterial;
+        /** Sets the vector4 uniform value */
+        setVector4Value(name: string, value: BABYLON.Vector4): TOOLKIT.CustomShaderMaterial;
+        /** Gets the vector4 uniform value */
+        getVector4Value(name: string): BABYLON.Vector4;
+        /** Adds a vector3 uniform property */
+        addVector3Uniform(name: string, value: BABYLON.Vector3): TOOLKIT.CustomShaderMaterial;
+        /** Sets the vector3 uniform value */
+        setVector3Value(name: string, value: BABYLON.Vector3): TOOLKIT.CustomShaderMaterial;
+        /** Gets the vector3 uniform value */
+        getVector3Value(name: string): BABYLON.Vector3;
+        /** Adds a vector2 uniform property */
+        addVector2Uniform(name: string, value: BABYLON.Vector2): TOOLKIT.CustomShaderMaterial;
+        /** Sets the vector2 uniform value */
+        setVector2Value(name: string, value: BABYLON.Vector2): TOOLKIT.CustomShaderMaterial;
+        /** Gets the vector2 uniform value */
+        getVector2Value(name: string): BABYLON.Vector2;
+        /** Adds a float uniform property */
+        addFloatUniform(name: string, value: number): TOOLKIT.CustomShaderMaterial;
+        /** Sets the float uniform value */
+        setFloatValue(name: string, value: number): TOOLKIT.CustomShaderMaterial;
+        /** Gets the float uniform value */
+        getFloatValue(name: string): number;
+        /** Adds a boolean uniform property */
+        addBoolUniform(name: string, value: boolean): TOOLKIT.CustomShaderMaterial;
+        /** Sets the boolean uniform value */
+        setBoolValue(name: string, value: boolean): TOOLKIT.CustomShaderMaterial;
+        /** Gets the boolean uniform value */
+        getBoolValue(name: string): boolean;
+        /** Gets the animatables */
+        getAnimatables(): BABYLON.IAnimatable[];
+        /** Gets the active textures */
+        getActiveTextures(): BABYLON.BaseTexture[];
+        /** Has the specified texture */
+        hasTexture(texture: BABYLON.BaseTexture): boolean;
+        /** Gets this custom material uniforms */
+        getCustomUniforms(wgsl: boolean): TOOLKIT.CustomUniformProperty[];
+        /** Gets this custom material uniforms */
+        getCustomSamplers(): string[];
+        /** Gets this custom material attributes */
+        getCustomAttributes(): string[];
+        /** Gets this custom material vertex source */
+        getCustomVertexCode(wgsl: boolean): string;
+        /** Gets this custom material fragment source */
+        getCustomFragmentCode(wgsl: boolean): string;
+        /** Prepares the custom material defines */
+        prepareCustomDefines(defines: BABYLON.MaterialDefines): void;
+        /** Update custom material bindings */
+        updateCustomBindings(effect: BABYLON.UniformBuffer): void;
+        /** Builds a custom uniform property */
+        protected buildUniformProperty(uniformName: string, uniformType: string, uniformValue: any): void;
     }
+    /**
+      * GLTF Custom Shader Material Plugin (BABYLON.MaterialPluginBase)
+      * @class CustomShaderMaterialPlugin - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class CustomShaderMaterialPlugin extends BABYLON.MaterialPluginBase {
+        private _isEnabled;
+        /**
+         * Creates a new material plugin
+         * @param material parent material of the plugin
+         * @param name name of the plugin
+         * @param priority priority of the plugin
+         * @param defines list of defines used by the plugin. The value of the property is the default value for this property
+         * @param addToPluginList true to add the plugin to the list of plugins managed by the material plugin manager of the material (default: true)
+         * @param enable true to enable the plugin (it is handy if the plugin does not handle properties to switch its current activation)
+         * @param resolveIncludes Indicates that any #include directive in the plugin code must be replaced by the corresponding code (default: false)
+         */
+        constructor(material: BABYLON.Material, name: string, priority: number, defines?: {}, addToPluginList?: boolean, enable?: boolean, resolveIncludes?: boolean);
+        get isEnabled(): boolean;
+        set isEnabled(enabled: boolean);
+        vertexDefinitions: string;
+        fragmentDefinitions: string;
+        /** Gets a reference to the custom shader material */
+        getCustomShaderMaterial(): TOOLKIT.CustomShaderMaterial;
+    }
+    /**
+     * Babylon custom uniform items (GLTF)
+     */
+    type CustomUniformProperty = {
+        name: string;
+        size: number;
+        type: string;
+        arraySize?: number;
+    };
 }
 declare namespace TOOLKIT.Simplex {
     /**
@@ -2338,6 +2318,69 @@ declare namespace TOOLKIT {
         static ValidateTransformMetadata(transform: BABYLON.TransformNode): void;
     }
 }
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+      * Babylon universal terrain material pro class
+      * @class UniversalTerrainMaterial - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class UniversalTerrainMaterial extends TOOLKIT.CustomShaderMaterial {
+        protected terrainInfo: any;
+        constructor(name: string, scene: BABYLON.Scene);
+        update(): void;
+        getClassName(): string;
+        getTerrainInfo(): any;
+    }
+    /**
+     * Custom Shader Material Plugin (BABYLON.MaterialPluginBase)
+     * @class UniversalTerrainMaterialPlugin
+     */
+    class UniversalTerrainMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        private colorName;
+        private splatmapSampler;
+        private detailsSampler;
+        private normalsSampler;
+        private GLSL_CustomFragment;
+        private GLSL_CustomVertex;
+        private GLSL_VertexMainEnd;
+        private GLSL_FragmentUpdateColor;
+        private WGSL_CustomFragment;
+        private WGSL_CustomVertex;
+        private WGSL_VertexMainEnd;
+        private WGSL_FragmentUpdateColor;
+        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** This is used to create custom shader code
+         *
+         *  WGSL - To sample a texture in a shader, you need to use the `textureSample` function.
+         *  let customColor: vec4<f32> = textureSample(testTexture, testTextureSampler, fragmentInputs.vAlbedoUV);
+         *
+         *  GLSL - To sample a texture in a shader, you need to use the `texture2D` function.
+         *  vec4 customColor = texture2D(testTexture, vAlbedoUV);
+         *
+         */
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the uniforms used in the shader code */
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the samplers used in the shader code */
+        getSamplers(samplers: string[]): void;
+        /** This get the attributes used in the shader code */
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This prepares the shader defines */
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This is used to update the uniforms bound to a mesh */
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        private WGSL_FormatTerrainVertexDefintions;
+        private WGSL_FormatTerrainVertexMainEnd;
+        private WGSL_FormatTerrainFragmentDefintions;
+        private WGSL_FormatTerrainFragmentUpdateColor;
+        private GLSL_FormatTerrainVertexDefintions;
+        private GLSL_FormatTerrainVertexMainEnd;
+        private GLSL_FormatTerrainFragmentDefintions;
+        private GLSL_FormatTerrainFragmentUpdateColor;
+    }
+}
 declare namespace TOOLKIT {
     /**
      * Babylon Toolkit Unity Editor - Loader Class
@@ -3458,17 +3501,17 @@ declare namespace TOOLKIT {
         private _panstereo;
         private _mindistance;
         private _maxdistance;
-        private _rolloffmode;
         private _reverbzonemix;
         private _bypasseffects;
         private _bypassreverbzones;
         private _bypasslistenereffects;
+        private _enablelegacyaudio;
         private _initializedReadyInstance;
         private _isAudioPlaying;
         private _isAudioPaused;
-        getSoundClip(): BABYLON.StaticSound;
+        getSoundClip(): BABYLON.StaticSound | BABYLON.Sound;
         /** Register handler that is triggered when the audio clip is ready */
-        onReadyObservable: BABYLON.Observable<BABYLON.StaticSound>;
+        onReadyObservable: BABYLON.Observable<BABYLON.StaticSound | BABYLON.Sound>;
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -3479,6 +3522,10 @@ declare namespace TOOLKIT {
          * Gets the ready status for track
          */
         isReady(): boolean;
+        /**
+         * Is legacy audio engine enabled
+         */
+        isLegacy(): boolean;
         /**
          * Gets the playing status for track
          */
@@ -3543,30 +3590,52 @@ declare namespace TOOLKIT {
          */
         setPlaybackSpeed(rate: number): void;
         /**
+         * Gets the spatial sound option of the track
+         */
+        hasSpatialSound(): boolean;
+        /**
+         * Gets the spatial sound option of the track (BABYLON.StaticSound)
+         */
+        getSpatialSound(): BABYLON.AbstractSpatialAudio;
+        /**
+         * Sets the spatial sound option of the track (BABYLON.StaticSound)
+         * @param value Define the value of the spatial sound
+         */
+        setSpatialSound(value: BABYLON.AbstractSpatialAudio): void;
+        /**
          * Gets the current time of the track
          */
         getCurrentTrackTime(): number;
         /**
-         * Gets the spatial sound option of the track
+         * Set audio data source (BABYLON.StaticSound)
          */
-        getSpatialSound(): BABYLON.AbstractSpatialAudio;
+        setAudioDataSource(source: string | ArrayBuffer): Promise<void>;
         /**
-         * Sets the spatial sound option of the track
-         * @param value Define the value of the spatial sound
+         * Set legacy audio data source (BABYLON.Sound)
          */
-        setSpatialSound(value: BABYLON.AbstractSpatialAudio): void;
-        /** Set audio data source */
-        setDataSource(source: string | ArrayBuffer): Promise<void>;
-        /** Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
+        setLegacyDataSource(source: string | ArrayBuffer | MediaStream): void;
+        /**
+         * Add audio preloader asset tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager)
+         */
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        /** Is Legacy Audio Engine Enabled */
+        static IsLegacyEngine(): boolean;
         /** Gets The Current Audo Engine Options */
         static GetAudioOptions(): BABYLON.IWebAudioEngineOptions;
         /** Sets The Current Audo Engine Options */
         static SetAudioOptions(options: BABYLON.IWebAudioEngineOptions): void;
         /** Gets The Current Audo Engine V2 */
         static GetAudioEngine(): Promise<BABYLON.AudioEngineV2>;
+        /** Unlocks The Legacy Audio Engine */
+        static UnlockLegacyAudio(): void;
         /** Unlocks The Current Audio Engine */
         static UnlockAudioEngine(): Promise<void>;
+        /** Attach Audio Spatial Camera */
+        static AttachSpatialCamera(node: BABYLON.Node): Promise<void>;
+        /** Detaches Current Audio Spatial Camera */
+        static DetachSpatialCamera(): Promise<void>;
+        /** Manually Update Spatial Camera Position And Rotation */
+        static UpdateSpatialCamera(position: BABYLON.Vector3, rotation: BABYLON.Quaternion): Promise<void>;
         /** Create Audio Engine Version 2 Buffered Sound Instance */
         static CreateSoundBuffer(source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options?: Partial<BABYLON.IStaticSoundBufferOptions>): Promise<BABYLON.StaticSoundBuffer>;
         /** Create Audio Engine Version 2 Static Sound Instance */
@@ -3797,7 +3866,6 @@ declare namespace TOOLKIT {
         updateSuspension(deltaTime: number): void;
         removeFromWorld(world: any): void;
         castRay2(wheel: TOOLKIT.HavokWheelInfo): number;
-        castRay(wheel: TOOLKIT.HavokWheelInfo): number;
         updateWheelTransformWorld(wheel: TOOLKIT.HavokWheelInfo): void;
         updateWheelTransform(wheelIndex: number): void;
         getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
