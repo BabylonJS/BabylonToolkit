@@ -2349,8 +2349,8 @@ declare namespace TOOLKIT {
         private WGSL_VertexMainEnd;
         private WGSL_FragmentUpdateColor;
         constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
-        getClassName(): string;
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getClassName(): string;
         /** This is used to create custom shader code
          *
          *  WGSL - To sample a texture in a shader, you need to use the `textureSample` function.
