@@ -86,7 +86,6 @@ declare namespace TOOLKIT {
         private static _EventBus;
         /** Default global event message bus
          * @example
-         * ```typescript
          * // Handle myevent message
          * TOOLKIT.SceneManager.EventBus.OnMessage("myevent", (data:string) => {
          *    console.log("My Event Data: " + data);
@@ -94,7 +93,6 @@ declare namespace TOOLKIT {
          *
          * // Post myevent message
          * TOOLKIT.SceneManager.EventBus.PostMessage("myevent", "Hello World!");
-         * ```
         */
         static get EventBus(): TOOLKIT.GlobalMessageBus;
         /** Gets the babylon toolkit playground default project script bundle cdn address
