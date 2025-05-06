@@ -18,6 +18,26 @@ declare namespace PROJECT {
 }
 declare namespace PROJECT {
     /**
+     * Babylon Script Component
+     * @class MyRotator
+     */
+    class MyRotator extends TOOLKIT.ScriptComponent {
+        speed: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
      * Babylon toolkit default camera system class
      * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
      * https://doc.babylonjs.com/divingDeeper/postProcesses/defaultRenderingPipeline
@@ -635,7 +655,6 @@ declare namespace PROJECT {
         private avatarGender;
         private avatarLabel;
         private avatarLoaded;
-        private animator;
         private avatarReady;
         manageLabelTexture: boolean;
         textureResolution: number;
@@ -1614,6 +1633,7 @@ declare namespace PROJECT {
         private colliderVisibility;
         private colliderRenderGroup;
         private showDebugRaycasts;
+        private raycastLength;
         private deltaTime;
         private minJumpTimer;
         private delayJumpTimer;
@@ -2782,6 +2802,185 @@ declare namespace PROJECT {
         protected late(): void;
         protected after(): void;
         protected destroy(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class SnapshotManager
+    */
+    class SnapshotManager extends TOOLKIT.ScriptComponent {
+        /** Is Snapshot Rendering Currently Enabled */
+        static IsSnapshotRenderingEnabled(): boolean;
+        /**
+         * Enable snapshot rendering
+         * Use this method instead of engine.snapshotRendering=true, to make sure everything is ready before enabling snapshot rendering.
+         * Note that this method is ref-counted and works in pair with disableSnapshotRendering(): you should call enableSnapshotRendering() as many times as you call disableSnapshotRendering().
+         */
+        static EnableSnapshotRendering(): void;
+        /**
+         * Disable snapshot rendering
+         * Note that this method is ref-counted and works in pair with disableSnapshotRendering(): you should call enableSnapshotRendering() as many times as you call disableSnapshotRendering().
+         */
+        static DisableSnapshotRendering(): void;
+        /**
+         * Reset the snapshot helper and the list of meshes to render snapshots for.
+         * @param scene The scene to reset the snapshot helper for.
+         */
+        static ResetSnapshotHelper(scene: BABYLON.Scene): void;
+        /**
+         * Get the snapshot helper.
+         * @returns The snapshot helper.
+         */
+        static GetSnapshotHelper(): BABYLON.SnapshotRenderingHelper;
+        private static _HelperEnabled;
+        private static _SnapshotHelper;
+        private autoStart;
+        private autoUpdate;
+        private delayTimeout;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, scriptComponentAlias?: string);
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected destroy(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class SnapshotRenderer
+    */
+    class SnapshotRenderer extends TOOLKIT.ScriptComponent {
+        protected start(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class DefaultMuteButton
+    */
+    class DefaultMuteButton extends TOOLKIT.ScriptComponent {
+        private static audioSystemInitialized;
+        static IsAudioSystemInitialized(): boolean;
+        private buttonIdentifier;
+        private buttonClassname;
+        private buttonContainer;
+        private buttonElement;
+        private muteIconElement;
+        private mutedIconElement;
+        private muteButtonState;
+        private mutedIconUrl;
+        private muteIconUrl;
+        private toggleEffects;
+        private autoPlayList;
+        private audioSources;
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected createMuteButton(): void;
+        protected handleButtonClick(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class SceneSoundSystem
+    */
+    class SceneSoundSystem extends TOOLKIT.ScriptComponent {
+        private static _MUSIC;
+        static get MUSIC(): PROJECT.SoundManager;
+        private static _SFX;
+        static get SFX(): PROJECT.SoundManager;
+        protected start(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class SoundManager
+    */
+    class SoundManager extends TOOLKIT.ScriptComponent {
+        private groupName;
+        private cachedVolume;
+        private volumeProperty;
+        getGroupName(): string;
+        protected m_soundMap: Map<string, TOOLKIT.AudioSource>;
+        protected m_soundList: TOOLKIT.AudioSource[];
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        /**
+         * Is the sound track currently playing
+         * @param name The name of the sound track to check is playing
+         */
+        isPlaying(name: string): boolean;
+        /**
+         * Is the sound track currently paused
+         * @param name The name of the sound track to check is paused
+         */
+        isPaused(name: string): boolean;
+        /**
+         * Play the sound track by name
+         * @param name The name of the sound track to play
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         * @param offset (optional) Start the sound at a specific time in seconds
+         * @param length (optional) Sound duration (in seconds)
+         */
+        playTrack(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /**
+         * Pause the sound track by name
+         * @param name The name of the sound track to play
+         */
+        pauseTrack(name: string): boolean;
+        /**
+         * Pause the sound for all tracks in the group
+         */
+        pauseAllTracks(): void;
+        /**
+         * Stop the sound track by name
+         * @param name The name of the sound track to play
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         */
+        stopTrack(name: string, time?: number): boolean;
+        /**
+         * Stop the sound for all tracks in the group
+         * @param time (optional) Stop the sound after X seconds. Stop immediately (0) by default.
+         */
+        stopAllTracks(time?: number): void;
+        /**
+         * Mute the sound track by name
+         * @param name The name of the sound track to play
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         */
+        muteTrack(name: string, time?: number): boolean;
+        /**
+         * Unmute the sound track by name
+         * @param name The name of the sound track to play
+         * @param time (optional) Start the sound after X seconds. Start immediately (0) by default.
+         */
+        unmuteTrack(name: string, time?: number): boolean;
+        /**
+         * Mutes the volume for all sound tracks in the group
+         * @param time Define time for gradual change to new volume
+         */
+        muteAllTracks(time?: number): void;
+        /**
+         * Unmutes the volume for all sound tracks in the group
+         * @param time Define time for gradual change to new volume
+         */
+        unmuteAllTracks(time?: number): void;
+        /**
+         * Sets the volume for all sound tracks in the group
+         * @param volume Define the new volume of the sound
+         * @param time Define time for gradual change to new volume
+         */
+        setGroupVolume(volume: number, time?: number): void;
+        /**
+         * Get a sound source by name
+         * @param name The name of the sound track to play
+         */
+        getAudioSource(name: string): TOOLKIT.AudioSource;
     }
 }
 declare namespace BABYLON {
