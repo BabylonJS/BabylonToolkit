@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.5.0 - R1) */
+        /** Gets the toolkit framework version number (8.6.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -941,6 +941,7 @@ declare namespace TOOLKIT {
         private _transform;
         private _scriptReady;
         private _registeredClassname;
+        private _registerComponentAlias;
         private _lateUpdateObserver;
         resetScriptComponent: () => void;
         /** Gets the script component ready state */
@@ -949,7 +950,7 @@ declare namespace TOOLKIT {
         get scene(): BABYLON.Scene;
         /** Gets the transform node entity */
         get transform(): BABYLON.TransformNode;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, scriptComponentAlias?: string);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         /** Gets the script component class name */
         getClassName(): string;
         /** Sets the script component property bag value */
