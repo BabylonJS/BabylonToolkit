@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.6.1 - R1) */
+        /** Gets the toolkit framework version number (8.8.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -951,6 +951,8 @@ declare namespace TOOLKIT {
         /** Gets the transform node entity */
         get transform(): BABYLON.TransformNode;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Destroys the script component instance */
+        dispose(): void;
         /** Gets the script component class name */
         getClassName(): string;
         /** Sets the script component property bag value */
@@ -3587,6 +3589,11 @@ declare namespace TOOLKIT {
          * @param time Define time for gradual change to new volume
          */
         setVolume(volume: number, time?: number): boolean;
+        /**
+         * Sets the volume of the track
+         * @param location Define the new location of the sound
+         */
+        setPosition(location: BABYLON.Vector3): void;
         /**
          * Gets the sound track playback speed
          */
