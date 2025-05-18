@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.8.0 - R1) */
+        /** Gets the toolkit framework version number (8.8.5 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3198,6 +3198,7 @@ declare namespace TOOLKIT {
         getCurrentState(layer: number): TOOLKIT.MachineState;
         getDefaultClips(): any[];
         getDefaultSource(): string;
+        setLayerWeight(layer: number, weight: number): void;
         fixAnimationGroup(group: BABYLON.AnimationGroup): string;
         getAnimationGroup(name: string): BABYLON.AnimationGroup;
         getAnimationGroups(): BABYLON.AnimationGroup[];
@@ -3603,6 +3604,26 @@ declare namespace TOOLKIT {
          * @param rate the audio playback rate
          */
         setPlaybackSpeed(rate: number): void;
+        /**
+         * Sets the sound rolloff mode (linear, inverse, exponential)
+         * @param mode the rolloff mode
+         */
+        setRolloffMode(mode: string): void;
+        /**
+         * Sets the sound track min distance level
+         * @param distance the min distance level
+         */
+        setMinDistance(distance: number): void;
+        /**
+         * Sets the sound track max distance level
+         * @param distance the mmax distance level
+         */
+        setMaxDistance(distance: number): void;
+        /**
+         * Sets the sound track spatial blend level
+         * @param blend the spatial blend level
+         */
+        setSpatialBlend(blend: number): void;
         /**
          * Gets the spatial sound option of the track
          */
