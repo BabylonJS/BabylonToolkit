@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.8.5 - R1) */
+        /** Gets the toolkit framework version number (8.9.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -379,6 +379,8 @@ declare namespace TOOLKIT {
          * @param instance an instance of a TOOLKIT.ScriptComponent class
          */
         static DestroyGameObject(transform: BABYLON.TransformNode): void;
+        /** Get a script component on the transform with the specfied class name. */
+        static GetComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
         /** Find game object in the scene hierarchy by path (Parent/Child/GrandChild). */
         static FindGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
         /** Find game object with tag */
