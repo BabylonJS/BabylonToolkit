@@ -26,7 +26,7 @@ await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 
 Or on playgrounds:
 ```
- await TOOLKIT.SceneManager.InitializePlayground(engine);
+ await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
 
 Or node package manager:
@@ -40,11 +40,6 @@ Or node package manager:
 A universal runtime library packaged for UMD and ES6 projects.
 
 https://www.npmjs.com/package/babylon-toolkit
-
-
-# Content Creation Tools
-
-The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine Exporter</a> plugins allow you to export interactive content from the game engine editor
 
 
 # Entity Component System
@@ -114,3 +109,7 @@ Unity Starter Content
 
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
 
+
+# Content Creation Tools
+
+The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine Exporter</a> plugins allow you to export interactive content from the game engine editor
