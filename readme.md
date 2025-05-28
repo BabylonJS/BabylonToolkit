@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The <a href="https://www.babylontoolkit.com">Babylon Toolkit</a> extension is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
+The <a target="_blank" href="https://www.babylontoolkit.com">Babylon Toolkit</a> extension is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
 
 
 # Download Files
@@ -96,27 +96,27 @@ namespace PROJECT {
 ```
 
 
-Getting Started 
-----------------
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#PNII2N">Your First TypeScript Playground (TS)</a>
+# Getting Started 
 
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#HLQXU4">Your First JavaScript Playground (JS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#PNII2N">Your First TypeScript Playground (TS)</a>
+
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#HLQXU4">Your First JavaScript Playground (JS)</a>
 
 
 # AI Coding Assistants
 
-The Babylon Toolkit <a href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development
+The Babylon Toolkit <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development
 
 
 # Content Creation Tools
 
-The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine Exporter</a> plugins allow you to export interactive content from the game engine editor
+The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Exporter</a> plugins allow you to export interactive GLTF content from the game engine editor
 
 
 Unity Starter Content
 ----------------------
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#V9AUOR">TypeScript Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#V9AUOR">TypeScript Starter Playground (TS)</a>
 
-<a href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
 
-<a href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
