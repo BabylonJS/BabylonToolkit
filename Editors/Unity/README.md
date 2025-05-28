@@ -74,6 +74,9 @@ The Babylon Toolkit Pro Classes allows out of the box features that help you jum
 
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
 
+<a href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
+
+
 
 # Advanced Game Development (Babylon Toolkit)
 

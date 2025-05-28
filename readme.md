@@ -1,6 +1,6 @@
 # Babylon Toolkit
 
-The <a href="https://www.babylontoolkit.com">Babylon Toolkit Extension</a> is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
+The <a href="https://www.babylontoolkit.com">Babylon Toolkit</a> extension is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
 
 
 # Download Files
@@ -15,17 +15,17 @@ https://github.com/BabylonJS/BabylonToolkit/tree/master/Snippets
 
 The **babylon.toolkit.js** runtime library **must** be loaded in your host environment:
 
-```
+```html
 <script type="text/javascript" src="scripts/babylon.toolkit.js"></script>
 ```
 
 Or at runtime:
-```
+```typescript
 await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 ```
 
 Or on playgrounds:
-```
+```typescript
  await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
 
@@ -45,7 +45,7 @@ https://www.npmjs.com/package/babylon-toolkit
 # Entity Component System
 
 The **Script Component** is the foundation of the babylon toolkit extended framework. It was modeled after Unity's MonoBehavior class:
-```
+```typescript
 namespace PROJECT {
     export class SampleScript extends TOOLKIT.ScriptComponent {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}, alias: string = "PROJECT.SampleScript") {
@@ -103,13 +103,20 @@ Getting Started
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#HLQXU4">Your First JavaScript Playground (JS)</a>
 
 
+# AI Coding Assistants
+
+The <a href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">GitHub Copilot</a> and <a href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT</a> agents have been extensively trained for web game development using the <a href="https://www.babylontoolkit.com">Babylon Toolkit</a>
+
+
+# Content Creation Tools
+
+The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine Exporter</a> plugins allow you to export interactive content from the game engine editor
+
+
 Unity Starter Content
 ----------------------
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#V9AUOR">TypeScript Starter Playground (TS)</a>
 
 <a href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
 
-
-# Content Creation Tools
-
-The <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Engine Exporter</a> plugins allow you to export interactive content from the game engine editor
+<a href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
