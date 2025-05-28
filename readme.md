@@ -110,7 +110,7 @@ The Babylon Toolkit <a target="_blank" href="https://marketplace.visualstudio.co
 
 # Content Creation Tools
 
-The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Exporter</a> plugins allow you to export interactive GLTF content from the game engine editor
+The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Exporter</a> plugins allow you to export interactive GLTF content and scripts
 
 
 Unity Starter Content
