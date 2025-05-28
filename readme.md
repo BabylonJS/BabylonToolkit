@@ -53,9 +53,9 @@ The **Script Component** is the foundation of the babylon toolkit extended frame
 ```
 namespace PROJECT {
     export class SampleScript extends TOOLKIT.ScriptComponent {
-        constructor(transform:BABYLON.TransformNode, scene:BABYLON.Scene, properties:any=null) {
-           super(transform, scene, properties, "PROJECT.SampleScript");
-        }
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties: any = {}, alias: string = "PROJECT.SampleScript") {
+            super(transform, scene, properties, alias);
+        }        
 
         protected awake(): void {
             /* Init component function */

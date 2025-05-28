@@ -381,6 +381,8 @@ declare namespace TOOLKIT {
         static DestroyGameObject(transform: BABYLON.TransformNode): void;
         /** Get a script component on the transform with the specfied class name. */
         static GetComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
+        /** Gets all script components on the transform. */
+        static GetComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
         /** Find game object in the scene hierarchy by path (Parent/Child/GrandChild). */
         static FindGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
         /** Find game object with tag */
@@ -3718,6 +3720,7 @@ declare namespace TOOLKIT {
         private _inputVelocity;
         private _angluarVelocity;
         private _eulerAngles;
+        private _currentAngle;
         private _gravityFactor;
         private _minJumpTimer;
         private _maxSlopeTimer;
@@ -3796,7 +3799,7 @@ declare namespace TOOLKIT {
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position and rotation to the specfied values. */
-        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetprestep?: boolean): void;
         /** Translates the character with the specfied velocity. Aux is not used. */
         move(velocity: BABYLON.Vector3, aux?: boolean): void;
         /** Jumps the chacracter with the specified speed. */
