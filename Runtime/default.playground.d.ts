@@ -1,43 +1,5 @@
 declare namespace PROJECT {
     /**
-    * Babylon Script Component
-    * @class Demo
-    */
-    class Demo extends TOOLKIT.ScriptComponent {
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected reset(): void;
-        protected destroy(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon Script Component
-     * @class MyRotator
-     */
-    class MyRotator extends TOOLKIT.ScriptComponent {
-        speed: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
-        protected reset(): void;
-        protected destroy(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
      * Babylon toolkit default camera system class
      * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
      * https://doc.babylonjs.com/divingDeeper/postProcesses/defaultRenderingPipeline
