@@ -105,7 +105,7 @@ Getting Started
 
 # AI Coding Assistants
 
-The <a href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">GitHub Copilot</a> and <a href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT</a> agents have been extensively trained for web game development using the <a href="https://www.babylontoolkit.com">Babylon Toolkit</a>
+The Babylon Toolkit <a href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development
 
 
 # Content Creation Tools
