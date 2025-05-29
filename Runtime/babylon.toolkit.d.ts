@@ -3799,12 +3799,12 @@ declare namespace TOOLKIT {
         protected update(): void;
         protected fixed(): void;
         /** Sets the character position and rotation to the specfied values. */
-        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, resetprestep?: boolean): void;
-        /** Translates the character with the specfied velocity. Aux is not used. */
+        set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
+        /** Translates the character with the specfied linear velocity. */
         move(velocity: BABYLON.Vector3, aux?: boolean): void;
         /** Jumps the chacracter with the specified speed. */
         jump(speed: number): void;
-        /** Turns the chacracter to the specified angle. */
+        /** Turns the chacracter to the specified angular velocity. */
         turn(angle: number): void;
         /** Rotates the chacracter to the specified rotation. */
         rotate(x: number, y: number, z: number, w: number): void;
