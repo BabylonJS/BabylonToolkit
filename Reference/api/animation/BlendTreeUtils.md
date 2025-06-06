@@ -348,7 +348,7 @@ class AdvancedBlendTreeCalculator extends TOOLKIT.ScriptComponent {
             this.inputVector
         );
         
-        const magnitude = this.inputVector.length();
+        const magnitude = Math.sqrt(this.inputVector.x * this.inputVector.x + this.inputVector.y * this.inputVector.y);
         const clampedMagnitude = TOOLKIT.BlendTreeUtils.ClampValue(magnitude, 0.0, 1.0);
         
         for (const blendValue of this.blendTreeValues) {

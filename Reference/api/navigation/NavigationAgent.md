@@ -313,7 +313,8 @@ if (agent.isReady()) {
         console.log(`Distance to target: ${distance}`);
         
         const velocity = agent.getCurrentVelocity();
-        console.log(`Current velocity: ${velocity.length()}`);
+        const velocityMagnitude = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z);
+        console.log(`Current velocity: ${velocityMagnitude}`);
     }
     
     if (agent.isOnOffMeshLink()) {

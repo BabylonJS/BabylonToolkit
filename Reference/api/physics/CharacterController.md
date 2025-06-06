@@ -295,16 +295,16 @@ characterController.setVerticalStepSpeed(5.0);
 ```typescript
 const inputVelocity = new BABYLON.Vector3();
 
-if (TOOLKIT.InputController.GetKey("w")) {
+if (TOOLKIT.InputController.GetKeyboardInput(87)) { // W key
     inputVelocity.z = 5.0;
 }
-if (TOOLKIT.InputController.GetKey("s")) {
+if (TOOLKIT.InputController.GetKeyboardInput(83)) { // S key
     inputVelocity.z = -5.0;
 }
-if (TOOLKIT.InputController.GetKey("a")) {
+if (TOOLKIT.InputController.GetKeyboardInput(65)) { // A key
     inputVelocity.x = -5.0;
 }
-if (TOOLKIT.InputController.GetKey("d")) {
+if (TOOLKIT.InputController.GetKeyboardInput(68)) { // D key
     inputVelocity.x = 5.0;
 }
 

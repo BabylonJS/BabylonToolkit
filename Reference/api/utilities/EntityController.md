@@ -95,10 +95,11 @@ Sets interpolation targets for smooth movement.
 ### Basic Network Entity Management
 ```typescript
 class NetworkEntityManager extends TOOLKIT.ScriptComponent {
-    public entityController: TOOLKIT.EntityController = new TOOLKIT.EntityController();
+    public entityController: TOOLKIT.EntityController;
     public playerEntities: Map<string, string> = new Map();
 
     protected start(): void {
+        this.entityController = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.EntityController");
         this.setupNetworkEntitySystem();
     }
 
@@ -185,10 +186,11 @@ class NetworkEntityManager extends TOOLKIT.ScriptComponent {
 ### Advanced Entity Synchronization
 ```typescript
 class AdvancedEntitySync extends TOOLKIT.ScriptComponent {
-    public entityController: TOOLKIT.EntityController = new TOOLKIT.EntityController();
+    public entityController: TOOLKIT.EntityController;
     public syncedEntities: Map<string, any> = new Map();
 
     protected start(): void {
+        this.entityController = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.EntityController");
         this.setupAdvancedSync();
     }
 

@@ -149,17 +149,11 @@ class DynamicBlendingSystem extends TOOLKIT.ScriptComponent {
         const deltaTime = TOOLKIT.SceneManager.GetDeltaTime();
         const lerpFactor = Math.min(1.0, this.blendTransitionSpeed * deltaTime);
         
-        this.currentBlending.primary.weight = this.lerp(
-            this.currentBlending.primary.weight,
-            this.targetBlending.primary.weight,
-            lerpFactor
-        );
+        this.currentBlending.primary.weight = this.currentBlending.primary.weight + 
+            (this.targetBlending.primary.weight - this.currentBlending.primary.weight) * lerpFactor;
         
-        this.currentBlending.secondary.weight = this.lerp(
-            this.currentBlending.secondary.weight,
-            this.targetBlending.secondary.weight,
-            lerpFactor
-        );
+        this.currentBlending.secondary.weight = this.currentBlending.secondary.weight + 
+            (this.targetBlending.secondary.weight - this.currentBlending.secondary.weight) * lerpFactor;
         
         if (this.currentBlending.primary.motion !== this.targetBlending.primary.motion) {
             this.currentBlending.primary.motion = this.targetBlending.primary.motion;
@@ -170,9 +164,7 @@ class DynamicBlendingSystem extends TOOLKIT.ScriptComponent {
         }
     }
 
-    private lerp(a: number, b: number, t: number): number {
-        return a + (b - a) * t;
-    }
+
 
     private applyCurrentBlending(): void {
         const totalWeight = this.currentBlending.primary.weight + this.currentBlending.secondary.weight;

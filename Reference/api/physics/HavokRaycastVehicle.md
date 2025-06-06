@@ -224,19 +224,19 @@ let engineForce = 0;
 let brakeForce = 0;
 let steeringAngle = 0;
 
-if (TOOLKIT.InputController.GetKey("w")) {
+if (TOOLKIT.InputController.GetKeyboardInput(87)) { // W key
     engineForce = maxEngineForce;
-} else if (TOOLKIT.InputController.GetKey("s")) {
+} else if (TOOLKIT.InputController.GetKeyboardInput(83)) { // S key
     engineForce = -maxEngineForce;
 }
 
-if (TOOLKIT.InputController.GetKey("space")) {
+if (TOOLKIT.InputController.GetKeyboardInput(32)) { // Space key
     brakeForce = maxBrakeForce;
 }
 
-if (TOOLKIT.InputController.GetKey("a")) {
+if (TOOLKIT.InputController.GetKeyboardInput(65)) { // A key
     steeringAngle = -maxSteeringAngle;
-} else if (TOOLKIT.InputController.GetKey("d")) {
+} else if (TOOLKIT.InputController.GetKeyboardInput(68)) { // D key
     steeringAngle = maxSteeringAngle;
 }
 

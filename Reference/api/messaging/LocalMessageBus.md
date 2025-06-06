@@ -53,9 +53,10 @@ Disposes of the message bus and cleans up all handlers.
 ### Basic Local Messaging
 ```typescript
 class LocalMessagingExample extends TOOLKIT.ScriptComponent {
-    public messageBus: TOOLKIT.LocalMessageBus = new TOOLKIT.LocalMessageBus();
+    public messageBus: TOOLKIT.LocalMessageBus;
 
     protected start(): void {
+        this.messageBus = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.LocalMessageBus");
         this.setupMessageHandlers();
         this.testMessaging();
     }
@@ -101,11 +102,12 @@ class LocalMessagingExample extends TOOLKIT.ScriptComponent {
 ### Component Communication System
 ```typescript
 class PlayerController extends TOOLKIT.ScriptComponent {
-    public messageBus: TOOLKIT.LocalMessageBus = new TOOLKIT.LocalMessageBus();
+    public messageBus: TOOLKIT.LocalMessageBus;
     public health: number = 100;
     public position: BABYLON.Vector3 = BABYLON.Vector3.Zero();
 
     protected start(): void {
+        this.messageBus = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.LocalMessageBus");
         this.setupPlayerMessaging();
     }
 
@@ -186,9 +188,10 @@ class PlayerController extends TOOLKIT.ScriptComponent {
 }
 
 class UIController extends TOOLKIT.ScriptComponent {
-    public messageBus: TOOLKIT.LocalMessageBus = new TOOLKIT.LocalMessageBus();
+    public messageBus: TOOLKIT.LocalMessageBus;
 
     protected start(): void {
+        this.messageBus = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.LocalMessageBus");
         this.setupUIMessaging();
     }
 
@@ -227,11 +230,12 @@ class UIController extends TOOLKIT.ScriptComponent {
 ### Event-Driven Game Systems
 ```typescript
 class GameSystemManager extends TOOLKIT.ScriptComponent {
-    public messageBus: TOOLKIT.LocalMessageBus = new TOOLKIT.LocalMessageBus();
+    public messageBus: TOOLKIT.LocalMessageBus;
     public gameState: string = "playing";
     public score: number = 0;
 
     protected start(): void {
+        this.messageBus = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.LocalMessageBus");
         this.setupGameSystemMessaging();
     }
 
@@ -339,10 +343,11 @@ class GameSystemManager extends TOOLKIT.ScriptComponent {
 ### Message Handler Management
 ```typescript
 class MessageHandlerManager extends TOOLKIT.ScriptComponent {
-    public messageBus: TOOLKIT.LocalMessageBus = new TOOLKIT.LocalMessageBus();
+    public messageBus: TOOLKIT.LocalMessageBus;
     public handlers: Map<string, Function[]> = new Map();
 
     protected start(): void {
+        this.messageBus = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.LocalMessageBus");
         this.setupDynamicHandlers();
     }
 

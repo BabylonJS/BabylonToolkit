@@ -166,9 +166,13 @@ class DirectionalMovement extends TOOLKIT.ScriptComponent {
     }
 
     private updateDirectionalBlending(): void {
-        const input = this.getMovementInput();
-        this.moveX = input.x;
-        this.moveY = input.y;
+        const horizontal = TOOLKIT.InputController.GetKeyboardInput(68) ? 1 : 
+                          TOOLKIT.InputController.GetKeyboardInput(65) ? -1 : 0; // D and A keys
+        const vertical = TOOLKIT.InputController.GetKeyboardInput(87) ? 1 : 
+                        TOOLKIT.InputController.GetKeyboardInput(83) ? -1 : 0; // W and S keys
+        
+        this.moveX = horizontal;
+        this.moveY = vertical;
         
         TOOLKIT.BlendTreeSystem.Calculate2DFreeformDirectional(
             this.moveX,
@@ -179,9 +183,7 @@ class DirectionalMovement extends TOOLKIT.ScriptComponent {
         this.applyDirectionalWeights();
     }
 
-    private getMovementInput(): { x: number, y: number } {
-        return { x: 0.5, y: 0.8 };
-    }
+
 
     private applyDirectionalWeights(): void {
         for (const blendValue of this.directionalBlendTree) {

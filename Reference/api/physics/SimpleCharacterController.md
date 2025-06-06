@@ -70,16 +70,16 @@ const deltaTime = scene.getEngine().getDeltaTime() / 1000.0;
 
 const inputDirection = new BABYLON.Vector3();
 
-if (TOOLKIT.InputController.GetKey("w")) {
+if (TOOLKIT.InputController.GetKeyboardInput(87)) { // W key
     inputDirection.z = 1.0;
 }
-if (TOOLKIT.InputController.GetKey("s")) {
+if (TOOLKIT.InputController.GetKeyboardInput(83)) { // S key
     inputDirection.z = -1.0;
 }
-if (TOOLKIT.InputController.GetKey("a")) {
+if (TOOLKIT.InputController.GetKeyboardInput(65)) { // A key
     inputDirection.x = -1.0;
 }
-if (TOOLKIT.InputController.GetKey("d")) {
+if (TOOLKIT.InputController.GetKeyboardInput(68)) { // D key
     inputDirection.x = 1.0;
 }
 
@@ -92,8 +92,8 @@ simpleController.move(inputDirection);
 ### Character Rotation
 ```typescript
 const mouseSensitivity = 0.002;
-const mouseX = TOOLKIT.InputController.GetMouseX();
-const mouseY = TOOLKIT.InputController.GetMouseY();
+const mouseX = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.MouseX);
+const mouseY = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.MouseY);
 
 const yawAngle = mouseX * mouseSensitivity;
 const pitchAngle = mouseY * mouseSensitivity;

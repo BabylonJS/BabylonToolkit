@@ -29,7 +29,7 @@ TransitionCheck provides a data structure for managing animation transition eval
 ### Basic Transition Check
 ```typescript
 class AnimationTransitionManager extends TOOLKIT.ScriptComponent {
-    public currentTransitionCheck: TOOLKIT.TransitionCheck = new TOOLKIT.TransitionCheck();
+    public currentTransitionCheck: TOOLKIT.TransitionCheck = {} as TOOLKIT.TransitionCheck;
 
     protected start(): void {
         this.initializeTransitionCheck();
@@ -129,7 +129,7 @@ class ComplexTransitionSystem extends TOOLKIT.ScriptComponent {
 
     private initializeTransitionChecks(): void {
         for (const state of this.transitionStates) {
-            const transitionCheck = new TOOLKIT.TransitionCheck();
+            const transitionCheck = {} as TOOLKIT.TransitionCheck;
             transitionCheck.result = "deny";
             transitionCheck.offest = 0.0;
             transitionCheck.blending = 0.0;
@@ -265,7 +265,7 @@ class ComplexTransitionSystem extends TOOLKIT.ScriptComponent {
 ### Transition Check Validation
 ```typescript
 class TransitionValidator extends TOOLKIT.ScriptComponent {
-    public transitionCheck: TOOLKIT.TransitionCheck = new TOOLKIT.TransitionCheck();
+    public transitionCheck: TOOLKIT.TransitionCheck = {} as TOOLKIT.TransitionCheck;
 
     protected start(): void {
         this.setupTransitionValidation();
@@ -356,7 +356,7 @@ class TransitionValidator extends TOOLKIT.ScriptComponent {
     }
 
     public copyTransitionCheck(): TOOLKIT.TransitionCheck {
-        const copy = new TOOLKIT.TransitionCheck();
+        const copy = {} as TOOLKIT.TransitionCheck;
         copy.result = this.transitionCheck.result;
         copy.offest = this.transitionCheck.offest;
         copy.blending = this.transitionCheck.blending;

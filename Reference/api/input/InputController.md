@@ -1,461 +1,481 @@
 # InputController
 
-Comprehensive input handling system for keyboard, mouse, touch, and gamepad input with customizable key mapping and input processing.
+Static input handling system for keyboard, mouse, touch, and gamepad input with comprehensive input processing capabilities.
 
 **Namespace**: `TOOLKIT`  
-**Type**: `class`  
-**Extends**: `TOOLKIT.ScriptComponent`  
+**Type**: `class` (static only)  
 **Copyright**: All rights reserved (c) 2024 Mackey Kinard
 
 ## Overview
 
-InputController provides a unified input system that handles multiple input devices and methods. It supports keyboard input, mouse input, touch controls, gamepad input, and virtual joysticks with customizable key mappings and input processing.
+InputController provides a unified static input system that handles multiple input devices and methods. It supports keyboard input, mouse input, touch controls, gamepad input, and pointer interactions through static methods only.
 
 ## Static Properties
 
 ### Input Configuration
-- **`KEYBOARD_INPUT_ENABLED`** `boolean` - Enable keyboard input processing
-- **`MOUSE_INPUT_ENABLED`** `boolean` - Enable mouse input processing
-- **`TOUCH_INPUT_ENABLED`** `boolean` - Enable touch input processing
-- **`GAMEPAD_INPUT_ENABLED`** `boolean` - Enable gamepad input processing
-- **`VIRTUAL_JOYSTICK_ENABLED`** `boolean` - Enable virtual joystick controls
+- **`MOUSE_DAMPENER`** `number` - Mouse input dampening factor
+- **`TAP_THRESHOLD_MS`** `number` - Tap threshold in milliseconds
+- **`GamepadManager`** `BABYLON.GamepadManager` - Global gamepad manager
+- **`AllowMobileControls`** `boolean` - Are mobile input controls allowed
+- **`MobileControlsActive`** `boolean` - Are mobile input controls currently active
+- **`EnablePinchZoomTracking`** `boolean` - Is mobile pinch zoom tracking enabled
 
-## Instance Properties
+### Event Handlers
+- **`GamepadConnected`** `(pad: BABYLON.Gamepad, state: BABYLON.EventState) => void` - Global gamepad connect event handler
+- **`GamepadDisconnected`** `(pad: BABYLON.Gamepad, state: BABYLON.EventState) => void` - Global gamepad disconnect event handler
 
-### Input State
-- **`inputEnabled`** `boolean` - Whether input processing is enabled
-- **`keyboardEnabled`** `boolean` - Whether keyboard input is enabled
-- **`mouseEnabled`** `boolean` - Whether mouse input is enabled
-- **`touchEnabled`** `boolean` - Whether touch input is enabled
-- **`gamepadEnabled`** `boolean` - Whether gamepad input is enabled
+## Static Methods
 
-### Mouse Properties
-- **`mousePosition`** `BABYLON.Vector2` - Current mouse position
-- **`mouseDelta`** `BABYLON.Vector2` - Mouse movement delta
-- **`mouseWheelDelta`** `number` - Mouse wheel scroll delta
-- **`mouseSensitivity`** `number` - Mouse sensitivity multiplier
+### Input System Management
 
-### Touch Properties
-- **`touchPosition`** `BABYLON.Vector2` - Primary touch position
-- **`touchDelta`** `BABYLON.Vector2` - Touch movement delta
-- **`touchCount`** `number` - Number of active touches
-- **`touchSensitivity`** `number` - Touch sensitivity multiplier
+#### `EnableUserInput(engine, scene, options?)`
+Enable user input state in the scene.
 
-## Input Query Methods
+**Parameters:**
+- `engine` `BABYLON.AbstractEngine` - Babylon engine instance
+- `scene` `BABYLON.Scene` - Scene to enable input for
+- `options?` `object` - Optional configuration
+  - `contextMenu?` `boolean` - Enable context menu
+  - `pointerLock?` `boolean` - Enable pointer lock
+  - `preventDefault?` `boolean` - Prevent default events
+  - `useCapture?` `boolean` - Use event capture
+
+#### `ConfigureUserInput(engine, scene, options?)`
+Configure user input state in the scene.
+
+**Parameters:**
+- `engine` `BABYLON.AbstractEngine` - Babylon engine instance
+- `scene` `BABYLON.Scene` - Scene to configure input for
+- `options?` `object` - Optional configuration (same as EnableUserInput)
+
+#### `DisableUserInput(scene, useCapture?)`
+Disables user input state in the scene.
+
+**Parameters:**
+- `scene` `BABYLON.Scene` - Scene to disable input for
+- `useCapture?` `boolean` - Use event capture
 
 ### Keyboard Input
 
-#### `getKey(keyCode)`
-Check if a key is currently being held down.
+#### `GetKeyboardInput(keycode)`
+Get the specified keyboard input by keycode.
 
 **Parameters:**
-- `keyCode` `number` - Key code to check
+- `keycode` `number` - Key code to check
+
+**Returns:** `boolean` - True if key is currently pressed
+
+#### `IsKeyboardButtonHeld(keycode)`
+Is the specified keyboard button held down.
+
+**Parameters:**
+- `keycode` `number` - Key code to check
 
 **Returns:** `boolean` - True if key is held down
 
-#### `getKeyDown(keyCode)`
-Check if a key was pressed this frame.
+#### `WasKeyboardButtonTapped(keycode, reset?)`
+Was the specified keyboard button tapped.
 
 **Parameters:**
-- `keyCode` `number` - Key code to check
+- `keycode` `number` - Key code to check
+- `reset?` `boolean` - Reset tapped state after check
 
-**Returns:** `boolean` - True if key was pressed this frame
+**Returns:** `boolean` - True if key was tapped
 
-#### `getKeyUp(keyCode)`
-Check if a key was released this frame.
-
-**Parameters:**
-- `keyCode` `number` - Key code to check
-
-**Returns:** `boolean` - True if key was released this frame
-
-#### `getKeyByName(keyName)`
-Check if a named key is currently being held down.
+#### `ResetKeyboardButtonTapped(keycode)`
+Reset the specified keyboard button tapped state.
 
 **Parameters:**
-- `keyName` `string` - Key name (e.g., "Space", "Enter", "A")
+- `keycode` `number` - Key code to reset
 
-**Returns:** `boolean` - True if key is held down
+### Keyboard Event Handlers
 
-### Mouse Input
-
-#### `getMouseButton(button)`
-Check if a mouse button is currently being held down.
+#### `OnKeyboardUp(callback)`
+Set a keyboard up event handler.
 
 **Parameters:**
-- `button` `number` - Mouse button (0=left, 1=middle, 2=right)
+- `callback` `(keycode: number) => void` - Callback function
 
-**Returns:** `boolean` - True if button is held down
-
-#### `getMouseButtonDown(button)`
-Check if a mouse button was pressed this frame.
+#### `OnKeyboardDown(callback)`
+Set a keyboard down event handler.
 
 **Parameters:**
-- `button` `number` - Mouse button to check
+- `callback` `(keycode: number) => void` - Callback function
 
-**Returns:** `boolean` - True if button was pressed this frame
-
-#### `getMouseButtonUp(button)`
-Check if a mouse button was released this frame.
+#### `OnKeyboardPress(keycode, callback)`
+Set a keyboard press event handler.
 
 **Parameters:**
-- `button` `number` - Mouse button to check
+- `keycode` `number` - Key code to listen for
+- `callback` `() => void` - Callback function
 
-**Returns:** `boolean` - True if button was released this frame
+### Mouse/Pointer Input
 
-#### `getMousePosition()`
-Get the current mouse position.
+#### `GetLeftButtonDown()`
+Get the value of the left button down.
 
-**Returns:** `BABYLON.Vector2` - Mouse position in screen coordinates
+**Returns:** `boolean` - True if left button is down
 
-#### `getMouseDelta()`
-Get the mouse movement delta since last frame.
+#### `GetMiddleButtonDown()`
+Get the value of the middle button down.
 
-**Returns:** `BABYLON.Vector2` - Mouse movement delta
+**Returns:** `boolean` - True if middle button is down
 
-#### `getMouseWheelDelta()`
-Get the mouse wheel scroll delta.
+#### `GetRightButtonDown()`
+Get the value of the right button down.
 
-**Returns:** `number` - Wheel scroll delta
+**Returns:** `boolean` - True if right button is down
 
-### Touch Input
+#### `GetMouseButtonsDown()`
+Get the value of all mouse buttons down.
 
-#### `getTouchPosition(index?)`
-Get the position of a touch input.
+**Returns:** `number` - Bitmask of mouse buttons down
 
-**Parameters:**
-- `index?` `number` - Touch index (0 for primary touch)
-
-**Returns:** `BABYLON.Vector2` - Touch position
-
-#### `getTouchDelta(index?)`
-Get the movement delta of a touch input.
+#### `GetPointerInput(button)`
+Get the specified pointer input by button.
 
 **Parameters:**
-- `index?` `number` - Touch index (0 for primary touch)
+- `button` `number` - Button index
 
-**Returns:** `BABYLON.Vector2` - Touch movement delta
+**Returns:** `boolean` - True if pointer button is pressed
 
-#### `getTouchCount()`
-Get the number of active touches.
+#### `IsPointerButtonHeld(button)`
+Is the specified pointer button held down.
 
-**Returns:** `number` - Number of active touches
+**Parameters:**
+- `button` `number` - Button index
 
-#### `isTouching()`
-Check if any touch is currently active.
+**Returns:** `boolean` - True if pointer button is held
 
-**Returns:** `boolean` - True if touching
+#### `WasPointerButtonTapped(number, reset?)`
+Was the specified pointer button tapped.
+
+**Parameters:**
+- `number` `number` - Button index
+- `reset?` `boolean` - Reset tapped state after check
+
+**Returns:** `boolean` - True if pointer button was tapped
+
+### Pointer Event Handlers
+
+#### `OnPointerUp(callback)`
+Set a pointer up event handler.
+
+**Parameters:**
+- `callback` `(button: number) => void` - Callback function
+
+#### `OnPointerDown(callback)`
+Set a pointer down event handler.
+
+**Parameters:**
+- `callback` `(button: number) => void` - Callback function
+
+#### `OnPointerPress(button, callback)`
+Set a pointer press event handler.
+
+**Parameters:**
+- `button` `number` - Button index to listen for
+- `callback` `() => void` - Callback function
 
 ### Gamepad Input
 
-#### `getGamepadButton(button, gamepadIndex?)`
-Check if a gamepad button is currently being held down.
+#### `GetGamepadButtonInput(button, player?)`
+Get the specified gamepad input by button.
 
 **Parameters:**
 - `button` `number` - Button index
-- `gamepadIndex?` `number` - Gamepad index (default 0)
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-**Returns:** `boolean` - True if button is held down
+**Returns:** `boolean` - True if gamepad button is pressed
 
-#### `getGamepadButtonDown(button, gamepadIndex?)`
-Check if a gamepad button was pressed this frame.
+#### `IsGamepadButtonHeld(button, player?)`
+Is the specified gamepad button held.
 
 **Parameters:**
 - `button` `number` - Button index
-- `gamepadIndex?` `number` - Gamepad index (default 0)
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-**Returns:** `boolean` - True if button was pressed this frame
+**Returns:** `boolean` - True if gamepad button is held
 
-#### `getGamepadAxis(axis, gamepadIndex?)`
-Get the value of a gamepad axis.
-
-**Parameters:**
-- `axis` `number` - Axis index
-- `gamepadIndex?` `number` - Gamepad index (default 0)
-
-**Returns:** `number` - Axis value (-1.0 to 1.0)
-
-#### `getGamepadStick(stick, gamepadIndex?)`
-Get the values of a gamepad stick.
+#### `IsGamepadButtonTapped(button, player?)`
+Is the specified gamepad button tapped.
 
 **Parameters:**
-- `stick` `number` - Stick index (0=left, 1=right)
-- `gamepadIndex?` `number` - Gamepad index (default 0)
+- `button` `number` - Button index
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-**Returns:** `BABYLON.Vector2` - Stick values (x, y)
+**Returns:** `boolean` - True if gamepad button was tapped
 
-## Input Mapping
-
-### Key Mapping
-
-#### `mapKey(actionName, keyCode)`
-Map a key to an action name.
+#### `GetGamepadDirectionInput(direction, player?)`
+Get the specified gamepad direction input by number.
 
 **Parameters:**
-- `actionName` `string` - Action name
-- `keyCode` `number` - Key code to map
+- `direction` `number` - Direction index
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-#### `mapKeys(actionName, keyCodes)`
-Map multiple keys to an action name.
+**Returns:** `boolean` - True if gamepad direction is pressed
 
-**Parameters:**
-- `actionName` `string` - Action name
-- `keyCodes` `number[]` - Array of key codes to map
-
-#### `unmapKey(actionName)`
-Remove key mapping for an action.
+#### `GetGamepadTriggerInput(trigger, player?)`
+Get the specified gamepad trigger input by number.
 
 **Parameters:**
-- `actionName` `string` - Action name to unmap
+- `trigger` `number` - Trigger index
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-#### `getAction(actionName)`
-Check if a mapped action is currently active.
+**Returns:** `number` - Trigger value (0.0 to 1.0)
 
-**Parameters:**
-- `actionName` `string` - Action name
-
-**Returns:** `boolean` - True if action is active
-
-#### `getActionDown(actionName)`
-Check if a mapped action was activated this frame.
+#### `GetGamepadType(player?)`
+Get the specified gamepad type.
 
 **Parameters:**
-- `actionName` `string` - Action name
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-**Returns:** `boolean` - True if action was activated this frame
+**Returns:** `TOOLKIT.GamepadType` - Gamepad type
 
-#### `getActionUp(actionName)`
-Check if a mapped action was deactivated this frame.
-
-**Parameters:**
-- `actionName` `string` - Action name
-
-**Returns:** `boolean` - True if action was deactivated this frame
-
-### Axis Mapping
-
-#### `mapAxis(axisName, positiveKey, negativeKey)`
-Map keys to an axis.
+#### `GetGamepad(player?)`
+Get the specified gamepad.
 
 **Parameters:**
-- `axisName` `string` - Axis name
-- `positiveKey` `number` - Key for positive direction
-- `negativeKey` `number` - Key for negative direction
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-#### `getAxis(axisName)`
-Get the value of a mapped axis.
+**Returns:** `BABYLON.Gamepad` - Gamepad instance
 
-**Parameters:**
-- `axisName` `string` - Axis name
+### User Input System
 
-**Returns:** `number` - Axis value (-1.0 to 1.0)
-
-## Virtual Controls
-
-### Virtual Joystick
-
-#### `enableVirtualJoystick(enabled)`
-Enable or disable virtual joystick.
+#### `GetUserInput(input, player?)`
+Get user input state from the scene.
 
 **Parameters:**
-- `enabled` `boolean` - Whether to enable virtual joystick
+- `input` `TOOLKIT.UserInputAxis` - Input axis to check
+- `player?` `TOOLKIT.PlayerNumber` - Player number (optional)
 
-#### `getVirtualJoystickPosition()`
-Get the virtual joystick position.
+**Returns:** `number` - Input value
 
-**Returns:** `BABYLON.Vector2` - Joystick position (-1.0 to 1.0)
+### Pointer Lock
 
-#### `isVirtualJoystickActive()`
-Check if virtual joystick is currently being used.
+#### `LockMousePointer(scene, lock)`
+Locks user pointer state in the scene.
 
-**Returns:** `boolean` - True if joystick is active
+**Parameters:**
+- `scene` `BABYLON.Scene` - Scene instance
+- `lock` `boolean` - Whether to lock pointer
 
-## Lifecycle Methods
+#### `IsPointerLocked()`
+Check if pointer is currently locked.
 
-### Component Lifecycle
+**Returns:** `boolean` - True if pointer is locked
 
-#### `awake()`
-Called when the component is first created. Initializes the input system.
+#### `IsPointerLockHandled()`
+Check if pointer lock is handled.
 
-**Protected method** - Override in derived classes
+**Returns:** `boolean` - True if pointer lock is handled
 
-#### `update()`
-Called every frame during the update loop. Updates input state.
+### Utility Methods
 
-**Protected method** - Override in derived classes
+#### `GetMouseDownTarget()`
+Get the target of mouse button down event.
 
-#### `destroy()`
-Called when the component is being destroyed. Cleans up input resources.
+**Returns:** `any` - Mouse down target
 
-**Protected method** - Override in derived classes
+#### `GetMouseDragTarget()`
+Get the target of mouse button drag event.
+
+**Returns:** `any` - Mouse drag target
+
+#### `GetPinchZoomState()`
+Get the value of the pinch zoom state.
+
+**Returns:** `TOOLKIT.PinchZoomState` - Pinch zoom state
+
+#### `IsWheelScrolling()`
+Is the mouse wheel scrolling this frame.
+
+**Returns:** `boolean` - True if wheel is scrolling
 
 ## Usage Examples
 
-### Basic Input Setup
-```typescript
-// Create input controller
-const input = new TOOLKIT.InputController(playerTransform, scene);
-
-// Enable input types
-input.keyboardEnabled = true;
-input.mouseEnabled = true;
-input.touchEnabled = true;
-
-// Check for input in update loop
-if (input.getKey(87)) { // W key
-    console.log("Moving forward");
-}
-
-if (input.getMouseButtonDown(0)) { // Left mouse button
-    console.log("Mouse clicked");
-}
-```
-
-### Action Mapping
-```typescript
-// Map keys to actions
-input.mapKey("jump", 32); // Space bar
-input.mapKey("fire", 17); // Ctrl key
-input.mapKeys("run", [16, 304]); // Shift keys
-
-// Map axes
-input.mapAxis("horizontal", 68, 65); // D and A keys
-input.mapAxis("vertical", 87, 83); // W and S keys
-
-// Use mapped inputs
-if (input.getActionDown("jump")) {
-    this.jump();
-}
-
-if (input.getAction("fire")) {
-    this.fire();
-}
-
-const horizontal = input.getAxis("horizontal");
-const vertical = input.getAxis("vertical");
-this.move(horizontal, vertical);
-```
-
-### Mouse and Touch Input
-```typescript
-// Mouse input
-const mousePos = input.getMousePosition();
-const mouseDelta = input.getMouseDelta();
-const wheelDelta = input.getMouseWheelDelta();
-
-// Touch input
-if (input.isTouching()) {
-    const touchPos = input.getTouchPosition();
-    const touchDelta = input.getTouchDelta();
-    const touchCount = input.getTouchCount();
-}
-
-// Virtual joystick
-input.enableVirtualJoystick(true);
-if (input.isVirtualJoystickActive()) {
-    const joystickPos = input.getVirtualJoystickPosition();
-    this.moveWithJoystick(joystickPos);
-}
-```
-
-### Gamepad Input
-```typescript
-// Check gamepad connection
-if (input.gamepadEnabled) {
-    // Button input
-    if (input.getGamepadButtonDown(0)) { // A button
-        this.jump();
-    }
-    
-    // Axis input
-    const leftStick = input.getGamepadStick(0);
-    const rightStick = input.getGamepadStick(1);
-    
-    this.move(leftStick.x, leftStick.y);
-    this.look(rightStick.x, rightStick.y);
-    
-    // Trigger input
-    const leftTrigger = input.getGamepadAxis(6);
-    const rightTrigger = input.getGamepadAxis(7);
-}
-```
-
-### Complete Player Controller
+### Basic Keyboard Input
 ```typescript
 class PlayerController extends TOOLKIT.ScriptComponent {
-    private input: TOOLKIT.InputController;
     private moveSpeed: number = 5.0;
-    private lookSpeed: number = 2.0;
-
-    protected awake(): void {
-        this.input = new TOOLKIT.InputController(this.transform, this.scene);
-        this.setupInputMappings();
-    }
 
     protected update(): void {
         this.handleMovement();
-        this.handleLook();
         this.handleActions();
     }
 
-    private setupInputMappings(): void {
-        // Movement
-        this.input.mapAxis("horizontal", 68, 65); // D, A
-        this.input.mapAxis("vertical", 87, 83); // W, S
-        
-        // Actions
-        this.input.mapKey("jump", 32); // Space
-        this.input.mapKey("run", 16); // Shift
-        this.input.mapKey("crouch", 67); // C
-        
-        // Mouse sensitivity
-        this.input.mouseSensitivity = 2.0;
-    }
-
     private handleMovement(): void {
-        const horizontal = this.input.getAxis("horizontal");
-        const vertical = this.input.getAxis("vertical");
-        
+        const horizontal = TOOLKIT.InputController.GetKeyboardInput(68) ? 1 : 
+                          TOOLKIT.InputController.GetKeyboardInput(65) ? -1 : 0; // D and A keys
+        const vertical = TOOLKIT.InputController.GetKeyboardInput(87) ? 1 : 
+                        TOOLKIT.InputController.GetKeyboardInput(83) ? -1 : 0; // W and S keys
+
         if (horizontal !== 0 || vertical !== 0) {
-            const speed = this.input.getAction("run") ? this.moveSpeed * 2 : this.moveSpeed;
+            const speed = TOOLKIT.InputController.GetKeyboardInput(16) ? this.moveSpeed * 2 : this.moveSpeed; // Shift for run
             this.moveCharacter(horizontal, vertical, speed);
         }
     }
 
-    private handleLook(): void {
-        if (this.input.mouseEnabled) {
-            const mouseDelta = this.input.getMouseDelta();
-            this.rotateCamera(mouseDelta.x * this.lookSpeed, mouseDelta.y * this.lookSpeed);
+    private handleActions(): void {
+        if (TOOLKIT.InputController.GetKeyboardInput(32)) { // Space bar
+            this.jump();
+        }
+
+        if (TOOLKIT.InputController.GetKeyboardInput(17)) { // Ctrl key
+            this.fire();
+        }
+    }
+}
+```
+
+### Mouse Input Handling
+```typescript
+class CameraController extends TOOLKIT.ScriptComponent {
+    private lookSpeed: number = 2.0;
+
+    protected start(): void {
+        TOOLKIT.InputController.EnableUserInput(this.scene.getEngine(), this.scene, {
+            pointerLock: true,
+            preventDefault: true
+        });
+    }
+
+    protected update(): void {
+        this.handleMouseInput();
+    }
+
+    private handleMouseInput(): void {
+        if (TOOLKIT.InputController.GetLeftButtonDown()) {
+            console.log("Left mouse button pressed");
+        }
+
+        if (TOOLKIT.InputController.GetRightButtonDown()) {
+            console.log("Right mouse button pressed");
+        }
+
+        if (TOOLKIT.InputController.IsWheelScrolling()) {
+            console.log("Mouse wheel scrolling");
+        }
+    }
+}
+```
+
+### Gamepad Input
+```typescript
+class GamepadController extends TOOLKIT.ScriptComponent {
+    protected update(): void {
+        this.handleGamepadInput();
+    }
+
+    private handleGamepadInput(): void {
+        if (TOOLKIT.InputController.GetGamepadButtonInput(0)) { // A button
+            this.jump();
+        }
+
+        if (TOOLKIT.InputController.GetGamepadButtonInput(1)) { // B button
+            this.crouch();
+        }
+
+        const leftTrigger = TOOLKIT.InputController.GetGamepadTriggerInput(0);
+        const rightTrigger = TOOLKIT.InputController.GetGamepadTriggerInput(1);
+
+        if (leftTrigger > 0.5) {
+            this.aimDownSights();
+        }
+
+        if (rightTrigger > 0.5) {
+            this.fire();
+        }
+    }
+}
+```
+
+### Input Event Handlers
+```typescript
+class InputEventManager extends TOOLKIT.ScriptComponent {
+    protected start(): void {
+        this.setupInputEventHandlers();
+    }
+
+    private setupInputEventHandlers(): void {
+        TOOLKIT.InputController.OnKeyboardDown((keycode: number) => {
+            console.log(`Key pressed: ${keycode}`);
+        });
+
+        TOOLKIT.InputController.OnKeyboardUp((keycode: number) => {
+            console.log(`Key released: ${keycode}`);
+        });
+
+        TOOLKIT.InputController.OnKeyboardPress(27, () => { // Escape key
+            this.showPauseMenu();
+        });
+
+        TOOLKIT.InputController.OnPointerDown((button: number) => {
+            console.log(`Pointer button pressed: ${button}`);
+        });
+
+        TOOLKIT.InputController.OnPointerPress(0, () => { // Left click
+            this.handleLeftClick();
+        });
+    }
+
+    private showPauseMenu(): void {
+        console.log("Showing pause menu");
+    }
+
+    private handleLeftClick(): void {
+        console.log("Left click detected");
+    }
+}
+```
+
+### User Input System
+```typescript
+class UserInputManager extends TOOLKIT.ScriptComponent {
+    protected update(): void {
+        this.handleUserInput();
+    }
+
+    private handleUserInput(): void {
+        const horizontalInput = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.Horizontal);
+        const verticalInput = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.Vertical);
+        const mouseX = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.MouseX);
+        const mouseY = TOOLKIT.InputController.GetUserInput(TOOLKIT.UserInputAxis.MouseY);
+
+        if (Math.abs(horizontalInput) > 0.1 || Math.abs(verticalInput) > 0.1) {
+            this.moveCharacter(horizontalInput, verticalInput);
+        }
+
+        if (Math.abs(mouseX) > 0.1 || Math.abs(mouseY) > 0.1) {
+            this.rotateCamera(mouseX, mouseY);
         }
     }
 
-    private handleActions(): void {
-        if (this.input.getActionDown("jump")) {
-            this.jump();
-        }
-        
-        if (this.input.getActionDown("crouch")) {
-            this.toggleCrouch();
-        }
+    private moveCharacter(horizontal: number, vertical: number): void {
+        console.log(`Moving character: ${horizontal}, ${vertical}`);
+    }
+
+    private rotateCamera(mouseX: number, mouseY: number): void {
+        console.log(`Rotating camera: ${mouseX}, ${mouseY}`);
     }
 }
 ```
 
 ## Key Codes Reference
 
-Common key codes for mapping:
+Common key codes for keyboard input:
 - **Space**: 32
 - **Enter**: 13
 - **Shift**: 16
 - **Ctrl**: 17
 - **Alt**: 18
+- **Escape**: 27
 - **A-Z**: 65-90
 - **0-9**: 48-57
-- **Arrow Keys**: 37-40
+- **Arrow Keys**: 37-40 (Left, Up, Right, Down)
 - **F1-F12**: 112-123
 
 ## Related Classes
-- [ScriptComponent](../core/ScriptComponent.md) - Base component class
 - [TouchJoystickHandler](TouchJoystickHandler.md) - Touch joystick implementation
 - [UserInputOptions](UserInputOptions.md) - Input configuration options
 - [SceneManager](../core/SceneManager.md) - Scene management utilities

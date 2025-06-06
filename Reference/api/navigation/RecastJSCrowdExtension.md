@@ -187,7 +187,8 @@ class OptimizedCrowd {
         const agentPos = this.crowd.getAgentPosition(agentIndex);
         const agentVel = this.crowd.getAgentVelocity(agentIndex);
         
-        if (agentVel.length() < 0.1 && !this.crowd.agentReachedDestination(agentIndex)) {
+        const velocityMagnitude = Math.sqrt(agentVel.x * agentVel.x + agentVel.y * agentVel.y + agentVel.z * agentVel.z);
+        if (velocityMagnitude < 0.1 && !this.crowd.agentReachedDestination(agentIndex)) {
             const randomTarget = this.crowd.getRandomPointAround(agentPos, 5.0);
             this.crowd.agentGoto(agentIndex, randomTarget);
         }

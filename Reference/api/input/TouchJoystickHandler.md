@@ -316,8 +316,9 @@ class AdvancedJoystickSystem extends TOOLKIT.ScriptComponent {
         this.targetInput.x = rawX * this.sensitivity;
         this.targetInput.y = rawY * this.sensitivity;
 
-        this.targetInput.x = this.applyCurve(this.targetInput.x, magnitude);
-        this.targetInput.y = this.applyCurve(this.targetInput.y, magnitude);
+        const curve = magnitude * magnitude;
+        this.targetInput.x = this.targetInput.x * curve;
+        this.targetInput.y = this.targetInput.y * curve;
     }
 
     private onJoystickReleased(event: any): void {
@@ -338,21 +339,15 @@ class AdvancedJoystickSystem extends TOOLKIT.ScriptComponent {
         const deltaTime = TOOLKIT.SceneManager.GetDeltaTime();
         const lerpFactor = Math.min(1.0, this.smoothing * deltaTime * 60);
 
-        this.currentInput.x = this.lerp(this.currentInput.x, this.targetInput.x, lerpFactor);
-        this.currentInput.y = this.lerp(this.currentInput.y, this.targetInput.y, lerpFactor);
+        this.currentInput.x = this.currentInput.x + (this.targetInput.x - this.currentInput.x) * lerpFactor;
+        this.currentInput.y = this.currentInput.y + (this.targetInput.y - this.currentInput.y) * lerpFactor;
     }
 
-    private lerp(a: number, b: number, t: number): number {
-        return a + (b - a) * t;
-    }
 
-    private applyCurve(value: number, magnitude: number): number {
-        const curve = magnitude * magnitude;
-        return value * curve;
-    }
 
     private applyInput(): void {
-        if (this.currentInput.length() > 0.01) {
+        const magnitude = Math.sqrt(this.currentInput.x * this.currentInput.x + this.currentInput.y * this.currentInput.y);
+        if (magnitude > 0.01) {
             const deltaTime = TOOLKIT.SceneManager.GetDeltaTime();
             const moveVector = new BABYLON.Vector3(
                 this.currentInput.x,

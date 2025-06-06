@@ -34,7 +34,7 @@ AnimationMixer provides a comprehensive system for blending and mixing multiple 
 class CharacterAnimator extends TOOLKIT.ScriptComponent {
     public walkAnimation: string = "walk";
     public runAnimation: string = "run";
-    public mixer: TOOLKIT.AnimationMixer = new TOOLKIT.AnimationMixer();
+    public mixer: TOOLKIT.AnimationMixer = {} as TOOLKIT.AnimationMixer;
 
     protected start(): void {
         this.setupAnimationMixer();
@@ -69,7 +69,7 @@ class CharacterAnimator extends TOOLKIT.ScriptComponent {
 ### Advanced Root Motion Handling
 ```typescript
 class RootMotionController extends TOOLKIT.ScriptComponent {
-    public mixer: TOOLKIT.AnimationMixer = new TOOLKIT.AnimationMixer();
+    public mixer: TOOLKIT.AnimationMixer = {} as TOOLKIT.AnimationMixer;
     public enableRootMotion: boolean = true;
 
     protected start(): void {
@@ -102,8 +102,8 @@ class RootMotionController extends TOOLKIT.ScriptComponent {
 ### Multi-Layer Animation Blending
 ```typescript
 class LayeredAnimationSystem extends TOOLKIT.ScriptComponent {
-    public baseMixer: TOOLKIT.AnimationMixer = new TOOLKIT.AnimationMixer();
-    public additiveMixer: TOOLKIT.AnimationMixer = new TOOLKIT.AnimationMixer();
+    public baseMixer: TOOLKIT.AnimationMixer = {} as TOOLKIT.AnimationMixer;
+    public additiveMixer: TOOLKIT.AnimationMixer = {} as TOOLKIT.AnimationMixer;
 
     protected start(): void {
         this.setupLayeredBlending();

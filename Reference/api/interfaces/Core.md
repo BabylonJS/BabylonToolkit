@@ -315,20 +315,16 @@ window.addEventListener("message", (event) => {
 
 ### Input Key Mapping
 ```typescript
-// Use keyboard enumeration for key mapping
-input.mapKey("jump", TOOLKIT.UserInputKeyboard.Space);
-input.mapKey("run", TOOLKIT.UserInputKeyboard.Shift);
-input.mapKey("crouch", TOOLKIT.UserInputKeyboard.C);
+// Use keyboard enumeration for input checking
+const horizontalInput = TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.D) ? 1 : 
+                       TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.A) ? -1 : 0;
 
-// Map movement keys
-input.mapAxis("horizontal", 
-    TOOLKIT.UserInputKeyboard.D, 
-    TOOLKIT.UserInputKeyboard.A
-);
-input.mapAxis("vertical", 
-    TOOLKIT.UserInputKeyboard.W, 
-    TOOLKIT.UserInputKeyboard.S
-);
+const verticalInput = TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.W) ? 1 : 
+                     TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.S) ? -1 : 0;
+
+const jumpPressed = TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.Space);
+const runPressed = TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.Shift);
+const crouchPressed = TOOLKIT.InputController.GetKeyboardInput(TOOLKIT.UserInputKeyboard.C);
 ```
 
 ### Animation Events
