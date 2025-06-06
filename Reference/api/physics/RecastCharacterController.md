@@ -85,12 +85,10 @@ Sets the character position and rotation to the specified values. The aux parame
 
 ### Basic Navigation Setup
 ```typescript
-const recastController = new TOOLKIT.RecastCharacterController(transform, scene);
+const recastController = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.RecastCharacterController");
 
-const navAgent = new TOOLKIT.NavigationAgent(transform, scene);
-navAgent.speed = 3.5;
+const navAgent = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.NavigationAgent");
 navAgent.angularSpeed = 120;
-navAgent.acceleration = 8.0;
 navAgent.stoppingDistance = 0.5;
 
 recastController.setNavigationAgent(navAgent);

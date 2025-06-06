@@ -295,8 +295,8 @@ Called when the component is being destroyed. Cleans up animation resources.
 
 ### Basic Animation Control
 ```typescript
-// Create animation state component
-const animState = new TOOLKIT.AnimationState(characterTransform, scene);
+// Get animation state component
+const animState = TOOLKIT.SceneManager.GetComponent(characterTransform, "TOOLKIT.AnimationState");
 
 // Play an animation
 animState.play("walk", 0, 30, true, 1.0);
@@ -353,7 +353,7 @@ class CharacterController extends TOOLKIT.ScriptComponent {
     private speed: number = 0;
 
     protected awake(): void {
-        this.animState = new TOOLKIT.AnimationState(this.transform, this.scene);
+        this.animState = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.AnimationState");
         this.setupAnimations();
     }
 

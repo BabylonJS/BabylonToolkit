@@ -15,11 +15,11 @@ await TOOLKIT.SceneManager.InitializeRuntime(engine);
 // Use scene management utilities
 const mesh = TOOLKIT.SceneManager.GetMesh(scene, "myMesh");
 
-// Create physics components
-const physics = new TOOLKIT.RigidbodyPhysics(transform, scene);
+// Access physics components
+const physics = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.RigidbodyPhysics");
 
-// Set up navigation
-const agent = new TOOLKIT.NavigationAgent(transform, scene);
+// Access navigation agent
+const agent = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.NavigationAgent");
 ```
 
 ## API Categories
@@ -145,8 +145,8 @@ TOOLKIT.RigidbodyPhysics.SetupPhysicsComponent(scene, playerTransform);
 
 ### Navigation Setup
 ```typescript
-// Create navigation agent
-const agent = new TOOLKIT.NavigationAgent(enemyTransform, scene);
+// Access navigation agent component
+const agent = TOOLKIT.SceneManager.GetComponent(enemyTransform, "TOOLKIT.NavigationAgent");
 
 // Set destination
 agent.setDestination(playerPosition);

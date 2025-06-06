@@ -255,8 +255,8 @@ Called when the component is being destroyed. Cleans up navigation resources.
 
 ### Basic Navigation Setup
 ```typescript
-// Create navigation agent
-const agent = new TOOLKIT.NavigationAgent(enemyTransform, scene);
+// Get navigation agent component
+const agent = TOOLKIT.SceneManager.GetComponent(enemyTransform, "TOOLKIT.NavigationAgent");
 
 // Configure agent properties
 agent.angularSpeed = 180; // degrees per second
@@ -346,7 +346,7 @@ class AIController extends TOOLKIT.ScriptComponent {
     private currentPatrolIndex: number = 0;
 
     protected awake(): void {
-        this.agent = new TOOLKIT.NavigationAgent(this.transform, this.scene);
+        this.agent = TOOLKIT.SceneManager.GetComponent(this.transform, "TOOLKIT.NavigationAgent");
         
         // Set up patrol points
         this.patrolPoints = [

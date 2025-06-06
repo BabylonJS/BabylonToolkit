@@ -69,8 +69,8 @@ Creates a new machine state instance with default values.
 ### Basic State Setup
 ```typescript
 class AnimationController extends TOOLKIT.ScriptComponent {
-    public idleState: TOOLKIT.MachineState = new TOOLKIT.MachineState();
-    public walkState: TOOLKIT.MachineState = new TOOLKIT.MachineState();
+    public idleState: TOOLKIT.MachineState = {} as TOOLKIT.MachineState;
+    public walkState: TOOLKIT.MachineState = {} as TOOLKIT.MachineState;
 
     protected start(): void {
         this.setupAnimationStates();
@@ -103,7 +103,7 @@ class AnimationController extends TOOLKIT.ScriptComponent {
 ### Advanced State Configuration
 ```typescript
 class ComplexAnimationState extends TOOLKIT.ScriptComponent {
-    public combatState: TOOLKIT.MachineState = new TOOLKIT.MachineState();
+    public combatState: TOOLKIT.MachineState = {} as TOOLKIT.MachineState;
 
     protected start(): void {
         this.setupCombatState();
@@ -200,7 +200,7 @@ class StateMachineManager extends TOOLKIT.ScriptComponent {
     }
 
     private createState(name: string, length: number): TOOLKIT.MachineState {
-        const state = new TOOLKIT.MachineState();
+        const state = {} as TOOLKIT.MachineState;
         state.name = name;
         state.length = length;
         state.rate = 1.0;

@@ -21,7 +21,7 @@ BlendingWeights provides a simple container for managing primary and secondary a
 ### Basic Blending Weights Setup
 ```typescript
 class AnimationBlender extends TOOLKIT.ScriptComponent {
-    public blendingWeights: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
+    public blendingWeights: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
 
     protected start(): void {
         this.setupBlendingWeights();
@@ -75,8 +75,8 @@ class AnimationBlender extends TOOLKIT.ScriptComponent {
 ### Dynamic Blending Weight Management
 ```typescript
 class DynamicBlendingSystem extends TOOLKIT.ScriptComponent {
-    public currentBlending: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
-    public targetBlending: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
+    public currentBlending: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
+    public targetBlending: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
     public blendTransitionSpeed: number = 2.0;
 
     protected start(): void {
@@ -191,9 +191,9 @@ class DynamicBlendingSystem extends TOOLKIT.ScriptComponent {
 ### Multi-Layer Blending Weights
 ```typescript
 class LayeredBlendingSystem extends TOOLKIT.ScriptComponent {
-    public baseLayerWeights: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
-    public additiveLayerWeights: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
-    public overrideLayerWeights: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
+    public baseLayerWeights: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
+    public additiveLayerWeights: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
+    public overrideLayerWeights: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
 
     protected start(): void {
         this.setupLayeredBlending();
@@ -313,7 +313,7 @@ class LayeredBlendingSystem extends TOOLKIT.ScriptComponent {
     }
 
     public getEffectiveBlending(): TOOLKIT.BlendingWeights {
-        const effective = new TOOLKIT.BlendingWeights();
+        const effective = {} as TOOLKIT.BlendingWeights;
         
         if (this.overrideLayerWeights.primary.weight > 0.5) {
             effective.primary = { ...this.overrideLayerWeights.primary };
@@ -332,7 +332,7 @@ class LayeredBlendingSystem extends TOOLKIT.ScriptComponent {
 ### Blending Weight Utilities
 ```typescript
 class BlendingWeightUtilities extends TOOLKIT.ScriptComponent {
-    public blendingWeights: TOOLKIT.BlendingWeights = new TOOLKIT.BlendingWeights();
+    public blendingWeights: TOOLKIT.BlendingWeights = {} as TOOLKIT.BlendingWeights;
 
     protected start(): void {
         this.initializeUtilities();
@@ -411,7 +411,7 @@ class BlendingWeightUtilities extends TOOLKIT.ScriptComponent {
     }
 
     public copyWeights(): TOOLKIT.BlendingWeights {
-        const copy = new TOOLKIT.BlendingWeights();
+        const copy = {} as TOOLKIT.BlendingWeights;
         copy.primary = { ...this.blendingWeights.primary };
         copy.secondary = { ...this.blendingWeights.secondary };
         return copy;

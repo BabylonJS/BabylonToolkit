@@ -178,7 +178,7 @@ Validates the shader configuration.
 
 ### Basic Custom Material
 ```typescript
-const customMaterial = new TOOLKIT.CustomShaderMaterial();
+const customMaterial = new TOOLKIT.CustomShaderMaterial("myCustomMaterial", scene);
 
 customMaterial.shaderName = "myCustomShader";
 
