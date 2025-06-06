@@ -3,6 +3,11 @@
 The <a target="_blank" href="https://www.babylontoolkit.com">Babylon Toolkit</a> extension is an advanced game development framework that provides modern game engine mechanics for BabylonJS.
 
 
+# API Reference
+
+https://github.com/BabylonJS/BabylonToolkit/tree/master/Reference
+
+
 # Download Files
 
 https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors
