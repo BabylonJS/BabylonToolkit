@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.11.0 - R1) */
+        /** Gets the toolkit framework version number (8.11.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3721,6 +3721,10 @@ declare namespace TOOLKIT {
         private _targetVelocity;
         private _smoothedVelocity;
         private _velocitySmoothTime;
+        private _velocitySnapThreshold;
+        private _targetRotation;
+        private _rotationSmoothTime;
+        private _rotationSnapThreshold;
         private _gravityFactor;
         private _minJumpTimer;
         private _maxSlopeTimer;
@@ -3763,6 +3767,12 @@ declare namespace TOOLKIT {
         getVerticalVelocity(): number;
         getVelocitySmoothTime(): number;
         setVelocitySmoothTime(smoothTime: number): void;
+        getVelocitySnapThreshold(): number;
+        setVelocitySnapThreshold(threshold: number): void;
+        getRotationSmoothTime(): number;
+        setRotationSmoothTime(smoothTime: number): void;
+        getRotationSnapThreshold(): number;
+        setRotationSnapThreshold(threshold: number): void;
         getSlopeAngleRadians(): number;
         getSlopeAngleDegrees(): number;
         getGroundCollisionNode(): BABYLON.TransformNode;
@@ -3800,7 +3810,7 @@ declare namespace TOOLKIT {
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
-        /** Sets the character position and rotation to the specfied values. */
+        /** Teleport the character position and rotation to the specfied values. */
         set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
         /** Translates the character with the specfied linear velocity. */
         move(velocity: BABYLON.Vector3, aux?: boolean): void;
@@ -3810,8 +3820,6 @@ declare namespace TOOLKIT {
         turn(angle: number): void;
         /** Rotates the chacracter to the specified rotation. */
         rotate(x: number, y: number, z: number, w: number): void;
-        /** Translate the chacracter to the specified position. */
-        translate(x: number, y: number, z: number): void;
         /** Sets the character controller rigidbody mass property */
         setRigidBodyMass(mass: number): void;
         /** Set the character controller rigidbody collision type */
