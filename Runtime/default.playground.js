@@ -42,14 +42,16 @@ var PROJECT;
         fullScreenToggle = 0;
         setPointerLock = false;
         setCameraTarget = null;
+        setSpatialAudio = true;
         editorPostProcessing = null;
         m_cameraRig = null;
         isMainCamera() { return this.mainCamera; }
         getCameraType() { return this.cameraType; }
         getTargetTransform() { return this.setCameraTarget; }
         setTargetTransform(target) { this.setCameraTarget = target; }
-        constructor(transform, scene, properties, scriptComponentAlias) {
-            super(transform, scene, properties, scriptComponentAlias);
+        enableSpatialAudio(value) { this.setSpatialAudio = value; }
+        constructor(transform, scene, properties) {
+            super(transform, scene, properties);
             PROJECT.DefaultCameraSystem.cameraInstance = this;
         }
         awake() { this.awakeCameraSystemState(); }
@@ -64,6 +66,7 @@ var PROJECT;
             this.cameraType = this.getProperty("mainCameraType", this.cameraType);
             this.cameraInertia = this.getProperty("setCameraInertia", this.cameraInertia);
             this.fullScreenToggle = this.getProperty("fullScreenToggle", this.fullScreenToggle);
+            this.setSpatialAudio = this.getProperty("setSpatialAudio", this.setSpatialAudio);
             this.setPointerLock = this.getProperty("setPointerLock", this.setPointerLock);
             this.immersiveOptions = this.getProperty("immersiveOptions", this.immersiveOptions);
             this.arcRotateConfig = this.getProperty("arcRotateConfig", this.arcRotateConfig);
@@ -83,6 +86,13 @@ var PROJECT;
             if (this.multiPlayerSetup != null) {
                 PROJECT.DefaultCameraSystem.startupMode = this.multiPlayerSetup.playerStartupMode;
                 PROJECT.DefaultCameraSystem.stereoCameras = this.multiPlayerSetup.stereoSideBySide;
+            }
+            // ..
+            // Default Spatial Audio Support
+            // ..
+            if (this.setSpatialAudio === true && !TOOLKIT.AudioSource.IsLegacyEngine()) {
+                TOOLKIT.AudioSource.AttachSpatialCamera(this.transform);
+                // console.warn("### Attached Main Camera To Spatial Audio: " + this.transform.name);
             }
             // ..
             // Default Camera System Support
@@ -712,9 +722,15 @@ var PROJECT;
                     }
                     if (contact === true) {
                         this.cameraDistance = BABYLON.Scalar.Clamp((distance * this.cameraController.distanceFactor), this.cameraController.minDistance, this.cameraController.maxDistance);
-                        // Lerp Past Camera Collisions
+                        // Recalculate scaled direction with new distance to prevent feedback loops
+                        this.dollyDirection.scaleToRef(this.cameraDistance, this.scaledCamDirection);
+                        // Lerp Past Camera Collisions - with improved diagonal smoothing
                         if (this.cameraNode.position.x !== this.scaledCamDirection.x || this.cameraNode.position.y !== this.scaledCamDirection.y || this.cameraNode.position.z !== this.scaledCamDirection.z) {
-                            BABYLON.Vector3.LerpToRef(this.cameraNode.position, this.scaledCamDirection, (deltaTime * this.cameraController.cameraSmoothing), this.cameraNode.position);
+                            // Apply adaptive smoothing to reduce stretching during rapid diagonal movement
+                            const cameraDelta = this.cameraNode.position.subtract(this.scaledCamDirection);
+                            const deltaLength = cameraDelta.length();
+                            const adaptiveSmoothingFactor = deltaLength > 0.3 ? this.cameraController.cameraSmoothing * 0.8 : this.cameraController.cameraSmoothing;
+                            BABYLON.Vector3.LerpToRef(this.cameraNode.position, this.scaledCamDirection, (deltaTime * adaptiveSmoothingFactor), this.cameraNode.position);
                         }
                     }
                     else {
@@ -731,10 +747,14 @@ var PROJECT;
                                 }
                             }
                         }
-                        // Lerp To Camera Boom Position
-                        if (this.cameraNode.position.x !== this.cameraController.boomPosition.x || this.cameraNode.position.y !== this.cameraController.boomPosition.y || this.cameraNode.position.z !== this.cameraController.boomPosition.z) {
+                        // Lerp To Camera Boom Position - with improved diagonal smoothing
+                        if (this.cameraNode.position.x !== this.cameraBoomPosition.x || this.cameraNode.position.y !== this.cameraBoomPosition.y || this.cameraNode.position.z !== this.cameraBoomPosition.z) {
                             this.cameraBoomPosition.set(this.cameraController.boomPosition.x, this.cameraController.boomPosition.y, this.cameraController.boomPosition.z);
-                            BABYLON.Vector3.LerpToRef(this.cameraNode.position, this.cameraBoomPosition, (deltaTime * this.cameraController.cameraSmoothing), this.cameraNode.position);
+                            // Apply adaptive smoothing to reduce stretching during rapid diagonal movement
+                            const cameraDelta = this.cameraNode.position.subtract(this.cameraBoomPosition);
+                            const deltaLength = cameraDelta.length();
+                            const adaptiveSmoothingFactor = deltaLength > 0.3 ? this.cameraController.cameraSmoothing * 0.8 : this.cameraController.cameraSmoothing;
+                            BABYLON.Vector3.LerpToRef(this.cameraNode.position, this.cameraBoomPosition, (deltaTime * adaptiveSmoothingFactor), this.cameraNode.position);
                         }
                     }
                 }
@@ -5711,6 +5731,10 @@ var PROJECT;
             if (this.inputMovementVector.length() > 1.0)
                 this.inputMovementVector.normalize(); // Note: Normalize In Place
             this.inputMagnitude = this.inputMovementVector.length();
+            // // Apply consistent diagonal movement scaling to prevent stretching
+            // if (this.inputMagnitude > 0.7071) { // sqrt(0.5) threshold for diagonal movement
+            //     this.inputMagnitude = Math.min(this.inputMagnitude, 1.0);
+            // }            
             // ..
             // Update Move Direction
             // ..
@@ -6418,7 +6442,6 @@ var PROJECT;
         keyboardCamera = TOOLKIT.UserInputKey.P;
         postNetworkAttributes = false;
         playerNumber = TOOLKIT.PlayerNumber.One;
-        boomPosition = new BABYLON.Vector3(0, 0, -5);
         airbornVelocity = new BABYLON.Vector3(0, 0, 0);
         movementVelocity = new BABYLON.Vector3(0, 0, 0);
         isAnimationEnabled() { return this.updateStateParams; }
@@ -6544,6 +6567,11 @@ var PROJECT;
         after() { this.afterPlayerController(); }
         update() { this.updatePlayerController(); }
         destroy() { this.destroyPlayerController(); }
+        /** Character controller position
+         * @deprecated Moved to default camera controller
+         * @see PROJECT.DefaultCameraSystem
+         */
+        boomPosition = new BABYLON.Vector3(0, 0, -5);
         /** Register handler that is triggered before the controller has been updated */
         onPreUpdateObservable = new BABYLON.Observable();
         /** Register handler that is triggered before the controller movement has been applied */
@@ -7177,6 +7205,10 @@ var PROJECT;
             if (this.inputMovementVector.length() > 1.0)
                 this.inputMovementVector.normalize(); // Note: Normalize In Place
             this.inputMagnitude = this.inputMovementVector.length();
+            // // Apply consistent diagonal movement scaling to prevent stretching
+            // if (this.inputMagnitude > 0.7071) { // sqrt(0.5) threshold for diagonal movement
+            //     this.inputMagnitude = Math.min(this.inputMagnitude, 1.0);
+            // }
             // ..
             // Update Move Direction
             // ..
@@ -7233,7 +7265,7 @@ var PROJECT;
             this.cameraForwardVector = this.freeCamera.getForwardRay().direction;
             this.cameraForwardVector.y = 0;
             this.cameraForwardVector.normalize();
-            this.cameraForwardVector.scaleToRef(this.playerInputZ, this.desiredForwardVector);
+            this.cameraForwardVector.scaleToRef(this.inputMovementVector.z, this.desiredForwardVector);
             // ..
             // Update Right Camera Vector
             // ..
@@ -7241,7 +7273,7 @@ var PROJECT;
             this.cameraRightVector = BABYLON.Vector3.Cross(this.cameraForwardVector, BABYLON.Vector3.Up());
             this.cameraRightVector.y = 0;
             this.cameraRightVector.normalize();
-            this.cameraRightVector.scaleToRef(-this.playerInputX, this.desiredRightVector);
+            this.cameraRightVector.scaleToRef(-this.inputMovementVector.x, this.desiredRightVector);
             if (this.movementAllowed === false) {
                 this.canPlayerJump = false;
                 this.playerInputX = 0;
@@ -7292,7 +7324,10 @@ var PROJECT;
                     TOOLKIT.Utilities.LookRotationToRef(this.playerLookRotation, this.playerRotationQuaternion);
                     const forwardTurnRatio = (this.playerLookRotation.length() / this.moveSpeed);
                     const forwardTurnSpeed = BABYLON.Scalar.Lerp(this.highTurnSpeed, this.lowTurnSpeed, forwardTurnRatio);
-                    BABYLON.Quaternion.SlerpToRef(this.transform.rotationQuaternion, this.playerRotationQuaternion, (forwardTurnSpeed * this.deltaTime), this.transform.rotationQuaternion);
+                    // Apply adaptive rotation smoothing to reduce stretching during rapid diagonal movement
+                    const rotationDelta = Math.abs(BABYLON.Quaternion.Dot(this.transform.rotationQuaternion, this.playerRotationQuaternion));
+                    const adaptiveRotationSpeed = rotationDelta < 0.85 ? forwardTurnSpeed * 0.85 : forwardTurnSpeed;
+                    BABYLON.Quaternion.SlerpToRef(this.transform.rotationQuaternion, this.playerRotationQuaternion, (adaptiveRotationSpeed * this.deltaTime), this.transform.rotationQuaternion);
                     this.lastRotationQuaternion.copyFrom(this.transform.rotationQuaternion);
                 }
             }
@@ -13197,8 +13232,8 @@ var PROJECT;
         autoStart = false;
         autoUpdate = true;
         delayTimeout = 3.0;
-        constructor(transform, scene, properties, scriptComponentAlias) {
-            super(transform, scene, properties, scriptComponentAlias);
+        constructor(transform, scene, properties) {
+            super(transform, scene, properties);
             PROJECT.SnapshotManager.ResetSnapshotHelper(scene);
         }
         start() {

@@ -34,13 +34,15 @@ declare namespace PROJECT {
         private fullScreenToggle;
         private setPointerLock;
         private setCameraTarget;
+        private setSpatialAudio;
         private editorPostProcessing;
         protected m_cameraRig: BABYLON.TargetCamera;
         isMainCamera(): boolean;
         getCameraType(): number;
         getTargetTransform(): BABYLON.TransformNode;
         setTargetTransform(target: BABYLON.TransformNode): void;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, scriptComponentAlias?: string);
+        enableSpatialAudio(value: boolean): void;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -1522,7 +1524,6 @@ declare namespace PROJECT {
         keyboardCamera: number;
         postNetworkAttributes: boolean;
         playerNumber: TOOLKIT.PlayerNumber;
-        boomPosition: BABYLON.Vector3;
         airbornVelocity: BABYLON.Vector3;
         movementVelocity: BABYLON.Vector3;
         isAnimationEnabled(): boolean;
@@ -1642,6 +1643,11 @@ declare namespace PROJECT {
         protected after(): void;
         protected update(): void;
         protected destroy(): void;
+        /** Character controller position
+         * @deprecated Moved to default camera controller
+         * @see PROJECT.DefaultCameraSystem
+         */
+        boomPosition: BABYLON.Vector3;
         /** Register handler that is triggered before the controller has been updated */
         onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered before the controller movement has been applied */
@@ -2800,7 +2806,7 @@ declare namespace PROJECT {
         private autoStart;
         private autoUpdate;
         private delayTimeout;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, scriptComponentAlias?: string);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
         protected start(): void;
         protected ready(): void;
         protected update(): void;
