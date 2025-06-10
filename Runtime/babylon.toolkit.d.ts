@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.9.2 - R1) */
+        /** Gets the toolkit framework version number (8.11.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3718,9 +3718,9 @@ declare namespace TOOLKIT {
         private _collisionEvents;
         private _currentVelocity;
         private _inputVelocity;
-        private _angluarVelocity;
-        private _eulerAngles;
-        private _currentAngle;
+        private _targetVelocity;
+        private _smoothedVelocity;
+        private _velocitySmoothTime;
         private _gravityFactor;
         private _minJumpTimer;
         private _maxSlopeTimer;
@@ -3761,6 +3761,8 @@ declare namespace TOOLKIT {
         setGravityFactor(factor: number): void;
         getInputVelocity(): BABYLON.Vector3;
         getVerticalVelocity(): number;
+        getVelocitySmoothTime(): number;
+        setVelocitySmoothTime(smoothTime: number): void;
         getSlopeAngleRadians(): number;
         getSlopeAngleDegrees(): number;
         getGroundCollisionNode(): BABYLON.TransformNode;
@@ -4263,7 +4265,7 @@ declare namespace TOOLKIT {
         static CachedPhysicsShapeCount: number;
         static DebugPhysicsViewer: any;
         static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
-        static ConfigurePhysicsEngine(scene: BABYLON.Scene, deltaWorldStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
+        static ConfigurePhysicsEngine(scene: BABYLON.Scene, fixedTimeStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
         static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.TransformNode): void;
         protected static GetPhysicsMaterialCombine(unity: number): number;
         protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
