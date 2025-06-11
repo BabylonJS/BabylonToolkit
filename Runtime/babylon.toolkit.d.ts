@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.11.1 - R1) */
+        /** Gets the toolkit framework version number (8.11.5 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3716,15 +3716,10 @@ declare namespace TOOLKIT {
         private _verticalStepSpeed;
         private _minimumStepHeight;
         private _collisionEvents;
+        private _targetRotation;
+        private _targetVelocity;
         private _currentVelocity;
         private _inputVelocity;
-        private _targetVelocity;
-        private _smoothedVelocity;
-        private _velocitySmoothTime;
-        private _velocitySnapThreshold;
-        private _targetRotation;
-        private _rotationSmoothTime;
-        private _rotationSnapThreshold;
         private _gravityFactor;
         private _minJumpTimer;
         private _maxSlopeTimer;
@@ -3765,14 +3760,6 @@ declare namespace TOOLKIT {
         setGravityFactor(factor: number): void;
         getInputVelocity(): BABYLON.Vector3;
         getVerticalVelocity(): number;
-        getVelocitySmoothTime(): number;
-        setVelocitySmoothTime(smoothTime: number): void;
-        getVelocitySnapThreshold(): number;
-        setVelocitySnapThreshold(threshold: number): void;
-        getRotationSmoothTime(): number;
-        setRotationSmoothTime(smoothTime: number): void;
-        getRotationSnapThreshold(): number;
-        setRotationSnapThreshold(threshold: number): void;
         getSlopeAngleRadians(): number;
         getSlopeAngleDegrees(): number;
         getGroundCollisionNode(): BABYLON.TransformNode;

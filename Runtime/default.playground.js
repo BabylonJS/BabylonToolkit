@@ -32,6 +32,8 @@ var PROJECT;
         static IsCameraSystemReady() { return PROJECT.DefaultCameraSystem.cameraReady; }
         /** Register handler that is triggered when the webxr experience helper has been created */
         static OnXRExperienceHelperObservable = new BABYLON.Observable();
+        /** Default Follow Speed */
+        static FOLLOW_SPEED = 1.0; // Default Follow Speed
         mainCamera = false;
         cameraType = 0;
         cameraInertia = 0.9;
@@ -670,6 +672,30 @@ var PROJECT;
                 // Update Camera Pivot Position
                 // ..
                 TOOLKIT.Utilities.GetAbsolutePositionToRef(this.setCameraTarget, this.cameraPivot.position, this.cameraPivotOffset);
+                // Smooth velocity changes with snap when close enough
+                // if (this._velocitySmoothTime > 0 && BABYLON.Vector3.Distance(this._smoothedVelocity, this._targetVelocity) > this._velocitySnapThreshold)
+                // {
+                //     const deltaTime = this.getDeltaSeconds();
+                //     const smoothingFactor = Math.min(1, (1 / this._velocitySmoothTime) * deltaTime);
+                //     BABYLON.Vector3.LerpToRef(
+                //         this._smoothedVelocity,
+                //         this._targetVelocity,
+                //         smoothingFactor,
+                //         this._smoothedVelocity
+                //     );
+                // }
+                // else
+                // {
+                //     // Snap to target velocity when close enough or smoothing is disabled
+                //     this._smoothedVelocity.copyFrom(this._targetVelocity);
+                // }
+                // Smoothly interpolate the cameraPivot to follow the target + offset
+                // BABYLON.Vector3.LerpToRef(
+                //     this.cameraPivot.position,
+                //     this.setCameraTarget.getAbsolutePosition().add(this.cameraPivotOffset),
+                //     deltaTime * PROJECT.DefaultCameraSystem.FOLLOW_SPEED,
+                //     this.cameraPivot.position
+                // );
                 // ..
                 // Update Camera Pivot Rotation
                 // ..
@@ -5731,10 +5757,6 @@ var PROJECT;
             if (this.inputMovementVector.length() > 1.0)
                 this.inputMovementVector.normalize(); // Note: Normalize In Place
             this.inputMagnitude = this.inputMovementVector.length();
-            // // Apply consistent diagonal movement scaling to prevent stretching
-            // if (this.inputMagnitude > 0.7071) { // sqrt(0.5) threshold for diagonal movement
-            //     this.inputMagnitude = Math.min(this.inputMagnitude, 1.0);
-            // }            
             // ..
             // Update Move Direction
             // ..
@@ -7205,10 +7227,6 @@ var PROJECT;
             if (this.inputMovementVector.length() > 1.0)
                 this.inputMovementVector.normalize(); // Note: Normalize In Place
             this.inputMagnitude = this.inputMovementVector.length();
-            // // Apply consistent diagonal movement scaling to prevent stretching
-            // if (this.inputMagnitude > 0.7071) { // sqrt(0.5) threshold for diagonal movement
-            //     this.inputMagnitude = Math.min(this.inputMagnitude, 1.0);
-            // }
             // ..
             // Update Move Direction
             // ..

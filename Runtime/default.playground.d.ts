@@ -24,6 +24,8 @@ declare namespace PROJECT {
         static IsCameraSystemReady(): boolean;
         /** Register handler that is triggered when the webxr experience helper has been created */
         static OnXRExperienceHelperObservable: BABYLON.Observable<BABYLON.WebXRDefaultExperience>;
+        /** Default Follow Speed */
+        static FOLLOW_SPEED: number;
         private mainCamera;
         private cameraType;
         private cameraInertia;
