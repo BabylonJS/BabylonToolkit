@@ -1,25 +1,31 @@
 # Babylon Toolkit API Reference
 
-A comprehensive API reference for the Babylon Toolkit library - a powerful extension framework for Babylon.js that provides Unity-style components and utilities for 3D web development.
+A comprehensive API reference for the Babylon Toolkit library - a powerful extension framework for Babylon.js that provides Unity style components and utilities for 3D web development.
 
 ## Overview
 
 The Babylon Toolkit extends Babylon.js with a comprehensive set of classes and utilities that make 3D web development more accessible and powerful. This documentation covers all classes, interfaces, and utilities available in the toolkit.
 
-## Quick Start
+## Pro Classes
 
 ```typescript
-// Initialize the toolkit
-await TOOLKIT.SceneManager.InitializeRuntime(engine);
+// Access character controller
+const character = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.CharacterController");
 
-// Use scene management utilities
-const mesh = TOOLKIT.SceneManager.GetMesh(scene, "myMesh");
+// Access rigidbody physics
+const rigidbody = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.RigidbodyPhysics");
 
-// Access physics components
-const physics = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.RigidbodyPhysics");
+// Access animation state
+const animator = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.AnimationState");
 
 // Access navigation agent
 const agent = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.NavigationAgent");
+
+// Access web video player
+const video = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.WebVideoPlayer");
+
+// Access audio source
+const audio = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.AudioSource");
 ```
 
 ## API Categories
@@ -105,52 +111,11 @@ const agent = TOOLKIT.SceneManager.GetComponent(transform, "TOOLKIT.NavigationAg
 - [Physics Interfaces](api/interfaces/Physics.md) - Physics system interfaces
 - [Animation Interfaces](api/interfaces/Animation.md) - Animation system interfaces
 
-## Version Information
-
-- **Toolkit Version**: 8.9.1 - R1
-- **Copyright**: All rights reserved (c) 2024 Mackey Kinard
-
 ## Getting Started
 
 1. **Installation**: Include the Babylon Toolkit in your project
-2. **Initialization**: Use `TOOLKIT.SceneManager.InitializeRuntime()` to set up the toolkit
-3. **Scene Setup**: Load your scenes and assets using the SceneManager utilities
-4. **Components**: Add script components to your transforms for interactive behavior
-5. **Physics**: Configure physics using RigidbodyPhysics for realistic simulations
-6. **Navigation**: Set up NavigationAgent for AI pathfinding and movement
-
-## Examples
-
-### Basic Scene Setup
-```typescript
-// Initialize the toolkit runtime
-await TOOLKIT.SceneManager.InitializeRuntime(engine);
-
-// Load a scene with assets
-await TOOLKIT.SceneManager.LoadAssetContainerAsync("./assets/", "scene.babylon");
-
-// Get scene objects
-const player = TOOLKIT.SceneManager.GetTransformNode(scene, "Player");
-const enemy = TOOLKIT.SceneManager.GetTransformNode(scene, "Enemy");
-```
-
-### Physics Setup
-```typescript
-// Configure physics engine
-await TOOLKIT.RigidbodyPhysics.ConfigurePhysicsEngine(scene);
-
-// Add physics to an object
-TOOLKIT.RigidbodyPhysics.SetupPhysicsComponent(scene, playerTransform);
-```
-
-### Navigation Setup
-```typescript
-// Access navigation agent component
-const agent = TOOLKIT.SceneManager.GetComponent(enemyTransform, "TOOLKIT.NavigationAgent");
-
-// Set destination
-agent.setDestination(playerPosition);
-```
+2. **Scene Setup**: Load your scenes and assets as you normally would
+3. **Components**: Add script components to transforms for interactive behavior
 
 ## Support
 
