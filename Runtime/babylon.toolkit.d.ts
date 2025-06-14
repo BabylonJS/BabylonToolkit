@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.11.22 - R1) */
+        /** Gets the toolkit framework version number (8.12.5 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -173,7 +173,6 @@ declare namespace TOOLKIT {
         static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
         /** Gets the current engine version string info. */
         static GetEngineVersionString(scene: BABYLON.Scene): string;
-        static RegisterLoaderPlugins(): void;
         /** Store data object of function on the local window state. */
         static SetWindowState(name: string, data: any): void;
         /** Retrieve data object or function from the local window state. */

@@ -42,7 +42,7 @@ Or node package manager:
 
 # Node Package Manager
 
-A universal runtime library packaged for UMD and ES6 projects.
+A universal runtime library packaged for UMD projects.
 
 https://www.npmjs.com/package/babylon-toolkit
 
