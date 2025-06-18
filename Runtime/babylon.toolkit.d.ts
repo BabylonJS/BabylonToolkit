@@ -1392,7 +1392,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.138 - R1) */
+        /** Gets the toolkit framework version number (8.12.142 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4449,7 +4449,7 @@ declare namespace TOOLKIT {
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
-/** Export Babylon Toolkit Namespace */
+/** Export Default Babylon Toolkit */
 
 declare var SM: typeof TOOLKIT.SceneManager;
 declare var WM: typeof TOOLKIT.WindowManager;
