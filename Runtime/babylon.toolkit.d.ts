@@ -5,7 +5,7 @@ declare namespace TOOLKIT {
      * @class CVTOOLS_unity_metadata - All rights reserved (c) 2024 Mackey Kinard
      * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
      */
-    const enum MaterialAlphaMode {
+    enum MaterialAlphaMode {
         /**
          * The alpha value is ignored and the rendered output is fully opaque
          */
@@ -1392,7 +1392,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.136 - R1) */
+        /** Gets the toolkit framework version number (8.12.138 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
