@@ -1,4 +1,618 @@
 /** UMD Type References */
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+    * Babylon toolkit scene manager class
+    * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
+    */
+    class SceneManager {
+        /** Gets the toolkit framework version number (8.12.222 - R1) */
+        static get Version(): string;
+        /** Gets the toolkit framework copyright notice */
+        static get Copyright(): string;
+        /** Set global system options */
+        static GlobalOptions: any;
+        /** Set global window state */
+        static WindowState: any;
+        /** Default network game server endpoint (without slash suffix) */
+        static ServerEndPoint: string;
+        /** Set the allow debug mode flag */
+        static EnableDebugMode: boolean;
+        /** Set the allow user input flag */
+        static EnableUserInput: boolean;
+        /** Enable the main page render loop */
+        static RenderLoopReady: boolean;
+        /** Pauses the main page render loop */
+        static PauseRenderLoop: boolean;
+        /** The webgl render context has been lost flag */
+        static LostRenderContext: boolean;
+        /** Set the preload auto update progress flag */
+        static AutoUpdateProgress: boolean;
+        /** Set the capsule collider shape type */
+        static PhysicsCapsuleShape: number;
+        /** Set the support srgb buffers flag */
+        static SupportSRGBBuffers: boolean;
+        /** The animation start mode. Defaults to NONE. */
+        static AnimationStartMode: number;
+        /** When loading glTF animations, which are defined in seconds, target them to this FPS. Defaults to 60 for new behavior. Set to 1 for old behavior */
+        static AnimationTargetFps: number;
+        /** Set the default convex hull shape margin size */
+        static DefaultConvexHullMargin: number;
+        /** Set the default height field shape margin size */
+        static DefaultHeightFieldMargin: number;
+        /** Set the ambient light intensity factor */
+        static AmbientLightIntensity: number;
+        /** Set the point light intensity factor */
+        static PointLightIntensity: number;
+        /** Set the spot light intensity factor */
+        static SpotLightIntensity: number;
+        /** Set the directional light intensity factor */
+        static DirectionalLightIntensity: number;
+        /** Set the terrain shader color correction value */
+        static TerrainColorCorrection: number;
+        /** Set the allow camera movement flag */
+        static AllowCameraMovement: boolean;
+        /** Set the allow camera rotation flag */
+        static AllowCameraRotation: boolean;
+        /** Set the virtual joystick enabled flag */
+        static VirtualJoystickEnabled: boolean;
+        /** Gets the total game time in milliseconds */
+        static GameTimeMilliseconds: number;
+        /** Set the parse script component flag */
+        static ParseScriptComponents: boolean;
+        /** Set the auto load script bundles flag */
+        static AutoLoadScriptBundles: boolean;
+        /** Returns a Promise that resolves after the specfied time */
+        static WaitForSeconds: (seconds: number) => Promise<void>;
+        /** Register handler that is triggered before the main scene render loop (engine.html) */
+        static OnPreRenderLoopObservable: BABYLON.Observable<void>;
+        /** Register handler that is triggered before the main scene render loop (engine.html) */
+        static OnPostRenderLoopObservable: BABYLON.Observable<void>;
+        /** Register handler that is triggered when the scene is ready (engine.html) */
+        static OnSceneReadyObservable: BABYLON.Observable<string>;
+        /** Register handler that is triggered when then engine has been resized (engine.html) */
+        static OnEngineResizeObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
+        /** Register handler that is triggered when the scene has been loaded (engine.html) */
+        static OnLoadCompleteObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
+        /** Register handler that is triggered when then webgl context need to be rebuilt (engine.html) */
+        static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
+        /** Register asset manager progress event (engine.html) */
+        static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        private static _HideLoadingScreen;
+        static CVTOOLS_NAME: string;
+        static CVTOOLS_MESH: string;
+        static CVTOOLS_HAND: string;
+        static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
+        private static _EventBus;
+        /** Default global event message bus
+         * @example
+         * // Handle myevent message
+         * TOOLKIT.SceneManager.EventBus.OnMessage("myevent", (data:string) => {
+         *    console.log("My Event Data: " + data);
+         * });
+         *
+         * // Post myevent message
+         * TOOLKIT.SceneManager.EventBus.PostMessage("myevent", "Hello World!");
+        */
+        static get EventBus(): TOOLKIT.GlobalMessageBus;
+        /** Gets the babylon toolkit playground default project script bundle cdn address
+         * @address https://cdn.jsdelivr.net/gh/BabylonJS/BabylonToolkit@master/Runtime/
+         */
+        static get PlaygroundCdn(): string;
+        /** Gets the babylon toolkit  playground repo address
+         * Contains interactive exported demo asset files
+         * @address https://www.babylontoolkit.com/playground/
+         */
+        static get PlaygroundRepo(): string;
+        /**
+         * Initialize the babylon toolkit playground environment
+         * @param engine The engine instance.
+         * @param options The playground options.
+         * @returns a waitable promise.
+         */
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
+        /**
+         * Initialize the babylon toolkit runtime environment
+         * @param engine The engine instance.
+         * @param options The playground options.
+         * @returns a waitable promise.
+         */
+        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
+        /**
+         * Sets the on scene ready handler then starts the assets manager loadAsync function
+         * @param assetsManager The list of required scene filenames to check ready state.
+         * @param requiredFilenames The list of required scene filenames to check ready state.
+         * @param readyHandler The function that will be called when all scene files are ready.
+         * @param maxTimeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
+         * @param debugMode The flag to enable on scene ready debug messages. Default false.
+         */
+        static LoadRuntimeAssets(assetsManager: BABYLON.AssetsManager, requiredFilenames: string[], readyHandler: () => void, maxTimeout?: number, debugMode?: boolean): Promise<void>;
+        /**
+         * Shows the default loading screen panel
+         * @param engine The engine instance.
+         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
+         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         */
+        static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
+        /**
+         * Hides the default loading screen panel
+         * @param engine The engine instance.
+         */
+        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine): void;
+        /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
+        static ForceHideLoadingScreen(): void;
+        private static DoForceHideLoadingScreen;
+        /** Focus the scene rendering canvas
+         * @param scene The scene instance.
+         */
+        static FocusRenderCanvas(scene: BABYLON.Scene): void;
+        private static SceneLoaderFileNames;
+        private static SceneLoaderPropertyBag;
+        private static SceneLoaderHandledFlag;
+        /**
+         * Sets the handler that executes when all required scene files are ready
+         * @param filenames The list of required scene filenames to check ready state.
+         * @param handler The function that will be called when all scene files are ready
+         * @param timeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
+         */
+        static SetOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
+        private static SceneParsingEnabled;
+        /** Enable scene loader parsing plugin */
+        static EnableSceneParsing(enabled: boolean): void;
+        /** Is scene loader parsing plugin enabled */
+        static IsSceneParsingEnabled(): boolean;
+        /** Has the specfied scene already been preloaded */
+        static HasSceneBeenPreLoaded(scene: BABYLON.Scene): boolean;
+        /** Get the scene default skybox mesh */
+        static GetDefaultSkybox(scene: BABYLON.Scene): BABYLON.AbstractMesh;
+        /** Get the scene default intenisty factor */
+        static GetIntensityFactor(): number;
+        /** Get the system render quality local storage setting. */
+        static GetRenderQuality(): TOOLKIT.RenderQuality;
+        /** Set the system render quality local storage setting. */
+        static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
+        /** Gets the current engine version string info. */
+        static GetEngineVersionString(scene: BABYLON.Scene): string;
+        /** Store data object of function on the local window state. */
+        static SetWindowState(name: string, data: any): void;
+        /** Retrieve data object or function from the local window state. */
+        static GetWindowState<T>(name: string): T;
+        /** Are scene manager debugging services available. */
+        static IsDebugMode(): boolean;
+        /** Send log data directly to the console. */
+        static ConsoleLog(...data: any[]): void;
+        /** Send info data directly to the console. */
+        static ConsoleInfo(...data: any[]): void;
+        /** Send warning data directly to the console. */
+        static ConsoleWarn(...data: any[]): void;
+        /** Send error data directly to the console. */
+        static ConsoleError(...data: any[]): void;
+        /** Logs a message to the console using the babylon logging system. */
+        static LogMessage(message: string): void;
+        /** Logs a warning to the console using babylon logging system. */
+        static LogWarning(warning: string): void;
+        /** Logs a error to the console using babylon logging system. */
+        static LogError(error: string): void;
+        /** Get the current time in seconds */
+        static GetTime(): number;
+        /** Get the current time in milliseconds */
+        static GetTimeMs(): number;
+        /** Get the total game time in seconds */
+        static GetGameTime(): number;
+        /** Get the total game time in milliseconds */
+        static GetGameTimeMs(): number;
+        /** Get the current delta time in seconds */
+        static GetDeltaTime(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
+        /** Get the current delta time in seconds */
+        static GetDeltaSeconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
+        /** Get the current delta time in milliseconds */
+        static GetDeltaMilliseconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
+        /** Get system time in milleseconds */
+        static GetTimeMilliseconds(): number;
+        /** Get the delta time animation ratio for 60 fps */
+        static GetAnimationRatio(scene: BABYLON.Scene): number;
+        /** Run a function on the next render loop. */
+        static RunOnce(scene: BABYLON.Scene, func: () => void, timeout?: number): void;
+        /** Disposes entire scene and release all resources */
+        static DisposeScene(scene: BABYLON.Scene, clearColor?: BABYLON.Color4): void;
+        /** Safely destroy transform node */
+        static SafeDestroy(transform: BABYLON.TransformNode, delay?: number, disable?: boolean): void;
+        /** Get the root url the last scene properties was loaded from */
+        static GetRootUrl(scene: BABYLON.Scene): string;
+        /** Sets the root url the last scene properties was loaded from */
+        static SetRootUrl(scene: BABYLON.Scene, url: string): void;
+        /** Get the file name the last scene properties was loaded from */
+        static GetSceneFile(scene: BABYLON.Scene): string;
+        /** Sets the file name the last scene properties was loaded from */
+        static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
+        /** Gets all the created engine instances */
+        static GetEngineInstances(): BABYLON.AbstractEngine[];
+        /** Get the last create engine instance */
+        static GetLastCreatedEngine(): BABYLON.AbstractEngine;
+        /** Get the last created scene instance */
+        static GetLastCreatedScene(): BABYLON.Scene;
+        /** Add a shadow castor mesh to a shadow light. */
+        static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
+        private static PhysicsViewersEnabled;
+        static IsPhysicsViewerEnabled(): boolean;
+        static TogglePhysicsViewer(scene: BABYLON.Scene): void;
+        /** Get managed asset container. */
+        static GetImportMeshes(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh[];
+        /** Get managed asset container map. */
+        static GetImportMeshesMap(scene: BABYLON.Scene): Map<string, BABYLON.AbstractMesh[]>;
+        /** Clear all managed asset containers. */
+        static ClearImportMeshes(scene: BABYLON.Scene): void;
+        /** Set managed asset container. */
+        static RegisterImportMeshes(scene: BABYLON.Scene, name: string, meshes: BABYLON.AbstractMesh[]): void;
+        /**
+         * Import cached meshes into a scene
+         * @param meshNames an array of mesh names, a single mesh name, or empty string for all meshes that filter what meshes are imported
+         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
+         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
+         * @param scene the instance of BABYLON.Scene to append to
+         * @param onSuccess a callback with a list of imported meshes, particleSystems, skeletons, and animationGroups when import succeeds
+         * @param onProgress a callback with a progress event for each file being loaded
+         * @param onError a callback with the scene, a message, and possibly an exception when import fails
+         * @param pluginExtension the extension used to determine the plugin
+         * @param name defines the name of the file, if the data is binary
+         * @returns The loaded plugin
+         */
+        static LoadImportMeshes(meshNames: string | readonly string[] | null | undefined, rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onSuccess?: (container: BABYLON.AbstractMesh[]) => void, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, onError?: (scene: BABYLON.Scene, message: string, exception?: any) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): BABYLON.Nullable<BABYLON.ISceneLoaderPlugin | BABYLON.ISceneLoaderPluginAsync>;
+        /**
+         * Import cached meshes into a scene
+         * @param meshNames an array of mesh names, a single mesh name, or empty string for all meshes that filter what meshes are imported
+         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
+         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
+         * @param scene the instance of BABYLON.Scene to append to
+         * @param onProgress a callback with a progress event for each file being loaded
+         * @param pluginExtension the extension used to determine the plugin
+         * @param name defines the name of the file
+         * @returns The loaded list of imported meshes, particle systems, skeletons, and animation groups
+         */
+        static LoadImportMeshesAsync(meshNames: string | readonly string[] | null | undefined, rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): Promise<BABYLON.AbstractMesh[]>;
+        /** Get managed asset container. */
+        static GetAssetContainer(scene: BABYLON.Scene, name: string): BABYLON.AssetContainer;
+        /** Get managed asset container map. */
+        static GetAssetContainerMap(scene: BABYLON.Scene): Map<string, BABYLON.AssetContainer>;
+        /** Clear all managed asset containers. */
+        static ClearAssetContainers(scene: BABYLON.Scene): void;
+        /** Set managed asset container. */
+        static RegisterAssetContainer(scene: BABYLON.Scene, name: string, container: BABYLON.AssetContainer): void;
+        /**
+         * Load a scene into a cached asset container
+         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
+         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
+         * @param scene is the instance of BABYLON.Scene to append to (default: last created scene)
+         * @param onSuccess a callback with the scene when import succeeds
+         * @param onProgress a callback with a progress event for each file being loaded
+         * @param onError a callback with the scene, a message, and possibly an exception when import fails
+         * @param pluginExtension the extension used to determine the plugin
+         * @param name defines the filename, if the data is binary
+         * @returns The loaded plugin
+         */
+        static LoadAssetContainer(rootUrl: string, sceneFilename?: string, scene?: BABYLON.Scene, onSuccess?: (container: BABYLON.AssetContainer) => void, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, onError?: (scene: BABYLON.Scene, message: string, exception?: any) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): void;
+        /**
+         * Load a scene into a cached asset container
+         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
+         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene (default: empty string)
+         * @param scene is the instance of Scene to append to
+         * @param onProgress a callback with a progress event for each file being loaded
+         * @param pluginExtension the extension used to determine the plugin
+         * @param name defines the filename, if the data is binary
+         * @returns The loaded asset container
+         */
+        static LoadAssetContainerAsync(rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onProgress?: BABYLON.Nullable<(event: BABYLON.ISceneLoaderProgressEvent) => void>, pluginExtension?: BABYLON.Nullable<string>, name?: string): Promise<BABYLON.AssetContainer>;
+        /** Gets the specified mesh by name from scene. */
+        static GetMesh(scene: BABYLON.Scene, name: string): BABYLON.Mesh;
+        /** Gets the specified mesh by id from scene. */
+        static GetMeshByID(scene: BABYLON.Scene, id: string): BABYLON.Mesh;
+        /** Gets the specified abstract mesh by name from scene. */
+        static GetAbstractMesh(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh;
+        /** Gets the specified abstract mesh by id from scene. */
+        static GetAbstractMeshByID(scene: BABYLON.Scene, id: string): BABYLON.AbstractMesh;
+        /** Gets the specified transform node by name from scene. */
+        static GetTransformNode(scene: BABYLON.Scene, name: string): BABYLON.TransformNode;
+        /** Gets the specified transform node by id from scene. */
+        static GetTransformNodeByID(scene: BABYLON.Scene, id: string): BABYLON.TransformNode;
+        /** Gets the transform node child detail mesh. */
+        static GetTransformDetailMesh(transform: BABYLON.TransformNode): BABYLON.AbstractMesh;
+        /** Gets the transform node skinned mesh. */
+        static GetSkinnedMesh(transform: BABYLON.TransformNode): BABYLON.AbstractMesh;
+        /** Gets the transform node primitive meshes. */
+        static GetPrimitiveMeshes(transform: BABYLON.TransformNode): BABYLON.AbstractMesh[];
+        /** Gets the specified transform node layer index value. */
+        static GetTransformLayer(transform: BABYLON.TransformNode): number;
+        /** Gets the specified transform node layer mask value. */
+        static GetTransformLayerMask(transform: BABYLON.TransformNode): number;
+        /** Gets the specified transform node layer name value. */
+        static GetTransformLayerName(transform: BABYLON.TransformNode): string;
+        /** Gets the specified transform node primary tag name. */
+        static GetTransformTag(transform: BABYLON.TransformNode): string;
+        /** Check if the transform has the specified query tag match */
+        static HasTransformTags(transform: BABYLON.TransformNode, query: string): boolean;
+        /** Are half or full texture floats supported */
+        static TextureFloatSupported(scene: BABYLON.Scene): boolean;
+        /** Registers an on pick trigger click action */
+        static RegisterClickAction(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh, func: () => void): BABYLON.IAction;
+        /** Unregisters an on pick trigger click action */
+        static UnregisterClickAction(mesh: BABYLON.AbstractMesh, action: BABYLON.IAction): boolean;
+        /** Starts a targeted float animation for tweening.  */
+        static StartTweenAnimation(scene: BABYLON.Scene, name: string, targetObject: any, targetProperty: string, startValue: number, endValue: number, defaultSpeedRatio?: number, defaultFrameRate?: number, defaultLoopMode?: number, defaultEasingFunction?: BABYLON.EasingFunction, onAnimationComplete?: () => void): BABYLON.Animatable;
+        /** DEPRECATED: Starts a native javascript tween animation (https://createjs.com/docs/tweenjs/modules/TweenJS.html) */
+        /** Get first material with name. (Uses starts with text searching) */
+        static GetMaterialWithName(scene: BABYLON.Scene, name: string): BABYLON.Material;
+        /** Get all materials with name. (Uses starts with text searching) */
+        static GetAllMaterialsWithName(scene: BABYLON.Scene, name: string): BABYLON.Material[];
+        /** TODO: Support Animation Groups */
+        /** TODO: Support Instance Or Clones */
+        /** Instantiate the specified prefab asset hierarchy from the specified scene. (Cloned Hierarchy) */
+        static InstantiatePrefabFromScene(scene: BABYLON.Scene, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean): BABYLON.TransformNode;
+        /** Instantiate the specified prefab asset hierarchy from an asset container. (Cloned Hierarchy) */
+        static InstantiatePrefabFromContainer(container: BABYLON.AssetContainer, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean): BABYLON.TransformNode;
+        /** Instantiate all the raw models from an asset container. (Cloned Hierarchy) */
+        static InstantiateModelsFromContainer(container: BABYLON.AssetContainer, nameFunction?: (sourceName: string) => string, createInstances?: boolean, cloneMaterials?: boolean, rebuildBoundingInfo?: boolean, filterPredicate?: any): BABYLON.TransformNode[];
+        /** Instantiate the specified prefab asset hierarchy from an asset container. (Instanced Hierarchy) */
+        static CreateInstancedModelsFromContainer(container: BABYLON.AssetContainer, newName?: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean, rebuildBoundingInfo?: boolean): BABYLON.InstantiatedEntries;
+        /** Clones the specified transform node asset into the scene. (Transform Node) */
+        static CloneTransformNode(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.TransformNode;
+        /** Clones the specified abstract mesh asset into the scene. (Abtract Mesh) */
+        static CloneAbstractMesh(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.AbstractMesh;
+        /** Creates an instance of the specified mesh asset into the scene. (Mesh Instance) */
+        static CreateInstancedMesh(container: BABYLON.AssetContainer, meshName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.InstancedMesh;
+        /** Rebuild mesh bounding box information */
+        static RebuildBoundingBoxInfo(transforms: BABYLON.TransformNode[]): void;
+        /**
+         * Attach a script component instance to the scene manager life cycle
+         * @param instance an instance of a TOOLKIT.ScriptComponent class
+         * @param alias the full class name alias. Example PROJECT.MyCustomComponent
+         * @param validate validate the instance klass on next frame. Default true.
+         */
+        static AttachScriptComponent(instance: TOOLKIT.ScriptComponent, alias: string, validate?: boolean): void;
+        /**
+         * Destroy a script component instance
+         * @param instance an instance of a TOOLKIT.ScriptComponent class
+         */
+        static DestroyScriptComponent(instance: TOOLKIT.ScriptComponent): void;
+        /**
+         * Destroy a Game Object
+         * @param instance an instance of a TOOLKIT.ScriptComponent class
+         */
+        static DestroyGameObject(transform: BABYLON.TransformNode): void;
+        /** Get a script component on the transform with the specfied class name. */
+        static GetComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
+        /** Gets all script components on the transform. */
+        static GetComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
+        /** Find game object in the scene hierarchy by path (Parent/Child/GrandChild). */
+        static FindGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
+        /** Find game object with tag */
+        static FindGameObjectWithTag(scene: BABYLON.Scene, tag: string): BABYLON.TransformNode;
+        /** Find all game objects with tag */
+        static FindGameObjectsWithTag(scene: BABYLON.Scene, tag: string): BABYLON.TransformNode[];
+        /** Finds all script components on the transform. */
+        static FindScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
+        /** Finds a script component on the transform with the specfied class name. */
+        static FindScriptComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
+        /** Finds all script components on the transform with the specfied class name. */
+        static FindAllScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
+        /** Finds the transform object metedata in the scene. */
+        static FindSceneMetadata(transform: BABYLON.TransformNode): any;
+        /** Finds the specfied camera rig in the scene. */
+        static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.FreeCamera;
+        /** Finds the specfied light rig in the scene. */
+        static FindSceneLightRig(transform: BABYLON.TransformNode): BABYLON.Light;
+        /** Finds the first transform with the specified script component. */
+        static FindTransformWithScript(scene: BABYLON.Scene, klass: string): BABYLON.TransformNode;
+        /** Finds all transforms with the specified script component. */
+        static FindAllTransformsWithScript(scene: BABYLON.Scene, klass: string): BABYLON.TransformNode[];
+        /** Finds the specfied child transform in the scene. */
+        static FindChildTransformNode(parent: BABYLON.TransformNode, name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Finds the first child transform with matching tags. */
+        static FindChildTransformWithTags(parent: BABYLON.TransformNode, query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Finds all child transforms with matching tags. */
+        static FindAllChildTransformsWithTags(parent: BABYLON.TransformNode, query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
+        /** Finds the first child transform with the specified script component. */
+        static FindChildTransformWithScript(parent: BABYLON.TransformNode, klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Finds all child transforms with the specified script component. */
+        static FindAllChildTransformsWithScript(parent: BABYLON.TransformNode, klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
+        /** Finds the first references to a components of type T on the same GameObject as the component specified, and any parent of the GameObject. */
+        static FindComponentInParent<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T;
+        /** Finds references to all components of type T on the same GameObject as the component specified, and any parent of the GameObject. */
+        static FindComponentsInParent<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T[];
+        /** Finds the first references to a components of type T on the same GameObject as the component specified, or any child of the GameObject. */
+        static FindComponentInChildren<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T;
+        /** Finds references to all components of type T on the same GameObject as the component specified, or any child of the GameObject. */
+        static FindComponentsInChildren<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T[];
+        /** Searches all nodes for the first instance of the specified script component. */
+        static SearchForScriptComponentByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T;
+        /** Searches all nodes for all instances of the specified script component. */
+        static SearchForAllScriptComponentsByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T[];
+        /** Moves entity using vector position with camera collisions. */
+        static MoveWithCollisions(entity: BABYLON.AbstractMesh, velocity: BABYLON.Vector3): void;
+        /** Moves entity using vector position using translations. */
+        static MoveWithTranslation(entity: BABYLON.TransformNode, velocity: BABYLON.Vector3): void;
+        /** Turns entity using quaternion rotations in radians. */
+        static TurnWithRotation(entity: BABYLON.TransformNode, radians: number, space?: BABYLON.Space): void;
+        static MAX_AGENT_COUNT: number;
+        static MAX_AGENT_RADIUS: number;
+        private static NavigationMesh;
+        private static CrowdInterface;
+        private static PluginInstance;
+        /** Register handler that is triggered when the navigation mesh is ready */
+        static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
+        /** Get recast total memory heap size */
+        static GetRecastHeapSize(): number;
+        /** Gets the recast navigation plugin tools. (Singleton Instance) */
+        static GetNavigationTools(): TOOLKIT.RecastJSPluginExtension;
+        /** Gets the recast navigation crowd interface. (Singleton Instance) */
+        static GetCrowdInterface(scene: BABYLON.Scene): BABYLON.ICrowd;
+        /** Has the recast baked navigation data. (Navigation Helper) */
+        static HasNavigationData(): boolean;
+        /** Gets the current recast navigation mesh. (Navigation Helper) */
+        static GetNavigationMesh(): BABYLON.Mesh;
+        /** Bake the recast navigation mesh from geometry. (Navigation Helper) */
+        static BakeNavigationMesh(scene: BABYLON.Scene, meshes: BABYLON.Mesh[], properties: BABYLON.INavMeshParameters, debug?: boolean, color?: BABYLON.Color3, collisionMesh?: boolean, debugMeshOffset?: number): number;
+        /** Load the recast navigation mesh binary data. (Navigation Helper) */
+        static LoadNavigationMesh(scene: BABYLON.Scene, data: Uint8Array, debug?: boolean, color?: BABYLON.Color3, timeSteps?: number, collisionMesh?: boolean, debugMeshOffset?: number): number;
+        /** Save the recast navigation mesh binary data. (Navigation Helper) */
+        static SaveNavigationMesh(): Uint8Array;
+        /** Computes a recast navigation path. (Navigation Helper) */
+        static ComputeNavigationPath(start: BABYLON.Vector3, end: BABYLON.Vector3, closetPoint?: boolean): BABYLON.Vector3[];
+        /** Animate movement along a navigation path. (Navigation Helper) */
+        static MoveAlongNavigationPath(scene: BABYLON.Scene, agent: BABYLON.TransformNode, path: BABYLON.Vector3[], speed?: number, easing?: BABYLON.EasingFunction, callback?: () => void): BABYLON.Animation;
+        /** Creates a cylinder obstacle and add it to the navigation. (Navigation Helper) */
+        static AddNavigationCylinderObstacle(position: BABYLON.Vector3, radius: number, height: number): BABYLON.IObstacle;
+        /** Creates an oriented box obstacle and add it to the navigation. (Navigation Helper) */
+        static AddNavigationBoxObstacle(position: BABYLON.Vector3, extent: BABYLON.Vector3, angle: number): BABYLON.IObstacle;
+        /** Removes an obstacle created by addCylinderObstacle or addBoxObstacle. (Navigation Helper) */
+        static RemoveNavigationObstacle(obstacle: BABYLON.IObstacle): void;
+        /** Toggle full screen scene mode. */
+        static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
+        /** Enter full screen scene mode. */
+        static EnterFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
+        /** Exit full screen scene mode. */
+        static ExitFullscreenMode(scene: BABYLON.Scene): void;
+        private static GotoFullscreenBrowser;
+        private static RequestBrowserPointerLock;
+        private static ExitFromFullscreenBrowser;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Babylon toolkit script component class
+     * @class ScriptComponent - All rights reserved (c) 2024 Mackey Kinard
+     */
+    abstract class ScriptComponent {
+        private _update;
+        private _late;
+        private _step;
+        private _fixed;
+        private _after;
+        private _ready;
+        private _lateUpdate;
+        private _properties;
+        private _awoken;
+        private _started;
+        private _scene;
+        private _delyed;
+        private _transform;
+        private _scriptReady;
+        private _registeredClassname;
+        private _registerComponentAlias;
+        private _lateUpdateObserver;
+        resetScriptComponent: () => void;
+        /** Gets the script component ready state */
+        isReady(): boolean;
+        /** Gets the current scene object */
+        get scene(): BABYLON.Scene;
+        /** Gets the transform node entity */
+        get transform(): BABYLON.TransformNode;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Destroys the script component instance */
+        dispose(): void;
+        /** Gets the script component class name */
+        getClassName(): string;
+        /** Sets the script component property bag value */
+        protected setProperty(name: string, propertyValue: any): void;
+        /** Gets the script component property bag value */
+        protected getProperty<T>(name: string, defaultValue?: T): T;
+        /** Get the current time in seconds */
+        getTime(): number;
+        /** Get the current time in milliseconds */
+        getTimeMs(): number;
+        /** Get the total game time in seconds */
+        getGameTime(): number;
+        /** Get the total game time in milliseconds */
+        getGameTimeMs(): number;
+        /** Get the current delta time in seconds */
+        getDeltaTime(): number;
+        /** Get the current delta time in seconds */
+        getDeltaSeconds(): number;
+        /** Get the current delta time in milliseconds */
+        getDeltaMilliseconds(): number;
+        /** Get the delta time animation ratio for 60 fps */
+        getAnimationRatio(): number;
+        /** Is a safe transform skinned mesh entity */
+        hasSkinnedMesh(): boolean;
+        /** Gets the safe transform skinned mesh entity */
+        getSkinnedMesh(): BABYLON.AbstractMesh;
+        /** Gets the safe transform mesh entity */
+        getTransformMesh(): BABYLON.Mesh;
+        /** Gets the safe transform abstract mesh entity */
+        getAbstractMesh(): BABYLON.AbstractMesh;
+        /** Gets the safe transform instanced mesh entity */
+        getInstancedMesh(): BABYLON.InstancedMesh;
+        /** Gets the transform primitive meshes */
+        getPrimitiveMeshes(): BABYLON.AbstractMesh[];
+        /** Get the transform object metedata in the scene. */
+        getMetadata(): any;
+        /** Get a script component on the transform with the specfied class name. */
+        getComponent<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T;
+        /** Get all script components on the transform with the specfied class name. */
+        getComponents<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T[];
+        /** Gets the attached transform light rig */
+        getLightRig(): BABYLON.Light;
+        /** Gets the attached transform camera rig */
+        getCameraRig(): BABYLON.FreeCamera;
+        /** Gets a script component transform primary tag name. */
+        getTransformTag(): string;
+        /** Check if the transform has the specified query tag match */
+        hasTransformTags(query: string): boolean;
+        /** Get the specfied child transform in the scene. */
+        getChildNode(name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Get the first child transform with matching tags. */
+        getChildWithTags(query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Get all child transforms with matching tags. */
+        getChildrenWithTags(query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
+        /** Get the first child transform with the specified script component. */
+        getChildWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
+        /** Get all child transforms with the specified script component. */
+        getChildrenWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
+        private _bodyCollisionObserver;
+        private _bodyCollisionEndedObserver;
+        private _worldTriggerEventObserver;
+        /** Enable physics collision events on the body */
+        enableCollisionEvents(): void;
+        /** Disable physics collision events on the body */
+        disableCollisionEvents(): void;
+        /** Observable handler that is triggered when a collision contact has entered */
+        onCollisionEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Observable handler that is triggered when a collision contact is active */
+        onCollisionStayObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Observable handler that is triggered when a collision contact has exited */
+        onCollisionExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Observable handler that is triggered when a pass thru collision contact has entered */
+        onTriggerEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Observable handler that is triggered when a pass thru collision contact has exited */
+        onTriggerExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Manually set the physics transform position */
+        setTransformPosition(position: BABYLON.Vector3): void;
+        /** Manually set the physics transform rotation */
+        setTransformRotation(rotation: BABYLON.Quaternion): void;
+        /** Registers an on pick trigger click action */
+        registerOnClickAction(func: () => void): BABYLON.IAction;
+        /** Unregisters an on pick tricgger click action */
+        unregisterOnClickAction(action: BABYLON.IAction): boolean;
+        private registerComponentInstance;
+        private delayComponentInstance;
+        private destroyComponentInstance;
+        private setupStepComponentInstance;
+        private removeStepComponentInstance;
+        private setupFixedComponentInstance;
+        private removeFixedComponentInstance;
+        private static RegisterInstance;
+        private static UpdateInstance;
+        private static LateInstance;
+        private static AfterInstance;
+        private static StepInstance;
+        private static FixedInstance;
+        private static ReadyInstance;
+        private static ResetInstance;
+        private static DestroyInstance;
+        private static ParseAutoProperties;
+        private static UnpackObjectProperty;
+    }
+}
 declare namespace TOOLKIT {
     /**
      * Babylon Toolkit Unity Editor - Loader Class
@@ -1385,620 +1999,6 @@ declare namespace TOOLKIT {
         dispose(): void;
     }
 }
-/** Babylon Toolkit Namespace */
-declare namespace TOOLKIT {
-    /**
-    * Babylon toolkit scene manager class
-    * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
-    */
-    class SceneManager {
-        /** Gets the toolkit framework version number (8.12.142 - R1) */
-        static get Version(): string;
-        /** Gets the toolkit framework copyright notice */
-        static get Copyright(): string;
-        /** Set global system options */
-        static GlobalOptions: any;
-        /** Set global window state */
-        static WindowState: any;
-        /** Default network game server endpoint (without slash suffix) */
-        static ServerEndPoint: string;
-        /** Set the allow debug mode flag */
-        static EnableDebugMode: boolean;
-        /** Set the allow user input flag */
-        static EnableUserInput: boolean;
-        /** Enable the main page render loop */
-        static RenderLoopReady: boolean;
-        /** Pauses the main page render loop */
-        static PauseRenderLoop: boolean;
-        /** The webgl render context has been lost flag */
-        static LostRenderContext: boolean;
-        /** Set the preload auto update progress flag */
-        static AutoUpdateProgress: boolean;
-        /** Set the capsule collider shape type */
-        static PhysicsCapsuleShape: number;
-        /** Set the support srgb buffers flag */
-        static SupportSRGBBuffers: boolean;
-        /** The animation start mode. Defaults to NONE. */
-        static AnimationStartMode: number;
-        /** When loading glTF animations, which are defined in seconds, target them to this FPS. Defaults to 60 for new behavior. Set to 1 for old behavior */
-        static AnimationTargetFps: number;
-        /** Set the default convex hull shape margin size */
-        static DefaultConvexHullMargin: number;
-        /** Set the default height field shape margin size */
-        static DefaultHeightFieldMargin: number;
-        /** Set the ambient light intensity factor */
-        static AmbientLightIntensity: number;
-        /** Set the point light intensity factor */
-        static PointLightIntensity: number;
-        /** Set the spot light intensity factor */
-        static SpotLightIntensity: number;
-        /** Set the directional light intensity factor */
-        static DirectionalLightIntensity: number;
-        /** Set the terrain shader color correction value */
-        static TerrainColorCorrection: number;
-        /** Set the allow camera movement flag */
-        static AllowCameraMovement: boolean;
-        /** Set the allow camera rotation flag */
-        static AllowCameraRotation: boolean;
-        /** Set the virtual joystick enabled flag */
-        static VirtualJoystickEnabled: boolean;
-        /** Gets the total game time in milliseconds */
-        static GameTimeMilliseconds: number;
-        /** Set the parse script component flag */
-        static ParseScriptComponents: boolean;
-        /** Set the auto load script bundles flag */
-        static AutoLoadScriptBundles: boolean;
-        /** Returns a Promise that resolves after the specfied time */
-        static WaitForSeconds: (seconds: number) => Promise<void>;
-        /** Register handler that is triggered before the main scene render loop (engine.html) */
-        static OnPreRenderLoopObservable: BABYLON.Observable<void>;
-        /** Register handler that is triggered before the main scene render loop (engine.html) */
-        static OnPostRenderLoopObservable: BABYLON.Observable<void>;
-        /** Register handler that is triggered when the scene is ready (engine.html) */
-        static OnSceneReadyObservable: BABYLON.Observable<string>;
-        /** Register handler that is triggered when then engine has been resized (engine.html) */
-        static OnEngineResizeObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
-        /** Register handler that is triggered when the scene has been loaded (engine.html) */
-        static OnLoadCompleteObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
-        /** Register handler that is triggered when then webgl context need to be rebuilt (engine.html) */
-        static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
-        /** Register asset manager progress event (engine.html) */
-        static OnAssetManagerProgress: (event: ProgressEvent) => void;
-        private static _HideLoadingScreen;
-        static CVTOOLS_NAME: string;
-        static CVTOOLS_MESH: string;
-        static CVTOOLS_HAND: string;
-        static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
-        private static _EventBus;
-        /** Default global event message bus
-         * @example
-         * // Handle myevent message
-         * TOOLKIT.SceneManager.EventBus.OnMessage("myevent", (data:string) => {
-         *    console.log("My Event Data: " + data);
-         * });
-         *
-         * // Post myevent message
-         * TOOLKIT.SceneManager.EventBus.PostMessage("myevent", "Hello World!");
-        */
-        static get EventBus(): TOOLKIT.GlobalMessageBus;
-        /** Gets the babylon toolkit playground default project script bundle cdn address
-         * @address https://cdn.jsdelivr.net/gh/BabylonJS/BabylonToolkit@master/Runtime/
-         */
-        static get PlaygroundCdn(): string;
-        /** Gets the babylon toolkit  playground repo address
-         * Contains interactive exported demo asset files
-         * @address https://www.babylontoolkit.com/playground/
-         */
-        static get PlaygroundRepo(): string;
-        /**
-         * Initialize the babylon toolkit playground environment
-         * @param engine The engine instance.
-         * @param options The playground options.
-         * @returns a waitable promise.
-         */
-        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
-        /**
-         * Initialize the babylon toolkit runtime environment
-         * @param engine The engine instance.
-         * @param options The playground options.
-         * @returns a waitable promise.
-         */
-        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
-        /**
-         * Sets the on scene ready handler then starts the assets manager loadAsync function
-         * @param assetsManager The list of required scene filenames to check ready state.
-         * @param requiredFilenames The list of required scene filenames to check ready state.
-         * @param readyHandler The function that will be called when all scene files are ready.
-         * @param maxTimeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
-         * @param debugMode The flag to enable on scene ready debug messages. Default false.
-         */
-        static LoadRuntimeAssets(assetsManager: BABYLON.AssetsManager, requiredFilenames: string[], readyHandler: () => void, maxTimeout?: number, debugMode?: boolean): Promise<void>;
-        /**
-         * Shows the default loading screen panel
-         * @param engine The engine instance.
-         * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
-         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
-         */
-        static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
-        /**
-         * Hides the default loading screen panel
-         * @param engine The engine instance.
-         */
-        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine): void;
-        /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
-        static ForceHideLoadingScreen(): void;
-        private static DoForceHideLoadingScreen;
-        /** Focus the scene rendering canvas
-         * @param scene The scene instance.
-         */
-        static FocusRenderCanvas(scene: BABYLON.Scene): void;
-        private static SceneLoaderFileNames;
-        private static SceneLoaderPropertyBag;
-        private static SceneLoaderHandledFlag;
-        /**
-         * Sets the handler that executes when all required scene files are ready
-         * @param filenames The list of required scene filenames to check ready state.
-         * @param handler The function that will be called when all scene files are ready
-         * @param timeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
-         */
-        static SetOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
-        private static SceneParsingEnabled;
-        /** Enable scene loader parsing plugin */
-        static EnableSceneParsing(enabled: boolean): void;
-        /** Is scene loader parsing plugin enabled */
-        static IsSceneParsingEnabled(): boolean;
-        /** Has the specfied scene already been preloaded */
-        static HasSceneBeenPreLoaded(scene: BABYLON.Scene): boolean;
-        /** Get the scene default skybox mesh */
-        static GetDefaultSkybox(scene: BABYLON.Scene): BABYLON.AbstractMesh;
-        /** Get the scene default intenisty factor */
-        static GetIntensityFactor(): number;
-        /** Get the system render quality local storage setting. */
-        static GetRenderQuality(): TOOLKIT.RenderQuality;
-        /** Set the system render quality local storage setting. */
-        static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
-        /** Gets the current engine version string info. */
-        static GetEngineVersionString(scene: BABYLON.Scene): string;
-        /** Store data object of function on the local window state. */
-        static SetWindowState(name: string, data: any): void;
-        /** Retrieve data object or function from the local window state. */
-        static GetWindowState<T>(name: string): T;
-        /** Are scene manager debugging services available. */
-        static IsDebugMode(): boolean;
-        /** Send log data directly to the console. */
-        static ConsoleLog(...data: any[]): void;
-        /** Send info data directly to the console. */
-        static ConsoleInfo(...data: any[]): void;
-        /** Send warning data directly to the console. */
-        static ConsoleWarn(...data: any[]): void;
-        /** Send error data directly to the console. */
-        static ConsoleError(...data: any[]): void;
-        /** Logs a message to the console using the babylon logging system. */
-        static LogMessage(message: string): void;
-        /** Logs a warning to the console using babylon logging system. */
-        static LogWarning(warning: string): void;
-        /** Logs a error to the console using babylon logging system. */
-        static LogError(error: string): void;
-        /** Get the current time in seconds */
-        static GetTime(): number;
-        /** Get the current time in milliseconds */
-        static GetTimeMs(): number;
-        /** Get the total game time in seconds */
-        static GetGameTime(): number;
-        /** Get the total game time in milliseconds */
-        static GetGameTimeMs(): number;
-        /** Get the current delta time in seconds */
-        static GetDeltaTime(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
-        /** Get the current delta time in seconds */
-        static GetDeltaSeconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
-        /** Get the current delta time in milliseconds */
-        static GetDeltaMilliseconds(scene: BABYLON.Scene, applyAnimationRatio?: boolean): number;
-        /** Get system time in milleseconds */
-        static GetTimeMilliseconds(): number;
-        /** Get the delta time animation ratio for 60 fps */
-        static GetAnimationRatio(scene: BABYLON.Scene): number;
-        /** Run a function on the next render loop. */
-        static RunOnce(scene: BABYLON.Scene, func: () => void, timeout?: number): void;
-        /** Disposes entire scene and release all resources */
-        static DisposeScene(scene: BABYLON.Scene, clearColor?: BABYLON.Color4): void;
-        /** Safely destroy transform node */
-        static SafeDestroy(transform: BABYLON.TransformNode, delay?: number, disable?: boolean): void;
-        /** Get the root url the last scene properties was loaded from */
-        static GetRootUrl(scene: BABYLON.Scene): string;
-        /** Sets the root url the last scene properties was loaded from */
-        static SetRootUrl(scene: BABYLON.Scene, url: string): void;
-        /** Get the file name the last scene properties was loaded from */
-        static GetSceneFile(scene: BABYLON.Scene): string;
-        /** Sets the file name the last scene properties was loaded from */
-        static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
-        /** Gets all the created engine instances */
-        static GetEngineInstances(): BABYLON.AbstractEngine[];
-        /** Get the last create engine instance */
-        static GetLastCreatedEngine(): BABYLON.AbstractEngine;
-        /** Get the last created scene instance */
-        static GetLastCreatedScene(): BABYLON.Scene;
-        /** Add a shadow castor mesh to a shadow light. */
-        static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
-        private static PhysicsViewersEnabled;
-        static IsPhysicsViewerEnabled(): boolean;
-        static TogglePhysicsViewer(scene: BABYLON.Scene): void;
-        /** Get managed asset container. */
-        static GetImportMeshes(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh[];
-        /** Get managed asset container map. */
-        static GetImportMeshesMap(scene: BABYLON.Scene): Map<string, BABYLON.AbstractMesh[]>;
-        /** Clear all managed asset containers. */
-        static ClearImportMeshes(scene: BABYLON.Scene): void;
-        /** Set managed asset container. */
-        static RegisterImportMeshes(scene: BABYLON.Scene, name: string, meshes: BABYLON.AbstractMesh[]): void;
-        /**
-         * Import cached meshes into a scene
-         * @param meshNames an array of mesh names, a single mesh name, or empty string for all meshes that filter what meshes are imported
-         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
-         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
-         * @param scene the instance of BABYLON.Scene to append to
-         * @param onSuccess a callback with a list of imported meshes, particleSystems, skeletons, and animationGroups when import succeeds
-         * @param onProgress a callback with a progress event for each file being loaded
-         * @param onError a callback with the scene, a message, and possibly an exception when import fails
-         * @param pluginExtension the extension used to determine the plugin
-         * @param name defines the name of the file, if the data is binary
-         * @returns The loaded plugin
-         */
-        static LoadImportMeshes(meshNames: string | readonly string[] | null | undefined, rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onSuccess?: (container: BABYLON.AbstractMesh[]) => void, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, onError?: (scene: BABYLON.Scene, message: string, exception?: any) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): BABYLON.Nullable<BABYLON.ISceneLoaderPlugin | BABYLON.ISceneLoaderPluginAsync>;
-        /**
-         * Import cached meshes into a scene
-         * @param meshNames an array of mesh names, a single mesh name, or empty string for all meshes that filter what meshes are imported
-         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
-         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
-         * @param scene the instance of BABYLON.Scene to append to
-         * @param onProgress a callback with a progress event for each file being loaded
-         * @param pluginExtension the extension used to determine the plugin
-         * @param name defines the name of the file
-         * @returns The loaded list of imported meshes, particle systems, skeletons, and animation groups
-         */
-        static LoadImportMeshesAsync(meshNames: string | readonly string[] | null | undefined, rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): Promise<BABYLON.AbstractMesh[]>;
-        /** Get managed asset container. */
-        static GetAssetContainer(scene: BABYLON.Scene, name: string): BABYLON.AssetContainer;
-        /** Get managed asset container map. */
-        static GetAssetContainerMap(scene: BABYLON.Scene): Map<string, BABYLON.AssetContainer>;
-        /** Clear all managed asset containers. */
-        static ClearAssetContainers(scene: BABYLON.Scene): void;
-        /** Set managed asset container. */
-        static RegisterAssetContainer(scene: BABYLON.Scene, name: string, container: BABYLON.AssetContainer): void;
-        /**
-         * Load a scene into a cached asset container
-         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
-         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene or a File object (default: empty string)
-         * @param scene is the instance of BABYLON.Scene to append to (default: last created scene)
-         * @param onSuccess a callback with the scene when import succeeds
-         * @param onProgress a callback with a progress event for each file being loaded
-         * @param onError a callback with the scene, a message, and possibly an exception when import fails
-         * @param pluginExtension the extension used to determine the plugin
-         * @param name defines the filename, if the data is binary
-         * @returns The loaded plugin
-         */
-        static LoadAssetContainer(rootUrl: string, sceneFilename?: string, scene?: BABYLON.Scene, onSuccess?: (container: BABYLON.AssetContainer) => void, onProgress?: (event: BABYLON.ISceneLoaderProgressEvent) => void, onError?: (scene: BABYLON.Scene, message: string, exception?: any) => void, pluginExtension?: BABYLON.Nullable<string>, name?: string): void;
-        /**
-         * Load a scene into a cached asset container
-         * @param rootUrl a string that defines the root url for the scene and resources or the concatenation of rootURL and filename (e.g. http://example.com/test.glb)
-         * @param sceneFilename a string that defines the name of the scene file or starts with "data:" following by the stringified version of the scene (default: empty string)
-         * @param scene is the instance of Scene to append to
-         * @param onProgress a callback with a progress event for each file being loaded
-         * @param pluginExtension the extension used to determine the plugin
-         * @param name defines the filename, if the data is binary
-         * @returns The loaded asset container
-         */
-        static LoadAssetContainerAsync(rootUrl: string, sceneFilename?: string, scene?: BABYLON.Nullable<BABYLON.Scene>, onProgress?: BABYLON.Nullable<(event: BABYLON.ISceneLoaderProgressEvent) => void>, pluginExtension?: BABYLON.Nullable<string>, name?: string): Promise<BABYLON.AssetContainer>;
-        /** Gets the specified mesh by name from scene. */
-        static GetMesh(scene: BABYLON.Scene, name: string): BABYLON.Mesh;
-        /** Gets the specified mesh by id from scene. */
-        static GetMeshByID(scene: BABYLON.Scene, id: string): BABYLON.Mesh;
-        /** Gets the specified abstract mesh by name from scene. */
-        static GetAbstractMesh(scene: BABYLON.Scene, name: string): BABYLON.AbstractMesh;
-        /** Gets the specified abstract mesh by id from scene. */
-        static GetAbstractMeshByID(scene: BABYLON.Scene, id: string): BABYLON.AbstractMesh;
-        /** Gets the specified transform node by name from scene. */
-        static GetTransformNode(scene: BABYLON.Scene, name: string): BABYLON.TransformNode;
-        /** Gets the specified transform node by id from scene. */
-        static GetTransformNodeByID(scene: BABYLON.Scene, id: string): BABYLON.TransformNode;
-        /** Gets the transform node child detail mesh. */
-        static GetTransformDetailMesh(transform: BABYLON.TransformNode): BABYLON.AbstractMesh;
-        /** Gets the transform node skinned mesh. */
-        static GetSkinnedMesh(transform: BABYLON.TransformNode): BABYLON.AbstractMesh;
-        /** Gets the transform node primitive meshes. */
-        static GetPrimitiveMeshes(transform: BABYLON.TransformNode): BABYLON.AbstractMesh[];
-        /** Gets the specified transform node layer index value. */
-        static GetTransformLayer(transform: BABYLON.TransformNode): number;
-        /** Gets the specified transform node layer mask value. */
-        static GetTransformLayerMask(transform: BABYLON.TransformNode): number;
-        /** Gets the specified transform node layer name value. */
-        static GetTransformLayerName(transform: BABYLON.TransformNode): string;
-        /** Gets the specified transform node primary tag name. */
-        static GetTransformTag(transform: BABYLON.TransformNode): string;
-        /** Check if the transform has the specified query tag match */
-        static HasTransformTags(transform: BABYLON.TransformNode, query: string): boolean;
-        /** Are half or full texture floats supported */
-        static TextureFloatSupported(scene: BABYLON.Scene): boolean;
-        /** Registers an on pick trigger click action */
-        static RegisterClickAction(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh, func: () => void): BABYLON.IAction;
-        /** Unregisters an on pick trigger click action */
-        static UnregisterClickAction(mesh: BABYLON.AbstractMesh, action: BABYLON.IAction): boolean;
-        /** Starts a targeted float animation for tweening.  */
-        static StartTweenAnimation(scene: BABYLON.Scene, name: string, targetObject: any, targetProperty: string, startValue: number, endValue: number, defaultSpeedRatio?: number, defaultFrameRate?: number, defaultLoopMode?: number, defaultEasingFunction?: BABYLON.EasingFunction, onAnimationComplete?: () => void): BABYLON.Animatable;
-        /** DEPRECATED: Starts a native javascript tween animation (https://createjs.com/docs/tweenjs/modules/TweenJS.html) */
-        /** Get first material with name. (Uses starts with text searching) */
-        static GetMaterialWithName(scene: BABYLON.Scene, name: string): BABYLON.Material;
-        /** Get all materials with name. (Uses starts with text searching) */
-        static GetAllMaterialsWithName(scene: BABYLON.Scene, name: string): BABYLON.Material[];
-        /** TODO: Support Animation Groups */
-        /** TODO: Support Instance Or Clones */
-        /** Instantiate the specified prefab asset hierarchy from the specified scene. (Cloned Hierarchy) */
-        static InstantiatePrefabFromScene(scene: BABYLON.Scene, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean): BABYLON.TransformNode;
-        /** Instantiate the specified prefab asset hierarchy from an asset container. (Cloned Hierarchy) */
-        static InstantiatePrefabFromContainer(container: BABYLON.AssetContainer, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean): BABYLON.TransformNode;
-        /** Instantiate all the raw models from an asset container. (Cloned Hierarchy) */
-        static InstantiateModelsFromContainer(container: BABYLON.AssetContainer, nameFunction?: (sourceName: string) => string, createInstances?: boolean, cloneMaterials?: boolean, rebuildBoundingInfo?: boolean, filterPredicate?: any): BABYLON.TransformNode[];
-        /** Instantiate the specified prefab asset hierarchy from an asset container. (Instanced Hierarchy) */
-        static CreateInstancedModelsFromContainer(container: BABYLON.AssetContainer, newName?: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean, rebuildBoundingInfo?: boolean): BABYLON.InstantiatedEntries;
-        /** Clones the specified transform node asset into the scene. (Transform Node) */
-        static CloneTransformNode(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.TransformNode;
-        /** Clones the specified abstract mesh asset into the scene. (Abtract Mesh) */
-        static CloneAbstractMesh(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.AbstractMesh;
-        /** Creates an instance of the specified mesh asset into the scene. (Mesh Instance) */
-        static CreateInstancedMesh(container: BABYLON.AssetContainer, meshName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.InstancedMesh;
-        /** Rebuild mesh bounding box information */
-        static RebuildBoundingBoxInfo(transforms: BABYLON.TransformNode[]): void;
-        /**
-         * Attach a script component instance to the scene manager life cycle
-         * @param instance an instance of a TOOLKIT.ScriptComponent class
-         * @param alias the full class name alias. Example PROJECT.MyCustomComponent
-         * @param validate validate the instance klass on next frame. Default true.
-         */
-        static AttachScriptComponent(instance: TOOLKIT.ScriptComponent, alias: string, validate?: boolean): void;
-        /**
-         * Destroy a script component instance
-         * @param instance an instance of a TOOLKIT.ScriptComponent class
-         */
-        static DestroyScriptComponent(instance: TOOLKIT.ScriptComponent): void;
-        /**
-         * Destroy a Game Object
-         * @param instance an instance of a TOOLKIT.ScriptComponent class
-         */
-        static DestroyGameObject(transform: BABYLON.TransformNode): void;
-        /** Get a script component on the transform with the specfied class name. */
-        static GetComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
-        /** Gets all script components on the transform. */
-        static GetComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
-        /** Find game object in the scene hierarchy by path (Parent/Child/GrandChild). */
-        static FindGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
-        /** Find game object with tag */
-        static FindGameObjectWithTag(scene: BABYLON.Scene, tag: string): BABYLON.TransformNode;
-        /** Find all game objects with tag */
-        static FindGameObjectsWithTag(scene: BABYLON.Scene, tag: string): BABYLON.TransformNode[];
-        /** Finds all script components on the transform. */
-        static FindScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
-        /** Finds a script component on the transform with the specfied class name. */
-        static FindScriptComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
-        /** Finds all script components on the transform with the specfied class name. */
-        static FindAllScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
-        /** Finds the transform object metedata in the scene. */
-        static FindSceneMetadata(transform: BABYLON.TransformNode): any;
-        /** Finds the specfied camera rig in the scene. */
-        static FindSceneCameraRig(transform: BABYLON.TransformNode): BABYLON.FreeCamera;
-        /** Finds the specfied light rig in the scene. */
-        static FindSceneLightRig(transform: BABYLON.TransformNode): BABYLON.Light;
-        /** Finds the first transform with the specified script component. */
-        static FindTransformWithScript(scene: BABYLON.Scene, klass: string): BABYLON.TransformNode;
-        /** Finds all transforms with the specified script component. */
-        static FindAllTransformsWithScript(scene: BABYLON.Scene, klass: string): BABYLON.TransformNode[];
-        /** Finds the specfied child transform in the scene. */
-        static FindChildTransformNode(parent: BABYLON.TransformNode, name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Finds the first child transform with matching tags. */
-        static FindChildTransformWithTags(parent: BABYLON.TransformNode, query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Finds all child transforms with matching tags. */
-        static FindAllChildTransformsWithTags(parent: BABYLON.TransformNode, query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
-        /** Finds the first child transform with the specified script component. */
-        static FindChildTransformWithScript(parent: BABYLON.TransformNode, klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Finds all child transforms with the specified script component. */
-        static FindAllChildTransformsWithScript(parent: BABYLON.TransformNode, klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
-        /** Finds the first references to a components of type T on the same GameObject as the component specified, and any parent of the GameObject. */
-        static FindComponentInParent<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T;
-        /** Finds references to all components of type T on the same GameObject as the component specified, and any parent of the GameObject. */
-        static FindComponentsInParent<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T[];
-        /** Finds the first references to a components of type T on the same GameObject as the component specified, or any child of the GameObject. */
-        static FindComponentInChildren<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T;
-        /** Finds references to all components of type T on the same GameObject as the component specified, or any child of the GameObject. */
-        static FindComponentsInChildren<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, transform: BABYLON.TransformNode, klass: string): T[];
-        /** Searches all nodes for the first instance of the specified script component. */
-        static SearchForScriptComponentByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T;
-        /** Searches all nodes for all instances of the specified script component. */
-        static SearchForAllScriptComponentsByName<T extends TOOLKIT.ScriptComponent>(scene: BABYLON.Scene, klass: string): T[];
-        /** Moves entity using vector position with camera collisions. */
-        static MoveWithCollisions(entity: BABYLON.AbstractMesh, velocity: BABYLON.Vector3): void;
-        /** Moves entity using vector position using translations. */
-        static MoveWithTranslation(entity: BABYLON.TransformNode, velocity: BABYLON.Vector3): void;
-        /** Turns entity using quaternion rotations in radians. */
-        static TurnWithRotation(entity: BABYLON.TransformNode, radians: number, space?: BABYLON.Space): void;
-        static MAX_AGENT_COUNT: number;
-        static MAX_AGENT_RADIUS: number;
-        private static NavigationMesh;
-        private static CrowdInterface;
-        private static PluginInstance;
-        /** Register handler that is triggered when the navigation mesh is ready */
-        static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
-        /** Get recast total memory heap size */
-        static GetRecastHeapSize(): number;
-        /** Gets the recast navigation plugin tools. (Singleton Instance) */
-        static GetNavigationTools(): TOOLKIT.RecastJSPluginExtension;
-        /** Gets the recast navigation crowd interface. (Singleton Instance) */
-        static GetCrowdInterface(scene: BABYLON.Scene): BABYLON.ICrowd;
-        /** Has the recast baked navigation data. (Navigation Helper) */
-        static HasNavigationData(): boolean;
-        /** Gets the current recast navigation mesh. (Navigation Helper) */
-        static GetNavigationMesh(): BABYLON.Mesh;
-        /** Bake the recast navigation mesh from geometry. (Navigation Helper) */
-        static BakeNavigationMesh(scene: BABYLON.Scene, meshes: BABYLON.Mesh[], properties: BABYLON.INavMeshParameters, debug?: boolean, color?: BABYLON.Color3, collisionMesh?: boolean, debugMeshOffset?: number): number;
-        /** Load the recast navigation mesh binary data. (Navigation Helper) */
-        static LoadNavigationMesh(scene: BABYLON.Scene, data: Uint8Array, debug?: boolean, color?: BABYLON.Color3, timeSteps?: number, collisionMesh?: boolean, debugMeshOffset?: number): number;
-        /** Save the recast navigation mesh binary data. (Navigation Helper) */
-        static SaveNavigationMesh(): Uint8Array;
-        /** Computes a recast navigation path. (Navigation Helper) */
-        static ComputeNavigationPath(start: BABYLON.Vector3, end: BABYLON.Vector3, closetPoint?: boolean): BABYLON.Vector3[];
-        /** Animate movement along a navigation path. (Navigation Helper) */
-        static MoveAlongNavigationPath(scene: BABYLON.Scene, agent: BABYLON.TransformNode, path: BABYLON.Vector3[], speed?: number, easing?: BABYLON.EasingFunction, callback?: () => void): BABYLON.Animation;
-        /** Creates a cylinder obstacle and add it to the navigation. (Navigation Helper) */
-        static AddNavigationCylinderObstacle(position: BABYLON.Vector3, radius: number, height: number): BABYLON.IObstacle;
-        /** Creates an oriented box obstacle and add it to the navigation. (Navigation Helper) */
-        static AddNavigationBoxObstacle(position: BABYLON.Vector3, extent: BABYLON.Vector3, angle: number): BABYLON.IObstacle;
-        /** Removes an obstacle created by addCylinderObstacle or addBoxObstacle. (Navigation Helper) */
-        static RemoveNavigationObstacle(obstacle: BABYLON.IObstacle): void;
-        /** Toggle full screen scene mode. */
-        static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
-        /** Enter full screen scene mode. */
-        static EnterFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
-        /** Exit full screen scene mode. */
-        static ExitFullscreenMode(scene: BABYLON.Scene): void;
-        private static GotoFullscreenBrowser;
-        private static RequestBrowserPointerLock;
-        private static ExitFromFullscreenBrowser;
-    }
-}
-/** Babylon Toolkit Namespace */
-declare namespace TOOLKIT {
-    /**
-     * Babylon toolkit script component class
-     * @class ScriptComponent - All rights reserved (c) 2024 Mackey Kinard
-     */
-    abstract class ScriptComponent {
-        private _update;
-        private _late;
-        private _step;
-        private _fixed;
-        private _after;
-        private _ready;
-        private _lateUpdate;
-        private _properties;
-        private _awoken;
-        private _started;
-        private _scene;
-        private _delyed;
-        private _transform;
-        private _scriptReady;
-        private _registeredClassname;
-        private _registerComponentAlias;
-        private _lateUpdateObserver;
-        resetScriptComponent: () => void;
-        /** Gets the script component ready state */
-        isReady(): boolean;
-        /** Gets the current scene object */
-        get scene(): BABYLON.Scene;
-        /** Gets the transform node entity */
-        get transform(): BABYLON.TransformNode;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        /** Destroys the script component instance */
-        dispose(): void;
-        /** Gets the script component class name */
-        getClassName(): string;
-        /** Sets the script component property bag value */
-        protected setProperty(name: string, propertyValue: any): void;
-        /** Gets the script component property bag value */
-        protected getProperty<T>(name: string, defaultValue?: T): T;
-        /** Get the current time in seconds */
-        getTime(): number;
-        /** Get the current time in milliseconds */
-        getTimeMs(): number;
-        /** Get the total game time in seconds */
-        getGameTime(): number;
-        /** Get the total game time in milliseconds */
-        getGameTimeMs(): number;
-        /** Get the current delta time in seconds */
-        getDeltaTime(): number;
-        /** Get the current delta time in seconds */
-        getDeltaSeconds(): number;
-        /** Get the current delta time in milliseconds */
-        getDeltaMilliseconds(): number;
-        /** Get the delta time animation ratio for 60 fps */
-        getAnimationRatio(): number;
-        /** Is a safe transform skinned mesh entity */
-        hasSkinnedMesh(): boolean;
-        /** Gets the safe transform skinned mesh entity */
-        getSkinnedMesh(): BABYLON.AbstractMesh;
-        /** Gets the safe transform mesh entity */
-        getTransformMesh(): BABYLON.Mesh;
-        /** Gets the safe transform abstract mesh entity */
-        getAbstractMesh(): BABYLON.AbstractMesh;
-        /** Gets the safe transform instanced mesh entity */
-        getInstancedMesh(): BABYLON.InstancedMesh;
-        /** Gets the transform primitive meshes */
-        getPrimitiveMeshes(): BABYLON.AbstractMesh[];
-        /** Get the transform object metedata in the scene. */
-        getMetadata(): any;
-        /** Get a script component on the transform with the specfied class name. */
-        getComponent<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T;
-        /** Get all script components on the transform with the specfied class name. */
-        getComponents<T extends TOOLKIT.ScriptComponent>(klass: string, recursive?: boolean): T[];
-        /** Gets the attached transform light rig */
-        getLightRig(): BABYLON.Light;
-        /** Gets the attached transform camera rig */
-        getCameraRig(): BABYLON.FreeCamera;
-        /** Gets a script component transform primary tag name. */
-        getTransformTag(): string;
-        /** Check if the transform has the specified query tag match */
-        hasTransformTags(query: string): boolean;
-        /** Get the specfied child transform in the scene. */
-        getChildNode(name: string, searchType?: TOOLKIT.SearchType, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Get the first child transform with matching tags. */
-        getChildWithTags(query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Get all child transforms with matching tags. */
-        getChildrenWithTags(query: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
-        /** Get the first child transform with the specified script component. */
-        getChildWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
-        /** Get all child transforms with the specified script component. */
-        getChildrenWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
-        private _bodyCollisionObserver;
-        private _bodyCollisionEndedObserver;
-        private _worldTriggerEventObserver;
-        /** Enable physics collision events on the body */
-        enableCollisionEvents(): void;
-        /** Disable physics collision events on the body */
-        disableCollisionEvents(): void;
-        /** Observable handler that is triggered when a collision contact has entered */
-        onCollisionEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observable handler that is triggered when a collision contact is active */
-        onCollisionStayObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observable handler that is triggered when a collision contact has exited */
-        onCollisionExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observable handler that is triggered when a pass thru collision contact has entered */
-        onTriggerEnterObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observable handler that is triggered when a pass thru collision contact has exited */
-        onTriggerExitObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Manually set the physics transform position */
-        setTransformPosition(position: BABYLON.Vector3): void;
-        /** Manually set the physics transform rotation */
-        setTransformRotation(rotation: BABYLON.Quaternion): void;
-        /** Registers an on pick trigger click action */
-        registerOnClickAction(func: () => void): BABYLON.IAction;
-        /** Unregisters an on pick tricgger click action */
-        unregisterOnClickAction(action: BABYLON.IAction): boolean;
-        private registerComponentInstance;
-        private delayComponentInstance;
-        private destroyComponentInstance;
-        private setupStepComponentInstance;
-        private removeStepComponentInstance;
-        private setupFixedComponentInstance;
-        private removeFixedComponentInstance;
-        private static RegisterInstance;
-        private static UpdateInstance;
-        private static LateInstance;
-        private static AfterInstance;
-        private static StepInstance;
-        private static FixedInstance;
-        private static ReadyInstance;
-        private static ResetInstance;
-        private static DestroyInstance;
-        private static ParseAutoProperties;
-        private static UnpackObjectProperty;
-    }
-}
 declare namespace TOOLKIT.Simplex {
     /**
      * A random() function, must return a number in the interval [0,1), just like Math.random().
@@ -2087,6 +2087,8 @@ declare namespace TOOLKIT {
         static OnPreloaderComplete: (tasks: BABYLON.AbstractAssetTask[]) => void;
         static GetLayerMask(layer: number): number;
         static IsLayerMasked(mask: number, layer: number): boolean;
+        /** Get the current havok plugin from the global stack */
+        static GetHavokPlugin(): BABYLON.HavokPlugin;
         static GetLoadingState(): number;
         /** Get full floating point random number */
         static GetRandomRange(min: number, max: number, last?: BABYLON.Nullable<number>, retries?: BABYLON.Nullable<number>): number;
@@ -4219,8 +4221,6 @@ declare namespace TOOLKIT {
         getRaycastVehicle(): any;
         /** Get the current havok instance from the global stack */
         static GetHavokInstance(): any;
-        /** Get the current havok plugin from the global stack */
-        static GetHavokPlugin(): BABYLON.HavokPlugin;
         /**
          * Performs a raycast from a given start point in the given direction and length and stores the result in a reusable PhysicsRaycastResult object.
          * @param origin - The start point of the raycast.
@@ -4451,7 +4451,7 @@ declare namespace TOOLKIT {
 }
 /** Export Default Babylon Toolkit */
 
-declare var SM: typeof TOOLKIT.SceneManager;
-declare var WM: typeof TOOLKIT.WindowManager;
-declare var IC: typeof TOOLKIT.InputController;
+//declare var SM: typeof TOOLKIT.SceneManager;
+//declare var WM: typeof TOOLKIT.WindowManager;
+//declare var IC: typeof TOOLKIT.InputController;
 

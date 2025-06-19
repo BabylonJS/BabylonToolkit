@@ -34,17 +34,24 @@ Or on playgrounds:
  await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
 
-Or node package manager:
+Or node package manager (UMD):
 ```
- npm install babylon-toolkit
+ npm install babylonjs-toolkit
+```
+
+Or node package manager (ES6):
+```
+ npm install @babylonjs-toolkit/next
 ```
 
 
 # Node Package Manager
 
-A universal runtime library packaged for UMD projects.
+Universal runtime library packages.
 
-https://www.npmjs.com/package/babylon-toolkit
+UMD - https://www.npmjs.com/package/babylonjs-toolkit
+
+ES6 - https://www.npmjs.com/package/@babylonjs-toolkit/next
 
 
 # Entity Component System
