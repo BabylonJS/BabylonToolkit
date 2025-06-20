@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.222 - R1) */
+        /** Gets the toolkit framework version number (8.12.226 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -105,14 +105,14 @@ declare namespace TOOLKIT {
          */
         static get PlaygroundRepo(): string;
         /**
-         * Initialize the babylon toolkit playground environment
+         * Initialize the babylon toolkit playground environment (GLTF)
          * @param engine The engine instance.
          * @param options The playground options.
          * @returns a waitable promise.
          */
         static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
         /**
-         * Initialize the babylon toolkit runtime environment
+         * Initialize the babylon toolkit runtime environment (GLTF)
          * @param engine The engine instance.
          * @param options The playground options.
          * @returns a waitable promise.
@@ -1036,13 +1036,15 @@ declare namespace TOOLKIT {
     }
     /**
      * Babylon toolkit playground initialization options
-     * @param loadProjectScriptBundle load a project script bundle. Default true.
+     * @param initSceneFileLoaders initialize scne file loaders. Default true.
+     * @param loadProjectScriptBundle load a project script bundle. Default false.
      * @param projectScriptBundleUrl specified project script bundle. Default bundle.
      * @param showDefaultLoadingScreen show the default loading screen. Default false.
      * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
     interface IPlaygroundOptions {
+        initSceneFileLoaders?: boolean;
         loadProjectScriptBundle?: boolean;
         projectScriptBundleUrl?: string;
         showDefaultLoadingScreen?: boolean;
@@ -4449,7 +4451,6 @@ declare namespace TOOLKIT {
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
-/** Export Default Babylon Toolkit */
 
 //declare var SM: typeof TOOLKIT.SceneManager;
 //declare var WM: typeof TOOLKIT.WindowManager;
