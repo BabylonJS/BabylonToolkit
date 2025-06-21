@@ -70,11 +70,9 @@ The Babylon Toolkit Pro Classes allows out of the box features that help you jum
 
 <a target="_blank" href="https://www.youtube.com/watch?v=YTlp_ut53wo&list=PLQjLia99I6qDtO16j-ia64xC5r8ps09bB&index=3&pp=gAQBiAQB">Pro Edition Features Video</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#V9AUOR">TypeScript Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#MQDXJ4">TypeScript Starter Playground (TS)</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
-
-<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#MQDXJ4">WebGPU Starter Playground (TS)</a>
 
 
 

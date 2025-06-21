@@ -112,8 +112,6 @@ namespace PROJECT {
 
 <a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#PNII2N">Your First TypeScript Playground (TS)</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#HLQXU4">Your First JavaScript Playground (JS)</a>
-
 
 # AI Coding Assistants
 
@@ -127,8 +125,6 @@ The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/ma
 
 Unity Starter Content
 ----------------------
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#V9AUOR">TypeScript Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#MQDXJ4">TypeScript Starter Playground (TS)</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#GJWO5O">JavaScript Starter Playground (JS)</a>
-
-<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#TWDYSM">WebGPU Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#MQDXJ4">WebGPU Starter Playground (TS)</a>
