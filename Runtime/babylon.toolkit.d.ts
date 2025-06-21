@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.228 - R1) */
+        /** Gets the toolkit framework version number (8.12.232 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -62,6 +62,10 @@ declare namespace TOOLKIT {
         static ParseScriptComponents: boolean;
         /** Set the auto load script bundles flag */
         static AutoLoadScriptBundles: boolean;
+        /** Set the ES6 strip namespace prefix flag */
+        static AutoStripNamespacePrefix: boolean;
+        /** Set the universal module definition flag */
+        static UniversalModuleDefinition: boolean;
         /** Returns a Promise that resolves after the specfied time */
         static WaitForSeconds: (seconds: number) => Promise<void>;
         /** Register handler that is triggered before the main scene render loop (engine.html) */
