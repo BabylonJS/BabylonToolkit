@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.238 - R1) */
+        /** Gets the toolkit framework version number (8.12.248 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -90,6 +90,8 @@ declare namespace TOOLKIT {
         static CVTOOLS_MESH_REGISTERED: boolean;
         static CVTOOLS_HAND_REGISTERED: boolean;
         static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
+        static GetClass(name: string): any;
+        static RegisterClass(name: string, klass: any): void;
         private static _EventBus;
         /** Default global event message bus
          * @example
@@ -2472,6 +2474,7 @@ declare namespace TOOLKIT {
         /** Computes the transition duration blending speed */
         static ComputeBlendingSpeed(rate: number, duration: number, dampen?: boolean): number;
         static CalculateCameraDistance(farClipPlane: number, lodPercent: number, clipPlaneScale?: number): number;
+        /** TODO */
         /** TODO */
         static InstantiateClass(className: string): any;
         /** TODO */
