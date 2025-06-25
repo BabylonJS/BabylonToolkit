@@ -1,5 +1,944 @@
 declare namespace PROJECT {
     /**
+    * Babylon Script Component
+    * @class AutoBodyGarage
+    */
+    class AutoBodyGarage extends TOOLKIT.ScriptComponent {
+        private m_bodyMaterial;
+        private m_bodyAbtractMesh;
+        protected awake(): void;
+        setupVehicleMaterials(bodyColor: BABYLON.Color3, wheelColor?: BABYLON.Color3, wheelType?: number, decalIndex?: number): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class CheckpointManager
+    */
+    class CheckpointManager extends TOOLKIT.ScriptComponent {
+        private checkPointList;
+        private checkPointCount;
+        private checkPointIndex;
+        private nextCheckPoint;
+        private startRaceTime;
+        private totalRaceTime;
+        private lapNumber;
+        private lapTimer;
+        private lapTimes;
+        private playerID;
+        private playerName;
+        private raceOver;
+        register(id: number, name: string): void;
+        getLapTimes(): number[];
+        getLapNumber(): number;
+        getCheckPoint(): number;
+        getPlayerName(): string;
+        getPlayerID(): number;
+        getRaceTime(): number;
+        getRaceOver(): boolean;
+        protected start(): void;
+        private nextCheckPointName;
+        protected update(): void;
+        protected late(): void;
+        startRaceTimer(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class NetworkCarPrediction
+    */
+    class NetworkCarPrediction extends TOOLKIT.ScriptComponent {
+        private autoRegister;
+        private handlerName;
+        private extrapolateTimeMs;
+        protected awake(): void;
+        register(): void;
+        private HandleUpdate;
+        private LegacyHandleUpdate;
+    }
+}
+declare namespace PROJECT {
+    interface ITrackNode {
+        radius: number;
+        position: TOOLKIT.IUnityVector3;
+        rotation: TOOLKIT.IUnityVector4;
+        localPosition: BABYLON.Vector3;
+        localRotation: BABYLON.Quaternion;
+        localDistance: number;
+    }
+    interface IControlPoint {
+        speed: number;
+        tvalue: number;
+        position: TOOLKIT.IUnityVector3;
+    }
+    class RoutePoint {
+        position: BABYLON.Vector3;
+        direction: BABYLON.Vector3;
+    }
+    class PlayerRaceStats {
+        id: number;
+        name: string;
+        position: number;
+    }
+    /**
+    * Babylon Script Component
+    * @class BT_RaceTrackManager
+    */
+    class RaceTrackManager extends TOOLKIT.ScriptComponent {
+        static TrackLength: number;
+        static TotalLapCount: number;
+        static WinnerTransform: BABYLON.TransformNode;
+        private static CheckPointTag;
+        private static CheckPointList;
+        private static LeaderBoardList;
+        private static PlayerVehicleList;
+        private trackNodes;
+        private raceLineData_1;
+        private raceLineData_2;
+        private raceLineData_3;
+        private raceLineData_4;
+        private raceLineData_5;
+        private raceLineColor_1;
+        private raceLineColor_2;
+        private raceLineColor_3;
+        private raceLineColor_4;
+        private raceLineColor_5;
+        private debugMeshLines_1;
+        private debugMeshLines_2;
+        private debugMeshLines_3;
+        private debugMeshLines_4;
+        private debugMeshLines_5;
+        private p0n;
+        private p1n;
+        private p2n;
+        private p3n;
+        private i;
+        private static _EventBus;
+        static get EventBus(): TOOLKIT.LocalMessageBus;
+        drawDebugLines: boolean;
+        getTrackNodes(): PROJECT.ITrackNode[];
+        getControlPoints(line: number): PROJECT.IControlPoint[];
+        protected awake(): void;
+        protected start(): void;
+        protected after(): void;
+        protected destroy(): void;
+        getRoutePoint(distance: number): PROJECT.RoutePoint;
+        getRoutePointToRef(distance: number, result: PROJECT.RoutePoint): void;
+        getRoutePosition(distance: number): BABYLON.Vector3;
+        getRoutePositionToRef(distance: number, result: BABYLON.Vector3): void;
+        /** Gets the checkpoint tag identifier */
+        static GetCheckpointTag(): string;
+        /** Get the checkpoint position list */
+        static GetCheckpointList(): BABYLON.AbstractMesh[];
+        /** Get the total number of checkpoints */
+        static GetCheckpointCount(): number;
+        /** Calculates the fraction distance to next checkpoint */
+        private static GetCheckpointDistance;
+        /** Register vehicle with track manager */
+        static RegisterVehicle(vehicle: BABYLON.TransformNode): void;
+        /** Gets the registered player vehicles */
+        static GetPlayerVehicles(): BABYLON.TransformNode[];
+        /** Register player with track manager */
+        static RegisterPlayer(id: number, name: string): void;
+        /** Update player leaderboard information */
+        static UpdateLeaderboard(id: number, lap: number, checkpoint: number, position: BABYLON.Vector3): void;
+        /** Get player leaderboard position */
+        static GetLeaderboardPosition(id: number): number;
+        /** Get leaderboard position list */
+        static GetLeaderboardPositionList(): PROJECT.PlayerRaceStats[];
+        /** Sort leaderboard position list */
+        private static SortLeaderboardPositionList;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon remote vehicle controller class (Colyseus Universal Game Room)
+    * @class RemoteCarController
+    */
+    class RemoteCarController extends TOOLKIT.ScriptComponent {
+        private static ShowSensorLines;
+        centerOfMass: number;
+        burnoutWheelPitch: number;
+        linkTrackManager: boolean;
+        playVehicleSounds: boolean;
+        smokeTexture: BABYLON.Texture;
+        skidThreashold: number;
+        smokeIntensity: number;
+        wheelDrawVelocity: number;
+        smokeOpacity: number;
+        smokeDonuts: number;
+        private steeringWheelHub;
+        private steeringWheelAxis;
+        private maxSteeringAngle;
+        private maxSteeringSpeed;
+        private _animator;
+        private _engineAudioSource;
+        private _skidAudioSource;
+        private brakeLightsMesh;
+        private brakeLightsTrans;
+        private reverseLightsMesh;
+        private reverseLightsTrans;
+        private frontLeftWheelTrans;
+        private frontRightWheelTrans;
+        private backLeftWheelTrans;
+        private backRightWheelTrans;
+        private frontLeftWheelMesh;
+        private frontRightWheelMesh;
+        private backLeftWheelMesh;
+        private backRightWheelMesh;
+        private frontLeftWheelEmitter;
+        private frontRightWheelEmitter;
+        private backLeftWheelEmitter;
+        private backRightWheelEmitter;
+        private frontLeftWheelParticle;
+        private frontRightWheelParticle;
+        private backLeftWheelParticle;
+        private backRightWheelParticle;
+        private frontLeftContact;
+        private frontRightContact;
+        private rearLeftContact;
+        private rearRightContact;
+        private frontLeftContactTag;
+        private frontRightContactTag;
+        private rearLeftContactTag;
+        private rearRightContactTag;
+        private frontLeftContactPoint;
+        private frontRightContactPoint;
+        private rearLeftContactPoint;
+        private rearRightContactPoint;
+        private frontLeftContactNormal;
+        private frontRightContactNormal;
+        private rearLeftContactNormal;
+        private rearRightContactNormal;
+        private frontLeftSensorLine;
+        private frontRightSensorLine;
+        private rearLeftSensorLine;
+        private rearRightSensorLine;
+        private startRaycastPosition;
+        private endRaycastPosition;
+        private smokeIntensityFactor;
+        private downDirection;
+        private downDistance;
+        private lastPitch;
+        private lastBrake;
+        private lastReverse;
+        private lastBurnout;
+        private lastSteering;
+        private lastSKID_FL;
+        private lastSKID_FR;
+        private lastSKID_RL;
+        private lastSKID_RR;
+        private lastSPIN_FL;
+        private lastSPIN_FR;
+        private lastSPIN_RL;
+        private lastSPIN_RR;
+        private PITCH_FL;
+        private PITCH_FR;
+        private PITCH_RL;
+        private PITCH_RR;
+        private WHEEL_SKID_PITCH;
+        getFrontLeftWheelContact(): boolean;
+        getFrontRightWheelContact(): boolean;
+        getRearLeftWheelContact(): boolean;
+        getRearRightWheelContact(): boolean;
+        getFrontLeftWheelContactTag(): string;
+        getFrontRightWheelContactTag(): string;
+        getRearLeftWheelContactTag(): string;
+        getRearRightWheelContactTag(): string;
+        getFrontLeftWheelContactPoint(): BABYLON.Vector3;
+        getFrontRightWheelContactPoint(): BABYLON.Vector3;
+        getRearLeftWheelContactPoint(): BABYLON.Vector3;
+        getRearRightWheelContactPoint(): BABYLON.Vector3;
+        getFrontLeftWheelContactNormal(): BABYLON.Vector3;
+        getFrontRightWheelContactNormal(): BABYLON.Vector3;
+        getRearLeftWheelContactNormal(): BABYLON.Vector3;
+        getRearRightWheelContactNormal(): BABYLON.Vector3;
+        protected m_frontLeftWheelSkid: number;
+        protected m_frontRightWheelSkid: number;
+        protected m_backLeftWheelSkid: number;
+        protected m_backRightWheelSkid: number;
+        protected m_velocityOffset: BABYLON.Vector3;
+        protected m_linearVelocity: BABYLON.Vector3;
+        protected m_lastPosition: BABYLON.Vector3;
+        protected m_positionCenter: BABYLON.Vector3;
+        protected m_scaledVelocity: number;
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        protected updateVehicleProperties(): void;
+        private castWheelContactRays;
+        private createSmokeParticleSystem;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon skidmark section class (Havok Physics Engine)
+     * @class SkidMarkSection
+     */
+    class SkidMarkSection {
+        Pos: BABYLON.Vector3;
+        Normal: BABYLON.Vector3;
+        Tangent: BABYLON.Vector4;
+        Posl: BABYLON.Vector3;
+        Posr: BABYLON.Vector3;
+        Intensity: number;
+        LastIndex: number;
+    }
+    /**
+     * Babylon Script Component
+     * @class SkidMarkManager
+     */
+    class SkidMarkManager extends TOOLKIT.ScriptComponent {
+        private static MAX_MARKS;
+        private static GROUND_OFFSET;
+        private static GPU_TRIANGLES;
+        private static MARK_COLOR;
+        private static MARK_WIDTH;
+        private static TEX_INTENSITY;
+        private static MIN_DISTANCE;
+        private static MIN_SQR_DISTANCE;
+        private static TEXTURE_MARKS;
+        private static SkidBufferPositions;
+        private static SkidBufferNormals;
+        private static SkidBufferTangents;
+        private static SkidBufferColors;
+        private static SkidBufferUvs;
+        private static SkidBufferIndices;
+        private static SkidMarkSections;
+        private static SkidMarkIndex;
+        private static SkidMarkMesh;
+        private static SkidMarkUpdated;
+        private static TempVector3_POS;
+        private static TempVector3_DIR;
+        private static TempVector3_XDIR;
+        private static TempVector3_SDIR;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        protected start(): void;
+        protected update(): void;
+        static AddSkidMarkSegment(pos: BABYLON.Vector3, normal: BABYLON.Vector3, intensity: number, lastIndex: number): BABYLON.Nullable<number>;
+        private static CreateSkidMarkManager;
+        private static AddSkidMarkVertexData;
+        private static UpdateSkidMarkManager;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon standard rigidbody vehicle controller class (Havok Physics Engine)
+     * @class StandardCarController
+     */
+    class StandardCarController extends TOOLKIT.ScriptComponent {
+        static DEFAULT_SKID_FACTOR: number;
+        static DEFAULT_PITCH_FACTOR: number;
+        static DEFAULT_SPEED_FACTOR: number;
+        static DEFAULT_DONUT_FACTOR: number;
+        static SimplexNoise2D: TOOLKIT.NoiseFunction2D;
+        MIN_RPM: number;
+        MAX_RPM: number;
+        private _animator;
+        private _rigidbody;
+        private _engineAudioSource;
+        private _skidAudioSource;
+        private _nosAudioSource;
+        private _skidExtraRotation;
+        private _donutExtraRotation;
+        private steeringWheelHub;
+        private steeringWheelAxis;
+        private maxSteeringAngle;
+        private maxSteeringSpeed;
+        private gearIndex;
+        private downShift;
+        private skiddingTime;
+        private shiftingTime;
+        private shiftingSide;
+        private shiftingBrake;
+        private engineForce;
+        private handBraking;
+        private linearDamping;
+        private angularDamping;
+        private forwardSpeed;
+        private absoluteSpeed;
+        private americanSpeed;
+        private gradientSpeed;
+        private frontWheelPower;
+        private backWheelPower;
+        private wheelBrakingForce;
+        private enginePitchLevel;
+        private smokeIntensityFactor;
+        private raycastVehicle;
+        private brakeLightsMesh;
+        private brakeLightsTrans;
+        private reverseLightsMesh;
+        private reverseLightsTrans;
+        private frontLeftWheelTrans;
+        private frontRightWheelTrans;
+        private backLeftWheelTrans;
+        private backRightWheelTrans;
+        private frontLeftWheelMesh;
+        private frontRightWheelMesh;
+        private backLeftWheelMesh;
+        private backRightWheelMesh;
+        private frontLeftWheelEmitter;
+        private frontRightWheelEmitter;
+        private backLeftWheelEmitter;
+        private backRightWheelEmitter;
+        private frontLeftWheelParticle;
+        private frontRightWheelParticle;
+        private backLeftWheelParticle;
+        private backRightWheelParticle;
+        private frontLeftWheelCollider;
+        private frontRightWheelCollider;
+        private backLeftWheelCollider;
+        private backRightWheelCollider;
+        private engineTorqueCurve;
+        private physicsSteerAngleL;
+        private physicsSteerAngleR;
+        private visualSteerAngleL;
+        private visualSteerAngleR;
+        private visualSteerBoostL;
+        private visualSteerBoostR;
+        private idleNoiseDelta;
+        private driveNoiseDelta;
+        private boostSpeedTimer;
+        private burnoutMeter;
+        private donutMeter;
+        private wheelRadius;
+        private clutchSlip;
+        private engineRPM;
+        private pitchRPM;
+        private shiftRPM;
+        private SKID_FL;
+        private SKID_FR;
+        private SKID_RL;
+        private SKID_RR;
+        private PITCH_FL;
+        private PITCH_FR;
+        private PITCH_RL;
+        private PITCH_RR;
+        private FRONT_LEFT;
+        private FRONT_RIGHT;
+        private BACK_LEFT;
+        private BACK_RIGHT;
+        private WHEEL_SKID_PITCH;
+        private POWER_BOOST_PITCH;
+        private SPIN_FL_Rotation;
+        private SPIN_FR_Rotation;
+        private SPIN_RL_Rotation;
+        private SPIN_RR_Rotation;
+        isBraking(): boolean;
+        isBoosting(): boolean;
+        getFootBraking(): boolean;
+        getHandBraking(): boolean;
+        getLinearVelocity(): BABYLON.Vector3;
+        getCurrentForward(): number;
+        getCurrentTurning(): number;
+        getCurrentSkidding(): boolean;
+        getCurrentDonuts(): boolean;
+        getReverseThrottle(): boolean;
+        getEnginePitchLevel(): number;
+        getCurrentBurnout(): boolean;
+        getFrontLeftSkid(): number;
+        getFrontRightSkid(): number;
+        getBackLeftSkid(): number;
+        getBackRightSkid(): number;
+        getWheelSkidPitch(): number;
+        getRigidbodyPhysics(): TOOLKIT.RigidbodyPhysics;
+        getRaycastVehicle(): TOOLKIT.RaycastVehicle;
+        getGradientSpeed(): number;
+        getForwardSpeed(): number;
+        getAbsoluteSpeed(): number;
+        getAmericanSpeed(): number;
+        getTopEngineSpeed(): number;
+        getNormalizedSpeed(): number;
+        getMaxReversePower(): number;
+        getCurrentGearIndex(): number;
+        getCurrentEngineRPM(): number;
+        getCurrentEngineForce(): number;
+        getCurrentEnginePitch(): number;
+        getGearShiftRatioCount(): number;
+        getSmokeTextureMask(): BABYLON.Texture;
+        getBrakeLightsMesh(): BABYLON.TransformNode;
+        getReverseLightsMesh(): BABYLON.TransformNode;
+        getFrontLeftWheelNode(): BABYLON.TransformNode;
+        getFrontRightWheelNode(): BABYLON.TransformNode;
+        getBackLeftWheelNode(): BABYLON.TransformNode;
+        getBackRightWheelNode(): BABYLON.TransformNode;
+        getWheelBurnoutEnabled(): boolean;
+        getWheelDonutsEnabled(): boolean;
+        getCurrentDonutSpinTime(): number;
+        getSmokeIntensityFactor(): number;
+        getWheelVelocityOffset(): BABYLON.Vector3;
+        smokeTexture: BABYLON.Texture;
+        skidThreashold: number;
+        wheelDrawVelocity: number;
+        smokeIntensity: number;
+        smokeOpacity: number;
+        smokeDonuts: number;
+        noiseTimeScale: number;
+        noiseTimeFactor: number;
+        maxBurnoutFactor: number;
+        maxSteerBoost: number;
+        overSteerSpeed: number;
+        overSteerTimeout: number;
+        topEngineSpeed: number;
+        topBoosterSpeed: number;
+        powerChangeRate: number;
+        powerCoefficient: number;
+        boosterCoefficient: number;
+        frictionLerpSpeed: number;
+        topSpeedDampener: number;
+        lowSpeedSteering: number;
+        highSpeedSteering: number;
+        donutTurningRadius: number;
+        donutEngineFactor: number;
+        donutRotateFactor: number;
+        donutLerpingSpeed: number;
+        gravitationalForce: number;
+        smoothFlyingForce: number;
+        transmissionRatio: number;
+        differentialRatio: number;
+        minBoosterSpeed: number;
+        maxBoosterTime: number;
+        maxPitchControl: number;
+        maxFrontBraking: number;
+        maxReversePower: number;
+        minBrakingForce: number;
+        maxBrakingForce: number;
+        handBrakingForce: number;
+        handBrakingTimer: number;
+        skidRotationTimeout: number;
+        linearBrakingForce: number;
+        angularBrakingForce: number;
+        burnoutFrictionSlip: number;
+        burnoutTimeDelay: number;
+        burnoutWheelPitch: number;
+        burnoutCoefficient: number;
+        burnoutTriggerMark: number;
+        enableAutoBurnouts: boolean;
+        driftTriggerAngle: number;
+        driftTriggerSpeed: number;
+        enableAutoDrifting: boolean;
+        penaltyGroundTag: string;
+        minPenaltySpeed: number;
+        linearWheelDrag: number;
+        frictionWheelSlip: number;
+        showSensorLines: boolean;
+        powerBooster: boolean;
+        linkTrackManager: boolean;
+        playVehicleSounds: boolean;
+        postNetworkAttributes: boolean;
+        wheelDriveType: number;
+        gearBoxMultiplier: number;
+        gearBoxMaxPitching: number;
+        gearBoxShiftChange: number;
+        gearBoxShiftDelay: number;
+        gearBoxShiftRatios: number[];
+        gearBoxShiftRanges: number[];
+        throttleBrakingForce: number;
+        throttleEngineSpeed: number;
+        brakeRecoveryDelay: number;
+        brakeRecoverySpeed: number;
+        skidRecoverySpeed: number;
+        extraRotationSpeed: number;
+        maxRotationSpeed: number;
+        burnoutLerpSpeed: number;
+        ackermanWheelBase: number;
+        ackermanRearTrack: number;
+        ackermanTurnRadius: number;
+        ackermanMaxRadius: number;
+        ackermanTurnFactor: number;
+        readBurnoutMeter(): number;
+        resetBurnoutMeter(): void;
+        readDonutMeter(): number;
+        resetDonutMeter(): void;
+        getBoosterTime(): number;
+        setBoosterTime(time: number): void;
+        resetBoosterTime(): void;
+        roadSurfaceFactor: number;
+        movementTilting: boolean;
+        surfaceDetection: boolean;
+        idleShakeRate: number;
+        idleShakeNoise: number;
+        maxForwardAngle: number;
+        maxLateralAngle: number;
+        lerpForwardFactor: number;
+        lerpLateralFactor: number;
+        shiftForwardExtra: number;
+        shiftLateralExtra: number;
+        forwardPitchFactor: number;
+        lateralRollFactor: number;
+        forwardRecoverRate: number;
+        lateralRecoverRate: number;
+        lowSpeedScale: number;
+        highSpeedScale: number;
+        lowForwardNoise: number;
+        highForwardNoise: number;
+        lowLateralNoise: number;
+        highLateralNoise: number;
+        speedThreashold: number;
+        boosterTransform: BABYLON.TransformNode;
+        chassisTransform: BABYLON.TransformNode;
+        tiltChassisEulers: BABYLON.Vector3;
+        protected m_frontLeftWheel: TOOLKIT.HavokWheelInfo;
+        protected m_frontRightWheel: TOOLKIT.HavokWheelInfo;
+        protected m_backLeftWheel: TOOLKIT.HavokWheelInfo;
+        protected m_backRightWheel: TOOLKIT.HavokWheelInfo;
+        protected m_frontLeftWheelSkid: number;
+        protected m_frontRightWheelSkid: number;
+        protected m_backLeftWheelSkid: number;
+        protected m_backRightWheelSkid: number;
+        protected m_angularDampener: BABYLON.Vector3;
+        protected m_velocityOffset: BABYLON.Vector3;
+        protected m_linearVelocity: BABYLON.Vector3;
+        protected m_lastPosition: BABYLON.Vector3;
+        protected m_scaledVelocity: number;
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        protected awakeVehicleState(): void;
+        protected initVehicleState(): void;
+        protected updateVehicleState(): void;
+        protected destroyVehicleState(): void;
+        private burnoutTimer;
+        private restoreTimer;
+        private cooldownTimer;
+        private wheelDonuts;
+        private wheelBurnout;
+        private wheelSkidding;
+        private donutSpinTime;
+        private currentForward;
+        private currentTurning;
+        private currentBoosting;
+        private currentSkidding;
+        private currentDonuts;
+        private currentSlipAngle;
+        private currentDrivePower;
+        private targetDrivePower;
+        private animatorSteerAngle;
+        /** Gets the current vehicle lateral slip angle in degrees. */
+        getCurrentSlipAngle(signed: boolean): number;
+        /** Gets the current vehicle lateral slip angle in radians. */
+        getCurrentSlipRadians(signed: boolean): number;
+        /** Drives the raycast vehicle with the specfied movement properties. */
+        drive(throttle: number, steering: number, braking: boolean, donuts: boolean, booster?: number, autopilot?: boolean, nos?: boolean): void;
+        private syncVehicleState;
+        private currentPitch;
+        private currentRoll;
+        private previousSpeed;
+        private angularVelocity;
+        private syncVehicleTilting;
+        private writeTransformMetadata;
+        private getVehicleEngineTorque;
+        private createSmokeParticleSystem;
+        private updateCurrentSkidInfo;
+        private updateCurrentBrakeDamping;
+        private updateLinearBrakeDamping;
+        private updateAngularBrakeDamping;
+        private updateCurrentRotationDelta;
+        private updateCurrentRotationBoost;
+        private updateCurrentFrictionSlip;
+        private frontLeftContact;
+        private frontRightContact;
+        private rearLeftContact;
+        private rearRightContact;
+        private frontLeftContactTag;
+        private frontRightContactTag;
+        private rearLeftContactTag;
+        private rearRightContactTag;
+        private frontLeftContactPoint;
+        private frontRightContactPoint;
+        private rearLeftContactPoint;
+        private rearRightContactPoint;
+        private frontLeftContactNormal;
+        private frontRightContactNormal;
+        private rearLeftContactNormal;
+        private rearRightContactNormal;
+        private frontLeftSensorLine;
+        private frontRightSensorLine;
+        private rearLeftSensorLine;
+        private rearRightSensorLine;
+        private frontLeftFrictionLerping;
+        private frontRightFrictionLerping;
+        private rearLeftFrictionLerping;
+        private rearRightFrictionLerping;
+        private frontLeftFrictionPenalty;
+        private frontRightFrictionPenalty;
+        private rearLeftFrictionPenalty;
+        private rearRightFrictionPenalty;
+        private startRaycastPosition;
+        private endRaycastPosition;
+        private downDirection;
+        private downDistance;
+        getFrontLeftWheelContact(): boolean;
+        getFrontRightWheelContact(): boolean;
+        getRearLeftWheelContact(): boolean;
+        getRearRightWheelContact(): boolean;
+        getFrontLeftWheelContactTag(): string;
+        getFrontRightWheelContactTag(): string;
+        getRearLeftWheelContactTag(): string;
+        getRearRightWheelContactTag(): string;
+        getFrontLeftWheelContactPoint(): BABYLON.Vector3;
+        getFrontRightWheelContactPoint(): BABYLON.Vector3;
+        getRearLeftWheelContactPoint(): BABYLON.Vector3;
+        getRearRightWheelContactPoint(): BABYLON.Vector3;
+        getFrontLeftWheelContactNormal(): BABYLON.Vector3;
+        getFrontRightWheelContactNormal(): BABYLON.Vector3;
+        getRearLeftWheelContactNormal(): BABYLON.Vector3;
+        getRearRightWheelContactNormal(): BABYLON.Vector3;
+        private wheelContactRaycastResult;
+        private castWheelContactRays;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class VehicleCameraManager
+    */
+    class VehicleCameraManager extends TOOLKIT.ScriptComponent {
+        enableCamera: boolean;
+        followTarget: boolean;
+        followHeight: number;
+        pitchingAngle: number;
+        rotationDamping: number;
+        minimumDistance: number;
+        maximumDistance: number;
+        buttonCamera: number;
+        keyboardCamera: number;
+        tickRemoteEntities: boolean;
+        fastMotionBlur: boolean;
+        lowSpeedBlurring: number;
+        highSpeedBlurring: number;
+        motionBlurSamples: number;
+        isObjectBasedBlur: boolean;
+        fastCameraShake: boolean;
+        lowSpeedShaking: number;
+        highSpeedShaking: number;
+        private firstPerson;
+        private cameraPivot;
+        private targetEulers;
+        private cameraRotation;
+        private cameraPivotOffset;
+        private autoAttachCamera;
+        private motionBlurAttached;
+        protected m_freeCamera: BABYLON.FreeCamera;
+        protected m_motionBlur: BABYLON.MotionBlurPostProcess;
+        protected m_cameraTransform: BABYLON.TransformNode;
+        protected m_inputController: PROJECT.VehicleInputController;
+        protected m_standardController: PROJECT.StandardCarController;
+        protected m_firstPersonOffset: BABYLON.Vector3;
+        protected awake(): void;
+        protected start(): void;
+        protected late(): void;
+        protected destroy(): void;
+        protected awakeCameraManager(): void;
+        protected initCameraManager(): void;
+        protected lateUpdateCameraManager(): void;
+        protected destroyCameraManager(): void;
+        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
+        togglePlayerCamera(): void;
+        firstPersonCamera(): void;
+        thirdPersonCamera(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon Script Component
+     * @class VehicleInputController
+     */
+    interface ISteeringWheelDevice {
+        deviceName: string;
+        forwardButton: number;
+        backwardButton: number;
+        leftHandBrake: number;
+        rightHandBrake: number;
+        leftDonutBoost: number;
+        rightDonutBoost: number;
+    }
+    class VehicleInputController extends TOOLKIT.ScriptComponent {
+        private playerDeltaX;
+        private playerDeltaY;
+        private playerMouseX;
+        private playerMouseY;
+        private ackermanRadius;
+        private recoveryRadius;
+        private waypointPosition;
+        private waypointCount;
+        private waypointIndex;
+        private noMovementTime;
+        private reverseFixMode;
+        private recoveryFixMode;
+        private nextTargetSpeed;
+        private prevTargetSpeed;
+        private vehicleResetCheck;
+        private randomSkillFactor;
+        private showChaseRabbit;
+        private showSensorLines;
+        private steeringWheelMode;
+        private rabbitTrackerLine;
+        private rabbitTrackerColor;
+        private greenTrackingColor;
+        private redTrackingColor;
+        private localTargetPosition;
+        private avoidPositionOffset;
+        private avoidanceLerp;
+        private avoidanceTimer;
+        private avoidanceValue;
+        private randomTurning;
+        private randomBoosting;
+        private randomDistance;
+        private lastCheckpoint;
+        private mainCenterSensorLine;
+        private mainRightSensorLine;
+        private mainLeftSensorLine;
+        private angleRightSensorLine;
+        private angleLeftSensorLine;
+        private sideRightSensorLine;
+        private sideLeftSensorLine;
+        private backRightSensorLine;
+        private backLeftSensorLine;
+        private sidewaysOffsetVector;
+        private backBumperEdgeVector;
+        private sensorStartPos;
+        private sensorPointPos;
+        private sensorAnglePos;
+        private rsideStartPos;
+        private rsidePointPos;
+        private lsideStartPos;
+        private lsidePointPos;
+        private tempScaleVector;
+        private rbackStartPos;
+        private rbackPointPos;
+        private lbackStartPos;
+        private lbackPointPos;
+        private trackVehiclePosition;
+        private trackRabbitPosition;
+        getPlayerDeltaX(): number;
+        getPlayerDeltaY(): number;
+        getPlayerMouseX(): number;
+        getPlayerMouseY(): number;
+        getWaypointIndex(): number;
+        getChaseRabbitMesh(): BABYLON.Mesh;
+        resetChaseRabbitMesh(): void;
+        getChasePointMesh(): BABYLON.Mesh;
+        resetChasePointMesh(): void;
+        enableInput: boolean;
+        resetTiming: number;
+        playerNumber: TOOLKIT.PlayerNumber;
+        pedelForward: number;
+        triggerForward: number;
+        keyboardForawrd: number;
+        auxKeyboardForawrd: number;
+        pedalBackward: number;
+        triggerBackwards: number;
+        keyboardBackwards: number;
+        auxKeyboardBackwards: number;
+        pedalBooster: number;
+        keyboardBooster: number;
+        buttonBooster: number;
+        buttonHandbrake: number;
+        keyboardHandbrake: number;
+        leftWheelHandbrake: number;
+        rightWheelHandbrake: number;
+        keyboardDonut: number;
+        leftButtonDonut: number;
+        rightButtonDonut: number;
+        leftWheelDonut: number;
+        rightWheelDonut: number;
+        raceLineNode: number;
+        minLookAhead: number;
+        maxLookAhead: number;
+        driverSkillLevel: number;
+        chaseRabbitSpeed: number;
+        throttleSensitivity: number;
+        steeringSensitivity: number;
+        brakingSensitivity: number;
+        brakingTurnAngle: number;
+        brakingSpeedLimit: number;
+        skiddingSpeedLimit: number;
+        linearDampenForce: number;
+        driveSpeedMultiplier: number;
+        driveLineDistance: number;
+        resetMovingTimeout: number;
+        reverseThrottleTime: number;
+        maxRaceTrackSpeed: number;
+        trackManagerIdentity: string;
+        vehicleTag: string;
+        obstacleTag: string;
+        sensorLength: number;
+        spacerWidths: number;
+        angleFactors: number;
+        initialOffsetX: number;
+        initialOffsetY: number;
+        initialOffsetZ: number;
+        sidewaysLength: number;
+        sidewaysOffset: number;
+        backBumperEdge: number;
+        powerBoosting: number;
+        wonderDistance: number;
+        avoidanceFactor: number;
+        avoidanceSpeed: number;
+        avoidanceTimeout: number;
+        avoidanceDistance: number;
+        private reversingFlag;
+        private reversingTime;
+        private reversingWait;
+        private reversingFor;
+        protected m_chasePointMesh: BABYLON.Mesh;
+        protected m_chaseRabbitMesh: BABYLON.Mesh;
+        protected m_circuitInterfaces: PROJECT.ITrackNode[];
+        protected m_circuitRaceLine_1: PROJECT.IControlPoint[];
+        protected m_circuitRaceLine_2: PROJECT.IControlPoint[];
+        protected m_circuitRaceLine_3: PROJECT.IControlPoint[];
+        protected m_circuitRaceLine_4: PROJECT.IControlPoint[];
+        protected m_circuitRaceLine_5: PROJECT.IControlPoint[];
+        protected m_rigidbodyPhysics: TOOLKIT.RigidbodyPhysics;
+        protected m_checkpointManager: PROJECT.CheckpointManager;
+        protected m_standardCarController: PROJECT.StandardCarController;
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        protected awakeVehicleController(): void;
+        protected initVehicleController(): void;
+        protected updateVehicleController(): void;
+        protected updateManualInputDrive(): void;
+        private autoDriveRaycastResult;
+        protected updateAutoPilotDrive(): void;
+        protected getDriverSkillFactor(): number;
+        protected getCurrentTrackNode(index: number): PROJECT.ITrackNode;
+        protected getCurrentControlPoint(lane: number, index: number): PROJECT.IControlPoint;
+        protected getRandomNumber(min: number, max: number): number;
+        protected generateRandonNumber(min: number, max: number, decimals?: number): number;
+        protected destroyVehicleController(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+    * Babylon Script Component
+    * @class VehicleNetworkLabel
+    */
+    class VehicleNetworkLabel extends TOOLKIT.ScriptComponent {
+        label: BABYLON.GUI.TextBlock;
+        rect: BABYLON.GUI.Rectangle;
+        autoCreate: boolean;
+        offsetX: number;
+        offsetY: number;
+        labelColor: BABYLON.Color3;
+        borderColor: BABYLON.Color3;
+        backgroundColor: BABYLON.Color3;
+        labelCreated: boolean;
+        protected update(): void;
+        createLabel(name: string): void;
+        protected destroy(): void;
+        private static AdvDynamicTexture;
+        /** Get the default fullscreen user interface advanced dynamic texture */
+        static GetFullscreenUI(scene: BABYLON.Scene, sampling?: number): BABYLON.GUI.AdvancedDynamicTexture;
+    }
+}
+declare namespace PROJECT {
+    /**
      * Babylon toolkit default camera system class
      * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
      * https://doc.babylonjs.com/divingDeeper/postProcesses/defaultRenderingPipeline
@@ -1750,945 +2689,6 @@ declare namespace PROJECT {
     enum ThirdPersonControl {
         ThirdPersonTurning = 0,
         ThirdPersonForward = 1
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class AutoBodyGarage
-    */
-    class AutoBodyGarage extends TOOLKIT.ScriptComponent {
-        private m_bodyMaterial;
-        private m_bodyAbtractMesh;
-        protected awake(): void;
-        setupVehicleMaterials(bodyColor: BABYLON.Color3, wheelColor?: BABYLON.Color3, wheelType?: number, decalIndex?: number): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class CheckpointManager
-    */
-    class CheckpointManager extends TOOLKIT.ScriptComponent {
-        private checkPointList;
-        private checkPointCount;
-        private checkPointIndex;
-        private nextCheckPoint;
-        private startRaceTime;
-        private totalRaceTime;
-        private lapNumber;
-        private lapTimer;
-        private lapTimes;
-        private playerID;
-        private playerName;
-        private raceOver;
-        register(id: number, name: string): void;
-        getLapTimes(): number[];
-        getLapNumber(): number;
-        getCheckPoint(): number;
-        getPlayerName(): string;
-        getPlayerID(): number;
-        getRaceTime(): number;
-        getRaceOver(): boolean;
-        protected start(): void;
-        private nextCheckPointName;
-        protected update(): void;
-        protected late(): void;
-        startRaceTimer(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class NetworkCarPrediction
-    */
-    class NetworkCarPrediction extends TOOLKIT.ScriptComponent {
-        private autoRegister;
-        private handlerName;
-        private extrapolateTimeMs;
-        protected awake(): void;
-        register(): void;
-        private HandleUpdate;
-        private LegacyHandleUpdate;
-    }
-}
-declare namespace PROJECT {
-    interface ITrackNode {
-        radius: number;
-        position: TOOLKIT.IUnityVector3;
-        rotation: TOOLKIT.IUnityVector4;
-        localPosition: BABYLON.Vector3;
-        localRotation: BABYLON.Quaternion;
-        localDistance: number;
-    }
-    interface IControlPoint {
-        speed: number;
-        tvalue: number;
-        position: TOOLKIT.IUnityVector3;
-    }
-    class RoutePoint {
-        position: BABYLON.Vector3;
-        direction: BABYLON.Vector3;
-    }
-    class PlayerRaceStats {
-        id: number;
-        name: string;
-        position: number;
-    }
-    /**
-    * Babylon Script Component
-    * @class BT_RaceTrackManager
-    */
-    class RaceTrackManager extends TOOLKIT.ScriptComponent {
-        static TrackLength: number;
-        static TotalLapCount: number;
-        static WinnerTransform: BABYLON.TransformNode;
-        private static CheckPointTag;
-        private static CheckPointList;
-        private static LeaderBoardList;
-        private static PlayerVehicleList;
-        private trackNodes;
-        private raceLineData_1;
-        private raceLineData_2;
-        private raceLineData_3;
-        private raceLineData_4;
-        private raceLineData_5;
-        private raceLineColor_1;
-        private raceLineColor_2;
-        private raceLineColor_3;
-        private raceLineColor_4;
-        private raceLineColor_5;
-        private debugMeshLines_1;
-        private debugMeshLines_2;
-        private debugMeshLines_3;
-        private debugMeshLines_4;
-        private debugMeshLines_5;
-        private p0n;
-        private p1n;
-        private p2n;
-        private p3n;
-        private i;
-        private static _EventBus;
-        static get EventBus(): TOOLKIT.LocalMessageBus;
-        drawDebugLines: boolean;
-        getTrackNodes(): PROJECT.ITrackNode[];
-        getControlPoints(line: number): PROJECT.IControlPoint[];
-        protected awake(): void;
-        protected start(): void;
-        protected after(): void;
-        protected destroy(): void;
-        getRoutePoint(distance: number): PROJECT.RoutePoint;
-        getRoutePointToRef(distance: number, result: PROJECT.RoutePoint): void;
-        getRoutePosition(distance: number): BABYLON.Vector3;
-        getRoutePositionToRef(distance: number, result: BABYLON.Vector3): void;
-        /** Gets the checkpoint tag identifier */
-        static GetCheckpointTag(): string;
-        /** Get the checkpoint position list */
-        static GetCheckpointList(): BABYLON.AbstractMesh[];
-        /** Get the total number of checkpoints */
-        static GetCheckpointCount(): number;
-        /** Calculates the fraction distance to next checkpoint */
-        private static GetCheckpointDistance;
-        /** Register vehicle with track manager */
-        static RegisterVehicle(vehicle: BABYLON.TransformNode): void;
-        /** Gets the registered player vehicles */
-        static GetPlayerVehicles(): BABYLON.TransformNode[];
-        /** Register player with track manager */
-        static RegisterPlayer(id: number, name: string): void;
-        /** Update player leaderboard information */
-        static UpdateLeaderboard(id: number, lap: number, checkpoint: number, position: BABYLON.Vector3): void;
-        /** Get player leaderboard position */
-        static GetLeaderboardPosition(id: number): number;
-        /** Get leaderboard position list */
-        static GetLeaderboardPositionList(): PROJECT.PlayerRaceStats[];
-        /** Sort leaderboard position list */
-        private static SortLeaderboardPositionList;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon remote vehicle controller class (Colyseus Universal Game Room)
-    * @class RemoteCarController
-    */
-    class RemoteCarController extends TOOLKIT.ScriptComponent {
-        private static ShowSensorLines;
-        centerOfMass: number;
-        burnoutWheelPitch: number;
-        linkTrackManager: boolean;
-        playVehicleSounds: boolean;
-        smokeTexture: BABYLON.Texture;
-        skidThreashold: number;
-        smokeIntensity: number;
-        wheelDrawVelocity: number;
-        smokeOpacity: number;
-        smokeDonuts: number;
-        private steeringWheelHub;
-        private steeringWheelAxis;
-        private maxSteeringAngle;
-        private maxSteeringSpeed;
-        private _animator;
-        private _engineAudioSource;
-        private _skidAudioSource;
-        private brakeLightsMesh;
-        private brakeLightsTrans;
-        private reverseLightsMesh;
-        private reverseLightsTrans;
-        private frontLeftWheelTrans;
-        private frontRightWheelTrans;
-        private backLeftWheelTrans;
-        private backRightWheelTrans;
-        private frontLeftWheelMesh;
-        private frontRightWheelMesh;
-        private backLeftWheelMesh;
-        private backRightWheelMesh;
-        private frontLeftWheelEmitter;
-        private frontRightWheelEmitter;
-        private backLeftWheelEmitter;
-        private backRightWheelEmitter;
-        private frontLeftWheelParticle;
-        private frontRightWheelParticle;
-        private backLeftWheelParticle;
-        private backRightWheelParticle;
-        private frontLeftContact;
-        private frontRightContact;
-        private rearLeftContact;
-        private rearRightContact;
-        private frontLeftContactTag;
-        private frontRightContactTag;
-        private rearLeftContactTag;
-        private rearRightContactTag;
-        private frontLeftContactPoint;
-        private frontRightContactPoint;
-        private rearLeftContactPoint;
-        private rearRightContactPoint;
-        private frontLeftContactNormal;
-        private frontRightContactNormal;
-        private rearLeftContactNormal;
-        private rearRightContactNormal;
-        private frontLeftSensorLine;
-        private frontRightSensorLine;
-        private rearLeftSensorLine;
-        private rearRightSensorLine;
-        private startRaycastPosition;
-        private endRaycastPosition;
-        private smokeIntensityFactor;
-        private downDirection;
-        private downDistance;
-        private lastPitch;
-        private lastBrake;
-        private lastReverse;
-        private lastBurnout;
-        private lastSteering;
-        private lastSKID_FL;
-        private lastSKID_FR;
-        private lastSKID_RL;
-        private lastSKID_RR;
-        private lastSPIN_FL;
-        private lastSPIN_FR;
-        private lastSPIN_RL;
-        private lastSPIN_RR;
-        private PITCH_FL;
-        private PITCH_FR;
-        private PITCH_RL;
-        private PITCH_RR;
-        private WHEEL_SKID_PITCH;
-        getFrontLeftWheelContact(): boolean;
-        getFrontRightWheelContact(): boolean;
-        getRearLeftWheelContact(): boolean;
-        getRearRightWheelContact(): boolean;
-        getFrontLeftWheelContactTag(): string;
-        getFrontRightWheelContactTag(): string;
-        getRearLeftWheelContactTag(): string;
-        getRearRightWheelContactTag(): string;
-        getFrontLeftWheelContactPoint(): BABYLON.Vector3;
-        getFrontRightWheelContactPoint(): BABYLON.Vector3;
-        getRearLeftWheelContactPoint(): BABYLON.Vector3;
-        getRearRightWheelContactPoint(): BABYLON.Vector3;
-        getFrontLeftWheelContactNormal(): BABYLON.Vector3;
-        getFrontRightWheelContactNormal(): BABYLON.Vector3;
-        getRearLeftWheelContactNormal(): BABYLON.Vector3;
-        getRearRightWheelContactNormal(): BABYLON.Vector3;
-        protected m_frontLeftWheelSkid: number;
-        protected m_frontRightWheelSkid: number;
-        protected m_backLeftWheelSkid: number;
-        protected m_backRightWheelSkid: number;
-        protected m_velocityOffset: BABYLON.Vector3;
-        protected m_linearVelocity: BABYLON.Vector3;
-        protected m_lastPosition: BABYLON.Vector3;
-        protected m_positionCenter: BABYLON.Vector3;
-        protected m_scaledVelocity: number;
-        protected awake(): void;
-        protected start(): void;
-        protected update(): void;
-        protected destroy(): void;
-        protected updateVehicleProperties(): void;
-        private castWheelContactRays;
-        private createSmokeParticleSystem;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon skidmark section class (Havok Physics Engine)
-     * @class SkidMarkSection
-     */
-    class SkidMarkSection {
-        Pos: BABYLON.Vector3;
-        Normal: BABYLON.Vector3;
-        Tangent: BABYLON.Vector4;
-        Posl: BABYLON.Vector3;
-        Posr: BABYLON.Vector3;
-        Intensity: number;
-        LastIndex: number;
-    }
-    /**
-     * Babylon Script Component
-     * @class SkidMarkManager
-     */
-    class SkidMarkManager extends TOOLKIT.ScriptComponent {
-        private static MAX_MARKS;
-        private static GROUND_OFFSET;
-        private static GPU_TRIANGLES;
-        private static MARK_COLOR;
-        private static MARK_WIDTH;
-        private static TEX_INTENSITY;
-        private static MIN_DISTANCE;
-        private static MIN_SQR_DISTANCE;
-        private static TEXTURE_MARKS;
-        private static SkidBufferPositions;
-        private static SkidBufferNormals;
-        private static SkidBufferTangents;
-        private static SkidBufferColors;
-        private static SkidBufferUvs;
-        private static SkidBufferIndices;
-        private static SkidMarkSections;
-        private static SkidMarkIndex;
-        private static SkidMarkMesh;
-        private static SkidMarkUpdated;
-        private static TempVector3_POS;
-        private static TempVector3_DIR;
-        private static TempVector3_XDIR;
-        private static TempVector3_SDIR;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
-        protected start(): void;
-        protected update(): void;
-        static AddSkidMarkSegment(pos: BABYLON.Vector3, normal: BABYLON.Vector3, intensity: number, lastIndex: number): BABYLON.Nullable<number>;
-        private static CreateSkidMarkManager;
-        private static AddSkidMarkVertexData;
-        private static UpdateSkidMarkManager;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon standard rigidbody vehicle controller class (Havok Physics Engine)
-     * @class StandardCarController
-     */
-    class StandardCarController extends TOOLKIT.ScriptComponent {
-        static DEFAULT_SKID_FACTOR: number;
-        static DEFAULT_PITCH_FACTOR: number;
-        static DEFAULT_SPEED_FACTOR: number;
-        static DEFAULT_DONUT_FACTOR: number;
-        static SimplexNoise2D: TOOLKIT.Simplex.NoiseFunction2D;
-        MIN_RPM: number;
-        MAX_RPM: number;
-        private _animator;
-        private _rigidbody;
-        private _engineAudioSource;
-        private _skidAudioSource;
-        private _nosAudioSource;
-        private _skidExtraRotation;
-        private _donutExtraRotation;
-        private steeringWheelHub;
-        private steeringWheelAxis;
-        private maxSteeringAngle;
-        private maxSteeringSpeed;
-        private gearIndex;
-        private downShift;
-        private skiddingTime;
-        private shiftingTime;
-        private shiftingSide;
-        private shiftingBrake;
-        private engineForce;
-        private handBraking;
-        private linearDamping;
-        private angularDamping;
-        private forwardSpeed;
-        private absoluteSpeed;
-        private americanSpeed;
-        private gradientSpeed;
-        private frontWheelPower;
-        private backWheelPower;
-        private wheelBrakingForce;
-        private enginePitchLevel;
-        private smokeIntensityFactor;
-        private raycastVehicle;
-        private brakeLightsMesh;
-        private brakeLightsTrans;
-        private reverseLightsMesh;
-        private reverseLightsTrans;
-        private frontLeftWheelTrans;
-        private frontRightWheelTrans;
-        private backLeftWheelTrans;
-        private backRightWheelTrans;
-        private frontLeftWheelMesh;
-        private frontRightWheelMesh;
-        private backLeftWheelMesh;
-        private backRightWheelMesh;
-        private frontLeftWheelEmitter;
-        private frontRightWheelEmitter;
-        private backLeftWheelEmitter;
-        private backRightWheelEmitter;
-        private frontLeftWheelParticle;
-        private frontRightWheelParticle;
-        private backLeftWheelParticle;
-        private backRightWheelParticle;
-        private frontLeftWheelCollider;
-        private frontRightWheelCollider;
-        private backLeftWheelCollider;
-        private backRightWheelCollider;
-        private engineTorqueCurve;
-        private physicsSteerAngleL;
-        private physicsSteerAngleR;
-        private visualSteerAngleL;
-        private visualSteerAngleR;
-        private visualSteerBoostL;
-        private visualSteerBoostR;
-        private idleNoiseDelta;
-        private driveNoiseDelta;
-        private boostSpeedTimer;
-        private burnoutMeter;
-        private donutMeter;
-        private wheelRadius;
-        private clutchSlip;
-        private engineRPM;
-        private pitchRPM;
-        private shiftRPM;
-        private SKID_FL;
-        private SKID_FR;
-        private SKID_RL;
-        private SKID_RR;
-        private PITCH_FL;
-        private PITCH_FR;
-        private PITCH_RL;
-        private PITCH_RR;
-        private FRONT_LEFT;
-        private FRONT_RIGHT;
-        private BACK_LEFT;
-        private BACK_RIGHT;
-        private WHEEL_SKID_PITCH;
-        private POWER_BOOST_PITCH;
-        private SPIN_FL_Rotation;
-        private SPIN_FR_Rotation;
-        private SPIN_RL_Rotation;
-        private SPIN_RR_Rotation;
-        isBraking(): boolean;
-        isBoosting(): boolean;
-        getFootBraking(): boolean;
-        getHandBraking(): boolean;
-        getLinearVelocity(): BABYLON.Vector3;
-        getCurrentForward(): number;
-        getCurrentTurning(): number;
-        getCurrentSkidding(): boolean;
-        getCurrentDonuts(): boolean;
-        getReverseThrottle(): boolean;
-        getEnginePitchLevel(): number;
-        getCurrentBurnout(): boolean;
-        getFrontLeftSkid(): number;
-        getFrontRightSkid(): number;
-        getBackLeftSkid(): number;
-        getBackRightSkid(): number;
-        getWheelSkidPitch(): number;
-        getRigidbodyPhysics(): TOOLKIT.RigidbodyPhysics;
-        getRaycastVehicle(): TOOLKIT.RaycastVehicle;
-        getGradientSpeed(): number;
-        getForwardSpeed(): number;
-        getAbsoluteSpeed(): number;
-        getAmericanSpeed(): number;
-        getTopEngineSpeed(): number;
-        getNormalizedSpeed(): number;
-        getMaxReversePower(): number;
-        getCurrentGearIndex(): number;
-        getCurrentEngineRPM(): number;
-        getCurrentEngineForce(): number;
-        getCurrentEnginePitch(): number;
-        getGearShiftRatioCount(): number;
-        getSmokeTextureMask(): BABYLON.Texture;
-        getBrakeLightsMesh(): BABYLON.TransformNode;
-        getReverseLightsMesh(): BABYLON.TransformNode;
-        getFrontLeftWheelNode(): BABYLON.TransformNode;
-        getFrontRightWheelNode(): BABYLON.TransformNode;
-        getBackLeftWheelNode(): BABYLON.TransformNode;
-        getBackRightWheelNode(): BABYLON.TransformNode;
-        getWheelBurnoutEnabled(): boolean;
-        getWheelDonutsEnabled(): boolean;
-        getCurrentDonutSpinTime(): number;
-        getSmokeIntensityFactor(): number;
-        getWheelVelocityOffset(): BABYLON.Vector3;
-        smokeTexture: BABYLON.Texture;
-        skidThreashold: number;
-        wheelDrawVelocity: number;
-        smokeIntensity: number;
-        smokeOpacity: number;
-        smokeDonuts: number;
-        noiseTimeScale: number;
-        noiseTimeFactor: number;
-        maxBurnoutFactor: number;
-        maxSteerBoost: number;
-        overSteerSpeed: number;
-        overSteerTimeout: number;
-        topEngineSpeed: number;
-        topBoosterSpeed: number;
-        powerChangeRate: number;
-        powerCoefficient: number;
-        boosterCoefficient: number;
-        frictionLerpSpeed: number;
-        topSpeedDampener: number;
-        lowSpeedSteering: number;
-        highSpeedSteering: number;
-        donutTurningRadius: number;
-        donutEngineFactor: number;
-        donutRotateFactor: number;
-        donutLerpingSpeed: number;
-        gravitationalForce: number;
-        smoothFlyingForce: number;
-        transmissionRatio: number;
-        differentialRatio: number;
-        minBoosterSpeed: number;
-        maxBoosterTime: number;
-        maxPitchControl: number;
-        maxFrontBraking: number;
-        maxReversePower: number;
-        minBrakingForce: number;
-        maxBrakingForce: number;
-        handBrakingForce: number;
-        handBrakingTimer: number;
-        skidRotationTimeout: number;
-        linearBrakingForce: number;
-        angularBrakingForce: number;
-        burnoutFrictionSlip: number;
-        burnoutTimeDelay: number;
-        burnoutWheelPitch: number;
-        burnoutCoefficient: number;
-        burnoutTriggerMark: number;
-        enableAutoBurnouts: boolean;
-        driftTriggerAngle: number;
-        driftTriggerSpeed: number;
-        enableAutoDrifting: boolean;
-        penaltyGroundTag: string;
-        minPenaltySpeed: number;
-        linearWheelDrag: number;
-        frictionWheelSlip: number;
-        showSensorLines: boolean;
-        powerBooster: boolean;
-        linkTrackManager: boolean;
-        playVehicleSounds: boolean;
-        postNetworkAttributes: boolean;
-        wheelDriveType: number;
-        gearBoxMultiplier: number;
-        gearBoxMaxPitching: number;
-        gearBoxShiftChange: number;
-        gearBoxShiftDelay: number;
-        gearBoxShiftRatios: number[];
-        gearBoxShiftRanges: number[];
-        throttleBrakingForce: number;
-        throttleEngineSpeed: number;
-        brakeRecoveryDelay: number;
-        brakeRecoverySpeed: number;
-        skidRecoverySpeed: number;
-        extraRotationSpeed: number;
-        maxRotationSpeed: number;
-        burnoutLerpSpeed: number;
-        ackermanWheelBase: number;
-        ackermanRearTrack: number;
-        ackermanTurnRadius: number;
-        ackermanMaxRadius: number;
-        ackermanTurnFactor: number;
-        readBurnoutMeter(): number;
-        resetBurnoutMeter(): void;
-        readDonutMeter(): number;
-        resetDonutMeter(): void;
-        getBoosterTime(): number;
-        setBoosterTime(time: number): void;
-        resetBoosterTime(): void;
-        roadSurfaceFactor: number;
-        movementTilting: boolean;
-        surfaceDetection: boolean;
-        idleShakeRate: number;
-        idleShakeNoise: number;
-        maxForwardAngle: number;
-        maxLateralAngle: number;
-        lerpForwardFactor: number;
-        lerpLateralFactor: number;
-        shiftForwardExtra: number;
-        shiftLateralExtra: number;
-        forwardPitchFactor: number;
-        lateralRollFactor: number;
-        forwardRecoverRate: number;
-        lateralRecoverRate: number;
-        lowSpeedScale: number;
-        highSpeedScale: number;
-        lowForwardNoise: number;
-        highForwardNoise: number;
-        lowLateralNoise: number;
-        highLateralNoise: number;
-        speedThreashold: number;
-        boosterTransform: BABYLON.TransformNode;
-        chassisTransform: BABYLON.TransformNode;
-        tiltChassisEulers: BABYLON.Vector3;
-        protected m_frontLeftWheel: TOOLKIT.HavokWheelInfo;
-        protected m_frontRightWheel: TOOLKIT.HavokWheelInfo;
-        protected m_backLeftWheel: TOOLKIT.HavokWheelInfo;
-        protected m_backRightWheel: TOOLKIT.HavokWheelInfo;
-        protected m_frontLeftWheelSkid: number;
-        protected m_frontRightWheelSkid: number;
-        protected m_backLeftWheelSkid: number;
-        protected m_backRightWheelSkid: number;
-        protected m_angularDampener: BABYLON.Vector3;
-        protected m_velocityOffset: BABYLON.Vector3;
-        protected m_linearVelocity: BABYLON.Vector3;
-        protected m_lastPosition: BABYLON.Vector3;
-        protected m_scaledVelocity: number;
-        protected awake(): void;
-        protected start(): void;
-        protected update(): void;
-        protected destroy(): void;
-        protected awakeVehicleState(): void;
-        protected initVehicleState(): void;
-        protected updateVehicleState(): void;
-        protected destroyVehicleState(): void;
-        private burnoutTimer;
-        private restoreTimer;
-        private cooldownTimer;
-        private wheelDonuts;
-        private wheelBurnout;
-        private wheelSkidding;
-        private donutSpinTime;
-        private currentForward;
-        private currentTurning;
-        private currentBoosting;
-        private currentSkidding;
-        private currentDonuts;
-        private currentSlipAngle;
-        private currentDrivePower;
-        private targetDrivePower;
-        private animatorSteerAngle;
-        /** Gets the current vehicle lateral slip angle in degrees. */
-        getCurrentSlipAngle(signed: boolean): number;
-        /** Gets the current vehicle lateral slip angle in radians. */
-        getCurrentSlipRadians(signed: boolean): number;
-        /** Drives the raycast vehicle with the specfied movement properties. */
-        drive(throttle: number, steering: number, braking: boolean, donuts: boolean, booster?: number, autopilot?: boolean, nos?: boolean): void;
-        private syncVehicleState;
-        private currentPitch;
-        private currentRoll;
-        private previousSpeed;
-        private angularVelocity;
-        private syncVehicleTilting;
-        private writeTransformMetadata;
-        private getVehicleEngineTorque;
-        private createSmokeParticleSystem;
-        private updateCurrentSkidInfo;
-        private updateCurrentBrakeDamping;
-        private updateLinearBrakeDamping;
-        private updateAngularBrakeDamping;
-        private updateCurrentRotationDelta;
-        private updateCurrentRotationBoost;
-        private updateCurrentFrictionSlip;
-        private frontLeftContact;
-        private frontRightContact;
-        private rearLeftContact;
-        private rearRightContact;
-        private frontLeftContactTag;
-        private frontRightContactTag;
-        private rearLeftContactTag;
-        private rearRightContactTag;
-        private frontLeftContactPoint;
-        private frontRightContactPoint;
-        private rearLeftContactPoint;
-        private rearRightContactPoint;
-        private frontLeftContactNormal;
-        private frontRightContactNormal;
-        private rearLeftContactNormal;
-        private rearRightContactNormal;
-        private frontLeftSensorLine;
-        private frontRightSensorLine;
-        private rearLeftSensorLine;
-        private rearRightSensorLine;
-        private frontLeftFrictionLerping;
-        private frontRightFrictionLerping;
-        private rearLeftFrictionLerping;
-        private rearRightFrictionLerping;
-        private frontLeftFrictionPenalty;
-        private frontRightFrictionPenalty;
-        private rearLeftFrictionPenalty;
-        private rearRightFrictionPenalty;
-        private startRaycastPosition;
-        private endRaycastPosition;
-        private downDirection;
-        private downDistance;
-        getFrontLeftWheelContact(): boolean;
-        getFrontRightWheelContact(): boolean;
-        getRearLeftWheelContact(): boolean;
-        getRearRightWheelContact(): boolean;
-        getFrontLeftWheelContactTag(): string;
-        getFrontRightWheelContactTag(): string;
-        getRearLeftWheelContactTag(): string;
-        getRearRightWheelContactTag(): string;
-        getFrontLeftWheelContactPoint(): BABYLON.Vector3;
-        getFrontRightWheelContactPoint(): BABYLON.Vector3;
-        getRearLeftWheelContactPoint(): BABYLON.Vector3;
-        getRearRightWheelContactPoint(): BABYLON.Vector3;
-        getFrontLeftWheelContactNormal(): BABYLON.Vector3;
-        getFrontRightWheelContactNormal(): BABYLON.Vector3;
-        getRearLeftWheelContactNormal(): BABYLON.Vector3;
-        getRearRightWheelContactNormal(): BABYLON.Vector3;
-        private wheelContactRaycastResult;
-        private castWheelContactRays;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class VehicleCameraManager
-    */
-    class VehicleCameraManager extends TOOLKIT.ScriptComponent {
-        enableCamera: boolean;
-        followTarget: boolean;
-        followHeight: number;
-        pitchingAngle: number;
-        rotationDamping: number;
-        minimumDistance: number;
-        maximumDistance: number;
-        buttonCamera: number;
-        keyboardCamera: number;
-        tickRemoteEntities: boolean;
-        fastMotionBlur: boolean;
-        lowSpeedBlurring: number;
-        highSpeedBlurring: number;
-        motionBlurSamples: number;
-        isObjectBasedBlur: boolean;
-        fastCameraShake: boolean;
-        lowSpeedShaking: number;
-        highSpeedShaking: number;
-        private firstPerson;
-        private cameraPivot;
-        private targetEulers;
-        private cameraRotation;
-        private cameraPivotOffset;
-        private autoAttachCamera;
-        private motionBlurAttached;
-        protected m_freeCamera: BABYLON.FreeCamera;
-        protected m_motionBlur: BABYLON.MotionBlurPostProcess;
-        protected m_cameraTransform: BABYLON.TransformNode;
-        protected m_inputController: PROJECT.VehicleInputController;
-        protected m_standardController: PROJECT.StandardCarController;
-        protected m_firstPersonOffset: BABYLON.Vector3;
-        protected awake(): void;
-        protected start(): void;
-        protected late(): void;
-        protected destroy(): void;
-        protected awakeCameraManager(): void;
-        protected initCameraManager(): void;
-        protected lateUpdateCameraManager(): void;
-        protected destroyCameraManager(): void;
-        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
-        togglePlayerCamera(): void;
-        firstPersonCamera(): void;
-        thirdPersonCamera(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon Script Component
-     * @class VehicleInputController
-     */
-    interface ISteeringWheelDevice {
-        deviceName: string;
-        forwardButton: number;
-        backwardButton: number;
-        leftHandBrake: number;
-        rightHandBrake: number;
-        leftDonutBoost: number;
-        rightDonutBoost: number;
-    }
-    class VehicleInputController extends TOOLKIT.ScriptComponent {
-        private playerDeltaX;
-        private playerDeltaY;
-        private playerMouseX;
-        private playerMouseY;
-        private ackermanRadius;
-        private recoveryRadius;
-        private waypointPosition;
-        private waypointCount;
-        private waypointIndex;
-        private noMovementTime;
-        private reverseFixMode;
-        private recoveryFixMode;
-        private nextTargetSpeed;
-        private prevTargetSpeed;
-        private vehicleResetCheck;
-        private randomSkillFactor;
-        private showChaseRabbit;
-        private showSensorLines;
-        private steeringWheelMode;
-        private rabbitTrackerLine;
-        private rabbitTrackerColor;
-        private greenTrackingColor;
-        private redTrackingColor;
-        private localTargetPosition;
-        private avoidPositionOffset;
-        private avoidanceLerp;
-        private avoidanceTimer;
-        private avoidanceValue;
-        private randomTurning;
-        private randomBoosting;
-        private randomDistance;
-        private lastCheckpoint;
-        private mainCenterSensorLine;
-        private mainRightSensorLine;
-        private mainLeftSensorLine;
-        private angleRightSensorLine;
-        private angleLeftSensorLine;
-        private sideRightSensorLine;
-        private sideLeftSensorLine;
-        private backRightSensorLine;
-        private backLeftSensorLine;
-        private sidewaysOffsetVector;
-        private backBumperEdgeVector;
-        private sensorStartPos;
-        private sensorPointPos;
-        private sensorAnglePos;
-        private rsideStartPos;
-        private rsidePointPos;
-        private lsideStartPos;
-        private lsidePointPos;
-        private tempScaleVector;
-        private rbackStartPos;
-        private rbackPointPos;
-        private lbackStartPos;
-        private lbackPointPos;
-        private trackVehiclePosition;
-        private trackRabbitPosition;
-        getPlayerDeltaX(): number;
-        getPlayerDeltaY(): number;
-        getPlayerMouseX(): number;
-        getPlayerMouseY(): number;
-        getWaypointIndex(): number;
-        getChaseRabbitMesh(): BABYLON.Mesh;
-        resetChaseRabbitMesh(): void;
-        getChasePointMesh(): BABYLON.Mesh;
-        resetChasePointMesh(): void;
-        enableInput: boolean;
-        resetTiming: number;
-        playerNumber: TOOLKIT.PlayerNumber;
-        pedelForward: number;
-        triggerForward: number;
-        keyboardForawrd: number;
-        auxKeyboardForawrd: number;
-        pedalBackward: number;
-        triggerBackwards: number;
-        keyboardBackwards: number;
-        auxKeyboardBackwards: number;
-        pedalBooster: number;
-        keyboardBooster: number;
-        buttonBooster: number;
-        buttonHandbrake: number;
-        keyboardHandbrake: number;
-        leftWheelHandbrake: number;
-        rightWheelHandbrake: number;
-        keyboardDonut: number;
-        leftButtonDonut: number;
-        rightButtonDonut: number;
-        leftWheelDonut: number;
-        rightWheelDonut: number;
-        raceLineNode: number;
-        minLookAhead: number;
-        maxLookAhead: number;
-        driverSkillLevel: number;
-        chaseRabbitSpeed: number;
-        throttleSensitivity: number;
-        steeringSensitivity: number;
-        brakingSensitivity: number;
-        brakingTurnAngle: number;
-        brakingSpeedLimit: number;
-        skiddingSpeedLimit: number;
-        linearDampenForce: number;
-        driveSpeedMultiplier: number;
-        driveLineDistance: number;
-        resetMovingTimeout: number;
-        reverseThrottleTime: number;
-        maxRaceTrackSpeed: number;
-        trackManagerIdentity: string;
-        vehicleTag: string;
-        obstacleTag: string;
-        sensorLength: number;
-        spacerWidths: number;
-        angleFactors: number;
-        initialOffsetX: number;
-        initialOffsetY: number;
-        initialOffsetZ: number;
-        sidewaysLength: number;
-        sidewaysOffset: number;
-        backBumperEdge: number;
-        powerBoosting: number;
-        wonderDistance: number;
-        avoidanceFactor: number;
-        avoidanceSpeed: number;
-        avoidanceTimeout: number;
-        avoidanceDistance: number;
-        private reversingFlag;
-        private reversingTime;
-        private reversingWait;
-        private reversingFor;
-        protected m_chasePointMesh: BABYLON.Mesh;
-        protected m_chaseRabbitMesh: BABYLON.Mesh;
-        protected m_circuitInterfaces: PROJECT.ITrackNode[];
-        protected m_circuitRaceLine_1: PROJECT.IControlPoint[];
-        protected m_circuitRaceLine_2: PROJECT.IControlPoint[];
-        protected m_circuitRaceLine_3: PROJECT.IControlPoint[];
-        protected m_circuitRaceLine_4: PROJECT.IControlPoint[];
-        protected m_circuitRaceLine_5: PROJECT.IControlPoint[];
-        protected m_rigidbodyPhysics: TOOLKIT.RigidbodyPhysics;
-        protected m_checkpointManager: PROJECT.CheckpointManager;
-        protected m_standardCarController: PROJECT.StandardCarController;
-        protected awake(): void;
-        protected start(): void;
-        protected update(): void;
-        protected destroy(): void;
-        protected awakeVehicleController(): void;
-        protected initVehicleController(): void;
-        protected updateVehicleController(): void;
-        protected updateManualInputDrive(): void;
-        private autoDriveRaycastResult;
-        protected updateAutoPilotDrive(): void;
-        protected getDriverSkillFactor(): number;
-        protected getCurrentTrackNode(index: number): PROJECT.ITrackNode;
-        protected getCurrentControlPoint(lane: number, index: number): PROJECT.IControlPoint;
-        protected getRandomNumber(min: number, max: number): number;
-        protected generateRandonNumber(min: number, max: number, decimals?: number): number;
-        protected destroyVehicleController(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
-    * @class VehicleNetworkLabel
-    */
-    class VehicleNetworkLabel extends TOOLKIT.ScriptComponent {
-        label: BABYLON.GUI.TextBlock;
-        rect: BABYLON.GUI.Rectangle;
-        autoCreate: boolean;
-        offsetX: number;
-        offsetY: number;
-        labelColor: BABYLON.Color3;
-        borderColor: BABYLON.Color3;
-        backgroundColor: BABYLON.Color3;
-        labelCreated: boolean;
-        protected update(): void;
-        createLabel(name: string): void;
-        protected destroy(): void;
-        private static AdvDynamicTexture;
-        /** Get the default fullscreen user interface advanced dynamic texture */
-        static GetFullscreenUI(scene: BABYLON.Scene, sampling?: number): BABYLON.GUI.AdvancedDynamicTexture;
     }
 }
 declare namespace PROJECT {
