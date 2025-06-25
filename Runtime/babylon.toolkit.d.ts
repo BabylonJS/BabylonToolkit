@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.250 - R1) */
+        /** Gets the toolkit framework version number (8.12.256 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -2010,7 +2010,7 @@ declare namespace TOOLKIT {
         dispose(): void;
     }
 }
-declare namespace TOOLKIT.Simplex {
+declare namespace TOOLKIT {
     /**
      * A random() function, must return a number in the interval [0,1), just like Math.random().
      */
@@ -2025,12 +2025,6 @@ declare namespace TOOLKIT.Simplex {
      */
     type NoiseFunction2D = (x: number, y: number) => number;
     /**
-     * Creates a 2D noise function
-     * @param random the random function that will be used to build the permutation table
-     * @returns {NoiseFunction2D}
-     */
-    function createNoise2D(random?: RandomFn): NoiseFunction2D;
-    /**
      * Samples the noise field in three dimensions
      *
      * Coordinates should be finite, bigger than -2^31 and smaller than 2^31.
@@ -2040,12 +2034,6 @@ declare namespace TOOLKIT.Simplex {
      * @returns a number in the interval [-1, 1]
      */
     type NoiseFunction3D = (x: number, y: number, z: number) => number;
-    /**
-     * Creates a 3D noise function
-     * @param random the random function that will be used to build the permutation table
-     * @returns {NoiseFunction3D}
-     */
-    function createNoise3D(random?: RandomFn): NoiseFunction3D;
     /**
      * Samples the noise field in four dimensions
      *
@@ -2057,19 +2045,43 @@ declare namespace TOOLKIT.Simplex {
      * @returns a number in the interval [-1, 1]
      */
     type NoiseFunction4D = (x: number, y: number, z: number, w: number) => number;
-    /**
-     * Creates a 4D noise function
-     * @param random the random function that will be used to build the permutation table
-     * @returns {NoiseFunction4D}
-     */
-    function createNoise4D(random?: RandomFn): NoiseFunction4D;
-    /**
-     * Builds a random permutation table.
-     * This is exported only for (internal) testing purposes.
-     * Do not rely on this export.
-     * @private
-     */
-    function buildPermutationTable(random: RandomFn): Uint8Array;
+    class SimplexNoise {
+        private static readonly F2;
+        private static readonly G2;
+        private static readonly F3;
+        private static readonly G3;
+        private static readonly F4;
+        private static readonly G4;
+        private static readonly grad2;
+        private static readonly grad3;
+        private static readonly grad4;
+        private static fastFloor;
+        /**
+         * Creates a 2D noise function
+         * @param random the random function that will be used to build the permutation table
+         * @returns {NoiseFunction2D}
+         */
+        static createNoise2D(random?: RandomFn): NoiseFunction2D;
+        /**
+         * Creates a 3D noise function
+         * @param random the random function that will be used to build the permutation table
+         * @returns {NoiseFunction3D}
+         */
+        static createNoise3D(random?: RandomFn): NoiseFunction3D;
+        /**
+         * Creates a 4D noise function
+         * @param random the random function that will be used to build the permutation table
+         * @returns {NoiseFunction4D}
+         */
+        static createNoise4D(random?: RandomFn): NoiseFunction4D;
+        /**
+         * Builds a random permutation table.
+         * This is exported only for (internal) testing purposes.
+         * Do not rely on this export.
+         * @private
+         */
+        static buildPermutationTable(random: RandomFn): Uint8Array;
+    }
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
