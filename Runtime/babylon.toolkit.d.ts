@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.256 - R1) */
+        /** Gets the toolkit framework version number (8.12.258 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3193,6 +3193,7 @@ declare namespace TOOLKIT {
         protected m_defaultGroup: BABYLON.AnimationGroup;
         protected m_animationTargets: BABYLON.TargetedAnimation[];
         protected m_rotationIdentity: BABYLON.Quaternion;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected destroy(): void;
@@ -3556,6 +3557,7 @@ declare namespace TOOLKIT {
         getSoundClip(): BABYLON.StaticSound | BABYLON.Sound;
         /** Register handler that is triggered when the audio clip is ready */
         onReadyObservable: BABYLON.Observable<BABYLON.StaticSound | BABYLON.Sound>;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -3824,6 +3826,7 @@ declare namespace TOOLKIT {
         raycastLength: number;
         /** Sets the character controller to debug mode (show ray lines) */
         showRaycasts: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
@@ -3858,6 +3861,7 @@ declare namespace TOOLKIT {
      */
     class SimpleCharacterController extends TOOLKIT.ScriptComponent {
         private _eulerAngles;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         /** Sets the character position and rotation to the specfied values. Aux is not used. */
         set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, aux?: boolean): void;
@@ -3881,6 +3885,7 @@ declare namespace TOOLKIT {
         getNavigationAgent(): TOOLKIT.NavigationAgent;
         setNavigationAgent(agent: TOOLKIT.NavigationAgent): void;
         setDestinationPoint(destination: BABYLON.Vector3, closetPoint?: boolean): void;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         /** Sets the character position and rotation to the specfied values. Aux is closest point option. */
         set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number, aux?: boolean): void;
@@ -4114,6 +4119,7 @@ declare namespace TOOLKIT {
         protected m_agentDirection: BABYLON.Vector3;
         protected m_agentQuaternion: BABYLON.Quaternion;
         protected m_agentDestination: BABYLON.Vector3;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected destroy(): void;
@@ -4231,6 +4237,7 @@ declare namespace TOOLKIT {
         private _isKinematic;
         private _centerOfMass;
         protected m_raycastVehicle: any;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected late(): void;
@@ -4417,6 +4424,7 @@ declare namespace TOOLKIT {
      * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
      */
     class ShurikenParticles extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -4435,6 +4443,7 @@ declare namespace TOOLKIT {
      * @class TerrainGenerator - All rights reserved (c) 2024 Mackey Kinard
     */
     class TerrainGenerator extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -4479,6 +4488,7 @@ declare namespace TOOLKIT {
         protected m_videoTexture: BABYLON.VideoTexture;
         protected m_videoMaterial: BABYLON.StandardMaterial;
         protected m_diffuseIntensity: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
         protected awakeWebVideoPlayer(): void;
