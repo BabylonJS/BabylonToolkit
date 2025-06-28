@@ -6,6 +6,7 @@ declare namespace PROJECT {
     class AutoBodyGarage extends TOOLKIT.ScriptComponent {
         private m_bodyMaterial;
         private m_bodyAbtractMesh;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         setupVehicleMaterials(bodyColor: BABYLON.Color3, wheelColor?: BABYLON.Color3, wheelType?: number, decalIndex?: number): void;
     }
@@ -36,6 +37,7 @@ declare namespace PROJECT {
         getPlayerID(): number;
         getRaceTime(): number;
         getRaceOver(): boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         private nextCheckPointName;
         protected update(): void;
@@ -52,6 +54,7 @@ declare namespace PROJECT {
         private autoRegister;
         private handlerName;
         private extrapolateTimeMs;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         register(): void;
         private HandleUpdate;
@@ -119,6 +122,7 @@ declare namespace PROJECT {
         drawDebugLines: boolean;
         getTrackNodes(): PROJECT.ITrackNode[];
         getControlPoints(line: number): PROJECT.IControlPoint[];
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected after(): void;
@@ -263,6 +267,7 @@ declare namespace PROJECT {
         protected m_lastPosition: BABYLON.Vector3;
         protected m_positionCenter: BABYLON.Vector3;
         protected m_scaledVelocity: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -314,7 +319,7 @@ declare namespace PROJECT {
         private static TempVector3_DIR;
         private static TempVector3_XDIR;
         private static TempVector3_SDIR;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         protected update(): void;
         static AddSkidMarkSegment(pos: BABYLON.Vector3, normal: BABYLON.Vector3, intensity: number, lastIndex: number): BABYLON.Nullable<number>;
@@ -593,6 +598,7 @@ declare namespace PROJECT {
         protected m_linearVelocity: BABYLON.Vector3;
         protected m_lastPosition: BABYLON.Vector3;
         protected m_scaledVelocity: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -728,6 +734,7 @@ declare namespace PROJECT {
         protected m_inputController: PROJECT.VehicleInputController;
         protected m_standardController: PROJECT.StandardCarController;
         protected m_firstPersonOffset: BABYLON.Vector3;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected late(): void;
@@ -896,6 +903,7 @@ declare namespace PROJECT {
         protected m_rigidbodyPhysics: TOOLKIT.RigidbodyPhysics;
         protected m_checkpointManager: PROJECT.CheckpointManager;
         protected m_standardCarController: PROJECT.StandardCarController;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -929,6 +937,7 @@ declare namespace PROJECT {
         borderColor: BABYLON.Color3;
         backgroundColor: BABYLON.Color3;
         labelCreated: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected update(): void;
         createLabel(name: string): void;
         protected destroy(): void;
@@ -983,7 +992,7 @@ declare namespace PROJECT {
         getTargetTransform(): BABYLON.TransformNode;
         setTargetTransform(target: BABYLON.TransformNode): void;
         enableSpatialAudio(value: boolean): void;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -1184,6 +1193,7 @@ declare namespace PROJECT {
         private views;
         private xbox;
         private color;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -1210,6 +1220,7 @@ declare namespace PROJECT {
         private htmlMarkup;
         private parentElement;
         private uiParentElement;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -1253,7 +1264,7 @@ declare namespace PROJECT {
         private drawAtIdealSize;
         private useSmallestIdeal;
         private fontFamilyList;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected destroy(): void;
@@ -1271,6 +1282,7 @@ declare namespace PROJECT {
     * @class AssetExporter
     */
     class AssetExporter extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected fixed(): void;
@@ -1290,6 +1302,7 @@ declare namespace PROJECT {
         private parentMeshes;
         private importMeshes;
         private assetContainers;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected destroy(): void;
         /** Add asset preloader tasks (https://doc.babylonjs.com/divingDeeper/importers/assetManager) */
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
@@ -1305,6 +1318,7 @@ declare namespace PROJECT {
         private setCustomRootUrl;
         getMaterialInstance(): BABYLON.NodeMaterial;
         protected m_nodeMaterial: BABYLON.NodeMaterial;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1316,6 +1330,7 @@ declare namespace PROJECT {
     */
     class NodeMaterialParticle extends TOOLKIT.ScriptComponent {
         private nodeMaterialEditor;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected setupNodeMaterial(materialInstance: BABYLON.NodeMaterial): void;
@@ -1342,6 +1357,7 @@ declare namespace PROJECT {
         private resuable;
         getPostProcess(): BABYLON.PostProcess;
         protected m_postProcess: BABYLON.PostProcess;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         protected setupNodeMaterial(materialInstance: BABYLON.NodeMaterial): void;
         protected destroy(): void;
@@ -1357,6 +1373,7 @@ declare namespace PROJECT {
         private textureSize;
         getProceduralTexture(): BABYLON.ProceduralTexture;
         protected m_proceduralTexture: BABYLON.ProceduralTexture;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         protected setupNodeMaterial(materialInstance: BABYLON.NodeMaterial): void;
         protected destroy(): void;
@@ -1404,7 +1421,7 @@ declare namespace PROJECT {
         getRightStickElement(): HTMLDivElement;
         showLeftStickElement(show: boolean): void;
         showRightStickElement(show: boolean): void;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -1487,6 +1504,7 @@ declare namespace PROJECT {
     */
     class MobileOccludeMaterial extends TOOLKIT.ScriptComponent {
         private applyToMaterial;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
     }
 }
@@ -1497,6 +1515,7 @@ declare namespace PROJECT {
     */
     class MobileShadowMaterial extends TOOLKIT.ScriptComponent {
         private createNewMaterial;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1528,7 +1547,7 @@ declare namespace PROJECT {
         isSoloSession(): boolean;
         isHostSession(): boolean;
         getColyseusClient(): Colyseus.Client;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected destroy(): void;
@@ -1576,6 +1595,7 @@ declare namespace PROJECT {
         fontStyle: string;
         fontSize: number;
         fillRect: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected ready(): void;
         protected update(): void;
@@ -1611,6 +1631,7 @@ declare namespace PROJECT {
         private creationAttributes;
         private bufferedAttributes;
         private networkEntityCreated;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected update(): void;
         protected destroy(): void;
         createEntity(): void;
@@ -1907,6 +1928,7 @@ declare namespace PROJECT {
         axisB: BABYLON.Vector3;
         constraint: BABYLON.BallAndSocketConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1922,6 +1944,7 @@ declare namespace PROJECT {
         maxDistance: number;
         constraint: BABYLON.DistanceConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1938,6 +1961,7 @@ declare namespace PROJECT {
         pivotB: BABYLON.Vector3;
         constraint: BABYLON.HingeConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1956,6 +1980,7 @@ declare namespace PROJECT {
         axisB: BABYLON.Vector3;
         constraint: BABYLON.LockConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1974,6 +1999,7 @@ declare namespace PROJECT {
         axisB: BABYLON.Vector3;
         constraint: BABYLON.PrismaticConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -1993,6 +2019,7 @@ declare namespace PROJECT {
         axisLimits: BABYLON.Physics6DoFLimit[];
         constraint: BABYLON.Physics6DoFConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -2011,6 +2038,7 @@ declare namespace PROJECT {
         axisB: BABYLON.Vector3;
         constraint: BABYLON.SliderConstraint;
         collisionsEnabled: boolean;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
     }
@@ -2026,6 +2054,7 @@ declare namespace PROJECT {
         smoothInputVectors: boolean;
         private animationState;
         private animationStateParams;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected destroy(): void;
@@ -2239,7 +2268,7 @@ declare namespace PROJECT {
         protected m_positionCenter: BABYLON.Vector3;
         protected m_scaledVelocity: number;
         protected playerDrawVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected after(): void;
@@ -2578,7 +2607,7 @@ declare namespace PROJECT {
         protected m_positionCenter: BABYLON.Vector3;
         protected m_scaledVelocity: number;
         protected playerDrawVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected after(): void;
@@ -2699,6 +2728,7 @@ declare namespace PROJECT {
     class FxParticleSystem extends TOOLKIT.ScriptComponent {
         getParticleEmitter(): BABYLON.AbstractMesh;
         getParticleSystem(): BABYLON.ParticleSystem | BABYLON.GPUParticleSystem;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected m_particleEmitter: BABYLON.AbstractMesh;
         protected m_particleSystem: BABYLON.ParticleSystem | BABYLON.GPUParticleSystem;
         protected awake(): void;
@@ -2720,6 +2750,7 @@ declare namespace PROJECT {
         getSkyboxMesh(): BABYLON.AbstractMesh;
         getSkyMaterial(): BABYLON.SkyMaterial;
         getReflectionProbe(): BABYLON.ReflectionProbe;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -2737,8 +2768,8 @@ declare namespace PROJECT {
 }
 declare namespace PROJECT {
     /**
-     * Babylon water material system pro class (Babylon Water Material)
-     * @class WaterMaterialSystem - All rights reserved (c) 2020 Mackey Kinard
+     * Babylon water system (Colyseus Universal Game Room)
+     * @class WaterMaterialSystem - All rights reserved (c) 2020 Mackey Kinard
      */
     class WaterMaterialSystem extends TOOLKIT.ScriptComponent {
         private waterTag;
@@ -2766,6 +2797,7 @@ declare namespace PROJECT {
         getWaterMaterial(): BABYLON.WaterMaterial;
         protected m_waterGeometry: BABYLON.AbstractMesh;
         protected m_waterMaterial: BABYLON.WaterMaterial;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -2808,7 +2840,7 @@ declare namespace PROJECT {
         private autoStart;
         private autoUpdate;
         private delayTimeout;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any);
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         protected ready(): void;
         protected update(): void;
@@ -2821,6 +2853,7 @@ declare namespace PROJECT {
     * @class SnapshotRenderer
     */
     class SnapshotRenderer extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
     }
 }
@@ -2844,6 +2877,7 @@ declare namespace PROJECT {
         private toggleEffects;
         private autoPlayList;
         private audioSources;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
@@ -2861,6 +2895,7 @@ declare namespace PROJECT {
         static get MUSIC(): PROJECT.SoundManager;
         private static _SFX;
         static get SFX(): PROJECT.SoundManager;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
     }
 }
@@ -2876,6 +2911,7 @@ declare namespace PROJECT {
         getGroupName(): string;
         protected m_soundMap: Map<string, TOOLKIT.AudioSource>;
         protected m_soundList: TOOLKIT.AudioSource[];
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;

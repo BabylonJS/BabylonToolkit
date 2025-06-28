@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.12.258 - R1) */
+        /** Gets the toolkit framework version number (8.12.262 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4541,8 +4541,8 @@ declare namespace TOOLKIT {
         addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
     }
 }
-
 //declare var SM: typeof TOOLKIT.SceneManager;
 //declare var WM: typeof TOOLKIT.WindowManager;
 //declare var IC: typeof TOOLKIT.InputController;
 
+export as namespace TOOLKIT;
