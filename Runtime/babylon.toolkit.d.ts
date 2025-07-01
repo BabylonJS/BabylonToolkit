@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.14.56 - R1) */
+        /** Gets the toolkit framework version number (8.14.58 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -119,14 +119,14 @@ declare namespace TOOLKIT {
          * @param options The playground options.
          * @returns a waitable promise.
          */
-        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions): Promise<void>;
         /**
          * Initialize the babylon toolkit runtime environment
          * @param engine The engine instance.
          * @param options The playground options.
          * @returns a waitable promise.
          */
-        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
+        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions): Promise<void>;
         /**
          * Initialize the scene loader plugin
          */
@@ -879,7 +879,7 @@ declare namespace TOOLKIT {
         static EnableBabylonRotation: boolean;
     }
     /**
-     * Babylon toolkit playground initialization options
+     * Babylon toolkit runtime initialization options
      * @param hardwareScalingLevel set hardware scaling level. Set to 0 to skip. Default (1 / window.devicePixelRatio).
      * @param initSceneFileLoaders initialize scene file loaders. Default true.
      * @param loadAsyncRuntimeLibs load async runtime libraries. Default true.
@@ -889,7 +889,7 @@ declare namespace TOOLKIT {
      * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
-    interface IPlaygroundOptions {
+    interface IRuntimeOptions {
         hardwareScalingLevel?: number;
         initSceneFileLoaders?: boolean;
         loadAsyncRuntimeLibs?: boolean;
