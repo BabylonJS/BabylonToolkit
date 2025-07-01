@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.14.54 - R1) */
+        /** Gets the toolkit framework version number (8.14.56 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -880,14 +880,17 @@ declare namespace TOOLKIT {
     }
     /**
      * Babylon toolkit playground initialization options
-     * @param initSceneFileLoaders initialize scne file loaders. Default true.
+     * @param hardwareScalingLevel set hardware scaling level. Set to 0 to skip. Default (1 / window.devicePixelRatio).
+     * @param initSceneFileLoaders initialize scene file loaders. Default true.
+     * @param loadAsyncRuntimeLibs load async runtime libraries. Default true.
      * @param loadProjectScriptBundle load a project script bundle. Default false.
-     * @param projectScriptBundleUrl specified project script bundle. Default bundle.
+     * @param projectScriptBundleUrl specified project script bundle. Default (default.playground.js).
      * @param showDefaultLoadingScreen show the default loading screen. Default false.
      * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
     interface IPlaygroundOptions {
+        hardwareScalingLevel?: number;
         initSceneFileLoaders?: boolean;
         loadAsyncRuntimeLibs?: boolean;
         loadProjectScriptBundle?: boolean;
@@ -3077,6 +3080,8 @@ declare namespace TOOLKIT {
         static SetVirtualRealityEnabled(enabled: boolean): void;
         /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
         static SetWindowsLaunchMode(mode?: number): void;
+        /** Gets the default window hardware scaling level (1 / window.devicePixelRatio) */
+        static GetHardwareScalingLevel(): number;
         /** Quit the Windows Runtime host application. */
         static QuitWindowsApplication(): void;
         static PrintToScreen(text: string, color?: string): void;
