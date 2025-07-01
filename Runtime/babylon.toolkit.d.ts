@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.14.20 - R1) */
+        /** Gets the toolkit framework version number (8.14.50 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -127,6 +127,10 @@ declare namespace TOOLKIT {
          * @returns a waitable promise.
          */
         static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
+        /**
+         * Initialize the scene loader plugin
+         */
+        static InitializeSceneLoaderPlugin(): void;
         /**
          * Sets the on scene ready handler then starts the assets manager loadAsync function
          * @param assetsManager The list of required scene filenames to check ready state.
