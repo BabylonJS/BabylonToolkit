@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.14.50 - R1) */
+        /** Gets the toolkit framework version number (8.14.51 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -114,14 +114,14 @@ declare namespace TOOLKIT {
          */
         static get PlaygroundRepo(): string;
         /**
-         * Initialize the babylon toolkit playground environment (GLTF)
+         * @deprecated Use InitializeRuntime instead.
          * @param engine The engine instance.
          * @param options The playground options.
          * @returns a waitable promise.
          */
         static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IPlaygroundOptions): Promise<void>;
         /**
-         * Initialize the babylon toolkit runtime environment (GLTF)
+         * Initialize the babylon toolkit runtime environment
          * @param engine The engine instance.
          * @param options The playground options.
          * @returns a waitable promise.
@@ -889,6 +889,7 @@ declare namespace TOOLKIT {
      */
     interface IPlaygroundOptions {
         initSceneFileLoaders?: boolean;
+        loadAsyncRuntimeLibs?: boolean;
         loadProjectScriptBundle?: boolean;
         projectScriptBundleUrl?: string;
         showDefaultLoadingScreen?: boolean;
