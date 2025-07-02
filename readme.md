@@ -125,6 +125,6 @@ The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/ma
 
 Unity Starter Content
 ----------------------
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#MQDXJ4">TypeScript Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#C6XBI3">TypeScript Starter Playground (TS)</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#MQDXJ4">WebGPU Starter Playground (TS)</a>
+<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#C6XBI3">WebGPU Starter Playground (TS)</a>
