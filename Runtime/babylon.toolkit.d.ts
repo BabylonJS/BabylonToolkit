@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.15.1 - R1) */
+        /** Gets the toolkit framework version number (8.15.10 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3934,23 +3934,38 @@ declare namespace TOOLKIT {
         stabilizingForce: number;
         maxImpulseForce: number;
         frictionRestoreSpeed: number;
+        maxVisualExtensionLimit: number;
+        maxVisualCompressionLimit: number;
         currentVehicleSpeedKmHour: number;
-        useRaycastSmoothing: boolean;
-        raycastSmoothingFactor: number;
-        maxNormalAngleDeviation: number;
+        static MUSTANG_GT_FRONT_WHEEL_CONFIG: {
+            suspensionRestLength: number;
+            maxSuspensionTravel: number;
+            radius: number;
+            suspensionStiffness: number;
+            dampingCompression: number;
+            dampingRelaxation: number;
+            frictionSlip: number;
+            rollInfluence: number;
+            maxSuspensionForce: number;
+            isFrontWheel: boolean;
+            invertDirection: boolean;
+        };
+        static MUSTANG_GT_REAR_WHEEL_CONFIG: {
+            suspensionRestLength: number;
+            maxSuspensionTravel: number;
+            radius: number;
+            suspensionStiffness: number;
+            dampingCompression: number;
+            dampingRelaxation: number;
+            frictionSlip: number;
+            rollInfluence: number;
+            maxSuspensionForce: number;
+            isFrontWheel: boolean;
+            invertDirection: boolean;
+        };
+        stabilizeVelocity: boolean;
         multiRaycastEnabled: boolean;
-        raycastSpreadDistance: number;
-        private wheelNormalHistory;
-        adaptiveRaycastingEnabled: boolean;
-        highSpeedThreshold: number;
-        lowSpeedRaycastCount: number;
-        highSpeedRaycastCount: number;
-        detectSuspensionAnomalies: boolean;
-        detectNormalVariation: boolean;
-        suspensionJumpThreshold: number;
-        normalVariationThreshold: number;
-        private previousSuspensionLengths;
-        enableRaycastLogging: boolean;
+        multiRaycastMultiplier: number;
         enableRoughTrackLogging: boolean;
         private frameCounter;
         isArcadeBurnoutModeActive: boolean;
@@ -3989,6 +4004,10 @@ declare namespace TOOLKIT {
         private currentSteeringInput;
         private handbrakeAngularVelocity;
         private handbrakeEngaged;
+        private raycastResult;
+        private lastValidPoints;
+        private lastValidNormals;
+        private lastValidDistances;
         constructor(options: any);
         addWheel(options: any): number;
         getNumWheels(): number;
@@ -4028,17 +4047,16 @@ declare namespace TOOLKIT {
         getBaseRotationBoost(): number;
         getDonutRotationBoost(): number;
         getCurrentRotationBoost(): number;
-        setRaycastSmoothing(enabled: boolean, smoothingFactor?: number, maxAngleDeviation?: number): void;
-        setMultiRaycastEnabled(enabled: boolean, spreadDistance?: number): void;
-        private performSmoothedRaycast;
-        private generateRaycastSpreadPositions;
-        private performSingleRaycast;
-        private isValidNormal;
-        private calculateNormalAngle;
-        private calculateSmoothedResult;
-        private updateNormalHistory;
-        private applyTemporalSmoothing;
-        private applySmoothedResult;
+        setLoggingEnabled(enabled: boolean): void;
+        getLoggingEnabled(): boolean;
+        setMultiRaycastEnabled(enabled: boolean): void;
+        getMultiRaycastEnabled(): boolean;
+        setMultiRaycastRadiusScale(radiusMultiplier: number): void;
+        getMultiRaycastRadiusScale(): number;
+        setStabilizeVelocityEnabled(enabled: boolean): void;
+        getStabilizeVelocityEnabled(): boolean;
+        private applyVelocityBasedStabilization;
+        private applyPredictiveNormalStabilization;
         private updateBurnoutCoefficient;
         private updateBurnoutModeActive;
         private updateWheelRotationBoost;
@@ -4074,43 +4092,20 @@ declare namespace TOOLKIT {
         }): void;
         getDriftIntensity(): number;
         isDrifting(): boolean;
-        setRaycastSmoothingSettings(settings: {
-            enabled?: boolean;
-            smoothingFactor?: number;
-            maxAngleDeviation?: number;
-            multiRaycast?: boolean;
-            spreadDistance?: number;
-            adaptive?: boolean;
-            highSpeedThreshold?: number;
-        }): void;
-        setAdaptiveRaycasting(enabled: boolean, highSpeedThreshold?: number): void;
-        enableRaycastSmoothing(smoothingFactor?: number): void;
-        disableRaycastSmoothing(): void;
-        setRoughTrackDetectionSettings(settings: {
-            suspensionAnomalies?: boolean;
-            normalVariation?: boolean;
-            suspensionJumpThreshold?: number;
-            normalVariationThreshold?: number;
-        }): void;
-        enableEnhancedRoughTrackDetection(): void;
-        enableDebugLogging(raycastLogging?: boolean, roughTrackLogging?: boolean): void;
-        disableDebugLogging(): void;
-        setRaycastLogging(enabled: boolean): void;
-        setRoughTrackLogging(enabled: boolean): void;
-        logCurrentRaycastConfig(): void;
-        forceRaycastTest(wheelIndex?: number): void;
         private updateDriftState;
         updateVehicle(timeStep: number): void;
         updateSuspension(deltaTime: number): void;
         removeFromWorld(world: any): void;
-        castRay2(wheel: TOOLKIT.HavokWheelInfo): number;
+        private calculateSurfaceRoughness;
+        private isValidDrivableSurface;
+        private calculateSurfaceAngle;
+        performCasting(wheel: TOOLKIT.HavokWheelInfo): number;
         updateWheelTransformWorld(wheel: TOOLKIT.HavokWheelInfo): void;
         updateWheelTransform(wheelIndex: number): void;
         getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
         updateFriction(timeStep: number): void;
-        private clampSuspensionTravel;
-        private filterRoughSurfaceNormal;
-        private applyVelocityBasedStabilization;
+        private performSingleRaycast;
+        private performThinMultiRaycast;
     }
     /**
      * Babylon JavaScript File
@@ -4153,6 +4148,7 @@ declare namespace TOOLKIT {
         sideImpulse: number;
         forwardImpulse: number;
         raycastResult: BABYLON.PhysicsRaycastResult;
+        physicsShape: BABYLON.PhysicsShapeSphere;
         worldTransform: BABYLON.TransformNode;
         visualTravelRange: number;
         invertDirection: boolean;
@@ -4163,6 +4159,9 @@ declare namespace TOOLKIT {
         steeringAngle: number;
         rotationBoost: number;
         locked: boolean;
+        skidinfo: number;
+        skidThreshold: number;
+        lateralImpulse: number;
         constructor(options: any);
         updateWheel(chassis: any): void;
     }
@@ -4380,22 +4379,8 @@ declare namespace TOOLKIT {
         setVisualSteeringAngle(angle: number, wheel: number): void;
         getPhysicsSteeringAngle(wheel: number): number;
         setPhysicsSteeringAngle(angle: number, wheel: number): void;
-        setFrictionUpdateSpeed(lerpSpeed: number): void;
         getFrictionUpdateSpeed(): number;
-        enableRaycastLogging(enabled: boolean): void;
-        enableRoughTrackLogging(enabled: boolean): void;
-        setRaycastSmoothingSettings(settings: {
-            enabled?: boolean;
-            smoothingFactor?: number;
-            maxAngleDeviation?: number;
-            multiRaycast?: boolean;
-            spreadDistance?: number;
-            adaptive?: boolean;
-            highSpeedThreshold?: number;
-        }): void;
-        setAdaptiveRaycasting(enabled: boolean, highSpeedThreshold?: number): void;
-        enableRaycastSmoothing(factor?: number): void;
-        disableRaycastSmoothing(): void;
+        setFrictionUpdateSpeed(lerpSpeed: number): void;
         /** Sets vehicle arcade steering input for sliding assist using physics vehicle object. (Advanced Use Only) */
         setArcadeSteeringInput(steering: number): void;
         /** Gets vehicle arcade steering assist factor using physics vehicle object. (Advanced Use Only) */
@@ -4477,6 +4462,22 @@ declare namespace TOOLKIT {
         getSmoothFlyingImpulse(): number;
         /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
         setSmoothFlyingImpulse(impulse: number): void;
+        /** Gets vehicle max visual extension limit using physics vehicle object. (Advanved Use Only) */
+        getMaxVisualExtensionLimit(): number;
+        /** Sets vehicle max visual extension limit using physics vehicle object. (Advanved Use Only) */
+        setMaxVisualExtensionLimit(limit: number): void;
+        /** Gets vehicle max visual compression limit using physics vehicle object. (Advanved Use Only) */
+        getMaxVisualCompressionLimit(): number;
+        /** Sets vehicle max visual compression limit using physics vehicle object. (Advanved Use Only) */
+        setMaxVisualCompressionLimit(limit: number): void;
+        setLoggingEnabled(enabled: boolean): void;
+        getLoggingEnabled(): boolean;
+        setMultiRaycastEnabled(enable: boolean): void;
+        getMultiRaycastEnabled(): boolean;
+        setMultiRaycastRadiusScale(scale: number): void;
+        getMultiRaycastRadiusScale(): number;
+        setStabilizeVelocityEnabled(enabled: boolean): void;
+        getStabilizeVelocityEnabled(): boolean;
         protected setupWheelInformation(): void;
         tickVehicleController(step: number): void;
         updateWheelInformation(): void;
