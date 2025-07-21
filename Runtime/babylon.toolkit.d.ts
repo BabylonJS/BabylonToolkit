@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.15.10 - R1) */
+        /** Gets the toolkit framework version number (8.16.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3933,10 +3933,15 @@ declare namespace TOOLKIT {
         smoothFlyingImpulse: number;
         stabilizingForce: number;
         maxImpulseForce: number;
-        frictionRestoreSpeed: number;
+        enableFrictionUpdates: boolean;
         maxVisualExtensionLimit: number;
         maxVisualCompressionLimit: number;
         currentVehicleSpeedKmHour: number;
+        skiddingFrictionUpdateSpeed: number;
+        burnoutFrictionUpdateSpeed: number;
+        handbrakeWheelStiffness: number;
+        burnoutWheelStiffness: number;
+        driftWheelStiffness: number;
         static MUSTANG_GT_FRONT_WHEEL_CONFIG: {
             suspensionRestLength: number;
             maxSuspensionTravel: number;
@@ -3970,10 +3975,22 @@ declare namespace TOOLKIT {
         private frameCounter;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
-        isArcadeHandbrakeActive: boolean;
+        isArcadeHandBrakeActive: boolean;
+        isArcadeWheelSkidActive: boolean;
         arcadeFrontSideFactor: number;
         arcadeRearSideFactor: number;
-        arcadeHandbrakeTransitionFactor: number;
+        arcadeWheelSkidLimit: number;
+        arcadeWheelSkidTimer: number;
+        arcadeHandBrakingDelay: number;
+        arcadeHandBrakingTimer: number;
+        arcadeHandBrakeTransitionFactor: number;
+        minPenaltySpeed: number;
+        penaltyWheelSlip: number;
+        penaltyGroundTag: string;
+        frontLeftContactTag: string;
+        frontRightContactTag: string;
+        rearLeftContactTag: string;
+        rearRightContactTag: string;
         isDriftModeEnabled: boolean;
         driftSpeedThreshold: number;
         driftMaxSpeed: number;
@@ -3985,7 +4002,7 @@ declare namespace TOOLKIT {
         private steeringChangeRate;
         private driftDirection;
         arcadeSteerAssistFactor: number;
-        handbrakePreserveFactor: number;
+        handBrakePreserveFactor: number;
         donutModeTransitionFactor: number;
         donutEngineMultiplier: number;
         donutTransitionSpeed: number;
@@ -3996,19 +4013,31 @@ declare namespace TOOLKIT {
         burnoutCoefficient: number;
         burnoutTargetCoefficient: number;
         burnoutTransitionSpeed: number;
+        burnoutFrictionSlip: number;
+        burnoutFrictionGrip: number;
+        private burnoutCooldownDuration;
+        private burnoutCooldownTimer;
         private burnoutModeEngaged;
         private burnoutPowerBoost;
         private baseRotationBoost;
         private donutRotationBoost;
         private currentRotationBoost;
+        launchBoostEnabled: boolean;
+        launchBoostMultiplier: number;
+        launchBoostDuration: number;
+        launchBoostDecaySpeed: number;
+        burnoutKickStrength: number;
+        kickEnergyBuildup: number;
+        private currentLaunchBoost;
+        private launchBoostActive;
+        private launchBoostAccumulation;
         private currentSteeringInput;
         private handbrakeAngularVelocity;
         private handbrakeEngaged;
         private raycastResult;
-        private lastValidPoints;
-        private lastValidNormals;
-        private lastValidDistances;
+        private skipFrictionSlipUpdate;
         constructor(options: any);
+        addToWorld(world: any): void;
         addWheel(options: any): number;
         getNumWheels(): number;
         getWheelInfo(wheelIndex: number): TOOLKIT.HavokWheelInfo;
@@ -4020,9 +4049,23 @@ declare namespace TOOLKIT {
         setAllWheelsRotationBoost(boost: number): void;
         setRearWheelsRotationBoost(boost: number): void;
         setFrontWheelsRotationBoost(boost: number): void;
-        addToWorld(world: any): void;
         setArcadeSteeringInput(steering: number): void;
-        setIsArcadeHandbrakeActive(active: boolean): void;
+        setisArcadeHandBrakeActive(active: boolean): void;
+        getisArcadeHandBrakeActive(): boolean;
+        setIsArcadeWheelSkidActive(active: boolean): void;
+        getIsArcadeWheelSkidActive(): boolean;
+        setEnableFrictionUpdates(enabled: boolean): void;
+        getEnableFrictionUpdates(): boolean;
+        setLaunchBoostEnabled(enabled: boolean): void;
+        getLaunchBoostEnabled(): boolean;
+        setLaunchBoostDuration(duration: number): void;
+        getLaunchBoostDuration(): number;
+        setLaunchBoostMultiplier(multiplier: number): void;
+        getLaunchBoostMultiplier(): number;
+        setLaunchBoostDecaySpeed(speed: number): void;
+        getLaunchBoostDecaySpeed(): number;
+        setBurnoutKickStrength(strength: number): void;
+        getBurnoutKickStrength(): number;
         setIsArcadeBurnoutModeActive(active: boolean): void;
         getIsArcadeBurnoutModeActive(): boolean;
         setIsArcadeDonutModeActive(active: boolean): void;
@@ -4035,18 +4078,43 @@ declare namespace TOOLKIT {
         setDonutEngineMultiplier(multiplier: number): void;
         setDonutTurnRadius(radius: number): void;
         setDonutTransitionSpeed(speed: number): void;
+        setBurnoutWheelStiffness(scale: number): void;
+        getBurnoutWheelStiffness(): number;
+        setHandbrakeWheelStiffness(scale: number): void;
+        getHandbrakeWheelStiffness(): number;
+        setDriftWheelStiffness(scale: number): void;
+        getDriftWheelStiffness(): number;
         setDefaultBurnoutCoefficient(coefficient: number): void;
         getDefaultBurnoutCoefficient(): number;
-        setBurnoutCoefficient(coefficient: number): void;
-        getBurnoutCoefficient(): number;
+        setActiveBurnoutCoefficient(coefficient: number): void;
+        getActiveBurnoutCoefficient(): number;
         getBurnoutPowerBoost(): number;
         isBurnoutModeEngaged(): boolean;
+        setBurnoutFrictionSlip(slip: number): void;
+        getBurnoutFrictionSlip(): number;
+        setBurnoutFrictionGrip(grip: number): void;
+        getBurnoutFrictionGrip(): number;
+        getBurnoutTransitionSpeed(): number;
         setBurnoutTransitionSpeed(speed: number): void;
         setBaseRotationBoost(boost: number): void;
         setDonutRotationBoost(boost: number): void;
         getBaseRotationBoost(): number;
         getDonutRotationBoost(): number;
         getCurrentRotationBoost(): number;
+        getArcadeWheelSkidTimer(): number;
+        getArcadeHandBrakingTimer(): number;
+        setBurnoutCooldownTime(time: number): void;
+        getBurnoutCooldownTime(): number;
+        setArcadeWheelSkidLimit(limit: number): void;
+        getArcadeWheelSkidLimit(): number;
+        setArcadeHandBrakeDelay(delay: number): void;
+        getArcadeHandBrakeDelay(): number;
+        getMinPenaltySpeed(): number;
+        setMinPenaltySpeed(speed: number): void;
+        getPenaltyWheelSlip(): number;
+        setPenaltyWheelSlip(slip: number): void;
+        getPenaltyGroundTag(): string;
+        setPenaltyGroundTag(tag: string): void;
         setLoggingEnabled(enabled: boolean): void;
         getLoggingEnabled(): boolean;
         setMultiRaycastEnabled(enabled: boolean): void;
@@ -4055,12 +4123,15 @@ declare namespace TOOLKIT {
         getMultiRaycastRadiusScale(): number;
         setStabilizeVelocityEnabled(enabled: boolean): void;
         getStabilizeVelocityEnabled(): boolean;
+        setSkipFrictionSlipUpdate(skip: boolean): void;
+        getSkipFrictionSlipUpdate(): boolean;
         private applyVelocityBasedStabilization;
         private applyPredictiveNormalStabilization;
         private updateBurnoutCoefficient;
-        private updateBurnoutModeActive;
+        private updateBurnoutDriveState;
         private updateWheelRotationBoost;
-        updateCurrentFrictionSlip(): void;
+        updateCurrentFrictionSlip(timeStep: number): void;
+        resetDefaultFrictionSlip(): void;
         getAngularDampingReduction(): number;
         private getEasedDonutTransitionFactor;
         getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
@@ -4094,7 +4165,7 @@ declare namespace TOOLKIT {
         isDrifting(): boolean;
         private updateDriftState;
         updateVehicle(timeStep: number): void;
-        updateSuspension(deltaTime: number): void;
+        updateSuspension(timeStep: number): void;
         removeFromWorld(world: any): void;
         private calculateSurfaceRoughness;
         private isValidDrivableSurface;
@@ -4351,7 +4422,7 @@ declare namespace TOOLKIT {
         private _centerMass;
         private _chassisMesh;
         private _tempVectorPos;
-        lockedWheelIndexes: number[];
+        private _lockedWheelIndexes;
         getPhysicsBody(): BABYLON.PhysicsBody;
         getNumWheels(): number;
         getWheelInfo(wheel: number): TOOLKIT.HavokWheelInfo;
@@ -4379,30 +4450,78 @@ declare namespace TOOLKIT {
         setVisualSteeringAngle(angle: number, wheel: number): void;
         getPhysicsSteeringAngle(wheel: number): number;
         setPhysicsSteeringAngle(angle: number, wheel: number): void;
-        getFrictionUpdateSpeed(): number;
-        setFrictionUpdateSpeed(lerpSpeed: number): void;
+        resetDefaultFrictionSlip(): void;
+        setEnableFrictionUpdates(enabled: boolean): void;
+        getEnableFrictionUpdates(): boolean;
+        getSkiddingFrictionUpdateSpeed(): number;
+        setSkiddingFrictionUpdateSpeed(speed: number): void;
+        getBurnoutFrictionUpdateSpeed(): number;
+        setBurnoutFrictionUpdateSpeed(speed: number): void;
+        setBurnoutCooldownTime(time: number): void;
+        getBurnoutCooldownTime(): number;
+        setBurnoutWheelStiffness(scale: number): void;
+        getBurnoutWheelStiffness(): number;
+        setHandbrakeWheelStiffness(scale: number): void;
+        getHandbrakeWheelStiffness(): number;
+        setDriftWheelStiffness(scale: number): void;
+        getDriftWheelStiffness(): number;
+        setLockedWheelIndexes(indexes: number[]): void;
+        getLockedWheelIndexes(): number[];
+        getAngularDampingReduction(): number;
+        /** Sets rotation boost for a specific wheel using physics vehicle object. (Advanced Use Only) */
+        setWheelRotationBoost(wheelIndex: number, boost: number): void;
+        /** Sets rotation boost for all wheels using physics vehicle object. (Advanced Use Only) */
+        setAllWheelsRotationBoost(boost: number): void;
+        /** Sets rotation boost for rear wheels only using physics vehicle object. (Advanced Use Only) */
+        setRearWheelsRotationBoost(boost: number): void;
+        /** Sets rotation boost for front wheels only using physics vehicle object. (Advanced Use Only) */
+        setFrontWheelsRotationBoost(boost: number): void;
         /** Sets vehicle arcade steering input for sliding assist using physics vehicle object. (Advanced Use Only) */
         setArcadeSteeringInput(steering: number): void;
         /** Gets vehicle arcade steering assist factor using physics vehicle object. (Advanced Use Only) */
         getArcadeSteerAssistFactor(): number;
         /** Sets vehicle arcade steering assist factor using physics vehicle object. (Advanced Use Only) */
         setArcadeSteerAssistFactor(factor: number): void;
-        /** Gets vehicle arcade handbrake preserve factor using physics vehicle object. (Advanced Use Only) */
-        getHandbrakePreserveFactor(): number;
-        /** Sets vehicle arcade handbrake preserve factor using physics vehicle object. (Advanced Use Only) */
-        setHandbrakePreserveFactor(factor: number): void;
+        /** Gets vehicle arcade momentum preserve factor using physics vehicle object. (Advanced Use Only) */
+        getArcadeMomentumPreserveFactor(): number;
+        /** Sets vehicle arcade momentum preserve factor using physics vehicle object. (Advanced Use Only) */
+        setArcadeMomentumPreserveFactor(factor: number): void;
         /** Gets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
-        getIsArcadeHandbrakeActive(): boolean;
+        getisArcadeHandBrakeActive(): boolean;
         /** Sets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
-        setIsArcadeHandbrakeActive(active: boolean): void;
+        setisArcadeHandBrakeActive(active: boolean): void;
         /** Gets vehicle arcade burnout mode state using physics vehicle object. (Advanced Use Only) */
         getIsArcadeBurnoutModeActive(): boolean;
         /** Sets vehicle arcade burnout mode state using physics vehicle object. (Advanced Use Only) */
         setIsArcadeBurnoutModeActive(active: boolean): void;
+        /** Sets vehicle arcade wheel skid state using physics vehicle object. (Advanced Use Only) */
+        setIsArcadeWheelSkidActive(active: boolean): void;
+        /** Gets vehicle arcade wheel skid state using physics vehicle object. (Advanced Use Only) */
+        getIsArcadeWheelSkidActive(): boolean;
         /** Gets vehicle arcade donut mode state using physics vehicle object. (Advanced Use Only) */
         getIsArcadeDonutModeActive(): boolean;
         /** Sets vehicle arcade donut mode state using physics vehicle object. (Advanced Use Only) */
         setIsArcadeDonutModeActive(active: boolean): void;
+        /** Sets vehicle arcade hand brake delay using physics vehicle object. (Advanced Use Only) */
+        setArcadeHandBrakeDelay(factor: number): void;
+        /** Gets vehicle arcade hand brake delay using physics vehicle object. (Advanced Use Only) */
+        getArcadeHandBrakeDelay(): number;
+        /** Sets vehicle arcade wheel skid limit using physics vehicle object. (Advanced Use Only) */
+        setArcadeWheelSkidLimit(factor: number): void;
+        /** Gets vehicle arcade wheel skid limit using physics vehicle object. (Advanced Use Only) */
+        getArcadeWheelSkidLimit(): number;
+        /** Gets vehicle arcade wheel skid countdown timer using physics vehicle object. (Advanced Use Only) */
+        getArcadeWheelSkidTimer(): number;
+        /** Gets vehicle arcade wheel skid countdown timer using physics vehicle object. (Advanced Use Only) */
+        getArcadeHandBrakingTimer(): number;
+        /** Gets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
+        getArcadeFrontSideFactor(): number;
+        /** Sets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
+        setArcadeFrontSideFactor(factor: number): void;
+        /** Gets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
+        getArcadeRearSideFactor(): number;
+        /** Sets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
+        setArcadeRearSideFactor(factor: number): void;
         /** Gets vehicle donut mode transition factor using physics vehicle object. (Advanced Use Only) */
         getDonutModeTransitionFactor(): number;
         /** Gets vehicle donut mode eased transition factor using physics vehicle object. (Advanced Use Only) */
@@ -4417,24 +4536,6 @@ declare namespace TOOLKIT {
         setDonutTurnRadius(radius: number): void;
         /** Sets vehicle donut transition speed using physics vehicle object. (Advanced Use Only) */
         setDonutTransitionSpeed(speed: number): void;
-        /** Gets vehicle angular damping reduction factor during donut mode using physics vehicle object. (Advanced Use Only) */
-        getAngularDampingReduction(): number;
-        /** Gets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeFrontSideFactor(): number;
-        /** Sets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeFrontSideFactor(factor: number): void;
-        /** Gets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeRearSideFactor(): number;
-        /** Sets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeRearSideFactor(factor: number): void;
-        /** Sets rotation boost for a specific wheel using physics vehicle object. (Advanced Use Only) */
-        setWheelRotationBoost(wheelIndex: number, boost: number): void;
-        /** Sets rotation boost for all wheels using physics vehicle object. (Advanced Use Only) */
-        setAllWheelsRotationBoost(boost: number): void;
-        /** Sets rotation boost for rear wheels only using physics vehicle object. (Advanced Use Only) */
-        setRearWheelsRotationBoost(boost: number): void;
-        /** Sets rotation boost for front wheels only using physics vehicle object. (Advanced Use Only) */
-        setFrontWheelsRotationBoost(boost: number): void;
         isDriftSystemEnabled(): boolean;
         setDriftSystemEnabled(enabled: boolean): void;
         setDriftMaxSpeed(maxSpeed: number): void;
@@ -4445,15 +4546,36 @@ declare namespace TOOLKIT {
         getDriftGripReduction(): number;
         setDriftSteeringThreshold(threshold: number): void;
         getDriftSteeringThreshold(): number;
+        setLaunchBoostEnabled(enabled: boolean): void;
+        getLaunchBoostEnabled(): boolean;
+        setLaunchBoostDuration(duration: number): void;
+        getLaunchBoostDuration(): number;
+        setLaunchBoostMultiplier(multiplier: number): void;
+        getLaunchBoostMultiplier(): number;
+        setLaunchBoostDecaySpeed(speed: number): void;
+        getLaunchBoostDecaySpeed(): number;
+        setBurnoutKickStrength(strength: number): void;
+        getBurnoutKickStrength(): number;
         isBurnoutModeEngaged(): boolean;
+        setBurnoutFrictionSlip(slip: number): void;
+        getBurnoutFrictionSlip(): number;
+        setBurnoutFrictionGrip(grip: number): void;
+        getBurnoutFrictionGrip(): number;
+        getMinPenaltySpeed(): number;
+        setMinPenaltySpeed(speed: number): void;
+        getPenaltyWheelSlip(): number;
+        setPenaltyWheelSlip(slip: number): void;
+        getPenaltyGroundTag(): string;
+        setPenaltyGroundTag(tag: string): void;
         setBaseRotationBoost(multiplier: number): void;
         getBaseRotationBoost(): number;
         setDonutRotationBoost(multiplier: number): void;
         getDonutRotationBoost(): number;
         getBurnoutPowerBoost(): number;
         setBurnoutTransitionSpeed(speed: number): void;
-        setDefaultBurnoutCoefficient(coefficient: number): void;
-        getDefaultBurnoutCoefficient(): number;
+        getBurnoutTransitionSpeed(): number;
+        setBurnoutCoefficient(coefficient: number): void;
+        getBurnoutCoefficient(): number;
         /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
         getStabilizingForce(): number;
         /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
