@@ -3728,6 +3728,25 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
+     * Babylon canvas panel class (Unity Style Canvas Panel)
+     * @class CanvasPanel - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class CanvasPanel extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected destroy(): void;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
      * Babylon toolkit default character controller pro class (Unity Style Physics Based Character Controller System)
      * @class CharacterController - All rights reserved (c) 2020 Mackey Kinard
      */
