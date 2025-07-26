@@ -9,11 +9,6 @@ In Unity's Package Manager
 
 Click "+" Button ➔ Add package from git url....
 
-Community Edition
-```
-https://github.com/babylontoolkit/communityedition.git
-```
-
 Professional Edition
 ```
 https://github.com/babylontoolkit/professionaledition.git
@@ -25,11 +20,6 @@ https://github.com/babylontoolkit/professionaledition.git
 In Unity's Package Manager
 
 Click "+" Button ➔ Add package from tarball....
-
-Community Edition
-```
-https://github.com/babylontoolkit/communityedition/releases
-```
 
 Professional Edition
 ```
