@@ -14,6 +14,11 @@ Professional Edition
 https://github.com/babylontoolkit/professionaledition.git
 ```
 
+Khronos Unity Package
+```
+https://github.com/babylontoolkit/unitygltf.git
+```
+
 
 # Local Installation
 
