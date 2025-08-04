@@ -244,16 +244,25 @@ declare namespace TOOLKIT {
         static GetLastCreatedEngine(): BABYLON.AbstractEngine;
         /** Get the last created scene instance */
         static GetLastCreatedScene(): BABYLON.Scene;
-        static IsCanvasPanelReady(): boolean;
-        static GetCanvasPanelElement(name: string): BABYLON.GUI.Control;
-        static ShowCanvasPanelElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        static HideCanvasPanelElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        private static AdvancedTexture;
-        static GetAdvancedTexture(): BABYLON.GUI.AdvancedDynamicTexture;
-        static SetCanvasPanelInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string): void;
+        private static ForegroundTexture;
         private static BackgroundTexture;
+        static GetForegroundTexture(): BABYLON.GUI.AdvancedDynamicTexture;
         static GetBackgroundTexture(): BABYLON.GUI.AdvancedDynamicTexture;
-        static SetCanvasPanelBackground(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string): void;
+        static CreateUserInterface(scene: BABYLON.Scene, foreground?: boolean, samplerMode?: number, adaptiveHardwareScaling?: boolean): BABYLON.GUI.AdvancedDynamicTexture;
+        static IsUserInterfaceReady(): boolean;
+        static GetUserInterfaceElement(name: string): BABYLON.GUI.Control;
+        static ShowUserInterfaceElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static HideUserInterfaceElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static LoadForegroundUserInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string, adaptiveHardwareScaling?: boolean): void;
+        static LoadBackgroundUserInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string, adaptiveHardwareScaling?: boolean): void;
+        /**
+         * Recreate the content of the ADT from a JSON object
+         * @param serializedObject define the JSON serialized object to restore from
+         * @param scaleToSize defines whether to scale to texture to the saved size
+         * @param urlRewriter defines an url rewriter to update urls before sending them to the controls
+         * @param appendControls if true, the controls will be appended to the existing ADT. Otherwise, the ADT will be replaced with the new content.
+         */
+        private static ParseUserInterfaceObject;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
         private static PhysicsViewersEnabled;
@@ -3735,54 +3744,6 @@ declare namespace TOOLKIT {
         static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
     }
 }
-declare namespace TOOLKIT {
-    /**
-     * Runtime implementation for Unity Canvas Panel export/import with BabylonJS GUI
-     * Handles comprehensive Canvas UI recreation from exported Unity Canvas data
-     */
-    class CanvasPanel extends TOOLKIT.ScriptComponent {
-        static OnParseNodeObject: BABYLON.Observable<any>;
-        static OnInterfaceLoaded: BABYLON.Observable<BABYLON.GUI.AdvancedDynamicTexture>;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected start(): Promise<void>;
-        protected destroy(): void;
-        protected engineResize(): void;
-        protected parseNodeObject(rootNode: any, hostPrefix: string): void;
-        private processNodeSources;
-        /**
-         * Extract font families used in GUI data
-         */
-        private extractRequiredFonts;
-        /**
-         * Load fonts in priority order: Unity exports → Google Fonts → System fallback
-         */
-        private loadRequiredFonts;
-        /**
-         * Load font manifest from exported Unity data
-         */
-        private loadFontManifest;
-        /**
-         * Load a single font with priority: Unity export → Google Fonts → System
-         */
-        private loadSingleFont;
-        /**
-         * Load font exported from Unity (optimized TTF format)
-         */
-        private loadUnityFont;
-        /**
-         * Load font from Google Fonts
-         */
-        private loadGoogleFont;
-        /**
-         * Check if font is available in Google Fonts
-         */
-        private isGoogleFont;
-        /**
-         * Check if font is available as system font
-         */
-        private isSystemFontAvailable;
-    }
-}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -5512,6 +5473,53 @@ declare namespace TOOLKIT {
         protected fixed(): void;
         protected after(): void;
         protected destroy(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Babylon Toolkit User Interface Component
+     */
+    class UserInterface extends TOOLKIT.ScriptComponent {
+        static OnParseNodeObject: BABYLON.Observable<any>;
+        static OnInterfaceLoaded: BABYLON.Observable<BABYLON.GUI.AdvancedDynamicTexture>;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected start(): Promise<void>;
+        protected destroy(): void;
+        protected engineResize(): void;
+        protected parseNodeObject(rootNode: any, hostPrefix: string): void;
+        private processNodeSources;
+        /**
+         * Extract font families used in GUI data
+         */
+        private extractRequiredFonts;
+        /**
+         * Load fonts in priority order: Unity exports → Google Fonts → System fallback
+         */
+        private loadRequiredFonts;
+        /**
+         * Load font manifest from exported Unity data
+         */
+        private loadFontManifest;
+        /**
+         * Load a single font with priority: Unity export → Google Fonts → System
+         */
+        private loadSingleFont;
+        /**
+         * Load font exported from Unity (optimized TTF format)
+         */
+        private loadUnityFont;
+        /**
+         * Load font from Google Fonts
+         */
+        private loadGoogleFont;
+        /**
+         * Check if font is available in Google Fonts
+         */
+        private isGoogleFont;
+        /**
+         * Check if font is available as system font
+         */
+        private isSystemFontAvailable;
     }
 }
 /** Babylon Toolkit Namespace */
