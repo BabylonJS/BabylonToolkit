@@ -244,6 +244,16 @@ declare namespace TOOLKIT {
         static GetLastCreatedEngine(): BABYLON.AbstractEngine;
         /** Get the last created scene instance */
         static GetLastCreatedScene(): BABYLON.Scene;
+        static IsCanvasPanelReady(): boolean;
+        static GetCanvasPanelElement(name: string): BABYLON.GUI.Control;
+        static ShowCanvasPanelElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static HideCanvasPanelElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        private static AdvancedTexture;
+        static GetAdvancedTexture(): BABYLON.GUI.AdvancedDynamicTexture;
+        static SetCanvasPanelInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string): void;
+        private static BackgroundTexture;
+        static GetBackgroundTexture(): BABYLON.GUI.AdvancedDynamicTexture;
+        static SetCanvasPanelBackground(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string): void;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
         private static PhysicsViewersEnabled;
@@ -3725,23 +3735,52 @@ declare namespace TOOLKIT {
         static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
     }
 }
-/** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-     * Babylon canvas panel class (Unity Style Canvas Panel)
-     * @class CanvasPanel - All rights reserved (c) 2024 Mackey Kinard
+     * Runtime implementation for Unity Canvas Panel export/import with BabylonJS GUI
+     * Handles comprehensive Canvas UI recreation from exported Unity Canvas data
      */
     class CanvasPanel extends TOOLKIT.ScriptComponent {
+        static OnParseNodeObject: BABYLON.Observable<any>;
+        static OnInterfaceLoaded: BABYLON.Observable<BABYLON.GUI.AdvancedDynamicTexture>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
+        protected start(): Promise<void>;
         protected destroy(): void;
+        protected engineResize(): void;
+        protected parseNodeObject(rootNode: any, hostPrefix: string): void;
+        private processNodeSources;
+        /**
+         * Extract font families used in GUI data
+         */
+        private extractRequiredFonts;
+        /**
+         * Load fonts in priority order: Unity exports → Google Fonts → System fallback
+         */
+        private loadRequiredFonts;
+        /**
+         * Load font manifest from exported Unity data
+         */
+        private loadFontManifest;
+        /**
+         * Load a single font with priority: Unity export → Google Fonts → System
+         */
+        private loadSingleFont;
+        /**
+         * Load font exported from Unity (optimized TTF format)
+         */
+        private loadUnityFont;
+        /**
+         * Load font from Google Fonts
+         */
+        private loadGoogleFont;
+        /**
+         * Check if font is available in Google Fonts
+         */
+        private isGoogleFont;
+        /**
+         * Check if font is available as system font
+         */
+        private isSystemFontAvailable;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -4825,19 +4864,635 @@ declare namespace TOOLKIT {
 declare namespace TOOLKIT {
     /**
      * Babylon shuriken particle system pro class (Unity Style Shuriken Particle System)
+     *
+     * GLTF-STYLE MINIMAL SERIALIZATION:
+     *
+     * This class implements a GLTF-style approach to particle system data serialization.
+     * The Unity C# exporter (UnityParticleSystemExporter.cs) handles minimal serialization
+     * at export time, only including properties that differ from defaults in GLTF extras.
+     * This dramatically reduces file sizes for typical particle systems.
+     *
+     * UNITY C# EXPORTER INTEGRATION:
+     *
+     * The Unity exporter now handles minimal serialization automatically:
+     *
+     * // In Unity C# - automatic minimal serialization
+     * var minimalData = UnityParticleSystemExporter.ExportParticleSystem(particleSystem);
+     * gltfExtras.particleSystem = minimalData; // Already minimized!
+     *
+     * // Analysis of size savings
+     * UnityParticleSystemExporter.AnalyzeSerializationSavings(particleSystem);
+     *
+     * RUNTIME USAGE:
+     *
+     * The runtime automatically merges user properties with defaults, so you always
+     * get a complete particle system configuration regardless of how minimal the
+     * serialized data is. No additional work needed!
+     *
+     * SIZE REDUCTION BENEFITS:
+     * • 70-90% smaller GLTF files for typical particle systems
+     * • Only changed properties stored in GLTF extras
+     * • Runtime merges with defaults seamlessly
+     * • Follows GLTF 2.0 specification patterns
+     *
+     * ENHANCED UNITY SUPPORT (2025):
+     * Added comprehensive support for Unity Main Module properties:
+     * • customSimulationSpace - Custom transform coordinate space
+     * • emitterVelocity - Tracks emitter movement for velocity inheritance
+     * • gravitySource - 2D vs 3D physics gravity modes
+     * • useUnscaledTime - Unscaled time for consistent behavior
+     *
      * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
      */
     class ShurikenParticles extends TOOLKIT.ScriptComponent {
+        private static DefaultParticleTexture;
+        private static readonly DEFAULT_PARTICLE_PROPERTIES;
+        private m_particleSystem;
+        private m_emitterMesh;
+        private m_systemProperties;
+        private m_isInitialized;
+        private m_playOnAwake;
+        private m_autoStart;
+        private m_systemTime;
+        private m_isLooping;
+        private m_duration;
+        private m_emissionTimer;
+        private m_burstTimers;
+        private m_prewarm;
+        private m_startDelay;
+        private m_simulationSpeed;
+        private m_scalingMode;
+        private m_emitterVelocityMode;
+        private m_customSimulationSpace;
+        private m_emitterVelocity;
+        private m_gravitySource;
+        private m_useUnscaledTime;
+        private m_reportedDeltaTime;
+        private m_isSystemRunning;
+        private m_cullingMode;
+        private m_isVisible;
+        private m_pausedTime;
+        private m_lastVisibilityCheck;
+        private static readonly UNITY_TO_BABYLON_SIZE_RATIO;
+        private static readonly UNITY_TO_BABYLON_GRAVITY_RATIO;
+        private static readonly UNITY_TO_BABYLON_EMIT_RATE_RATIO;
+        private static readonly UNITY_TO_BABYLON_EMIT_POWER_RATIO;
+        private static readonly UNITY_TO_BABYLON_CONE_SCALE_RATIO;
+        private static readonly UNITY_TO_BABYLON_LIFETIME_RATIO;
+        private static readonly UNITY_TO_BABYLON_DEATH_FADE_ALPHA;
+        static EMITTER_POSITION_OFFSET: BABYLON.Vector3;
+        static EMITTER_ROTATION_OFFSET: BABYLON.Vector3;
+        private m_animationCurves;
+        private m_gradients;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Get the underlying Babylon particle system */
+        getParticleSystem(): BABYLON.ParticleSystem | BABYLON.GPUParticleSystem;
+        /** Get the emitter mesh */
+        getEmitterMesh(): BABYLON.AbstractMesh;
+        /** Start the particle system */
+        private internalPlay;
+        /** Start the particle system */
+        play(): void;
+        /** Stop the particle system */
+        stop(): void;
+        /** Pause the particle system */
+        pause(): void;
+        /** Reset the particle system */
+        reset(): void;
+        /** Check if the system is playing */
+        isPlaying(): boolean;
+        /** Get current particle count */
+        getParticleCount(): number;
+        /** Get custom simulation space transform ID */
+        getCustomSimulationSpace(): number;
+        /** Get emitter velocity vector */
+        getEmitterVelocity(): BABYLON.Vector3;
+        /** Get gravity source mode (0=3D Physics, 1=2D Physics) */
+        getGravitySource(): number;
+        /** Get whether unscaled time is used */
+        getUseUnscaledTime(): boolean;
+        /** Get Unity's reported simulation delta time (read-only timing information) */
+        getCustomDeltaTime(): number;
+        /** Get Unity's reported simulation delta time (read-only timing information) */
+        getReportedDeltaTime(): number;
+        /**
+         * Get the effective delta time that would be used for particle simulation this frame
+         * This applies all Unity timing configurations: custom deltaTime, useUnscaledTime, and simulationSpeed
+         */
+        getEffectiveDeltaTime(): number;
+        /**
+         * Calculate Unity start delay value based on curve mode and multiplier
+         * Unity startDelay supports only TWO modes:
+         * - Mode 0 (Constant): Use curve.constant directly
+         * - Mode 2 (TwoConstants): Use curve.constantMin/constantMax directly
+         *
+         * IMPORTANT: Note: Unity's startDelayMultiplier is NOT USED For startDelay mode 0 = constant or mode 2 = two constants
+         * - Do NOT multiply by startDelayMultiplier ever!
+         */
+        private calculateStartDelay;
         protected awake(): void;
         protected start(): void;
         protected ready(): void;
         protected update(): void;
+        /**
+         * Determine if particle system should simulate this frame based on culling mode
+         */
+        private shouldSimulateThisFrame;
         protected late(): void;
         protected step(): void;
         protected fixed(): void;
         protected after(): void;
         protected destroy(): void;
+        /**
+         * Merges user properties with defaults to create complete particle system configuration.
+         * Only non-default values need to be serialized in GLTF extras.
+         * @param userProperties Properties from GLTF export (only changed values)
+         * @returns Complete particle system properties with defaults filled in
+         */
+        private static mergeWithDefaults;
+        /**
+         * Deep merge two objects, with source overriding target values
+         * @param target Default values object
+         * @param source User-provided values object
+         * @returns Merged object
+         */
+        private static deepMerge;
+        /**
+         * Gets a property value with fallback to default
+         * @param path Property path (e.g., "main.startLifetime.constant")
+         * @param userProps User properties
+         * @returns Property value or default
+         */
+        private static getPropertyWithDefault;
+        /**
+         * Utility for Unity C# exporters: Compare particle system properties against defaults
+         * to determine which properties need to be serialized in GLTF extras.
+         * @param fullProperties Complete particle system properties
+         * @returns Object containing only properties that differ from defaults
+         */
+        static getMinimalSerializationData(fullProperties: any): any;
+        /**
+         * Recursively extracts differences between two objects
+         * @param source Full properties object
+         * @param defaults Default values object
+         * @returns Object containing only differing properties
+         */
+        private static extractDifferences;
+        /**
+         * Deep array equality comparison
+         * @param arr1 First array
+         * @param arr2 Second array
+         * @returns True if arrays are deeply equal
+         */
+        private static arraysEqual;
+        /**
+         * Gets the default particle system properties (for reference by Unity exporters)
+         * @returns Complete default properties object
+         */
+        static getDefaultProperties(): TOOLKIT.IParticleSystemProperties;
+        private initializeParticleSystem;
+        private shouldUseGPUParticles;
+        private createEmitterMesh;
+        private createDefaultParticleTexture;
+        private createCPUParticleSystem;
+        private createGPUParticleSystem;
+        private configureMainModule;
+        private configureEmissionModule;
+        private configureShapeModule;
+        private configureRendererModule;
+        private implementStretchRendering;
+        private implementConstrainedBillboarding;
+        private implementMeshRendering;
+        private implementParticleSorting;
+        private implementParticleAlignment;
+        private implementParticleFlipping;
+        private implementParticlePivot;
+        private implementParticleRoll;
+        private implementVelocityScaling;
+        private implementNormalDirection;
+        private implementFreeformStretching;
+        private implementMaskInteraction;
+        private implementStretchRotation;
+        private implementShadowBias;
+        private implementMultiMeshRendering;
+        private implementCustomVertexStreams;
+        private implementTrailMaterial;
+        private implementMaterialConfiguration;
+        private implementShadowConfiguration;
+        private implementProbeConfiguration;
+        private implementGPUInstancing;
+        private implementSortingLayer;
+        private configureVelocityOverLifetimeModule;
+        private configureLimitVelocityOverLifetimeModule;
+        private configureColorOverLifetimeModule;
+        private configureSizeOverLifetimeModule;
+        private configureRotationOverLifetimeModule;
+        private configureTextureSheetAnimationModule;
+        private ensureBasicConfiguration;
+        private convertMinMaxCurve;
+        private convertMinMaxGradient;
+        private convertColor;
+        private colorsEqual;
+        /**
+         * Convert Unity gradient to BabylonJS color gradients
+         * @param gradient Unity gradient data
+         * @param particleSystem BabylonJS particle system to add gradients to
+         * @returns True if gradient was successfully applied
+         */
+        private applyUnityGradientToBabylon;
+        private convertVector3;
+        private evaluateCurveAtTime;
+        private setupBursts;
+        private resetBurstTimers;
+        private updateSystem;
+        private updateEmission;
+        private updateAnimationProperties;
+        private updateBursts;
+        private triggerBurst;
+        private configureEmissionShape;
+        private setupVelocityOverLifetime;
+        private setupLimitVelocity;
+        private createColorGradient;
+        private setupSpriteAnimation;
+        private createBoxShapeEmitter;
+        private createSphereShapeEmitter;
+        private createConeShapeEmitter;
+        private configureNoiseModule;
+        private configureCollisionModule;
+        private configureTrailsModule;
+        private configureSubEmittersModule;
+        /**
+         * Apply emitter velocity inheritance to newly spawned particles
+         * Unity: When emitter moves, particles can inherit velocity from the movement
+         */
+        private updateEmitterVelocityInheritance;
+        /**
+         * Handle custom simulation space coordinate transformation
+         * Unity: Particles can be simulated relative to a custom transform's coordinate space
+         */
+        private updateCustomSimulationSpace;
+        /**
+         * Handle ring buffer mode particle lifetime looping
+         * Unity: Particles can loop their lifetime instead of dying when exceeding maxLifetime
+         */
+        private updateRingBufferMode;
+        /**
+         * Handle Unity stop action when particle system completes
+         * Unity: Defines what happens when system stops and all particles die
+         */
+        private handleStopAction;
+        /**
+         * Set up visibility checking for camera frustum culling
+         * Monitors whether particle system is visible to determine simulation behavior
+         */
+        private setupCullingVisibilityCheck;
+        /**
+         * Check if particle system emitter is visible to any active camera
+         */
+        private isEmitterVisible;
+        /**
+         * Handle visibility state changes for different culling modes
+         */
+        private handleVisibilityChange;
+        private disposeParticleSystem;
+    }
+    interface IParticleSystemMinMaxCurve {
+        mode: number;
+        constant: number;
+        constantMin: number;
+        constantMax: number;
+        multiplier: number;
+        curve?: IParticleSystemAnimationCurve;
+        curveMin?: IParticleSystemAnimationCurve;
+        curveMax?: IParticleSystemAnimationCurve;
+    }
+    interface IParticleSystemMinMaxGradient {
+        mode: number;
+        color: IParticleSystemColor;
+        colorMin: IParticleSystemColor;
+        colorMax: IParticleSystemColor;
+        gradient?: IParticleSystemGradient;
+        gradientMin?: IParticleSystemGradient;
+        gradientMax?: IParticleSystemGradient;
+    }
+    interface IParticleSystemAnimationCurve {
+        length: number;
+        preWrapMode: number;
+        postWrapMode: number;
+        keys: IParticleSystemKeyframe[];
+    }
+    interface IParticleSystemKeyframe {
+        time: number;
+        value: number;
+        inTangent: number;
+        outTangent: number;
+        inWeight: number;
+        outWeight: number;
+        weightedMode: number;
+    }
+    interface IParticleSystemGradient {
+        mode: number;
+        colorKeys: IParticleSystemColorKey[];
+        alphaKeys: IParticleSystemAlphaKey[];
+    }
+    interface IParticleSystemColorKey {
+        color: IParticleSystemColor;
+        time: number;
+    }
+    interface IParticleSystemAlphaKey {
+        alpha: number;
+        time: number;
+    }
+    interface IParticleSystemColor {
+        r: number;
+        g: number;
+        b: number;
+        a: number;
+    }
+    interface IParticleSystemVector2 {
+        x: number;
+        y: number;
+    }
+    interface IParticleSystemVector3 {
+        x: number;
+        y: number;
+        z: number;
+    }
+    interface IParticleSystemTransform {
+        name: string;
+        instanceId: number;
+        position: IParticleSystemVector3;
+        rotation: IParticleSystemVector3;
+        scale: IParticleSystemVector3;
+    }
+    interface IParticleSystemBurst {
+        time: number;
+        count: IParticleSystemMinMaxCurve;
+        cycleCount: number;
+        repeatInterval: number;
+        probability: number;
+    }
+    interface IParticleSystemMainModule {
+        duration: number;
+        loop: boolean;
+        prewarm: boolean;
+        startDelay: IParticleSystemMinMaxCurve;
+        startDelayMultiplier: number;
+        startLifetime: IParticleSystemMinMaxCurve;
+        startLifetimeMultiplier: number;
+        startSpeed: IParticleSystemMinMaxCurve;
+        startSpeedMultiplier: number;
+        startSize3D: boolean;
+        startSize: IParticleSystemMinMaxCurve;
+        startSizeMultiplier: number;
+        startSizeX: IParticleSystemMinMaxCurve;
+        startSizeXMultiplier: number;
+        startSizeY: IParticleSystemMinMaxCurve;
+        startSizeYMultiplier: number;
+        startSizeZ: IParticleSystemMinMaxCurve;
+        startSizeZMultiplier: number;
+        startRotation3D: boolean;
+        startRotation: IParticleSystemMinMaxCurve;
+        startRotationMultiplier: number;
+        startRotationX: IParticleSystemMinMaxCurve;
+        startRotationXMultiplier: number;
+        startRotationY: IParticleSystemMinMaxCurve;
+        startRotationYMultiplier: number;
+        startRotationZ: IParticleSystemMinMaxCurve;
+        startRotationZMultiplier: number;
+        flipRotation: number;
+        startColor: IParticleSystemMinMaxGradient;
+        gravityModifier: IParticleSystemMinMaxCurve;
+        gravityModifierMultiplier: number;
+        simulationSpace: number;
+        simulationSpeed: number;
+        deltaTime: number;
+        scalingMode: number;
+        playOnAwake: boolean;
+        emitterVelocityMode: number;
+        maxParticles: number;
+        stopAction: number;
+        cullingMode: number;
+        ringBufferMode: number;
+        ringBufferLoopRange: IParticleSystemVector2;
+        customSimulationSpace?: number;
+        emitterVelocity?: IParticleSystemVector3;
+        gravitySource?: number;
+        useUnscaledTime?: boolean;
+    }
+    interface IParticleSystemEmissionModule {
+        enabled: boolean;
+        rateOverTime: IParticleSystemMinMaxCurve;
+        rateOverTimeMultiplier: number;
+        rateOverDistance: IParticleSystemMinMaxCurve;
+        rateOverDistanceMultiplier: number;
+        burstCount: number;
+        bursts: IParticleSystemBurst[];
+    }
+    interface IParticleSystemShapeModule {
+        enabled: boolean;
+        shapeType: number;
+        angle: number;
+        radius: number;
+        radiusMode: number;
+        radiusSpread: number;
+        radiusSpeed: IParticleSystemMinMaxCurve;
+        radiusSpeedMultiplier: number;
+        donutRadius: number;
+        position: IParticleSystemVector3;
+        rotation: IParticleSystemVector3;
+        scale: IParticleSystemVector3;
+        alignToDirection: boolean;
+        randomDirectionAmount: number;
+        sphericalDirectionAmount: number;
+        randomPositionAmount: number;
+        biasOnTriangles: boolean;
+        useMeshMaterialIndex: boolean;
+        meshMaterialIndex: number;
+        useMeshColors: boolean;
+        normalOffset: number;
+        meshSpawnMode: number;
+        meshSpawnSpread: number;
+        meshSpawnSpeed: IParticleSystemMinMaxCurve;
+        meshSpawnSpeedMultiplier: number;
+        arc: number;
+        arcMode: number;
+        arcSpread: number;
+        arcSpeed: IParticleSystemMinMaxCurve;
+        arcSpeedMultiplier: number;
+        length: number;
+        boxThickness: IParticleSystemVector3;
+    }
+    interface IParticleSystemRendererModule {
+        enabled: boolean;
+        materials: any[];
+        renderMode: number;
+        cameraVelocityScale: number;
+        velocityScale: number;
+        lengthScale: number;
+        normalDirection: number;
+        sortMode: number;
+        sortingFudge: number;
+        minParticleSize: number;
+        maxParticleSize: number;
+        alignment: number;
+        flip: IParticleSystemVector2;
+        allowRoll: boolean;
+        pivot: IParticleSystemVector3;
+        shadowCastingMode: number;
+        receiveShadows: boolean;
+        motionVectorGenerationMode: number;
+        lightProbeUsage: number;
+        reflectionProbeUsage: number;
+        enableGPUInstancing: boolean;
+        mesh?: any;
+        sortingLayerID: number;
+        sortingOrder: number;
+        freeformStretching?: boolean;
+        maskInteraction?: number;
+        meshCount?: number;
+        meshDistribution?: number;
+        rotateWithStretchDirection?: boolean;
+        shadowBias?: number;
+        supportsMeshInstancing?: boolean;
+        activeVertexStreamsCount?: number;
+        activeTrailVertexStreamsCount?: number;
+        meshes?: any[];
+        trailMaterial?: any;
+    }
+    interface IParticleSystemVelocityOverLifetimeModule {
+        enabled: boolean;
+        space: number;
+        x: IParticleSystemMinMaxCurve;
+        y: IParticleSystemMinMaxCurve;
+        z: IParticleSystemMinMaxCurve;
+        xMultiplier: number;
+        yMultiplier: number;
+        zMultiplier: number;
+        orbitalX: IParticleSystemMinMaxCurve;
+        orbitalY: IParticleSystemMinMaxCurve;
+        orbitalZ: IParticleSystemMinMaxCurve;
+        orbitalXMultiplier: number;
+        orbitalYMultiplier: number;
+        orbitalZMultiplier: number;
+        orbitalOffsetX: IParticleSystemMinMaxCurve;
+        orbitalOffsetY: IParticleSystemMinMaxCurve;
+        orbitalOffsetZ: IParticleSystemMinMaxCurve;
+        orbitalOffsetXMultiplier: number;
+        orbitalOffsetYMultiplier: number;
+        orbitalOffsetZMultiplier: number;
+        radial: IParticleSystemMinMaxCurve;
+        radialMultiplier: number;
+        speedModifier: IParticleSystemMinMaxCurve;
+        speedModifierMultiplier: number;
+    }
+    interface IParticleSystemLimitVelocityOverLifetimeModule {
+        enabled: boolean;
+        limitX: IParticleSystemMinMaxCurve;
+        limitY: IParticleSystemMinMaxCurve;
+        limitZ: IParticleSystemMinMaxCurve;
+        limitXMultiplier: number;
+        limitYMultiplier: number;
+        limitZMultiplier: number;
+        limit: IParticleSystemMinMaxCurve;
+        limitMultiplier: number;
+        dampen: number;
+        separateAxes: boolean;
+        space: number;
+        drag: IParticleSystemMinMaxCurve;
+        dragMultiplier: number;
+        multiplyDragByParticleSize: boolean;
+        multiplyDragByParticleVelocity: boolean;
+    }
+    interface IParticleSystemColorOverLifetimeModule {
+        enabled: boolean;
+        color: IParticleSystemMinMaxGradient;
+    }
+    interface IParticleSystemSizeOverLifetimeModule {
+        enabled: boolean;
+        size: IParticleSystemMinMaxCurve;
+        sizeMultiplier: number;
+        x: IParticleSystemMinMaxCurve;
+        xMultiplier: number;
+        y: IParticleSystemMinMaxCurve;
+        yMultiplier: number;
+        z: IParticleSystemMinMaxCurve;
+        zMultiplier: number;
+        separateAxes: boolean;
+    }
+    interface IParticleSystemRotationOverLifetimeModule {
+        enabled: boolean;
+        x: IParticleSystemMinMaxCurve;
+        xMultiplier: number;
+        y: IParticleSystemMinMaxCurve;
+        yMultiplier: number;
+        z: IParticleSystemMinMaxCurve;
+        zMultiplier: number;
+        separateAxes: boolean;
+    }
+    interface IParticleSystemTextureSheetAnimationModule {
+        enabled: boolean;
+        mode: number;
+        timeMode: number;
+        fps: number;
+        numTilesX: number;
+        numTilesY: number;
+        animation: number;
+        useRandomRow: boolean;
+        frameOverTime: IParticleSystemMinMaxCurve;
+        frameOverTimeMultiplier: number;
+        startFrame: IParticleSystemMinMaxCurve;
+        startFrameMultiplier: number;
+        cycleCount: number;
+        rowIndex: number;
+        rowMode: number;
+        uvChannelMask: number;
+        flipU: number;
+        flipV: number;
+        speedRange: IParticleSystemVector2;
+    }
+    interface IParticleSystemProperties {
+        isPlaying: boolean;
+        isPaused: boolean;
+        isStopped: boolean;
+        isEmitting: boolean;
+        particleCount: number;
+        time: number;
+        randomSeed: number;
+        useAutoRandomSeed: boolean;
+        name: string;
+        instanceId: number;
+        enabled: boolean;
+        transformPosition: IParticleSystemVector3;
+        transformRotation: IParticleSystemVector3;
+        transformScale: IParticleSystemVector3;
+        materialName?: string;
+        materialId?: number;
+        mainTextureName?: string;
+        mainTextureId?: number;
+        main: IParticleSystemMainModule;
+        emission: IParticleSystemEmissionModule;
+        shape: IParticleSystemShapeModule;
+        renderer: IParticleSystemRendererModule;
+        velocityOverLifetime: IParticleSystemVelocityOverLifetimeModule;
+        limitVelocityOverLifetime: IParticleSystemLimitVelocityOverLifetimeModule;
+        colorOverLifetime: IParticleSystemColorOverLifetimeModule;
+        sizeOverLifetime: IParticleSystemSizeOverLifetimeModule;
+        rotationOverLifetime: IParticleSystemRotationOverLifetimeModule;
+        textureSheetAnimation: IParticleSystemTextureSheetAnimationModule;
+        inheritVelocity?: any;
+        forceOverLifetime?: any;
+        colorBySpeed?: any;
+        sizeBySpeed?: any;
+        rotationBySpeed?: any;
+        externalForces?: any;
+        noise?: any;
+        collision?: any;
+        triggers?: any;
+        subEmitters?: any;
+        lights?: any;
+        trails?: any;
+        customData?: any;
     }
 }
 /** Babylon Toolkit Namespace */
