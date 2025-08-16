@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.16.1 - R1) */
+        /** Gets the toolkit framework version number (8.21.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -244,25 +244,6 @@ declare namespace TOOLKIT {
         static GetLastCreatedEngine(): BABYLON.AbstractEngine;
         /** Get the last created scene instance */
         static GetLastCreatedScene(): BABYLON.Scene;
-        private static ForegroundTexture;
-        private static BackgroundTexture;
-        static GetForegroundTexture(): BABYLON.GUI.AdvancedDynamicTexture;
-        static GetBackgroundTexture(): BABYLON.GUI.AdvancedDynamicTexture;
-        static CreateUserInterface(scene: BABYLON.Scene, foreground?: boolean, samplerMode?: number, adaptiveHardwareScaling?: boolean): BABYLON.GUI.AdvancedDynamicTexture;
-        static IsUserInterfaceReady(): boolean;
-        static GetUserInterfaceElement(name: string): BABYLON.GUI.Control;
-        static ShowUserInterfaceElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        static HideUserInterfaceElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        static LoadForegroundUserInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string, adaptiveHardwareScaling?: boolean): void;
-        static LoadBackgroundUserInterface(scene: BABYLON.Scene, userInterfaceData: any, samplerMode?: number, scaleToSize?: boolean, urlRewriter?: (url: string) => string, adaptiveHardwareScaling?: boolean): void;
-        /**
-         * Recreate the content of the ADT from a JSON object
-         * @param serializedObject define the JSON serialized object to restore from
-         * @param scaleToSize defines whether to scale to texture to the saved size
-         * @param urlRewriter defines an url rewriter to update urls before sending them to the controls
-         * @param appendControls if true, the controls will be appended to the existing ADT. Otherwise, the ADT will be replaced with the new content.
-         */
-        private static ParseUserInterfaceObject;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
         private static PhysicsViewersEnabled;
@@ -362,15 +343,18 @@ declare namespace TOOLKIT {
         static GetTransformTag(transform: BABYLON.TransformNode): string;
         /** Check if the transform has the specified query tag match */
         static HasTransformTags(transform: BABYLON.TransformNode, query: string): boolean;
+        /** Checks if the scene sound manager is available. */
+        static HasSoundManager(): boolean;
+        /** Play ambient music track from the scene sound manager. */
+        static PlayAmbientMusic(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /** Play a sound effect from the scene sound manager. */
+        static PlaySoundEffect(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
         /** Are half or full texture floats supported */
         static TextureFloatSupported(scene: BABYLON.Scene): boolean;
         /** Registers an on pick trigger click action */
         static RegisterClickAction(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh, func: () => void): BABYLON.IAction;
         /** Unregisters an on pick trigger click action */
         static UnregisterClickAction(mesh: BABYLON.AbstractMesh, action: BABYLON.IAction): boolean;
-        /** Starts a targeted float animation for tweening.  */
-        static StartTweenAnimation(scene: BABYLON.Scene, name: string, targetObject: any, targetProperty: string, startValue: number, endValue: number, defaultSpeedRatio?: number, defaultFrameRate?: number, defaultLoopMode?: number, defaultEasingFunction?: BABYLON.EasingFunction, onAnimationComplete?: () => void): BABYLON.Animatable;
-        /** DEPRECATED: Starts a native javascript tween animation (https://createjs.com/docs/tweenjs/modules/TweenJS.html) */
         /** Get first material with name. (Uses starts with text searching) */
         static GetMaterialWithName(scene: BABYLON.Scene, name: string): BABYLON.Material;
         /** Get all materials with name. (Uses starts with text searching) */
@@ -506,6 +490,655 @@ declare namespace TOOLKIT {
         private static GotoFullscreenBrowser;
         private static RequestBrowserPointerLock;
         private static ExitFromFullscreenBrowser;
+        /** Internal: clone a Babylon-friendly value (number/Vector/Color/etc.) */
+        private static _TweenClone;
+        /** Internal: get value by dotted path ("position.x") from an object */
+        private static _TweenGetByPath;
+        /** Internal: set value by dotted path ("position.x") on an object */
+        private static _TweenSetByPath;
+        /** Internal: infer Babylon Animation data type from a value */
+        private static _TweenInferType;
+        /** Internal: build an easing function from a friendly name; "linear" => undefined (no easing function) */
+        private static _TweenMakeEase;
+        /** Options shape (JSDoc for intellisense; keep it internal)
+         * {
+         *   duration?: number;      // seconds (default 1)
+         *   delay?: number;         // seconds (default 0)
+         *   ease?: string;          // 'linear' | 'sineIn' | 'sineOut' | ... (see _TweenMakeEase)
+         *   fps?: number;           // default 60
+         *   loop?: number;          // extra forward plays
+         *   yoyo?: boolean;         // alternate forward/back
+         *   yoyoCount?: number;     // # of additional yoyo cycles (omit => infinite)
+         *   blending?: boolean;     // default true
+         *   blendingSpeed?: number; // default 0.05
+         *   onStart?: () => void;
+         *   onUpdate?: () => void;
+         *   onRepeat?: (iteration:number) => void;
+         *   onComplete?: () => void;
+         * }
+         */
+        /** Internal: construct animations for multiple property paths, honoring direction */
+        private static _TweenBuildAnimations;
+        /** Internal: begin a run (forward/back), with optional delay */
+        private static _TweenBegin;
+        /**
+         * Create and run a tween animation that animates target properties to specified values.
+         *
+         * @param target - The object to animate (Mesh, Camera, Material, Vector3, Color3, etc.)
+         * @param toVars - Object specifying target property values and paths
+         * @param opts - Animation options (duration, easing, callbacks, etc.)
+         * @param scene - Optional BabylonJS scene (defaults to last created scene)
+         * @returns Tween handle with controls and Promise for completion
+         *
+         * @example
+         * ```typescript
+         * // Basic position animation
+         * const handle = SceneManager.TweenTo(mesh, {
+         *   "position.x": 10,
+         *   "position.y": 5
+         * }, {
+         *   duration: 2,
+         *   ease: "sineOut"
+         * });
+         *
+         * // Animation with callbacks
+         * SceneManager.TweenTo(material, {
+         *   "diffuseColor.r": 1,
+         *   "diffuseColor.g": 0,
+         *   "alpha": 0.5
+         * }, {
+         *   duration: 1.5,
+         *   ease: "cubicInOut",
+         *   delay: 0.5,
+         *   onStart: () => console.log("Animation started"),
+         *   onUpdate: () => console.log("Animating..."),
+         *   onComplete: () => console.log("Animation complete")
+         * });
+         *
+         * // Looping and yoyo animation
+         * SceneManager.TweenTo(camera, {
+         *   "position.z": 20
+         * }, {
+         *   duration: 3,
+         *   ease: "elasticOut",
+         *   yoyo: true,
+         *   yoyoCount: 3,
+         *   loop: 2,
+         *   onRepeat: (iteration) => console.log(`Loop ${iteration}`)
+         * });
+         *
+         * // Using the returned handle
+         * const tween = SceneManager.TweenTo(light, { intensity: 2 }, { duration: 1 });
+         *
+         * // Control the animation
+         * setTimeout(() => tween.Pause(), 500);
+         * setTimeout(() => tween.Resume(), 1000);
+         *
+         * // Wait for completion
+         * await tween.finished;
+         * console.log("Tween completed!");
+         * ```
+         *
+         * @remarks
+         * **Available Options:**
+         * - `duration?: number` - Animation duration in seconds (default: 1)
+         * - `delay?: number` - Delay before starting in seconds (default: 0)
+         * - `ease?: string` - Easing function name (default: "linear")
+         * - `fps?: number` - Animation framerate (default: 60)
+         * - `loop?: number` - Number of additional forward plays (default: 0)
+         * - `yoyo?: boolean` - Alternate forward/backward direction (default: false)
+         * - `yoyoCount?: number` - Number of yoyo cycles, omit for infinite (default: undefined)
+         * - `blending?: boolean` - Enable animation blending (default: true)
+         * - `blendingSpeed?: number` - Blending speed factor (default: 0.05)
+         * - `onStart?: () => void` - Called when animation starts
+         * - `onUpdate?: () => void` - Called each frame during animation
+         * - `onRepeat?: (iteration: number) => void` - Called on each loop/yoyo repeat
+         * - `onComplete?: () => void` - Called when animation completes
+         *
+         * **Available Easing Functions:**
+         * - Basic: "linear"
+         * - Sine: "sineIn", "sineOut", "sineInOut"
+         * - Quad: "quadIn", "quadOut", "quadInOut"
+         * - Cubic: "cubicIn", "cubicOut", "cubicInOut"
+         * - Quart: "quartIn", "quartOut", "quartInOut"
+         * - Quint: "quintIn", "quintOut", "quintInOut"
+         * - Expo: "expoIn", "expoOut", "expoInOut"
+         * - Circ: "circIn", "circOut", "circInOut"
+         * - Back: "backIn", "backOut", "backInOut"
+         * - Elastic: "elasticIn", "elasticOut", "elasticInOut"
+         * - Bounce: "bounceIn", "bounceOut", "bounceInOut"
+         *
+         * **Returned Handle Methods:**
+         * - `finished: Promise<void>` - Promise that resolves when animation completes
+         * - `Pause(): void` - Pause the animation
+         * - `Resume(): void` - Resume a paused animation
+         * - `Stop(jumpToEnd?: boolean): void` - Stop animation, optionally jump to end values
+         */
+        static TweenTo(target: any, toVars: Record<string, any>, opts?: any, scene?: BABYLON.Scene): {
+            /** Promise resolves when the tween fully completes */
+            finished: Promise<void>;
+            /** Pause the tween */
+            Pause: () => void;
+            /** Resume the tween */
+            Resume: () => void;
+            /** Stop the tween (optionally jump target to end values) */
+            Stop: (jumpToEnd?: boolean) => void;
+        };
+        /**
+         * Create and run a tween animation from specific starting values to target values.
+         *
+         * @param target - The object to animate (Mesh, Camera, Material, Vector3, Color3, etc.)
+         * @param fromVars - Object specifying starting property values and paths
+         * @param toVars - Object specifying target property values and paths
+         * @param opts - Animation options (duration, easing, callbacks, etc.)
+         * @param scene - Optional BabylonJS scene (defaults to last created scene)
+         * @returns Tween handle with controls and Promise for completion
+         *
+         * @example
+         * ```typescript
+         * // Animate from specific starting position to target
+         * const handle = SceneManager.TweenFromTo(mesh,
+         *   { "position.x": 0, "position.y": 0 },     // from values
+         *   { "position.x": 10, "position.y": 5 },    // to values
+         *   {
+         *     duration: 2,
+         *     ease: "sineOut"
+         *   }
+         * );
+         *
+         * // Material color transition with specific start and end
+         * SceneManager.TweenFromTo(material,
+         *   {
+         *     "diffuseColor.r": 0,
+         *     "diffuseColor.g": 1,
+         *     "diffuseColor.b": 0,
+         *     "alpha": 0
+         *   },
+         *   {
+         *     "diffuseColor.r": 1,
+         *     "diffuseColor.g": 0,
+         *     "diffuseColor.b": 0,
+         *     "alpha": 1
+         *   },
+         *   {
+         *     duration: 1.5,
+         *     ease: "cubicInOut",
+         *     onStart: () => console.log("Color transition started"),
+         *     onComplete: () => console.log("Color transition complete")
+         *   }
+         * );
+         *
+         * // Scale animation with yoyo effect
+         * SceneManager.TweenFromTo(mesh,
+         *   { "scaling.x": 0.1, "scaling.y": 0.1, "scaling.z": 0.1 },
+         *   { "scaling.x": 2, "scaling.y": 2, "scaling.z": 2 },
+         *   {
+         *     duration: 1,
+         *     ease: "elasticOut",
+         *     yoyo: true,
+         *     yoyoCount: 2,
+         *     onRepeat: (iteration) => console.log(`Scale cycle ${iteration}`)
+         *   }
+         * );
+         * ```
+         *
+         * @remarks
+         * This method is useful when you need to ensure specific starting values regardless of
+         * the object's current state. Unlike `TweenTo` which animates from current values,
+         * `TweenFromTo` sets the starting values explicitly before animating.
+         *
+         * **Key Differences from TweenTo:**
+         * - Allows explicit control over starting values
+         * - Useful for creating predictable animations
+         * - Perfect for fade-in effects, entrance animations, or state resets
+         * - Can animate from values different than current object state
+         *
+         * For complete options documentation, see {@link TweenTo}.
+         */
+        static TweenFromTo(target: any, fromVars: Record<string, any>, toVars: Record<string, any>, opts?: any, scene?: BABYLON.Scene): {
+            finished: Promise<void>;
+            Pause: () => void;
+            Resume: () => void;
+            Stop: (jumpToEnd?: boolean) => void;
+        };
+        /**
+         * Async version of TweenTo that directly returns a Promise for completion.
+         *
+         * @param target - The object to animate (Mesh, Camera, Material, Vector3, Color3, etc.)
+         * @param toVars - Object specifying target property values and paths
+         * @param opts - Animation options (duration, easing, callbacks, etc.)
+         * @param scene - Optional BabylonJS scene (defaults to last created scene)
+         * @returns Promise that resolves when the animation completes
+         *
+         * @example
+         * ```typescript
+         * // Simple async animation - wait for completion
+         * await SceneManager.TweenToAsync(mesh, {
+         *   "position.x": 10,
+         *   "position.y": 5
+         * }, {
+         *   duration: 2,
+         *   ease: "sineOut"
+         * });
+         * console.log("Mesh movement complete!");
+         *
+         * // Sequential animations using async/await
+         * async function performSequence() {
+         *   // Move mesh to position
+         *   await SceneManager.TweenToAsync(mesh, {
+         *     "position.z": 10
+         *   }, { duration: 1 });
+         *
+         *   // Then change its color
+         *   await SceneManager.TweenToAsync(mesh.material, {
+         *     "diffuseColor.r": 1,
+         *     "diffuseColor.g": 0,
+         *     "diffuseColor.b": 0
+         *   }, { duration: 0.5 });
+         *
+         *   // Finally scale it up
+         *   await SceneManager.TweenToAsync(mesh, {
+         *     "scaling.x": 2,
+         *     "scaling.y": 2,
+         *     "scaling.z": 2
+         *   }, { duration: 1, ease: "bounceOut" });
+         *
+         *   console.log("Complete transformation sequence finished!");
+         * }
+         *
+         * // Camera movement with await
+         * async function flyToTarget() {
+         *   await SceneManager.TweenToAsync(camera, {
+         *     "position.x": targetPosition.x,
+         *     "position.y": targetPosition.y + 5,
+         *     "position.z": targetPosition.z - 10
+         *   }, {
+         *     duration: 3,
+         *     ease: "cubicInOut",
+         *     onUpdate: () => camera.lookAt(targetPosition)
+         *   });
+         *
+         *   // Camera is now at target - proceed with next action
+         *   showTargetUI();
+         * }
+         *
+         * // Error handling with try/catch
+         * try {
+         *   await SceneManager.TweenToAsync(light, { intensity: 2 }, { duration: 1 });
+         *   console.log("Light animation completed successfully");
+         * } catch (error) {
+         *   console.error("Light animation was interrupted:", error);
+         * }
+         *
+         * // Parallel execution with Promise.all
+         * await Promise.all([
+         *   SceneManager.TweenToAsync(mesh1, { "position.x": 5 }, { duration: 2 }),
+         *   SceneManager.TweenToAsync(mesh2, { "position.y": 5 }, { duration: 2 }),
+         *   SceneManager.TweenToAsync(mesh3, { "position.z": 5 }, { duration: 2 })
+         * ]);
+         * console.log("All three meshes finished moving simultaneously!");
+         * ```
+         *
+         * @remarks
+         * This is a convenience method that wraps {@link TweenTo} and automatically awaits
+         * the `finished` Promise. It's perfect for:
+         *
+         * **Sequential Operations:**
+         * - Chain animations one after another with clean async/await syntax
+         * - Create complex animation sequences without callback nesting
+         * - Easy integration with other async operations
+         *
+         * **Simplified Code:**
+         * - Eliminates need to manually handle the returned tween handle
+         * - Cleaner syntax compared to `.then()` chains
+         * - Better error handling with try/catch blocks
+         *
+         * **When to Use:**
+         * - ✅ Simple animations where you just need to wait for completion
+         * - ✅ Sequential animation chains
+         * - ✅ Integration with other async functions
+         * - ❌ When you need to pause/resume/stop during execution (use {@link TweenTo} instead)
+         * - ❌ When you need the tween handle for manual control
+         *
+         * For complete options documentation, see {@link TweenTo}.
+         *
+         * @see {@link TweenTo} for the non-async version with full control capabilities
+         * @see {@link TweenFromToAsync} for async version with explicit start values
+         * @see {@link TweenGroupAsync} for async coordination of multiple tweens
+         */
+        static TweenToAsync(target: any, toVars: Record<string, any>, opts?: any, scene?: BABYLON.Scene): Promise<void>;
+        /**
+         * Async version of TweenFromTo that directly returns a Promise for completion.
+         *
+         * @param target - The object to animate (Mesh, Camera, Material, Vector3, Color3, etc.)
+         * @param fromVars - Object specifying starting property values and paths
+         * @param toVars - Object specifying target property values and paths
+         * @param opts - Animation options (duration, easing, callbacks, etc.)
+         * @param scene - Optional BabylonJS scene (defaults to last created scene)
+         * @returns Promise that resolves when the animation completes
+         *
+         * @example
+         * ```typescript
+         * // Fade in effect with known start and end values
+         * await SceneManager.TweenFromToAsync(material,
+         *   { alpha: 0 },        // Start transparent
+         *   { alpha: 1 },        // End opaque
+         *   { duration: 1, ease: "sineOut" }
+         * );
+         * console.log("Fade in complete!");
+         *
+         * // Sequential entrance animations
+         * async function performEntranceSequence() {
+         *   // Characters enter from below ground
+         *   await Promise.all([
+         *     SceneManager.TweenFromToAsync(hero,
+         *       { "position.y": -5, "scaling": new Vector3(0,0,0) },
+         *       { "position.y": 0, "scaling": new Vector3(1,1,1) },
+         *       { duration: 1, ease: "bounceOut" }
+         *     ),
+         *     SceneManager.TweenFromToAsync(companion,
+         *       { "position.y": -5, "scaling": new Vector3(0,0,0) },
+         *       { "position.y": 0, "scaling": new Vector3(1,1,1) },
+         *       { duration: 1, ease: "bounceOut" }
+         *     )
+         *   ]);
+         *
+         *   // Then move them to their positions
+         *   await Promise.all([
+         *     SceneManager.TweenFromToAsync(hero,
+         *       { "position.x": 0 },
+         *       { "position.x": -2 },
+         *       { duration: 0.8, ease: "cubicOut" }
+         *     ),
+         *     SceneManager.TweenFromToAsync(companion,
+         *       { "position.x": 0 },
+         *       { "position.x": 2 },
+         *       { duration: 0.8, ease: "cubicOut" }
+         *     )
+         *   ]);
+         *
+         *   console.log("Entrance sequence complete!");
+         * }
+         *
+         * // Color transition with precise control
+         * async function changeSceneAmbiance() {
+         *   // Transition from day to night colors
+         *   await SceneManager.TweenFromToAsync(skyMaterial,
+         *     {
+         *       "diffuseColor.r": 0.7,
+         *       "diffuseColor.g": 0.8,
+         *       "diffuseColor.b": 1.0
+         *     },
+         *     {
+         *       "diffuseColor.r": 0.1,
+         *       "diffuseColor.g": 0.1,
+         *       "diffuseColor.b": 0.3
+         *     },
+         *     { duration: 5, ease: "sineInOut" }
+         *   );
+         *
+         *   // Dim the main light
+         *   await SceneManager.TweenFromToAsync(sunLight,
+         *     { intensity: 1.0 },
+         *     { intensity: 0.2 },
+         *     { duration: 2, ease: "quadOut" }
+         *   );
+         *
+         *   console.log("Day to night transition complete!");
+         * }
+         *
+         * // UI panel slide-in animation
+         * async function showSettingsPanel() {
+         *   await SceneManager.TweenFromToAsync(settingsPanel,
+         *     {
+         *       "position.x": -400,  // Start off-screen
+         *       "alpha": 0
+         *     },
+         *     {
+         *       "position.x": 0,     // Slide to center
+         *       "alpha": 1
+         *     },
+         *     {
+         *       duration: 0.5,
+         *       ease: "backOut",
+         *       onComplete: () => enablePanelInteraction()
+         *     }
+         *   );
+         * }
+         *
+         * // Camera shake effect
+         * async function performCameraShake() {
+         *   const originalPos = camera.position.clone();
+         *
+         *   for (let i = 0; i < 5; i++) {
+         *     const shakeX = (Math.random() - 0.5) * 0.5;
+         *     const shakeY = (Math.random() - 0.5) * 0.5;
+         *
+         *     await SceneManager.TweenFromToAsync(camera,
+         *       {
+         *         "position.x": originalPos.x + shakeX,
+         *         "position.y": originalPos.y + shakeY
+         *       },
+         *       {
+         *         "position.x": originalPos.x,
+         *         "position.y": originalPos.y
+         *       },
+         *       { duration: 0.05, ease: "linear" }
+         *     );
+         *   }
+         *
+         *   console.log("Camera shake complete!");
+         * }
+         * ```
+         *
+         * @remarks
+         * This is a convenience method that wraps {@link TweenFromTo} and automatically awaits
+         * the `finished` Promise. It's especially useful for:
+         *
+         * **Predictable Animations:**
+         * - Entrance/exit effects where you control exact start positions
+         * - State transitions with known begin and end values
+         * - Reset animations that override current object state
+         *
+         * **Sequential Workflows:**
+         * - Chain animations with precise control over each step
+         * - Create complex sequences without callback nesting
+         * - Easy integration with other async operations
+         *
+         * **Key Advantages:**
+         * - ✅ Explicit control over starting values
+         * - ✅ Clean async/await syntax for sequences
+         * - ✅ Perfect for entrance/exit animations
+         * - ✅ Predictable results regardless of current object state
+         *
+         * **When to Use vs TweenToAsync:**
+         * - Use `TweenFromToAsync` when you need specific starting values
+         * - Use `TweenToAsync` when animating from current values
+         *
+         * For complete options documentation, see {@link TweenTo}.
+         *
+         * @see {@link TweenFromTo} for the non-async version with full control capabilities
+         * @see {@link TweenToAsync} for async version animating from current values
+         * @see {@link TweenGroupAsync} for async coordination of multiple tweens
+         */
+        static TweenFromToAsync(target: any, fromVars: Record<string, any>, toVars: Record<string, any>, opts?: any, scene?: BABYLON.Scene): Promise<void>;
+        /**
+         * Create a group controller to coordinate multiple tween animations with various execution modes.
+         *
+         * @param items - Array of tween handles or factory functions that return tween handles
+         * @param options - Group execution options (mode, stagger timing, progress callback)
+         * @returns Group handle with controls and Promise for completion
+         *
+         * @example
+         * ```typescript
+         * // Run multiple tweens simultaneously (default "all" mode)
+         * const group = SceneManager.TweenGroup([
+         *   SceneManager.TweenTo(mesh1, { "position.x": 10 }, { duration: 2 }),
+         *   SceneManager.TweenTo(mesh2, { "position.y": 5 }, { duration: 2 }),
+         *   SceneManager.TweenTo(mesh3, { "scaling.x": 2 }, { duration: 2 })
+         * ], {
+         *   onProgress: (done, total) => console.log(`${done}/${total} animations complete`)
+         * });
+         *
+         * // Sequential execution with stagger timing
+         * const sequenceGroup = SceneManager.TweenGroup([
+         *   () => SceneManager.TweenTo(light1, { intensity: 2 }, { duration: 1 }),
+         *   () => SceneManager.TweenTo(light2, { intensity: 2 }, { duration: 1 }),
+         *   () => SceneManager.TweenTo(light3, { intensity: 2 }, { duration: 1 })
+         * ], {
+         *   mode: "sequence",
+         *   stagger: 500, // 500ms delay between each animation
+         *   onProgress: (done, total) => console.log(`Light ${done} of ${total} activated`)
+         * });
+         *
+         * // Race mode - first to complete wins
+         * const raceGroup = SceneManager.TweenGroup([
+         *   SceneManager.TweenTo(camera, { "position.z": 10 }, { duration: 3 }),
+         *   SceneManager.TweenTo(camera, { "position.x": 10 }, { duration: 2 }),
+         *   SceneManager.TweenTo(camera, { "position.y": 10 }, { duration: 4 })
+         * ], {
+         *   mode: "race" // Stops all others when first completes
+         * });
+         *
+         * // Complex choreographed animation sequence
+         * const choreography = SceneManager.TweenGroup([
+         *   // Entrance animations
+         *   () => SceneManager.TweenFromTo(dancer1,
+         *     { "position.y": -5, "scaling": new Vector3(0,0,0) },
+         *     { "position.y": 0, "scaling": new Vector3(1,1,1) },
+         *     { duration: 1, ease: "bounceOut" }
+         *   ),
+         *   () => SceneManager.TweenFromTo(dancer2,
+         *     { "position.y": -5, "scaling": new Vector3(0,0,0) },
+         *     { "position.y": 0, "scaling": new Vector3(1,1,1) },
+         *     { duration: 1, ease: "bounceOut" }
+         *   ),
+         *   // Main performance
+         *   () => SceneManager.TweenTo(dancer1, { "rotation.y": Math.PI * 2 }, { duration: 2 }),
+         *   () => SceneManager.TweenTo(dancer2, { "rotation.y": -Math.PI * 2 }, { duration: 2 })
+         * ], {
+         *   mode: "sequence",
+         *   stagger: 200,
+         *   onProgress: (done, total) => {
+         *     if (done <= 2) console.log(`Dancer ${done} entered stage`);
+         *     else console.log(`Performance step ${done - 2} complete`);
+         *   }
+         * });
+         *
+         * // Using group controls
+         * setTimeout(() => group.Pause(), 1000);    // Pause all animations
+         * setTimeout(() => group.Resume(), 2000);   // Resume all animations
+         *
+         * // Wait for completion
+         * await group.finished;
+         * console.log("All animations in group completed!");
+         * ```
+         *
+         * @remarks
+         * **Execution Modes:**
+         * - `"all"` (default): Run all tweens simultaneously, wait for all to complete
+         * - `"sequence"`: Run tweens one after another in order, with optional stagger delay
+         * - `"race"`: Run tweens simultaneously, complete when first one finishes (stops others)
+         *
+         * **Factory Functions vs Direct Handles:**
+         * - Direct handles: `[tween1, tween2, tween3]` - Tweens start immediately when created
+         * - Factory functions: `[() => tween1, () => tween2]` - Tweens created precisely when needed
+         * - Use factories for sequence/stagger modes to ensure accurate timing
+         *
+         * **Available Options:**
+         * - `mode?: "all" | "sequence" | "race"` - Execution strategy (default: "all")
+         * - `stagger?: number` - Delay in milliseconds between starts in sequence mode (default: 0)
+         * - `onProgress?: (done: number, total: number) => void` - Progress callback
+         *
+         * **Returned Group Handle:**
+         * - `finished: Promise<void>` - Promise that resolves when group completes
+         * - `Pause(): void` - Pause all active animations in the group
+         * - `Resume(): void` - Resume all paused animations in the group
+         * - `Stop(jumpToEnd?: boolean): void` - Stop all animations, optionally jump to end values
+         *
+         * @see {@link TweenGroupAsync} for an awaitable version that returns the result directly
+         */
+        static TweenGroup(items: Array<{
+            finished: Promise<void>;
+            Pause: () => void;
+            Resume: () => void;
+            Stop: (jump?: boolean) => void;
+        } | (() => {
+            finished: Promise<void>;
+            Pause: () => void;
+            Resume: () => void;
+            Stop: (jump?: boolean) => void;
+        })>, options?: {
+            mode?: "all" | "sequence" | "race";
+            stagger?: number;
+            onProgress?: (done: number, total: number) => void;
+        }): {
+            tweens: {
+                finished: Promise<void>;
+                Pause: () => void;
+                Resume: () => void;
+                Stop: (jump?: boolean) => void;
+            }[];
+            finished: Promise<void>;
+            Pause: () => void;
+            Resume: () => void;
+            Stop: (jumpToEnd?: boolean) => void;
+        };
+        /**
+         * Async version of TweenGroup that directly returns a Promise for completion.
+         *
+         * @param items - Array of tween handles or factory functions that return tween handles
+         * @param options - Group execution options (mode, stagger timing, progress callback)
+         * @returns Promise that resolves when the group completes
+         *
+         * @example
+         * ```typescript
+         * // Simple async usage - wait for multiple tweens to complete
+         * await SceneManager.TweenGroupAsync([
+         *   SceneManager.TweenTo(mesh1, { "position.x": 10 }, { duration: 2 }),
+         *   SceneManager.TweenTo(mesh2, { "position.y": 5 }, { duration: 2 }),
+         *   SceneManager.TweenTo(mesh3, { "scaling.x": 2 }, { duration: 2 })
+         * ]);
+         * console.log("All parallel animations completed!");
+         *
+         * // Sequential animation chain
+         * await SceneManager.TweenGroupAsync([
+         *   () => SceneManager.TweenTo(door, { "rotation.y": Math.PI/2 }, { duration: 1, ease: "sineOut" }),
+         *   () => SceneManager.TweenTo(character, { "position.z": 5 }, { duration: 2, ease: "cubicInOut" }),
+         *   () => SceneManager.TweenTo(door, { "rotation.y": 0 }, { duration: 1, ease: "sineIn" })
+         * ], {
+         *   mode: "sequence",
+         *   stagger: 200
+         * });
+         * console.log("Character walked through door sequence complete!");
+         *
+         * // Use in async function chains
+         * async function performIntroSequence() {
+         *   // Fade in the scene
+         *   await SceneManager.TweenGroupAsync([
+         *     () => SceneManager.TweenTo(camera, { "position.y": 10 }, { duration: 2 }),
+         *     () => SceneManager.TweenTo(sunLight, { intensity: 1 }, { duration: 2 })
+         *   ]);
+         *
+         *   // Show UI elements
+         *   await SceneManager.TweenGroupAsync([
+         *     () => SceneManager.TweenTo(titleText, { alpha: 1 }, { duration: 1 }),
+         *     () => SceneManager.TweenTo(menuButton, { alpha: 1 }, { duration: 1 })
+         *   ], { mode: "sequence", stagger: 500 });
+         *
+         *   console.log("Intro sequence complete!");
+         * }
+         * ```
+         *
+         * @remarks
+         * This is a convenience method that wraps {@link TweenGroup} and automatically awaits
+         * the `finished` Promise. It's perfect for sequential async operations where you need
+         * to wait for a group of animations to complete before proceeding.
+         *
+         * For more control and the ability to pause/resume/stop the group during execution,
+         * use {@link TweenGroup} directly instead.
+         */
+        static TweenGroupAsync(items: Parameters<typeof TOOLKIT.SceneManager.TweenGroup>[0], options?: Parameters<typeof TOOLKIT.SceneManager.TweenGroup>[1]): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -600,6 +1233,20 @@ declare namespace TOOLKIT {
         getChildWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode;
         /** Get all child transforms with the specified script component. */
         getChildrenWithScript(klass: string, directDecendantsOnly?: boolean, predicate?: (node: BABYLON.Node) => boolean): BABYLON.TransformNode[];
+        /** Checks if the scene sound manager is available. */
+        hasSoundManager(): boolean;
+        /** Play ambient music track from the scene sound manager. */
+        playAmbientMusic(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /** Play a sound effect from the scene sound manager. */
+        playSoundEffect(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /** Gets the managed screen canvas element */
+        getCanvasElement(name: string): BABYLON.GUI.Control;
+        /** Shows the specified canvas element */
+        showCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): void;
+        /** Hides the specified canvas element */
+        hideCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): void;
+        /** Attach a handler to the user interface loaded event */
+        onUserInterfaceLoaded(handler: (canvas: string) => void): BABYLON.Observer<string>;
         private _bodyCollisionObserver;
         private _bodyCollisionEndedObserver;
         private _worldTriggerEventObserver;
@@ -1300,6 +1947,10 @@ declare namespace TOOLKIT {
         /** Post the buffered network entity attribute on the transform node update batch. (Local Entities Only) */
         static PostBufferedAttribute(transform: BABYLON.TransformNode, index: number, value: number): void;
     }
+    /**
+     * Babylon GUI Image Container
+     * @class ImageContainer - All rights reserved (c) 2024 Mackey Kinard
+     */
 }
 declare namespace TOOLKIT {
     /**
@@ -2437,8 +3088,6 @@ declare namespace TOOLKIT {
         static SampleAnimationQuaternion(animation: BABYLON.Animation, time: number, loopMode?: number, gltfAnimation?: boolean): BABYLON.Quaternion;
         /** Set the passed matrix "result" as the sampled key frame value for the specfied animation track. */
         static SampleAnimationMatrix(animation: BABYLON.Animation, time: number, loopMode?: number, gltfAnimation?: boolean): BABYLON.Matrix;
-        /** Creates a targeted float animation for tweening.  */
-        static CreateTweenAnimation(name: string, targetProperty: string, startValue: number, endValue: number, frameRate?: number, loopMode?: number): BABYLON.Animation;
         /** Gets the last key frame index value. */
         static GetLastKeyFrameIndex(animation: BABYLON.Animation): number;
         /** Private internal frame interpolation helper */
@@ -5480,11 +6129,12 @@ declare namespace TOOLKIT {
      * Babylon Toolkit User Interface Component
      */
     class UserInterface extends TOOLKIT.ScriptComponent {
+        private static readonly MAX_GUI_TEXTURE;
         static OnParseNodeObject: BABYLON.Observable<any>;
-        static OnInterfaceLoaded: BABYLON.Observable<BABYLON.GUI.AdvancedDynamicTexture>;
+        static OnInterfaceLoaded: BABYLON.Observable<string>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
         protected start(): Promise<void>;
-        protected destroy(): void;
         protected engineResize(): void;
         protected parseNodeObject(rootNode: any, hostPrefix: string): void;
         private processNodeSources;
@@ -5520,6 +6170,37 @@ declare namespace TOOLKIT {
          * Check if font is available as system font
          */
         private isSystemFontAvailable;
+        private static CreateInternalUserInterface;
+        private static LoadForegroundInterfaceData;
+        private static LoadBackgroundInterfaceData;
+        private static ParseUserInterfaceObject;
+        private static __ScaleTreePixelsCPS;
+        /** multiply numeric property (if exists) by s */
+        private static __mulNum;
+        /** multiply pixel property (string|number). Leaves percentages intact. */
+        private static __mulPx;
+        private static ApplyConstantPixelSizeFromJson;
+        private static GetADTBaseSize;
+        private static ComputeMaxSafeRenderScale;
+        /**
+         * Applies a capped renderScale; returns the applied (possibly clamped) value.
+         * Set allowDownscale=true to downsample if base already exceeds cap (default false to avoid blur).
+         */
+        private static ApplyCappedRenderScale;
+        /** Re-applies the cap on resize; keeps visual size stable if you counter-scaled the root. */
+        static ReapplyRenderScaleCapOnResize(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture, projectMaxTex?: number): void;
+        static IsForegroundReady(scene: BABYLON.Scene): boolean;
+        static SetForegroundTexture(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture): void;
+        static GetForegroundTexture(scene: BABYLON.Scene, createOptions?: any): BABYLON.GUI.AdvancedDynamicTexture;
+        static IsBackgroundReady(scene: BABYLON.Scene): boolean;
+        static SetBackgroundTexture(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture): void;
+        static GetBackgroundTexture(scene: BABYLON.Scene, createOptions?: any): BABYLON.GUI.AdvancedDynamicTexture;
+        static GetCanvasElement(scene: BABYLON.Scene, name: string): BABYLON.GUI.Control;
+        static ShowCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static HideCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static PIXEL_DENSITY_FACTOR: number;
+        private static IsRenderNinePatchFixed;
+        static FixRenderNinePatchFunction(): void;
     }
 }
 /** Babylon Toolkit Namespace */
