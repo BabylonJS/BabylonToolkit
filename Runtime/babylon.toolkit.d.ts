@@ -6129,13 +6129,13 @@ declare namespace TOOLKIT {
      * Babylon Toolkit User Interface Component
      */
     class UserInterface extends TOOLKIT.ScriptComponent {
-        private static readonly MAX_GUI_TEXTURE;
+        private static readonly PHYSICAL_SIZE_SLICE_FACTOR;
+        private static readonly PHYSICAL_SIZE_POINT_FACTOR;
+        private static readonly CHARACTER_WORD_SPACE_FACTOR;
         static OnParseNodeObject: BABYLON.Observable<any>;
         static OnInterfaceLoaded: BABYLON.Observable<string>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
         protected start(): Promise<void>;
-        protected engineResize(): void;
         protected parseNodeObject(rootNode: any, hostPrefix: string): void;
         private processNodeSources;
         /**
@@ -6174,21 +6174,21 @@ declare namespace TOOLKIT {
         private static LoadForegroundInterfaceData;
         private static LoadBackgroundInterfaceData;
         private static ParseUserInterfaceObject;
-        private static __ScaleTreePixelsCPS;
-        /** multiply numeric property (if exists) by s */
-        private static __mulNum;
-        /** multiply pixel property (string|number). Leaves percentages intact. */
-        private static __mulPx;
-        private static ApplyConstantPixelSizeFromJson;
-        private static GetADTBaseSize;
-        private static ComputeMaxSafeRenderScale;
-        /**
-         * Applies a capped renderScale; returns the applied (possibly clamped) value.
-         * Set allowDownscale=true to downsample if base already exceeds cap (default false to avoid blur).
-         */
-        private static ApplyCappedRenderScale;
-        /** Re-applies the cap on resize; keeps visual size stable if you counter-scaled the root. */
-        static ReapplyRenderScaleCapOnResize(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture, projectMaxTex?: number): void;
+        private static FixRenderNinePatchFunction;
+        private static ProcessHdrColors;
+        private static emulateUnityHDR;
+        private static applyUnityHDRToneMapping;
+        private static applyHdrEffects;
+        private static applyGlowEffects;
+        private static applyLightingEffects;
+        private static applyAdvancedLightingEffects;
+        private static parseRgbaColor;
+        private static ApplyHdrVisualEnhancements;
+        private static ProcessPreserveAspectRatio;
+        private static applyPreserveAspectRatio;
+        private static ProcessTextSpacingProperties;
+        private static applyCharacterSpacing;
+        private static applyWordSpacing;
         static IsForegroundReady(scene: BABYLON.Scene): boolean;
         static SetForegroundTexture(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture): void;
         static GetForegroundTexture(scene: BABYLON.Scene, createOptions?: any): BABYLON.GUI.AdvancedDynamicTexture;
@@ -6198,9 +6198,6 @@ declare namespace TOOLKIT {
         static GetCanvasElement(scene: BABYLON.Scene, name: string): BABYLON.GUI.Control;
         static ShowCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
         static HideCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        static PIXEL_DENSITY_FACTOR: number;
-        private static IsRenderNinePatchFixed;
-        static FixRenderNinePatchFunction(): void;
     }
 }
 /** Babylon Toolkit Namespace */
