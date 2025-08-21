@@ -1,4 +1,4 @@
-# Babylon Toolkit Tween System
+# Tween Style Animation System
 
 A modern, powerful animation system for BabylonJS that provides a clean async/await API for complex animations, group choreography, and easing effects.
 
@@ -514,9 +514,6 @@ await tween.finished;
 ## Browser Compatibility
 
 - Modern browsers with ES2017+ support
-- TypeScript 4.0+ recommended
-- BabylonJS 5.0+ required
+- TypeScript 5.0+ recommended
+- BabylonJS 8.0+ required
 
-## License
-
-All rights reserved (c) 2024 Mackey Kinard
