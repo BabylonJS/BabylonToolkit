@@ -346,7 +346,7 @@ declare namespace TOOLKIT {
         /** Checks if the scene sound manager is available. */
         static HasSoundManager(): boolean;
         /** Play a sound effect from the scene sound manager. */
-        static PlaySoundEffect(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        static PlayOneShot(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
         /** Play ambient music track from the scene sound manager. */
         static PlayMusicTrack(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
         /** Play ambient music track from the scene sound manager. */
@@ -556,7 +556,7 @@ declare namespace TOOLKIT {
          * @param to - Object containing target property values (supports dot notation)
          * @param options - Animation options (duration, easing, callbacks, etc.)
          * @param scene - Optional BabylonJS scene (defaults to last created scene)
-         * @returns ITweenResult containing animation reference and completion promise
+         * @returns ITweenResult containing animation references and completion promise
          *
          * @example
          * ```typescript
@@ -568,6 +568,9 @@ declare namespace TOOLKIT {
          *
          * // Wait for completion
          * await tween.finished;
+         *
+         * // Stop all animations if needed
+         * tween.animations.forEach(anim => anim.stop());
          *
          * // Material fade out
          * SceneManager.TweenTo(material,
@@ -590,8 +593,13 @@ declare namespace TOOLKIT {
          * - Handles Vector2, Vector3, Color3, Quaternion, and numeric values
          * - Automatically detects property types and creates appropriate animations
          *
+         * **Animation Control:**
+         * - Returns array of all BABYLON.Animatable instances (one per animated property)
+         * - Use `tween.animations.forEach(anim => anim.stop())` to stop all animations
+         * - Each property gets its own animatable for precise control
+         *
          * **Async Integration:**
-         * - Returns both animation reference and completion promise
+         * - Returns both animation references and completion promise
          * - Use `await tween.finished` for sequential animations
          * - Chain with other async operations seamlessly
          *
@@ -878,12 +886,12 @@ declare namespace TOOLKIT {
         onComplete?: () => void;
     }
     /**
-     * Interface for tween result containing the animation and promise
+     * Interface for tween result containing the animations and promise
      */
     interface ITweenResult {
-        /** The BABYLON animation instance */
-        animation: BABYLON.Animatable;
-        /** Promise that resolves when the animation completes */
+        /** Array of BABYLON animation instances (one per animated property) */
+        animations: BABYLON.Animatable[];
+        /** Promise that resolves when all animations complete */
         finished: Promise<void>;
     }
 }
@@ -5928,8 +5936,8 @@ declare namespace TOOLKIT {
         static SetBackgroundTexture(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture): void;
         static GetBackgroundTexture(scene: BABYLON.Scene, createOptions?: any): BABYLON.GUI.AdvancedDynamicTexture;
         static GetCanvasElement(name: string, scene?: BABYLON.Scene): BABYLON.GUI.Control;
-        static ShowCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
-        static HideCanvasElement(element: BABYLON.GUI.Control, fadeSpeedRatio?: number, onAnimationComplete?: () => void): BABYLON.Animatable;
+        static ShowCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
+        static HideCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
