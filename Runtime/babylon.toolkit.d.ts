@@ -345,10 +345,26 @@ declare namespace TOOLKIT {
         static HasTransformTags(transform: BABYLON.TransformNode, query: string): boolean;
         /** Checks if the scene sound manager is available. */
         static HasSoundManager(): boolean;
-        /** Play ambient music track from the scene sound manager. */
-        static PlayAmbientMusic(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
         /** Play a sound effect from the scene sound manager. */
         static PlaySoundEffect(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /** Play ambient music track from the scene sound manager. */
+        static PlayMusicTrack(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
+        /** Play ambient music track from the scene sound manager. */
+        static PauseMusicTrack(name: string): boolean;
+        /** Play ambient music track from the scene sound manager. */
+        static MuteMusicTrack(name: string, time?: number): boolean;
+        /** Unmute ambient music track from the scene sound manager. */
+        static UnmuteMusicTrack(name: string, time?: number): boolean;
+        /** Stop ambient music track from the scene sound manager. */
+        static StopMusicTrack(name: string, time?: number): boolean;
+        /** Stop all ambient music tracks from the scene sound manager. */
+        static StopAllMusicTracks(): void;
+        /** Pause all ambient music tracks from the scene sound manager. */
+        static PauseAllMusicTracks(): void;
+        /** Mute all ambient music tracks from the scene sound manager. */
+        static MuteAllMusicTracks(time?: number): void;
+        /** Unmute all ambient music tracks from the scene sound manager. */
+        static UnmuteAllMusicTracks(time?: number): void;
         /** Are half or full texture floats supported */
         static TextureFloatSupported(scene: BABYLON.Scene): boolean;
         /** Registers an on pick trigger click action */
@@ -502,6 +518,29 @@ declare namespace TOOLKIT {
          * Sets a property value using dot notation
          */
         private static SetPropertyValue;
+        /**
+         * Determines if a target is a BABYLON.GUI control
+         */
+        private static IsGUIControl;
+        /**
+         * Determines if a property is a GUI positioning/sizing property that needs special handling
+         */
+        private static IsGUIPositionProperty;
+        /**
+         * Extracts numeric value from GUI property using proper InPixels getters
+         * Handles both string ("100px", "50%") and numeric values with flags
+         */
+        private static ExtractGUINumericValue;
+        /**
+         * Creates a proxy object that makes GUI controls compatible with scene.beginAnimation
+         *
+         * This proxy is ESSENTIAL for GUI animations to work because:
+         * 1. BabylonJS scene.beginAnimation requires numeric properties to interpolate
+         * 2. GUI controls use string properties ("100px") and InPixels setters
+         * 3. The proxy provides a numeric interface that converts to InPixels setters
+         * 4. Without this, GUI position properties cannot be animated with scene.beginAnimation
+         */
+        private static CreateGUIAnimationProxy;
         /**
          * Determines the animation type based on the property value
          */
@@ -5867,7 +5906,7 @@ declare namespace TOOLKIT {
         private static LoadForegroundInterfaceData;
         private static LoadBackgroundInterfaceData;
         private static ParseUserInterfaceObject;
-        private static FixRenderNinePatchFunction;
+        private static FixUserInterfacePrototypes;
         private static ProcessHdrColors;
         private static emulateUnityHDR;
         private static applyUnityHDRToneMapping;

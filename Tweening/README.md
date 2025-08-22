@@ -1,17 +1,18 @@
 # Tween Style Animation System
 
-A modern, powerful animation system for BabylonJS that provides a clean async/await API for complex animations, group choreography, and easing effects.
+A modern, powerful animation system for BabylonJS that provides a clean async/await API for complex animations, group choreography, and easing effects with **full GUI control support**.
 
 ## Features
 
 - **Modern Async/Await API** - Clean, promise-based animation control
 - **Comprehensive Easing Support** - 30+ built-in easing functions
+- **Complete GUI Animation Support** - Full BABYLON.GUI.Control animation including position properties ✅ **FULLY WORKING**
 - **Group Animations** - Parallel and sequential animation choreography with stagger effects
 - **Dot Notation Properties** - Animate nested properties like `"position.x"` or `"material.alpha"`
 - **Type-Safe** - Full TypeScript support with proper type checking
 - **Flexible Control** - Both promise-based and callback-based workflows
 - **Yoyo Effects** - Built-in reversible animations
-- **Performance Optimized** - Built on native BabylonJS animation system
+- **Performance Optimized** - Built on native BabylonJS animation system with GPU acceleration
 
 ## Aliases
 
@@ -43,6 +44,13 @@ await SM.TweenGroupAsync([
     () => SM.TweenTo(mesh2, { "position.z": -4 }, { duration: 0.8 }),
     () => SM.TweenTo(mesh3, { "position.z": -4 }, { duration: 0.8 })
 ], { mode: "all", stagger: 150 });
+
+// GUI control animations (FULLY WORKING!)
+await SM.TweenFromToAsync(guiButton,
+    { top: "-100px", left: "50%", alpha: 0 },    // Start above screen
+    { top: "20px", left: "50%", alpha: 1 },      // Drop down and fade in
+    { duration: 1.2, ease: "backOut" }
+);
 ```
 
 ## API Reference
@@ -154,6 +162,7 @@ The system supports dot notation for nested properties and automatically detects
 - **Color3**: `diffuseColor`, `emissiveColor`, `specularColor`, light colors
 - **Color4**: Colors with alpha channel for GUI elements and transparency
 - **Quaternion**: `rotationQuaternion` for smooth, gimbal-lock-free rotations
+- **GUI Controls**: `BABYLON.GUI.Control` objects with position, alpha, and styling properties
 
 ### Examples
 ```typescript
@@ -178,6 +187,185 @@ The system supports dot notation for nested properties and automatically detects
     diffuseColor: new BABYLON.Color3(1, 0.5, 0)
 }
 ```
+
+## GUI Animation Support
+
+The tween system provides **comprehensive support for BABYLON.GUI.Control animations**, including position properties that were previously difficult to animate with high performance.
+
+### Supported GUI Properties
+
+- **Position Properties**: `top`, `left`, `topInPixels`, `leftInPixels` ✅ **FULLY WORKING**
+- **Size Properties**: `width`, `height`, `widthInPixels`, `heightInPixels` ✅ **FULLY WORKING**
+- **Standard Properties**: `alpha`, `color`, `scaleX`, `scaleY`, `rotation` ✅ **FULLY WORKING**
+- **String & Numeric Values**: Supports both numeric values and string values like `"50px"`, `"25%"` ✅ **FULLY WORKING**
+- **Mixed Units**: Can animate between different unit types seamlessly ✅ **FULLY WORKING**
+
+### GUI Animation Features
+
+- ✅ **High Performance**: Uses `scene.beginAnimation` for optimal GPU acceleration
+- ✅ **Proxy Object System**: Intelligent detection and handling of GUI controls with position properties
+- ✅ **InPixels Setters**: Properly uses BabylonJS `topInPixels`, `leftInPixels` setters for position animation
+- ✅ **String Support**: Handles both `"50px"` string values and numeric values seamlessly  
+- ✅ **Unit Conversion**: Automatically converts between pixels, percentages, and viewport units
+- ✅ **Full Compatibility**: Works with all easing functions, yoyo, loops, and group animations
+- ✅ **Type Safety**: Full TypeScript support with proper error handling
+- ✅ **Auto-Detection**: Automatically detects GUI controls and applies appropriate animation handling
+
+### Technical Implementation
+
+The GUI animation system uses an innovative **proxy object pattern** that:
+
+1. **Detects GUI Controls**: Automatically identifies `BABYLON.GUI.Control` objects using multiple detection methods
+2. **Creates Animation Proxies**: For position properties (`top`, `left`, `width`, `height`) that need special handling
+3. **Uses InPixels Setters**: Leverages BabylonJS's `topInPixels = value` setters which internally set `top = "100px"`
+4. **Maintains Compatibility**: Preserves all existing 3D object animation functionality
+5. **Handles String Values**: Seamlessly converts between string formats ("50px", "25%") and numeric values
+6. **Syncs in Real-Time**: Proxy objects update the GUI control's actual properties during animation
+7. **Performance Optimized**: Still uses `scene.beginAnimation` for maximum performance
+
+### GUI Animation Examples
+
+```typescript
+// Basic GUI button animation
+const button = BABYLON.GUI.Button.CreateSimpleButton("myButton", "Click Me");
+button.topInPixels = 100;
+button.leftInPixels = 50;
+button.alpha = 0;
+advancedTexture.addControl(button);
+
+// Animate position and alpha together
+await SM.TweenToAsync(button, {
+    topInPixels: 200,      // ✅ Position animation - FULLY WORKING!
+    leftInPixels: 150,     // ✅ Position animation - FULLY WORKING!
+    alpha: 1               // ✅ Alpha animation - Always worked
+}, {
+    duration: 2,
+    ease: "easeOutBounce"
+});
+
+// String-based positioning (also works)
+await SM.TweenToAsync(button, {
+    top: "50px",           // ✅ String position - FULLY WORKING!
+    left: "25%",           // ✅ Percentage position - FULLY WORKING!
+    alpha: 0.8
+}, {
+    duration: 1.5,
+    ease: "sineInOut"
+});
+
+// Complex GUI entrance animation
+await SM.TweenFromToAsync(panel,
+    { 
+        top: "-100px",         // Start above screen
+        left: "50%",           // Centered horizontally
+        alpha: 0               // Invisible
+    },
+    { 
+        top: "20px",           // Final position
+        left: "50%",           // Stay centered
+        alpha: 1               // Fully visible
+    },
+    { 
+        duration: 1.2, 
+        ease: "backOut" 
+    }
+);
+
+// GUI button pulse effect
+await SM.TweenFromToAsync(button,
+    { scaleX: 1.0, scaleY: 1.0 },
+    { scaleX: 1.3, scaleY: 1.3 },
+    { 
+        duration: 0.6, 
+        ease: "sineInOut", 
+        yoyo: true, 
+        yoyoCount: 2 
+    }
+);
+
+// Panel slide-in from left
+await SM.TweenFromToAsync(sidePanel,
+    { left: "-200px", alpha: 0 },    // Off-screen left
+    { left: "0px", alpha: 1 },       // On-screen
+    { duration: 0.8, ease: "quartOut" }
+);
+
+// Notification toast animation
+await SM.TweenFromToAsync(notification,
+    { 
+        top: "-50px",      // Start above screen
+        alpha: 0 
+    },
+    { 
+        top: "20px",       // Drop down
+        alpha: 1 
+    },
+    { duration: 0.5, ease: "bounceOut" }
+);
+
+// Auto-hide after delay
+setTimeout(async () => {
+    await SM.TweenToAsync(notification, {
+        top: "-50px",
+        alpha: 0
+    }, { duration: 0.3, ease: "sineIn" });
+}, 3000);
+
+// Group GUI animation with stagger
+const buttons = [button1, button2, button3, button4];
+await SM.TweenGroupAsync(
+    buttons.map(btn => () => SM.TweenFromTo(btn,
+        { top: "300px", alpha: 0 },      // Start below screen
+        { top: "100px", alpha: 1 },      // Final position
+        { duration: 0.6, ease: "backOut" }
+    )),
+    { mode: "all", stagger: 150 }  // 150ms delay between each button
+);
+
+// Responsive GUI layout transition
+await SM.TweenToAsync(mobilePanel, {
+    left: "0%",            // Full width on mobile
+    top: "0%",
+    width: "100%",
+    height: "100%"
+}, { duration: 0.8, ease: "easeInOutQuart" });
+
+// Modal dialog entrance
+await SM.TweenFromToAsync(modal,
+    { 
+        scaleX: 0.3, 
+        scaleY: 0.3, 
+        alpha: 0 
+    },
+    { 
+        scaleX: 1.0, 
+        scaleY: 1.0, 
+        alpha: 1 
+    },
+    { 
+        duration: 0.4, 
+        ease: "backOut" 
+    }
+);
+```
+
+### GUI Technical Details
+
+The GUI animation system uses an innovative **proxy object pattern** that:
+
+- **Detects GUI Controls**: Automatically identifies `BABYLON.GUI.Control` objects
+- **Creates Animation Proxies**: For position properties that need special handling
+- **Maintains Compatibility**: Preserves all existing 3D object animation functionality
+- **Handles String Values**: Converts between string formats ("50px", "25%") and numeric values
+- **Syncs in Real-Time**: Proxy objects update the GUI control's actual properties during animation
+
+**Benefits of the new system:**
+- 🚀 **Better Performance**: GPU-accelerated via `scene.beginAnimation`
+- 🎨 **30+ Easing Functions**: Professional animation curves
+- 🔧 **Less Code**: Single line vs complex RAF loops
+- 🎯 **Type Safety**: Full TypeScript support with error checking
+- ⚡ **Promise Support**: Clean async/await workflow
+- 🎭 **Advanced Features**: Yoyo, loops, groups, stagger effects
 
 ## Usage Examples
 
