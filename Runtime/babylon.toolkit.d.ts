@@ -345,6 +345,8 @@ declare namespace TOOLKIT {
         static HasTransformTags(transform: BABYLON.TransformNode, query: string): boolean;
         /** Checks if the scene sound manager is available. */
         static HasSoundManager(): boolean;
+        static IsSoundEffectPlaying(name: string): boolean;
+        static IsMusicTrackPlaying(name: string): boolean;
         /** Play a sound effect from the scene sound manager. */
         static PlayOneShot(name: string, time?: number, offset?: number, length?: number): Promise<boolean>;
         /** Play ambient music track from the scene sound manager. */
@@ -416,6 +418,13 @@ declare namespace TOOLKIT {
         static GetComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
         /** Find game object in the scene hierarchy by path (Parent/Child/GrandChild). */
         static FindGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
+        /** Internal helper for exact path searching (prevents infinite recursion) */
+        private static FindGameObjectExactPath;
+        /** Internal helper for recursive name searching */
+        private static FindGameObjectRecursive;
+        /** Debug utility to print scene hierarchy - useful for finding correct paths */
+        static DebugSceneHierarchy(scene: BABYLON.Scene, maxDepth?: number): void;
+        static LegacySearchForGameObject(scene: BABYLON.Scene, path: string): BABYLON.TransformNode;
         /** Find game object with tag */
         static FindGameObjectWithTag(scene: BABYLON.Scene, tag: string): BABYLON.TransformNode;
         /** Find all game objects with tag */
@@ -5915,6 +5924,85 @@ declare namespace TOOLKIT {
         private static LoadBackgroundInterfaceData;
         private static ParseUserInterfaceObject;
         private static FixUserInterfacePrototypes;
+        private static ProcessControlEvents;
+        /**
+         * Process Unity UI Legacy Events (UnityEvent-based system)
+         * Handles Button.onClick, Toggle.onValueChanged, Slider.onValueChanged, etc.
+         */
+        private static processUnityUIEvents;
+        /**
+         * Process UI Toolkit Events (Action delegate-based system)
+         * Handles Button.clicked, Toggle.value, Slider.value, etc.
+         */
+        private static processUIToolkitEvents;
+        /**
+         * Check if event data is from Unity UI (UnityEvent-based)
+         */
+        private static isUnityUIEvent;
+        /**
+         * Wire Unity UI Button onClick events
+         */
+        private static wireUnityUIButtonEvents;
+        /**
+         * Wire Unity UI Toggle onValueChanged events
+         */
+        private static wireUnityUIToggleEvents;
+        /**
+         * Wire Unity UI Slider onValueChanged events
+         */
+        private static wireUnityUISliderEvents;
+        /**
+         * Wire Unity UI Dropdown onValueChanged events
+         */
+        private static wireUnityUIDropdownEvents;
+        /**
+         * Wire Unity UI ScrollRect onValueChanged events
+         */
+        private static wireUnityUIScrollRectEvents;
+        /**
+         * Wire Unity UI InputField comprehensive events
+         */
+        private static wireUnityUIInputFieldEvents;
+        /**
+         * Wire UI Toolkit Button clicked events
+         */
+        private static wireUIToolkitButtonEvents;
+        /**
+         * Wire UI Toolkit Toggle events
+         */
+        private static wireUIToolkitToggleEvents;
+        /**
+         * Wire UI Toolkit Slider events
+         */
+        private static wireUIToolkitSliderEvents;
+        /**
+         * Wire UI Toolkit Dropdown events
+         */
+        private static wireUIToolkitDropdownEvents;
+        /**
+         * Execute Unity UI event with target object resolution and method invocation
+         */
+        private static executeUnityUIEvent;
+        /**
+         * Execute UI Toolkit event with runtime callback registration
+         */
+        private static executeUIToolkitEvent;
+        /**
+         * Find target object in the hierarchy path, instance ID, or component type
+         */
+        private static findTargetObject;
+        /**
+         * Extract and convert event parameters to appropriate types
+         */
+        private static extractParameters;
+        /**
+         * Resolve object reference by type name (AudioClip, Texture2D, etc.)
+         */
+        private static resolveObjectReference;
+        /**
+         * Execute UI Toolkit callback (runtime-registered callbacks)
+         */
+        private static executeUIToolkitCallback;
         private static ProcessHdrColors;
         private static emulateUnityHDR;
         private static applyUnityHDRToneMapping;
@@ -5938,6 +6026,7 @@ declare namespace TOOLKIT {
         static GetCanvasElement(name: string, scene?: BABYLON.Scene): BABYLON.GUI.Control;
         static ShowCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
         static HideCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
+        static AttachClickHandler(element: BABYLON.GUI.Control, func: (eventData?: BABYLON.GUI.Vector2WithInfo, eventState?: BABYLON.EventState) => any): BABYLON.Observer<BABYLON.GUI.Vector2WithInfo> | null;
     }
 }
 /** Babylon Toolkit Namespace */
