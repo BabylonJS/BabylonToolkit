@@ -2843,6 +2843,12 @@ declare namespace TOOLKIT {
         private static InterpolateAnimation;
         /** Update loop blend root motion metadata settings */
         static UpdateLoopBlendPositionSettings(animationTrack: BABYLON.AnimationGroup, loopBlendPositionY: boolean, loopBlendPositionXZ: boolean): void;
+        static TakeScreenSnapshot(scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, size?: {
+            width?: number;
+            height?: number;
+            precision?: number;
+        }, bitmapOptions?: ImageBitmapOptions, onComplete?: (bmd: ImageBitmap | null) => void): void;
+        static DownloadImageBitmap(bmp: ImageBitmap | null, filename?: string, type?: "image/png" | "image/jpeg", quality?: number): HTMLCanvasElement | OffscreenCanvas;
         /** Initialize default shader material properties */
         static InitializeShaderMaterial(material: BABYLON.ShaderMaterial, binding?: boolean, clipPlanes?: BABYLON.Nullable<boolean>): void;
         /** Transforms position from world space into screen space. */
