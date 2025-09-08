@@ -3521,7 +3521,6 @@ declare namespace TOOLKIT {
         static FPS: number;
         static EXIT: string;
         static TIME: number;
-        static SPEED: number;
         private _looptime;
         private _loopblend;
         private _frametime;
@@ -3586,7 +3585,7 @@ declare namespace TOOLKIT {
         private _parameters;
         speedRatio: number;
         delayUpdateUntilReady: boolean;
-        enableAnimation: boolean;
+        enableAnimations: boolean;
         applyRootMotion: boolean;
         awakened(): boolean;
         initialized(): boolean;
@@ -3673,6 +3672,7 @@ declare namespace TOOLKIT {
         setAnimationGroups(groups: BABYLON.AnimationGroup[]): void;
         private updateAnimationGroups;
         private awakeStateMachine;
+        delayStart: number;
         private sourceAnimationGroups;
         private updateStateMachine;
         private setupSourceAnimationGroups;
