@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.28.1 - R1) */
+        /** Gets the toolkit framework version number (8.28.2 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1786,16 +1786,19 @@ declare namespace TOOLKIT {
         setupLoader(): void;
         /** @hidden */
         startParsing(): void;
-        /** @hidden */
-        loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): BABYLON.Nullable<Promise<void>>;
-        private loadSceneExAsync;
         private _processActiveMeshes;
         private _processUnityMeshes;
         private _processPreloadTimeout;
         /** @hidden */
-        loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): BABYLON.Nullable<Promise<BABYLON.TransformNode>>;
+        loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): Promise<void> | null;
+        private _loadSceneInternalAsync;
+        private _loadSceneExAsync;
         /** @hidden */
-        loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
+        loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
+        /** @hidden */
+        loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): Promise<void> | null;
+        /** @hidden */
+        private _loadMaterialPropertiesInternalAsync;
         private _getCachedMaterialByIndex;
         private _getCachedLightmapByIndex;
         /** @hidden */
@@ -4191,6 +4194,19 @@ declare namespace TOOLKIT {
         private _isSliding;
         private _isGrounded;
         private _isSteppingUp;
+        private _stepUpStartPosition;
+        private _stepUpTargetPosition;
+        private _stepUpProgress;
+        private _stepUpDuration;
+        private _stepUpVerticalVelocity;
+        private _stepCheckDistance;
+        private _stepCheckShape;
+        private _stepLocalRaycastResult;
+        private _stepForwardRaycastResult;
+        private _stepHeightRaycastResult;
+        private _stepLandingRaycastResult;
+        private _lastStepDebugLogTime;
+        private _stepDebugLogIntervalMs;
         private _hitColor;
         private _noHitColor;
         private _groundRay;
@@ -4201,6 +4217,19 @@ declare namespace TOOLKIT {
         private _stepCheckDestinationMesh;
         private _stepCheckRayHelper;
         private _stepCheckRay;
+        private _stepDebugHitMaterial;
+        private _stepDebugNoHitMaterial;
+        private _stepHeightOriginMesh;
+        private _stepHeightHitPointMesh;
+        private _stepClearanceOriginMesh;
+        private _stepClearanceHitPointMesh;
+        private _stepForwardLine;
+        private _stepHeightLine;
+        private _stepClearanceLine;
+        private _stepCheckRaycastOrigin;
+        private _stepCheckRaycastDestination;
+        private _stepCheckRaycastHitPoint;
+        private _stepCheckRaycastResult;
         private _groundRaycastShape;
         private _groundCollisionNode;
         private _groundRaycastOffset;
@@ -4209,10 +4238,6 @@ declare namespace TOOLKIT {
         private _groundRaycastDestination;
         private _localGroundShapecastResult;
         private _worldGroundShapecastResult;
-        private _stepCheckRaycastOrigin;
-        private _stepCheckRaycastDestination;
-        private _stepCheckRaycastHitPoint;
-        private _stepCheckRaycastResult;
         protected m_moveDeltaX: number;
         protected m_moveDeltaZ: number;
         protected m_havokplugin: any;
@@ -4243,26 +4268,43 @@ declare namespace TOOLKIT {
         isSliding(): boolean;
         canSlide(): boolean;
         canJump(): boolean;
+        getStepUpProgress(): number;
+        getStepUpDuration(): number;
+        setStepUpDuration(duration: number): void;
+        getStepCheckDistance(): number;
+        setStepCheckDistance(distance: number): void;
         /** Register handler that is triggered when the character position has been updated */
         onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the character velocity will be updated */
         onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Current vertical velocity offset */
-        verticalVelocityOffset: number;
-        /** Enable character step offset feature */
-        enableStepOffset: boolean;
         /** Enable character gravity feature */
         enableGravity: boolean;
         /** Extra downward force applied */
         downwardForce: number;
-        /** Minimum raycast length */
+        /** Minimum ground check raycast length */
         raycastLength: number;
+        /** Enable character step offset feature */
+        enableStepOffset: boolean;
         /** Sets the character controller to debug mode (show ray lines) */
         showRaycasts: boolean;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
+        /** Check if we should attempt step offset based on current movement */
+        private shouldAttemptStepOffset;
+        /** Perform forward step detection to check for obstacles that can be stepped on */
+        private detectStepObstacle;
+        /** Validate if the detected obstacle is within step offset height limits */
+        private validateStepHeight;
+        /** Execute the step-up movement */
+        private executeStepUp;
+        /** Update step-up animation progress */
+        private updateStepUpAnimation;
+        /** Smooth step function for natural step-up animation */
+        private smoothStep;
+        /** Main step offset detection and execution logic */
+        private handleStepOffset;
         /** Teleport the character position and rotation to the specfied values. */
         set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
         /** Translates the character with the specfied linear velocity. */
@@ -4285,8 +4327,6 @@ declare namespace TOOLKIT {
         private createPhysicsBodyAndShape;
         /** Create character controller physics shape */
         private createPhysicsShapeCapsule;
-        /** Create character controller physics shape */
-        private createPhysicsShapeCylinder;
     }
     /**
      * Babylon toolkit simple character controller pro class (Simple Non Physics Based Character Controller System)
