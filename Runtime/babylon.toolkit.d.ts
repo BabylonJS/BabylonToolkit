@@ -3136,6 +3136,15 @@ declare namespace TOOLKIT {
         static GetPointerDragDirection(mousex: number, mousey: number, buttondown: boolean): TOOLKIT.DragDirection;
         /** Resets ths pinch zoom event tracking. */
         static ResetPinchZoomTracking(): void;
+        /**
+         * Returns the current mouse position in pixels using Unity-style coordinates
+         * where (0,0) is the bottom-left of the rendering canvas.
+         * If a `scene` is provided the position is computed relative to the scene's
+         * rendering canvas; otherwise it will attempt to use the first canvas in the
+         * document or fall back to window coordinates.
+         * Z is always returned as 0 to match Unity's Input.mousePosition Vector3.
+         */
+        static GetMousePosition(scene?: BABYLON.Scene): BABYLON.Vector3;
         /** Is the mouse wheel scrollng this frame. */
         static IsWheelScrolling(): boolean;
         /** Set on gamepad button up event handler. */
@@ -3255,6 +3264,10 @@ declare namespace TOOLKIT {
         private static keyButtonUp;
         private static previousPosition;
         private static preventDefault;
+        private static lastClientX;
+        private static lastClientY;
+        private static virtualClientX;
+        private static virtualClientY;
         private static rightHanded;
         private static gamepad1;
         private static gamepad1Type;
