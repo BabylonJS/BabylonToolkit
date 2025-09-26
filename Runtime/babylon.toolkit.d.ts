@@ -3098,6 +3098,7 @@ declare namespace TOOLKIT {
         static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
         /** Locks user pointer state in the scene. */
         static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
+        private static LastMousePosition;
         private static PointerLockedFlag;
         static IsPointerLocked(): boolean;
         private static LockMousePointerObserver;
@@ -3137,14 +3138,11 @@ declare namespace TOOLKIT {
         /** Resets ths pinch zoom event tracking. */
         static ResetPinchZoomTracking(): void;
         /**
-         * Returns the current mouse position in pixels using Unity-style coordinates
-         * where (0,0) is the bottom-left of the rendering canvas.
-         * If a `scene` is provided the position is computed relative to the scene's
-         * rendering canvas; otherwise it will attempt to use the first canvas in the
-         * document or fall back to window coordinates.
+         * Standard mode returns the current mouse position in pixels using top-left origin coordinates.
+         * Unity mode returns the current mouse position in pixels using Unity-style coordinates where (0,0) is the bottom-left of the rendering canvas.
          * Z is always returned as 0 to match Unity's Input.mousePosition Vector3.
          */
-        static GetMousePosition(scene?: BABYLON.Scene): BABYLON.Vector3;
+        static GetMousePosition(scene: BABYLON.Scene, unityMode?: boolean): BABYLON.Vector3;
         /** Is the mouse wheel scrollng this frame. */
         static IsWheelScrolling(): boolean;
         /** Set on gamepad button up event handler. */
