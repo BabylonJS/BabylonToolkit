@@ -3139,10 +3139,10 @@ declare namespace TOOLKIT {
         static ResetPinchZoomTracking(): void;
         /**
          * Standard mode returns the current mouse position in pixels using top-left origin coordinates.
-         * Unity mode returns the current mouse position in pixels using Unity-style coordinates where (0,0) is the bottom-left of the rendering canvas.
+         * Bottom up mode returns the current mouse position in pixels using Unity-style coordinates where (0,0) is the bottom-left of the rendering canvas.
          * Z is always returned as 0 to match Unity's Input.mousePosition Vector3.
          */
-        static GetMousePosition(scene: BABYLON.Scene, unityMode?: boolean): BABYLON.Vector3;
+        static GetMousePosition(scene: BABYLON.Scene, bottomUp?: boolean): BABYLON.Vector3;
         /** Is the mouse wheel scrollng this frame. */
         static IsWheelScrolling(): boolean;
         /** Set on gamepad button up event handler. */
