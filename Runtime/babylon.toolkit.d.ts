@@ -5932,6 +5932,44 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * Babylon Toolkit User Interface Controls
+     */
+    class UnitySlider extends BABYLON.GUI.Slider {
+    }
+    /**
+     * Babylon Toolkit User Interface Controls
+     */
+    class UnityScrollBar extends BABYLON.GUI.ScrollBar {
+        private _direction;
+        get direction(): string;
+        set direction(value: string);
+        protected _getThumbPosition(): number;
+        serialize(serializationObject: any): void;
+        _parseFromContent(serializationObject: any, host: BABYLON.GUI.AdvancedDynamicTexture): void;
+    }
+    /**
+     * Babylon Toolkit User Interface Controls
+     */
+    class UnityDropdownMenu extends BABYLON.GUI.Container {
+        private _button;
+        private _popup;
+        private _options;
+        private _selectedIndex;
+        constructor(name?: string);
+        get selectedIndex(): number;
+        set selectedIndex(v: number);
+        set options(opts: Array<{
+            text: string;
+            imageSource?: string;
+        }>);
+        private _updateSelectedText;
+        private _rebuildOptions;
+        serialize(): any;
+        static Parse(parsedData: any, adt: BABYLON.GUI.AdvancedDynamicTexture, urlRewriter?: (url: string) => string): UnityDropdownMenu;
+    }
+}
+declare namespace TOOLKIT {
+    /**
      * Babylon Toolkit User Interface Component
      */
     class UserInterface extends TOOLKIT.ScriptComponent {
