@@ -4121,6 +4121,11 @@ declare namespace TOOLKIT {
          */
         setSpatialSound(value: BABYLON.AbstractSpatialAudio): void;
         /**
+         * Attaches the spatial sound to the transform node (BABYLON.StaticSound)
+         * @param transform Define the transform node to attach the spatial sound to
+         */
+        attachToSpatialNode(transform: BABYLON.TransformNode): void;
+        /**
          * Gets the current time of the track
          */
         getCurrentTrackTime(): number;
