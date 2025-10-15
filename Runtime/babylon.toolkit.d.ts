@@ -2878,6 +2878,20 @@ declare namespace TOOLKIT {
         /** Parse scene component metadata. */
         static PostParseSceneComponents(scene: BABYLON.Scene, transforms: BABYLON.TransformNode[], preloadList: Array<TOOLKIT.ScriptComponent>, readyList: Array<TOOLKIT.ScriptComponent>): TOOLKIT.MetadataParser;
         /**
+         * Creates a default reflection texture with neutral properties to mimic Unity's reflection settings
+         * @param scene The Babylon scene
+         * @returns A cube texture configured for minimal reflection
+         */
+        static GetDefaultReflectionTexture(scene: BABYLON.Scene): BABYLON.CubeTexture;
+        /**
+         * Creates a neutral reflection texture with customizable properties to mimic Unity's reflection settings
+         * @param scene The Babylon scene
+         * @param grayValue Gray value (0-255) for the reflection color
+         * @param level Reflection intensity level (0-1)
+         * @returns A cube texture configured for minimal reflection
+         */
+        static GetNeutralReflectionTexture(scene: BABYLON.Scene, grayValue?: number, level?: number): BABYLON.CubeTexture;
+        /**
          * Gets the specified asset container mesh.
          * @param container defines the asset container
          * @param meshName defines the mesh name to get
@@ -3440,8 +3454,17 @@ declare namespace TOOLKIT {
         static IsIPOD(): boolean;
         /** Is internet explorer 11 platform agent. */
         static IsIE11(): boolean;
-        /** Is mobile web platform agent. */
+        /** Basic mobile check (UA-CH, input modality, and UA fallback). */
         static IsMobile(): boolean;
+        /** Sync high-end estimate using capability scoring. */
+        static IsHighEndMobile(): boolean;
+        /**
+         * Optional: async refinement with a tiny CPU micro-benchmark.
+         * Use this if you want a more confident answer (runs ~10–30ms on modern phones).
+         */
+        static IsHighEndMobileAsync(): Promise<boolean>;
+        /** Is non mobile web platform agent. */
+        static IsDesktop(): boolean;
         /** Are playstation services available. */
         static IsPlaystation(): boolean;
         /** Are xbox console services available. */
