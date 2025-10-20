@@ -1894,6 +1894,7 @@ declare namespace TOOLKIT {
         private _ubos;
         protected shader: string;
         protected plugin: BABYLON.MaterialPluginBase;
+        getClassName(): string;
         constructor(name: string, scene: BABYLON.Scene);
         /** Adds a custom attribute property */
         addAttribute(attributeName: string): void;
@@ -1966,6 +1967,7 @@ declare namespace TOOLKIT {
       */
     class CustomShaderMaterialPlugin extends BABYLON.MaterialPluginBase {
         private _isEnabled;
+        getClassName(): string;
         /**
          * Creates a new material plugin
          * @param material parent material of the plugin
