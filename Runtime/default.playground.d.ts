@@ -2468,7 +2468,6 @@ declare namespace PROJECT {
         private showDebugRaycasts;
         private raycastLength;
         private deltaTime;
-        private minJumpTimer;
         private delayJumpTimer;
         private canPlayerJump;
         private animationState;
