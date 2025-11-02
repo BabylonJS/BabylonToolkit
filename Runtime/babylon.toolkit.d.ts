@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.33.4 - R1) */
+        /** Gets the toolkit framework version number (8.34.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4200,16 +4200,7 @@ declare namespace TOOLKIT {
      */
     class CharacterController extends TOOLKIT.ScriptComponent {
         static TERMINAL_VELOCITY: number;
-        static SLOPE_GRAVITY_FORCE: number;
-        static UPHILL_GRAVITY_FORCE: number;
-        static STATIC_GRAVITY_FORCE: number;
-        static DEFAULT_GRAVITY_FORCE: number;
-        static DEFAULT_JUMPING_TIMER: number;
-        static DEFAULT_SLIDING_TIMER: number;
         static DEFAULT_CHARACTER_MASS: number;
-        static MIN_GROUND_CHECK_DISTANCE: number;
-        static MIN_GROUND_CHECK_SKINWIDTH: number;
-        static MIN_GROUND_CHECK_SLOPEANGLE: number;
         private _avatarRadius;
         private _avatarHeight;
         private _centerOffset;
@@ -4217,13 +4208,7 @@ declare namespace TOOLKIT {
         private _skinWidth;
         private _stepHeight;
         private _minMoveDistance;
-        private _slopeSlideSpeed;
-        private _slopeAngleRadians;
-        private _slopeAngleDegrees;
-        private _slopeMoveDirection;
         private _verticalVelocity;
-        private _verticalStepSpeed;
-        private _minimumStepHeight;
         private _collisionEvents;
         private _targetRotation;
         private _targetVelocity;
@@ -4231,55 +4216,16 @@ declare namespace TOOLKIT {
         private _inputVelocity;
         private _gravityFactor;
         private _minJumpTimer;
-        private _maxSlopeTimer;
-        private _isSliding;
         private _isGrounded;
-        private _isSteppingUp;
-        private _stepUpStartPosition;
-        private _stepUpTargetPosition;
-        private _stepUpProgress;
-        private _stepUpDuration;
-        private _stepUpVerticalVelocity;
-        private _stepCheckDistance;
-        private _stepCheckShape;
-        private _stepLocalRaycastResult;
-        private _stepForwardRaycastResult;
-        private _stepHeightRaycastResult;
-        private _stepLandingRaycastResult;
-        private _lastStepDebugLogTime;
-        private _stepDebugLogIntervalMs;
-        private _hitColor;
-        private _noHitColor;
-        private _groundRay;
-        private _groundRayHelper;
-        private _groundHitPointMesh;
-        private _stepCheckOriginMesh;
-        private _stepCheckHitPointMesh;
-        private _stepCheckDestinationMesh;
-        private _stepCheckRayHelper;
-        private _stepCheckRay;
-        private _stepDebugHitMaterial;
-        private _stepDebugNoHitMaterial;
-        private _stepHeightOriginMesh;
-        private _stepHeightHitPointMesh;
-        private _stepClearanceOriginMesh;
-        private _stepClearanceHitPointMesh;
-        private _stepForwardLine;
-        private _stepHeightLine;
-        private _stepClearanceLine;
-        private _stepCheckRaycastOrigin;
-        private _stepCheckRaycastDestination;
-        private _stepCheckRaycastHitPoint;
-        private _stepCheckRaycastResult;
-        private _groundRaycastShape;
-        private _groundCollisionNode;
-        private _groundRaycastOffset;
-        private _groundRaycastOrigin;
-        private _groundRaycastDirection;
-        private _groundRaycastDestination;
-        private _localGroundShapecastResult;
-        private _worldGroundShapecastResult;
+        private _groundContacts;
+        private _groundContactNormals;
+        private _raycastResult;
+        private _rayOrigin;
+        private _rayTarget;
+        private _previousGroundHeight;
+        private _stepDetectionDistance;
         protected m_moveDeltaX: number;
+        protected m_moveDeltaY: number;
         protected m_moveDeltaZ: number;
         protected m_havokplugin: any;
         getAvatarRadius(): number;
@@ -4290,62 +4236,37 @@ declare namespace TOOLKIT {
         getGravityFactor(): number;
         setGravityFactor(factor: number): void;
         getInputVelocity(): BABYLON.Vector3;
+        setInputVelocity(velocity: BABYLON.Vector3): void;
         getVerticalVelocity(): number;
-        getSlopeAngleRadians(): number;
-        getSlopeAngleDegrees(): number;
-        getGroundCollisionNode(): BABYLON.TransformNode;
-        getVerticalStepSpeed(): number;
-        setVerticalStepSpeed(speed: number): void;
-        getMinimumStepHeight(): number;
-        setMinimumStepHeight(height: number): void;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
-        getSlopeSlideSpeed(): number;
-        setSlopeSlideSpeed(speed: number): void;
+        getMinJumpTimer(): number;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
-        isSteppingUp(): boolean;
         isGrounded(): boolean;
-        isSliding(): boolean;
-        canSlide(): boolean;
         canJump(): boolean;
-        getStepUpProgress(): number;
-        getStepUpDuration(): number;
-        setStepUpDuration(duration: number): void;
-        getStepCheckDistance(): number;
-        setStepCheckDistance(distance: number): void;
         /** Register handler that is triggered when the character position has been updated */
         onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the character velocity will be updated */
         onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Enable character gravity feature */
+        /** Enable character gravity features */
         enableGravity: boolean;
-        /** Extra downward force applied */
-        downwardForce: number;
-        /** Minimum ground check raycast length */
-        raycastLength: number;
-        /** Enable character step offset feature */
+        /** Enable character step offset features */
         enableStepOffset: boolean;
-        /** Sets the character controller to debug mode (show ray lines) */
-        showRaycasts: boolean;
+        /** Use multiple raycasts for accurate ground detection on complex geometry (stairs, slopes) */
+        useMultiRaycast: boolean;
+        /** Number of rays to cast when useMultiRaycast is true (default: 5) */
+        multiRaycastCount: number;
+        /** Maximum ground check distance below character (default: 0.25) */
+        groundCheckDistance: number;
+        /** Default jumping timer (seconds) */
+        defaultJumpingTimer: number;
+        /** Enable character frame rate compensation */
+        frameRateCompensation: boolean;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected fixed(): void;
-        /** Check if we should attempt step offset based on current movement */
-        private shouldAttemptStepOffset;
-        /** Perform forward step detection to check for obstacles that can be stepped on */
-        private detectStepObstacle;
-        /** Validate if the detected obstacle is within step offset height limits */
-        private validateStepHeight;
-        /** Execute the step-up movement */
-        private executeStepUp;
-        /** Update step-up animation progress */
-        private updateStepUpAnimation;
-        /** Smooth step function for natural step-up animation */
-        private smoothStep;
-        /** Main step offset detection and execution logic */
-        private handleStepOffset;
         /** Teleport the character position and rotation to the specfied values. */
         set(px: number, py: number, pz: number, rx?: number, ry?: number, rz?: number, rw?: number): void;
         /** Translates the character with the specfied linear velocity. */
@@ -4360,10 +4281,18 @@ declare namespace TOOLKIT {
         setRigidBodyMass(mass: number): void;
         /** Set the character controller rigidbody collision type */
         setCollisionState(collision: boolean): void;
+        /** Check if a surface normal represents valid ground (not wall/ceiling) */
+        private isValidGroundNormal;
+        /** Option B: Single raycast down from character center */
+        private performSingleRayGroundCheck;
+        /** Option C: Multiple raycasts in circular pattern for accuracy on complex geometry */
+        private performMultiRayGroundCheck;
+        /** Perform raycast(s) downward to detect ground and get accurate surface normal */
+        private performGroundRaycast;
+        /** Detect if character is approaching a step and calculate step-up velocity */
+        private detectAndHandleStepOffset;
         /** Update the character controller grounded state */
         private updateGroundedState;
-        /** Handle character controller slopes and steps */
-        private updateSlopesAndSlides;
         /** Create character controller physics body */
         private createPhysicsBodyAndShape;
         /** Create character controller physics shape */
