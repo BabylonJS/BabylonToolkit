@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.34.0 - R1) */
+        /** Gets the toolkit framework version number (8.34.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4259,7 +4259,9 @@ declare namespace TOOLKIT {
         multiRaycastCount: number;
         /** Maximum ground check distance below character (default: 0.25) */
         groundCheckDistance: number;
-        /** Default jumping timer (seconds) */
+        /** Step velocity factor for climbing (default: 0.5) */
+        stepUpVelocityFactor: number;
+        /** Default jumping timer (default: 0.5) */
         defaultJumpingTimer: number;
         /** Enable character frame rate compensation */
         frameRateCompensation: boolean;
