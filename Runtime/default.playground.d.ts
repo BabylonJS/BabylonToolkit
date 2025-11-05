@@ -2465,8 +2465,7 @@ declare namespace PROJECT {
         private showDebugColliders;
         private colliderVisibility;
         private colliderRenderGroup;
-        private showDebugRaycasts;
-        private raycastLength;
+        private groundCheckDistance;
         private deltaTime;
         private delayJumpTimer;
         private canPlayerJump;
