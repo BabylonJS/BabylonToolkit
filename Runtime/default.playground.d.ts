@@ -2122,10 +2122,10 @@ declare namespace PROJECT {
         private animationStateParams;
         private sphereCollisionShape;
         private hasGroundedContact;
-        private showDebugRaycasts;
         private showDebugColliders;
         private colliderVisibility;
         private colliderRenderGroup;
+        private groundCheckDistance;
         private deltaTime;
         private minJumpTimer;
         private delayJumpTimer;
