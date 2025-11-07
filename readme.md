@@ -115,7 +115,9 @@ namespace PROJECT {
 
 # AI Coding Assistants
 
-The @codewrx <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development. The default <a target="_blank" href="https://github.com/codewrxai/AI-Agent-Personas">Agent Personas</a> can be downloaded and used as a prompt with any external AI solutions.
+The @codewrx <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development. The default <a target="_blank" href="https://github.com/codewrxai/AI-Agent-Personas">Agent Personas</a> can be downloaded and used as a prompt with any external AI solutions. 
+
+<a target="_blank" href="https://github.com/codewrxai/AI-Babylon-Toolkit/tree/master/Examples">Training Examples</a> can be referenced as context for agents.
 
 
 # Content Creation Tools
