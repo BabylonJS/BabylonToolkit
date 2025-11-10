@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.1 - R1) */
+        /** Gets the toolkit framework version number (8.36.101 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -169,6 +169,22 @@ declare namespace TOOLKIT {
          * @param timeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
          */
         static SetOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
+        /**
+         * Executes a React router navigation to the specified route
+         * @param scene The scene instance.
+         * @param route The route path to navigate.
+         * @param options The navigation options.
+         */
+        static NavigateTo(scene: BABYLON.Scene, route: string, options?: any): void;
+        /** Sets the React router navigation hook on the scene
+         * @param scene The scene instance.
+         * @param navigateToFunction The react router navigate function.
+         */
+        static SetReactNavigationHook(scene: BABYLON.Scene, navigateToFunction: any): void;
+        /** Deletes the React router navigation hook on the scene
+         * @param scene The scene instance.
+         */
+        static DeleteReactNavigationHook(scene: BABYLON.Scene): void;
         private static SceneParsingEnabled;
         /** Enable scene loader parsing plugin */
         static EnableSceneParsing(enabled: boolean): void;
