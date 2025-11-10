@@ -39,7 +39,16 @@ Or node package manager (ES6):
  npm install @babylonjs-toolkit/next
 ```
 
-# Initialize Toolkit
+# Node Package Manager
+
+Universal runtime library packages.
+
+UMD - https://www.npmjs.com/package/babylonjs-toolkit
+
+ES6 - https://www.npmjs.com/package/@babylonjs-toolkit/next
+
+
+# Initialize Scene Manager
 On the playgrounds:
 ```typescript
  await TOOLKIT.SceneManager.InitializePlayground(engine);
@@ -49,15 +58,6 @@ Or in application:
 ```typescript
  await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
-
-# Node Package Manager
-
-Universal runtime library packages.
-
-UMD - https://www.npmjs.com/package/babylonjs-toolkit
-
-ES6 - https://www.npmjs.com/package/@babylonjs-toolkit/next
-
 
 # Entity Component System
 
@@ -134,10 +134,15 @@ User Interface Guide
 The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity/UserInterface">User Interface System</a> allow seamless export of more 50+ Unity UI Elements to native BabylonJS GUI Elements.
 
 
-Unity Starter Content
+Starter Template Repos
 ----------------------
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#C6XBI3">TypeScript Starter Playground (TS)</a>
+<a target="_blank" href="https://github.com/MackeyK24/UMD-StarterAssets">Starter Assets Template (UMD)</a>
 
-<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#C6XBI3">WebGPU Starter Playground (TS)</a>
+<a target="_blank" href="https://github.com/MackeyK24/ES6-StarterAssets">Starter Assets Template (ES6)</a>
 
 
+Unity Starter Assets Demo
+----------------------
+<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#XNLKWY">WebGL Demo Playground (TS)</a>
+
+<a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#XNLKWY">WebGPU Demo Playground (TS)</a>
