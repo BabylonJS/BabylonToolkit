@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.101 - R1) */
+        /** Gets the toolkit framework version number (8.36.110 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -174,8 +174,11 @@ declare namespace TOOLKIT {
          * @param scene The scene instance.
          * @param route The route path to navigate.
          * @param options The navigation options.
+         * @optional To force a full page reload, use: window.location assign or replace to set the route. (No From App State Supported)
+         * @optional Use { replace: true } in nav options to replace current history entry instead of pushing a new one.
+         * @example SceneManager.NavigateTo(scene, "/babylon?scene=samplescene.gltf", { replace: true });
          */
-        static NavigateTo(scene: BABYLON.Scene, route: string, options?: any): void;
+        static NavigateTo(scene: BABYLON.Scene, route: string, options?: any, useWindowLocation?: boolean): void;
         /** Sets the React router navigation hook on the scene
          * @param scene The scene instance.
          * @param navigateToFunction The react router navigate function.
@@ -254,12 +257,6 @@ declare namespace TOOLKIT {
         static GetSceneFile(scene: BABYLON.Scene): string;
         /** Sets the file name the last scene properties was loaded from */
         static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
-        /** Gets all the created engine instances */
-        static GetEngineInstances(): BABYLON.AbstractEngine[];
-        /** Get the last create engine instance */
-        static GetLastCreatedEngine(): BABYLON.AbstractEngine;
-        /** Get the last created scene instance */
-        static GetLastCreatedScene(): BABYLON.Scene;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
         private static PhysicsViewersEnabled;
@@ -3511,8 +3508,6 @@ declare namespace TOOLKIT {
         static GetQueryStringParam(name: string, url: string): string;
         /** Post a safe message to the top browser window */
         static PostWindowMessage(msg: TOOLKIT.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
-        /** Loads a new level scene file into the scene viewer (engine.html) */
-        static LoadLevel(sceneFile: string, queryString?: string): boolean;
         /** Shows the default page scene loader. */
         static ShowSceneLoader(): void;
         /** Hides the default page scene loader. */
