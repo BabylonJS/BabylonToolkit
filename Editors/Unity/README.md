@@ -1,6 +1,6 @@
 # Unity Exporter
 
-The Babylon Toolkit editor plugin is powered by a suite of AI assisted automation and game development tools to enhance your productivity and workflow. You can create your games using a design time script component based architecture. The minimum editor version is Unity 2022.3.33f1 or greater. The image libraries are not supported for Apple Silicon. Intel versions of the editor are required.
+The Babylon Toolkit Editor plugin is powered by a suite of AI assisted automation and game development tools to enhance your productivity and workflow. You can create your games using a design time script component based architecture. The minimum editor version is Unity 2022.3.33f1 or greater. The image libraries are not supported for Apple Silicon. Intel versions of the editor are required.
 
 
 # Git Installation
@@ -9,7 +9,7 @@ In Unity's Package Manager
 
 Click "+" Button ➔ Add package from git url....
 
-Professional Edition
+Babylon Toolkit Editor
 ```
 https://github.com/babylontoolkit/professionaledition.git
 ```

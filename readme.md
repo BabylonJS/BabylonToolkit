@@ -29,11 +29,6 @@ Or at runtime:
 await BABYLON.Tools.LoadScriptAsync("scripts/babylon.toolkit.js");
 ```
 
-Or on playgrounds:
-```typescript
- await TOOLKIT.SceneManager.InitializeRuntime(engine);
-```
-
 Or node package manager (UMD):
 ```
  npm install babylonjs-toolkit
@@ -44,6 +39,16 @@ Or node package manager (ES6):
  npm install @babylonjs-toolkit/next
 ```
 
+# Initialize Toolkit
+On the playgrounds:
+```typescript
+ await TOOLKIT.SceneManager.InitializePlayground(engine);
+```
+
+Or in application:
+```typescript
+ await TOOLKIT.SceneManager.InitializeRuntime(engine);
+```
 
 # Node Package Manager
 
