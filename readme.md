@@ -143,6 +143,4 @@ Starter Template Repos
 
 Unity Starter Assets Demo
 ----------------------
-<a target="_blank" href="https://playground.babylonjs.com/index.html?BabylonToolkit#XNLKWY">WebGL Demo Playground (TS)</a>
-
 <a target="_blank" href="https://playground.babylonjs.com/index.html?webgpu&BabylonToolkit#XNLKWY">WebGPU Demo Playground (TS)</a>
