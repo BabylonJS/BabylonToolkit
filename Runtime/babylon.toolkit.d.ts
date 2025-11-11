@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.110 - R1) */
+        /** Gets the toolkit framework version number (8.36.111 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4230,6 +4230,7 @@ declare namespace TOOLKIT {
         private _isGrounded;
         private _groundContacts;
         private _groundContactNormals;
+        private _groundContactBody;
         private _raycastResult;
         private _rayOrigin;
         private _rayTarget;
@@ -4251,6 +4252,7 @@ declare namespace TOOLKIT {
         getVerticalVelocity(): number;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
+        getGroundContactBody(): any;
         getMinJumpTimer(): number;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
