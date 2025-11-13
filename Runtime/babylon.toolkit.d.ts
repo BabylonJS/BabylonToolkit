@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.111 - R1) */
+        /** Gets the toolkit framework version number (8.36.1000 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4278,6 +4278,8 @@ declare namespace TOOLKIT {
         defaultJumpingTimer: number;
         /** Enable character frame rate compensation */
         frameRateCompensation: boolean;
+        /** Default grounding velocity clamp (default: -2.0) */
+        downwardVelocityClamp: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
