@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.1000 - R1) */
+        /** Gets the toolkit framework version number (8.36.1001 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -92,6 +92,10 @@ declare namespace TOOLKIT {
         static GetEngine(scene: BABYLON.Scene): BABYLON.Engine | BABYLON.WebGPUEngine;
         static GetClass(name: string): any;
         static RegisterClass(name: string, klass: any): void;
+        /** Gets the auxiliary data string from the scene metadata */
+        static GetAuxiliaryData(scene: BABYLON.Scene): string;
+        /** Sets the auxiliary data string in the scene metadata */
+        static SetAuxiliaryData(scene: BABYLON.Scene, data: string): void;
         private static _EventBus;
         /** Default global event message bus
          * @example
@@ -4225,6 +4229,7 @@ declare namespace TOOLKIT {
         private _targetVelocity;
         private _currentVelocity;
         private _inputVelocity;
+        private _stepUpVelocity;
         private _gravityFactor;
         private _minJumpTimer;
         private _isGrounded;
@@ -4249,6 +4254,7 @@ declare namespace TOOLKIT {
         setGravityFactor(factor: number): void;
         getInputVelocity(): BABYLON.Vector3;
         setInputVelocity(velocity: BABYLON.Vector3): void;
+        getStepUpVelocity(): number;
         getVerticalVelocity(): number;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
