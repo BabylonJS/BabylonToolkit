@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.1001 - R1) */
+        /** Gets the toolkit framework version number (8.36.1011 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -155,7 +155,7 @@ declare namespace TOOLKIT {
          * Hides the default loading screen panel
          * @param engine The engine instance.
          */
-        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine): void;
+        static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, fade?: boolean): void;
         /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
         static ForceHideLoadingScreen(): void;
         private static DoForceHideLoadingScreen;
