@@ -6,7 +6,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.1011 - R1) */
+        /** Gets the toolkit framework version number (8.36.1100 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4224,6 +4224,7 @@ declare namespace TOOLKIT {
         private _stepHeight;
         private _minMoveDistance;
         private _verticalVelocity;
+        private _currentSlopeAngle;
         private _collisionEvents;
         private _targetRotation;
         private _targetVelocity;
@@ -4234,8 +4235,9 @@ declare namespace TOOLKIT {
         private _minJumpTimer;
         private _isGrounded;
         private _groundContacts;
-        private _groundContactNormals;
-        private _groundContactBody;
+        private _groundContactInfo;
+        private _groundedEnterTimer;
+        private _groundedExitTimer;
         private _raycastResult;
         private _rayOrigin;
         private _rayTarget;
@@ -4255,10 +4257,11 @@ declare namespace TOOLKIT {
         getInputVelocity(): BABYLON.Vector3;
         setInputVelocity(velocity: BABYLON.Vector3): void;
         getStepUpVelocity(): number;
+        getCurrentSlopeAngle(): number;
         getVerticalVelocity(): number;
         getMinMoveDistance(): number;
         setMinMoveDistance(distance: number): void;
-        getGroundContactBody(): any;
+        getGroundContactInfo(): TOOLKIT.IGroundContactInfo | null;
         getMinJumpTimer(): number;
         getSlopeLimit(): number;
         setSlopeLimit(slopeRadians: number): void;
@@ -4282,10 +4285,16 @@ declare namespace TOOLKIT {
         stepUpVelocityFactor: number;
         /** Default jumping timer (default: 0.5) */
         defaultJumpingTimer: number;
-        /** Enable character frame rate compensation */
-        frameRateCompensation: boolean;
+        /** Only apply gravity when the character is not grounded */
+        onlyApplyGravityWhenNotGrounded: boolean;
         /** Default grounding velocity clamp (default: -2.0) */
         downwardVelocityClamp: number;
+        /** Contact hysteresis time - how long to keep a contact valid after last physics event (default: 0.15 seconds) */
+        contactHysteresisTime: number;
+        /** Seconds of sustained contact required before grounded becomes true (default: 0.03 seconds) */
+        groundedEnterTime: number;
+        /** Seconds to keep grounded true after last valid contact (default: 0.1 seconds) */
+        groundedExitTime: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
@@ -4304,6 +4313,12 @@ declare namespace TOOLKIT {
         setRigidBodyMass(mass: number): void;
         /** Set the character controller rigidbody collision type */
         setCollisionState(collision: boolean): void;
+        /** Store contact and reset its hysteresis timer */
+        private registerGroundContact;
+        /** Age all cached ground contacts and remove the ones that expired */
+        private updateGroundContactAges;
+        /** Check if collision contact is at the feet (bottom hemisphere of capsule) */
+        private isContactAtFeet;
         /** Check if a surface normal represents valid ground (not wall/ceiling) */
         private isValidGroundNormal;
         /** Option B: Single raycast down from character center */
@@ -4320,6 +4335,15 @@ declare namespace TOOLKIT {
         private createPhysicsBodyAndShape;
         /** Create character controller physics shape */
         private createPhysicsShapeCapsule;
+    }
+    /**
+     * Ground contact raycast information interface
+     */
+    interface IGroundContactInfo {
+        hasGround: boolean;
+        groundNormal: BABYLON.Vector3;
+        groundHeight: number;
+        groundBody: BABYLON.PhysicsBody | null;
     }
     /**
      * Babylon toolkit simple character controller pro class (Simple Non Physics Based Character Controller System)
