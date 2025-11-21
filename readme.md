@@ -136,9 +136,11 @@ The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/ma
 
 Starter Template Repos
 ----------------------
-<a target="_blank" href="https://github.com/MackeyK24/UMD-StarterAssets">Starter Assets Template (UMD)</a>
+<a target="_blank" href="https://github.com/MackeyK24/UMD-StarterAssets">React Starter Assets Template (UMD)</a>
 
-<a target="_blank" href="https://github.com/MackeyK24/ES6-StarterAssets">Starter Assets Template (ES6)</a>
+<a target="_blank" href="https://github.com/MackeyK24/ES6-StarterAssets">React Starter Assets Template (ES6)</a>
+
+<a target="_blank" href="https://github.com/MackeyK24/NJS-StarterAssets">React Starter Assets Template (NEXT.JS)</a>
 
 
 Unity Starter Assets Demo
