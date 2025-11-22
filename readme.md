@@ -47,6 +47,8 @@ UMD - https://www.npmjs.com/package/babylonjs-toolkit
 
 ES6 - https://www.npmjs.com/package/@babylonjs-toolkit/next
 
+DLC - https://www.npmjs.com/package/@babylonjs-toolkit/dlc
+
 
 # Initialize Scene Manager
 On the playgrounds:
@@ -54,7 +56,7 @@ On the playgrounds:
  await TOOLKIT.SceneManager.InitializePlayground(engine);
 ```
 
-Or in application:
+Or in web applications:
 ```typescript
  await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
@@ -112,7 +114,7 @@ namespace PROJECT {
 }
 ```
 
-The **Ecmascript Module Version** uses the ES6 import and export syntax:
+The **ECMAScript Module Version** uses the **ES6** import and export syntax:
 ```typescript
 import { Scene } from "@babylonjs/core/scene";
 import { TransformNode } from "@babylonjs/core/Meshes";
