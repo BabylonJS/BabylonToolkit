@@ -1,12 +1,13 @@
 /** UMD Type References */
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
+    var Navigation: typeof globalThis.Navigation;
     /**
     * Babylon toolkit scene manager class
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version number (8.36.1100 - R1) */
+        /** Gets the toolkit framework version string (8.40.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -263,6 +264,7 @@ declare namespace TOOLKIT {
         static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
+        static RefreshShadowCascades(light: BABYLON.ShadowLight): void;
         private static PhysicsViewersEnabled;
         static IsPhysicsViewerEnabled(): boolean;
         static TogglePhysicsViewer(scene: BABYLON.Scene): void;
@@ -492,37 +494,55 @@ declare namespace TOOLKIT {
         static TurnWithRotation(entity: BABYLON.TransformNode, radians: number, space?: BABYLON.Space): void;
         static MAX_AGENT_COUNT: number;
         static MAX_AGENT_RADIUS: number;
-        private static NavigationMesh;
-        private static CrowdInterface;
-        private static PluginInstance;
         /** Register handler that is triggered when the navigation mesh is ready */
         static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
-        /** Get recast total memory heap size */
-        static GetRecastHeapSize(): number;
-        /** Gets the recast navigation plugin tools. (Singleton Instance) */
-        static GetNavigationTools(): TOOLKIT.RecastJSPluginExtension;
-        /** Gets the recast navigation crowd interface. (Singleton Instance) */
-        static GetCrowdInterface(scene: BABYLON.Scene): BABYLON.ICrowd;
-        /** Has the recast baked navigation data. (Navigation Helper) */
+        private static NavMeshPlugin;
+        private static NavMeshSurface;
+        private static NavMeshDebugger;
+        private static NavMeshMaterial;
+        private static CrowdInterface;
+        /** Has recast navigation data. */
         static HasNavigationData(): boolean;
-        /** Gets the current recast navigation mesh. (Navigation Helper) */
-        static GetNavigationMesh(): BABYLON.Mesh;
-        /** Bake the recast navigation mesh from geometry. (Navigation Helper) */
-        static BakeNavigationMesh(scene: BABYLON.Scene, meshes: BABYLON.Mesh[], properties: BABYLON.INavMeshParameters, debug?: boolean, color?: BABYLON.Color3, collisionMesh?: boolean, debugMeshOffset?: number): number;
-        /** Load the recast navigation mesh binary data. (Navigation Helper) */
-        static LoadNavigationMesh(scene: BABYLON.Scene, data: Uint8Array, debug?: boolean, color?: BABYLON.Color3, timeSteps?: number, collisionMesh?: boolean, debugMeshOffset?: number): number;
-        /** Save the recast navigation mesh binary data. (Navigation Helper) */
-        static SaveNavigationMesh(): Uint8Array;
-        /** Computes a recast navigation path. (Navigation Helper) */
-        static ComputeNavigationPath(start: BABYLON.Vector3, end: BABYLON.Vector3, closetPoint?: boolean): BABYLON.Vector3[];
-        /** Animate movement along a navigation path. (Navigation Helper) */
-        static MoveAlongNavigationPath(scene: BABYLON.Scene, agent: BABYLON.TransformNode, path: BABYLON.Vector3[], speed?: number, easing?: BABYLON.EasingFunction, callback?: () => void): BABYLON.Animation;
-        /** Creates a cylinder obstacle and add it to the navigation. (Navigation Helper) */
-        static AddNavigationCylinderObstacle(position: BABYLON.Vector3, radius: number, height: number): BABYLON.IObstacle;
-        /** Creates an oriented box obstacle and add it to the navigation. (Navigation Helper) */
-        static AddNavigationBoxObstacle(position: BABYLON.Vector3, extent: BABYLON.Vector3, angle: number): BABYLON.IObstacle;
-        /** Removes an obstacle created by addCylinderObstacle or addBoxObstacle. (Navigation Helper) */
-        static RemoveNavigationObstacle(obstacle: BABYLON.IObstacle): void;
+        /** Gets the recast navigation data. */
+        static GetNavigationData(): any | null;
+        /** Gets the recast navigation height mesh */
+        static GetNavigationMesh(): BABYLON.Mesh | null;
+        /** Gets the recast navigation debug mesh. */
+        static GetNavigationDebug(): BABYLON.Mesh | null;
+        /** Gets the recast navigation plugin instance. */
+        static GetNavigationPlugin(): ADDONS.RecastNavigationJSPluginV2 | null;
+        /** Gets the recast navigation crowd interface. */
+        static GetCrowdInterface(scene: BABYLON.Scene): BABYLON.ICrowd;
+        /** Loads the navigation mesh from binary url.
+         * @param scene The Babylon.js scene
+         * @param binaryUrl The navigation mesh binary url
+         * @param heightMesh The height mesh used for navigation surface
+         * @param createDebugMesh Whether to show a debug mesh
+         */
+        static LoadNavigationMeshDataAsync(scene: BABYLON.Scene, binaryUrl: string, heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        /** Build the navigation mesh from binary data.
+         * @param scene The Babylon.js scene
+         * @param binaryData The navigation mesh binary data
+         * @param heightMesh The height mesh used for navigation surface
+         * @param createDebugMesh Whether to show a debug mesh
+         */
+        static BuildNavigationMeshDataAsync(scene: BABYLON.Scene, binaryData: Uint8Array, heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        /** Build the navigation mesh from tile cache.
+         * @param scene The Babylon.js scene
+         * @param tileCacheData The navigation mesh tile cache data
+         * @param tileCacheMeshProcess The navigation mesh tile cache mesh processor (optional - uses default if null)
+         * @param heightMesh The height mesh used for navigation surface
+         * @param createDebugMesh Whether to show a debug mesh
+         */
+        static BuildNavigationMeshTileCacheAsync(scene: BABYLON.Scene, tileCacheData: Uint8Array, tileCacheMeshProcess?: any, heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        /** Create the navigation mesh from scene geometry.
+         * @param scene The Babylon.js scene
+         * @param properties The Unity navigation mesh bake properties
+         * @param geometry The scene geometry to build the navigation mesh from
+         * @param heightMesh The optional height mesh geometry
+         * @param showDebugMesh Whether to show a debug mesh
+         */
+        static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
         /** Toggle full screen scene mode. */
         static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Enter full screen scene mode. */
@@ -919,6 +939,26 @@ declare namespace TOOLKIT {
         animations: BABYLON.Animatable[];
         /** Promise that resolves when all animations complete */
         finished: Promise<void>;
+    }
+    /**
+     * Interface for Unity navigation mesh generation options
+     */
+    interface IUnityNavigationOptions {
+        cs: number;
+        ch: number;
+        tilesize: number;
+        walkableradius: number;
+        walkableheight: number;
+        walkableclimb: number;
+        walkableslopeangle: number;
+        minregionarea: number;
+        maxedgelen: number;
+        mergeregionarea: number;
+        maxsimplificationerror: number;
+        maxvertsperpoly: number;
+        detailsampledist: number;
+        detailsamplemaxerror: number;
+        buildheightmesh: boolean;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -1714,6 +1754,106 @@ declare namespace TOOLKIT {
         static PostBufferedAttribute(transform: BABYLON.TransformNode, index: number, value: number): void;
     }
     /**
+     * Type utility describing a constructor function
+     */
+    type RecastClassCtor<T = any> = new (...args: any[]) => T;
+    /**
+     * Minimal set of typed helpers for Recast/Detour WASM module exported as bjsRECAST.
+     * - Many types are left as `any` because the original Emscripten/wasm exports are complex.
+     * - This interface documents all fields and callable methods discovered on `bjsRECAST`.
+     */
+    interface IRecastNavigationPlugin {
+        isNull?: (v: any) => boolean;
+        destroy?: (v: any) => void;
+        allocCompactHeightfield?: () => any;
+        allocContourSet?: () => any;
+        allocHeightfield?: () => any;
+        allocHeightfieldLayerSet?: () => any;
+        allocPolyMesh?: () => any;
+        allocPolyMeshDetail?: () => any;
+        buildCompactHeightfield?: (buildContext: any, walkableHeight: number, walkableClimb: number, heightfield: any, compactHeightfield: any) => any;
+        buildContours?: (buildContext: any, compactHeightfield: any, maxError: number, maxEdgeLen: number, contourSet: any, buildFlags?: number) => any;
+        buildDistanceField?: (buildContext: any, compactHeightfield: any) => any;
+        buildHeightfieldLayers?: (buildContext: any, compactHeightfield: any, borderSize: number, walkableHeight: number, heightfieldLayerSet: any) => any;
+        buildLayerRegions?: (buildContext: any, compactHeightfield: any, borderSize: number, minRegionArea: number) => any;
+        buildPolyMesh?: (buildContext: any, contourSet: any, nvp: number, polyMesh: any) => any;
+        buildPolyMeshDetail?: (buildContext: any, mesh: any, compactHeightfield: any, sampleDist: number, sampleMaxError: number, polyMeshDetail: any) => any;
+        buildRegions?: (buildContext: any, compactHeightfield: any, borderSize: number, minRegionArea: number, mergeRegionArea: number) => any;
+        buildRegionsMonotone?: (buildContext: any, compactHeightfield: any, borderSize: number, minRegionArea: number, mergeRegionArea: number) => any;
+        buildTileCacheLayer?: (comp: any, header: any, heights: any, areas: any, cons: any, tileCacheData: any) => any;
+        buildTiledNavMeshRcConfig?: (options: {
+            recastConfig: any;
+            navMeshBounds: [number, number, number, number, number, number];
+        }) => any;
+        calcBounds?: (verts: number[], nv: number) => any;
+        calcGridSize?: (bmin: number[], bmax: number[], cs: number) => any;
+        clearUnwalkableTriangles?: (buildContext: any, walkableSlopeAngle: number, verts: number[], nv: number, tris: number[], nt: number, areas: any) => any;
+        cloneRcConfig?: (rcConfig: any) => any;
+        copyPolyMesh?: (buildContext: any, src: any, dest: any) => any;
+        createDefaultTileCacheMeshProcess?: () => any;
+        createHeightfield?: (buildContext: any, heightfield: any, width: number, height: number, bmin: number[], bmax: number[], cs: number, ch: number) => any;
+        createNavMeshData?: (navMeshCreateParams: any) => any;
+        createRcConfig?: (partialConfig: any) => any;
+        crowdAgentParamsDefaults?: {
+            [key: string]: any;
+        };
+        dtIlog2?: (v: number) => number;
+        dtNextPow2?: (v: number) => number;
+        erodeWalkableArea?: (buildContext: any, radius: number, compactHeightfield: any) => any;
+        exportNavMesh?: (navMesh: any) => any;
+        exportTileCache?: (navMesh: any, tileCache: any) => any;
+        filterLedgeSpans?: (buildContext: any, walkableHeight: number, verts: number[], nv: number, tris: number[], nt: number, areas: any) => any;
+        filterLowHangingWalkableObstacles?: (buildContext: any, walkableClimb: number, heightfield: any) => any;
+        filterWalkableLowHeightSpans?: (buildContext: any, walkableHeight: number, heightfield: any) => any;
+        floodFillPruneNavMesh?: (navMesh: any, startPolyRefs: any) => any;
+        freeCompactHeightfield?: (compactHeightfield: any) => void;
+        freeContourSet?: (contourSet: any) => void;
+        freeHeightfield?: (heightfield: any) => void;
+        freeHeightfieldLayerSet?: (heightfieldLayerSet: any) => void;
+        freePolyMesh?: (polyMesh: any) => void;
+        freePolyMeshDetail?: (polyMeshDetail: any) => void;
+        generateSoloNavMesh?: (positions: number[], indices: number[], navMeshGeneratorConfig?: any, keepIntermediates?: boolean) => any;
+        generateSoloNavMeshData?: (positions: number[], indices: number[], navMeshGeneratorConfig?: any, keepIntermediates?: boolean) => any;
+        generateTileCache?: (positions: number[], indices: number[], navMeshGeneratorConfig?: any, keepIntermediates?: boolean) => any;
+        generateTileNavMeshData?: (positions: number[], indices: number[], rcConfig: any, chunkyTriMesh: any, tile: number, options?: any, keepIntermediates?: boolean, buildContext?: any) => any;
+        generateTiledNavMesh?: (positions: number[], indices: number[], navMeshGeneratorConfig?: any, keepIntermediates?: boolean) => any;
+        getBoundingBox?: (positions: number[], indices: number[]) => any;
+        getCon?: (compactSpan: any, dir: number) => any;
+        getDirForOffset?: (x: number, y: number) => number;
+        getDirOffsetX?: (dir: number) => number;
+        getDirOffsetY?: (dir: number) => number;
+        getHeightFieldSpanCount?: (buildContext: any, heightfield: any) => number;
+        getHeightfieldLayerAreas?: (heightfieldLayer: any) => any;
+        getHeightfieldLayerCons?: (heightfieldLayer: any) => any;
+        getHeightfieldLayerHeights?: (heightfieldLayer: any) => any;
+        getNavMeshPositionsAndIndices?: (navMesh: any, flags?: number) => any;
+        getRandomSeed?: () => number;
+        importNavMesh?: (data: any) => any;
+        importTileCache?: (data: any, tileCacheMeshProcess?: any) => any;
+        init?: (impl: any) => Promise<any> | any;
+        markBoxArea?: (buildContext: any, bmin: number[], bmax: number[], areaId: number, compactHeightfield: any) => any;
+        markConvexPolyArea?: (buildContext: any, verts: number[], nverts: number, hmin: number, hmax: number, areaId: number, compactHeightfield: any) => any;
+        markCylinderArea?: (buildContext: any, pos: number[], radius: number, height: number, areaId: number, compactHeightfield: any) => any;
+        markWalkableTriangles?: (buildContext: any, walkableSlopeAngle: number, verts: number[], nv: number, tris: number[], nt: number, areas: any) => any;
+        medianFilterWalkableArea?: (buildContext: any, compactHeightfield: any) => any;
+        mergePolyMeshDetails?: (buildContext: any, meshes: any[], out: any) => any;
+        mergePolyMeshes?: (buildContext: any, meshes: any[], outPolyMesh: any) => any;
+        mergePositionsAndIndices?: (meshes: any[]) => any;
+        rasterizeTriangles?: (buildContext: any, verts: number[], nv: number, tris: number[], areas: any, nt: number, heightfield: any, flagMergeThreshold?: number) => any;
+        recastConfigDefaults?: Record<string, any>;
+        rgbToDuRgba?: (hexColor: string | number) => number;
+        setCon?: (compactSpan: any, dir: number, i: number) => any;
+        setRandomSeed?: (seed: number) => void;
+        soloNavMeshGeneratorConfigDefaults?: Record<string, any>;
+        statusDetail?: (status: number, detail: number) => number;
+        statusFailed?: (status: number) => boolean;
+        statusInProgress?: (status: number) => boolean;
+        statusSucceed?: (status: number) => boolean;
+        statusToReadableString?: (status: number) => string;
+        tileCacheGeneratorConfigDefaults?: Record<string, any>;
+        tiledNavMeshGeneratorConfigDefaults?: Record<string, any>;
+    }
+    /**
      * Babylon GUI Image Container
      * @class ImageContainer - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -1850,6 +1990,7 @@ declare namespace TOOLKIT {
         private _processShaderMaterials;
         private preProcessSceneProperties;
         private postProcessSceneProperties;
+        private lateProcessSceneProperties;
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
         private _parseNodeMaterialPropertiesAsync;
@@ -2037,426 +2178,6 @@ declare namespace TOOLKIT {
         private static DoProcessPendingFreezes;
         private static SetupCameraComponent;
         private static SetupLightComponent;
-    }
-}
-declare namespace TOOLKIT {
-    /**
-    * Babylon toolkit recast navigation extension class
-    * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
-    */
-    class RecastJSPluginExtension implements BABYLON.INavigationEnginePlugin {
-        /**
-         * Reference to the Recast library
-         */
-        bjsRECAST: any;
-        /**
-         * plugin name
-         */
-        name: string;
-        /**
-         * The active navmesh. RecastJS plugin extended to support multiple navmeshes.
-         */
-        navMesh: any;
-        navMeshes: any[];
-        private _maximumSubStepCount;
-        private _timeStep;
-        private _timeFactor;
-        private _tempVec1;
-        private _tempVec2;
-        private _worker;
-        /**
-         * Initializes the recastJS plugin
-         * @param recastInjection can be used to inject your own recast reference
-         */
-        constructor(recastInjection?: any);
-        /**
-         * Set worker URL to be used when generating a new navmesh
-         * @param workerURL url string
-         * @returns boolean indicating if worker is created
-         */
-        setWorkerURL(workerURL: string | URL): boolean;
-        /**
-         * Set the time step of the navigation tick update.
-         * Default is 1/60.
-         * A value of 0 will disable fixed time update
-         * @param newTimeStep the new timestep to apply to this world.
-         */
-        setTimeStep(newTimeStep?: number): void;
-        /**
-         * Get the time step of the navigation tick update.
-         * @returns the current time step
-         */
-        getTimeStep(): number;
-        /**
-         * If delta time in navigation tick update is greater than the time step
-         * a number of sub iterations are done. If more iterations are need to reach deltatime
-         * they will be discarded.
-         * A value of 0 will set to no maximum and update will use as many substeps as needed
-         * @param newStepCount the maximum number of iterations
-         */
-        setMaximumSubStepCount(newStepCount?: number): void;
-        /**
-         * Get the maximum number of iterations per navigation tick update
-         * @returns the maximum number of iterations
-         */
-        getMaximumSubStepCount(): number;
-        /**
-         * Time factor applied when updating crowd agents (default 1). A value of 0 will pause crowd updates.
-         * @param value the time factor applied at update
-         */
-        set timeFactor(value: number);
-        /**
-         * Get the time factor used for crowd agent update
-         * @returns the time factor
-         */
-        get timeFactor(): number;
-        /**
-         * Sets the active navigation mesh
-         * @param index of the navigation mesh to make active
-         * @returns navigation mesh was set as active
-         */
-        setActiveNavMesh(index: number): boolean;
-        /**
-         * Get the active navigation mesh
-         * @returns active navigation mesh
-         */
-        getActiveNavMesh(): any;
-        /**
-         * Get a navigation mesh by index
-         * @returns indexed navigation mesh
-         */
-        getIndexedNavMesh(index: number): any;
-        /**
-         * Get the total number of navigation meshes
-         * @returns number of navigation meshes
-         */
-        getNavMeshCount(): number;
-        /**
-         * Get the navigation mesh array
-         * @returns navigation mesh array
-         */
-        getNavMeshArray(): any[];
-        /**
-         * Create and activate a new navigation mesh
-         * @param meshes array of all the geometry used to compute the navigation mesh
-         * @param parameters bunch of parameters used to filter geometry
-         * @param completion callback when data is available from the worker. Not used without a worker
-         * @returns navigation mesh index
-         */
-        createNavMesh(meshes: Array<BABYLON.Mesh>, parameters: BABYLON.INavMeshParameters, completion?: (navmeshData: Uint8Array) => void): number;
-        /**
-         * Create a navigation mesh debug mesh
-         * @param scene is where the mesh will be added
-         * @returns debug display mesh
-         */
-        createDebugNavMesh(scene: BABYLON.Scene): BABYLON.Mesh;
-        /**
-         * Get a navigation mesh constrained position, closest to the parameter position
-         * @param position world position
-         * @returns the closest point to position constrained by the navigation mesh
-         */
-        getClosestPoint(position: BABYLON.Vector3): BABYLON.Vector3;
-        /**
-         * Get a navigation mesh constrained position, closest to the parameter position
-         * @param position world position
-         * @param result output the closest point to position constrained by the navigation mesh
-         */
-        getClosestPointToRef(position: BABYLON.Vector3, result: BABYLON.Vector3): void;
-        /**
-         * Get a navigation mesh constrained position, within a particular radius
-         * @param position world position
-         * @param maxRadius the maximum distance to the constrained world position
-         * @returns the closest point to position constrained by the navigation mesh
-         */
-        getRandomPointAround(position: BABYLON.Vector3, maxRadius: number): BABYLON.Vector3;
-        /**
-         * Get a navigation mesh constrained position, within a particular radius
-         * @param position world position
-         * @param maxRadius the maximum distance to the constrained world position
-         * @param result output the closest point to position constrained by the navigation mesh
-         */
-        getRandomPointAroundToRef(position: BABYLON.Vector3, maxRadius: number, result: BABYLON.Vector3): void;
-        /**
-         * Compute the final position from a segment made of destination-position
-         * @param position world position
-         * @param destination world position
-         * @returns the resulting point along the navmesh
-         */
-        moveAlong(position: BABYLON.Vector3, destination: BABYLON.Vector3): BABYLON.Vector3;
-        /**
-         * Compute the final position from a segment made of destination-position
-         * @param position world position
-         * @param destination world position
-         * @param result output the resulting point along the navmesh
-         */
-        moveAlongToRef(position: BABYLON.Vector3, destination: BABYLON.Vector3, result: BABYLON.Vector3): void;
-        private _convertNavPathPoints;
-        /**
-         * Compute a navigation path from start to end. Returns an empty array if no path can be computed
-         * Path is straight.
-         * @param start world position
-         * @param end world position
-         * @returns array containing world position composing the path
-         */
-        computePath(start: BABYLON.Vector3, end: BABYLON.Vector3): BABYLON.Vector3[];
-        /**
-         * Compute a navigation path from start to end. Returns an empty array if no path can be computed.
-         * Path follows navigation mesh geometry.
-         * @param start world position
-         * @param end world position
-         * @returns array containing world position composing the path
-         */
-        computePathSmooth(start: BABYLON.Vector3, end: BABYLON.Vector3): BABYLON.Vector3[];
-        /**
-         * Create a new Crowd so you can add agents
-         * @param maxAgents the maximum agent count in the crowd
-         * @param maxAgentRadius the maximum radius an agent can have
-         * @param scene to attach the crowd to
-         * @returns the crowd you can add agents to
-         */
-        createCrowd(maxAgents: number, maxAgentRadius: number, scene: BABYLON.Scene): BABYLON.ICrowd;
-        /**
-         * Set the Bounding box extent for doing spatial queries (getClosestPoint, getRandomPointAround, ...)
-         * The queries will try to find a solution within those bounds
-         * default is (1,1,1)
-         * @param extent x,y,z value that define the extent around the queries point of reference
-         */
-        setDefaultQueryExtent(extent: BABYLON.Vector3): void;
-        /**
-         * Get the Bounding box extent specified by setDefaultQueryExtent
-         * @returns the box extent values
-         */
-        getDefaultQueryExtent(): BABYLON.Vector3;
-        /**
-         * Build and activate a new navigation mesh from a previously saved state using getNavmeshData
-         * @param data the Uint8Array returned by getNavmeshData
-         * @returns navigation mesh index
-         */
-        buildFromNavmeshData(data: Uint8Array): number;
-        /**
-         * returns the navmesh data that can be used later. The navmesh must be built before retrieving the data
-         * @returns data the Uint8Array that can be saved and reused
-         */
-        getNavmeshData(): Uint8Array;
-        /**
-         * Get the Bounding box extent result specified by setDefaultQueryExtent
-         * @param result output the box extent values
-         */
-        getDefaultQueryExtentToRef(result: BABYLON.Vector3): void;
-        /**
-         * Disposes
-         */
-        dispose(): void;
-        /**
-         * Creates a cylinder obstacle and add it to the navigation
-         * @param position world position
-         * @param radius cylinder radius
-         * @param height cylinder height
-         * @returns the obstacle freshly created
-         */
-        addCylinderObstacle(position: BABYLON.Vector3, radius: number, height: number): BABYLON.IObstacle;
-        /**
-         * Creates an oriented box obstacle and add it to the navigation
-         * @param position world position
-         * @param extent box size
-         * @param angle angle in radians of the box orientation on Y axis
-         * @returns the obstacle freshly created
-         */
-        addBoxObstacle(position: BABYLON.Vector3, extent: BABYLON.Vector3, angle: number): BABYLON.IObstacle;
-        /**
-         * Removes an obstacle created by addCylinderObstacle or addBoxObstacle
-         * @param obstacle obstacle to remove from the navigation
-         */
-        removeObstacle(obstacle: BABYLON.IObstacle): void;
-        /**
-         * If this plugin is supported
-         * @returns true if plugin is supported
-         */
-        isSupported(): boolean;
-        /**
-         * Returns the seed used for randomized functions like `getRandomPointAround`
-         * @returns seed number
-         */
-        getRandomSeed(): number;
-        /**
-         * Set the seed used for randomized functions like `getRandomPointAround`
-         * @param seed number used as seed for random functions
-         */
-        setRandomSeed(seed: number): void;
-    }
-    /**
-     * Recast detour crowd implementation (Mutiple Navigation Meshes)
-     */
-    class RecastJSCrowdExtension implements BABYLON.ICrowd {
-        /**
-         * Recast/detour plugin
-         */
-        bjsRECASTPlugin: TOOLKIT.RecastJSPluginExtension;
-        /**
-         * Link to the detour crowd
-         */
-        recastCrowd: any;
-        /**
-         * One transform per agent
-         */
-        transforms: BABYLON.TransformNode[];
-        /**
-         * All agents created
-         */
-        agents: number[];
-        /**
-         * agents reach radius
-         */
-        reachRadii: number[];
-        /**
-         * true when a destination is active for an agent and notifier hasn't been notified of reach
-         */
-        private _agentDestinationArmed;
-        /**
-         * agent current target
-         */
-        private _agentDestination;
-        /**
-         * Link to the scene is kept to unregister the crowd from the scene
-         */
-        private _scene;
-        /**
-         * Observer for crowd updates
-         */
-        private _onBeforeAnimationsObserver;
-        /**
-         * Fires each time an agent is in reach radius of its destination
-         */
-        onReachTargetObservable: BABYLON.Observable<{
-            agentIndex: number;
-            destination: BABYLON.Vector3;
-        }>;
-        /**
-         * Constructor
-         * @param plugin recastJS plugin
-         * @param maxAgents the maximum agent count in the crowd
-         * @param maxAgentRadius the maximum radius an agent can have
-         * @param scene to attach the crowd to
-         * @returns the crowd you can add agents to
-         */
-        constructor(plugin: TOOLKIT.RecastJSPluginExtension, maxAgents: number, maxAgentRadius: number, scene: BABYLON.Scene);
-        /**
-         * Add a new agent to the crowd with the specified parameter a corresponding transformNode.
-         * You can attach anything to that node. The node position is updated in the scene update tick.
-         * @param pos world position that will be constrained by the navigation mesh
-         * @param parameters agent parameters
-         * @param transform hooked to the agent that will be update by the scene
-         * @returns agent index
-         */
-        addAgent(pos: BABYLON.Vector3, parameters: BABYLON.IAgentParameters, transform: BABYLON.TransformNode): number;
-        /**
-         * Returns the agent position in world space
-         * @param index agent index returned by addAgent
-         * @returns world space position
-         */
-        getAgentPosition(index: number): BABYLON.Vector3;
-        /**
-         * Returns the agent position result in world space
-         * @param index agent index returned by addAgent
-         * @param result output world space position
-         */
-        getAgentPositionToRef(index: number, result: BABYLON.Vector3): void;
-        /**
-         * Returns the agent velocity in world space
-         * @param index agent index returned by addAgent
-         * @returns world space velocity
-         */
-        getAgentVelocity(index: number): BABYLON.Vector3;
-        /**
-         * Returns the agent velocity result in world space
-         * @param index agent index returned by addAgent
-         * @param result output world space velocity
-         */
-        getAgentVelocityToRef(index: number, result: BABYLON.Vector3): void;
-        /**
-         * Returns the agent next target point on the path
-         * @param index agent index returned by addAgent
-         * @returns world space position
-         */
-        getAgentNextTargetPath(index: number): BABYLON.Vector3;
-        /**
-         * Returns the agent next target point on the path
-         * @param index agent index returned by addAgent
-         * @param result output world space position
-         */
-        getAgentNextTargetPathToRef(index: number, result: BABYLON.Vector3): void;
-        /**
-         * Gets the agent state
-         * @param index agent index returned by addAgent
-         * @returns agent state
-         */
-        getAgentState(index: number): number;
-        /**
-         * returns true if the agent in over an off mesh link connection
-         * @param index agent index returned by addAgent
-         * @returns true if over an off mesh link connection
-         */
-        overOffmeshConnection(index: number): boolean;
-        /**
-         * Asks a particular agent to go to a destination. That destination is constrained by the navigation mesh
-         * @param index agent index returned by addAgent
-         * @param destination targeted world position
-         */
-        agentGoto(index: number, destination: BABYLON.Vector3): void;
-        /**
-         * Teleport the agent to a new position
-         * @param index agent index returned by addAgent
-         * @param destination targeted world position
-         */
-        agentTeleport(index: number, destination: BABYLON.Vector3): void;
-        /**
-         * Update agent parameters
-         * @param index agent index returned by addAgent
-         * @param parameters agent parameters
-         */
-        updateAgentParameters(index: number, parameters: BABYLON.IAgentParameters): void;
-        /**
-         * remove a particular agent previously created
-         * @param index agent index returned by addAgent
-         */
-        removeAgent(index: number): void;
-        /**
-         * get the list of all agents attached to this crowd
-         * @returns list of agent indices
-         */
-        getAgents(): number[];
-        /**
-         * Tick update done by the Scene. Agent position/velocity/acceleration is updated by this function
-         * @param deltaTime in seconds
-         */
-        update(deltaTime: number): void;
-        /**
-         * Set the Bounding box extent for doing spatial queries (getClosestPoint, getRandomPointAround, ...)
-         * The queries will try to find a solution within those bounds
-         * default is (1,1,1)
-         * @param extent x,y,z value that define the extent around the queries point of reference
-         */
-        setDefaultQueryExtent(extent: BABYLON.Vector3): void;
-        /**
-         * Get the Bounding box extent specified by setDefaultQueryExtent
-         * @returns the box extent values
-         */
-        getDefaultQueryExtent(): BABYLON.Vector3;
-        /**
-         * Get the Bounding box extent result specified by setDefaultQueryExtent
-         * @param result output the box extent values
-         */
-        getDefaultQueryExtentToRef(result: BABYLON.Vector3): void;
-        /**
-         * Get the next corner points composing the path (max 4 points)
-         * @param index agent index returned by addAgent
-         * @returns array containing world position composing the path
-         */
-        getCorners(index: number): BABYLON.Vector3[];
-        /**
-         * Release all resources
-         */
-        dispose(): void;
     }
 }
 declare namespace TOOLKIT {
@@ -4159,7 +3880,6 @@ declare namespace TOOLKIT {
          * Sets the spatial sound option of the track (BABYLON.StaticSound)
          * @param value Define the value of the spatial sound
          */
-        setSpatialSound(value: BABYLON.AbstractSpatialAudio): void;
         /**
          * Attaches the spatial sound to the transform node (BABYLON.StaticSound)
          * @param transform Define the transform node to attach the spatial sound to
@@ -4840,6 +4560,7 @@ declare namespace TOOLKIT {
         protected m_agentDirection: BABYLON.Vector3;
         protected m_agentQuaternion: BABYLON.Quaternion;
         protected m_agentDestination: BABYLON.Vector3;
+        protected m_debugDestinationSphere: BABYLON.Mesh;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
@@ -4882,6 +4603,10 @@ declare namespace TOOLKIT {
         getAgentWaypointToRef(result: BABYLON.Vector3): void;
         /** Cancel current waypoint path navigation. */
         cancelNavigation(): void;
+        /** Gets debug destination mesh. */
+        getDebugDestinationMesh(): BABYLON.Mesh;
+        /** Shows or hides the debug destination mesh. */
+        showDebugDestination(show: boolean): void;
     }
     /**
      *  Recast Detour Crowd Agent States
