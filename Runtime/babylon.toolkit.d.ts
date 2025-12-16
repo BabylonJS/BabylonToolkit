@@ -49,6 +49,12 @@ declare namespace TOOLKIT {
         static SpotLightIntensity: number;
         /** Set the directional light intensity factor */
         static DirectionalLightIntensity: number;
+        /** Set the exp fog density scale factor */
+        static FogExpDensityScale: number;
+        /** Set the exp2 fog density scale factor */
+        static FogExp2DensityScale: number;
+        /** Set the linear fog density scale factor */
+        static FogLinearDensityScale: number;
         /** Set the terrain shader color correction value */
         static TerrainColorCorrection: number;
         /** Set the allow camera movement flag */
@@ -1990,12 +1996,11 @@ declare namespace TOOLKIT {
         private _processShaderMaterials;
         private preProcessSceneProperties;
         private postProcessSceneProperties;
+        private updateSkyboxEnvironment;
+        private applyUnitySHToScene;
         private lateProcessSceneProperties;
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
-        private _parseNodeMaterialPropertiesAsync;
-        private _parseShaderMaterialPropertiesAsync;
-        private _parseDiffuseMaterialPropertiesAsync;
         private _parseCommonConstantProperties;
     }
     /**
@@ -2674,6 +2679,8 @@ declare namespace TOOLKIT {
         /** Computes the transition duration blending speed */
         static ComputeBlendingSpeed(rate: number, duration: number, dampen?: boolean): number;
         static CalculateCameraDistance(farClipPlane: number, lodPercent: number, clipPlaneScale?: number): number;
+        static EvalSphericalPolynomialRGB(poly: BABYLON.SphericalPolynomial, n: BABYLON.Vector3): BABYLON.Color3;
+        static BestFitScale(unityRGB: number[], babRGB: number[]): number;
         /** TODO */
         /** TODO */
         static InstantiateClass(className: string): any;
@@ -3991,6 +3998,8 @@ declare namespace TOOLKIT {
         onUpdatePositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the character velocity will be updated */
         onUpdateVelocityObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Enable character update features */
+        enableUpdate: boolean;
         /** Enable character gravity features */
         enableGravity: boolean;
         /** Enable character step offset features */
@@ -4029,10 +4038,20 @@ declare namespace TOOLKIT {
         turn(angle: number): void;
         /** Rotates the chacracter to the specified rotation. */
         rotate(x: number, y: number, z: number, w: number): void;
-        /** Sets the character controller rigidbody mass property */
+        /** Sets the character controller rigidbody mass property
+         * @param mass The new mass value (must be greater than zero)
+         */
         setRigidBodyMass(mass: number): void;
-        /** Set the character controller rigidbody collision type */
+        /** Set the character controller rigidbody collision type
+         * @param collision true = solid, false = trigger
+         */
         setCollisionState(collision: boolean): void;
+        /**
+         * Set collision filter masks for the character controller at runtime.
+         * @param membershipMask bitmask for which group(s) this shape belongs to
+         * @param collideMask bitmask for which groups this shape should collide with
+         */
+        setCollisionFilters(membershipMask: number, collideMask: number): void;
         /** Store contact and reset its hysteresis timer */
         private registerGroundContact;
         /** Age all cached ground contacts and remove the ones that expired */
