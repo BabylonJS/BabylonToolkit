@@ -1927,6 +1927,8 @@ declare namespace TOOLKIT {
         private _fileName;
         private _licenseName;
         private _licenseType;
+        private _globalEnvironmentPromise;
+        private _pendingReflectionTextures;
         private static ScriptBundleCache;
         /** @hidden */
         constructor(loader: BABYLON.GLTF2.GLTFLoader);
@@ -1956,6 +1958,18 @@ declare namespace TOOLKIT {
         loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): Promise<void> | null;
         private _loadSceneInternalAsync;
         private _loadSceneExAsync;
+        /**
+         * Applies global environment SH polynomials to a reflection texture.
+         * If environment isn't ready yet, queues the texture for deferred processing.
+         * @param reflectionTexture The reflection texture to update
+         * @param textureName Name for logging purposes
+         */
+        private _applySHToReflectionTexture;
+        /**
+         * Processes all pending reflection textures that were loaded before the global environment.
+         * Called once the environment texture is ready and has generated its SH polynomials.
+         */
+        private _processPendingReflectionTextures;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
         /** @hidden */
@@ -2681,6 +2695,18 @@ declare namespace TOOLKIT {
         static CalculateCameraDistance(farClipPlane: number, lodPercent: number, clipPlaneScale?: number): number;
         static EvalSphericalPolynomialRGB(poly: BABYLON.SphericalPolynomial, n: BABYLON.Vector3): BABYLON.Color3;
         static BestFitScale(unityRGB: number[], babRGB: number[]): number;
+        /**
+         * Computes a best-fit scale and RMSE between a Babylon SphericalPolynomial and
+         * Unity's ground-truth evaluation samples (6 directions -> 18 floats RGB).
+         * Returns scale (multiply Babylon evals by this to best-match Unity), RMSE,
+         * per-channel RMSE and a per-direction breakdown.
+         */
+        static ComputeSHEval6Fit(sp: BABYLON.SphericalPolynomial, unityEval6: number[]): {
+            scale: number;
+            rmse: number;
+            perChannelRMSE: number[];
+            perDir: Array<any>;
+        };
         /** TODO */
         /** TODO */
         static InstantiateClass(className: string): any;
