@@ -2172,6 +2172,14 @@ declare namespace TOOLKIT {
         type: string;
         arraySize?: number;
     };
+    /**
+      * Babylon universal shader material pro class
+      * @class UniversalShaderMaterial - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class UniversalShaderMaterial extends TOOLKIT.CustomShaderMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+    }
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
@@ -2612,7 +2620,6 @@ declare namespace TOOLKIT {
         }, bitmapOptions?: ImageBitmapOptions, onComplete?: (bmd: ImageBitmap | null) => void): void;
         static DownloadImageBitmap(bmp: ImageBitmap | null, filename?: string, type?: "image/png" | "image/jpeg", quality?: number): HTMLCanvasElement | OffscreenCanvas;
         /** Initialize default shader material properties */
-        static InitializeShaderMaterial(material: BABYLON.ShaderMaterial, binding?: boolean, clipPlanes?: BABYLON.Nullable<boolean>): void;
         /** Transforms position from world space into screen space. */
         static WorldToScreenPoint(scene: BABYLON.Scene, position: BABYLON.Vector3, camera?: BABYLON.Camera): BABYLON.Vector3;
         /** Transforms a point from screen space into world space. */
@@ -2754,7 +2761,7 @@ declare namespace TOOLKIT {
         protected terrainInfo: any;
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
-        getClassName(): string;
+        getShaderName(): string;
         getTerrainInfo(): any;
     }
     /**
