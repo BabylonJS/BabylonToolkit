@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.40.1 - R1) */
+        /** Gets the toolkit framework version string (8.42.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -216,6 +216,8 @@ declare namespace TOOLKIT {
         static SetRenderQuality(quality: TOOLKIT.RenderQuality): void;
         /** Gets the current engine version string info. */
         static GetEngineVersionString(scene: BABYLON.Scene): string;
+        /** Get the scene image based lighting spherical polynomial */
+        static GetImageBasedLighting(scene: BABYLON.Scene): BABYLON.SphericalPolynomial;
         /** Store data object of function on the local window state. */
         static SetWindowState(name: string, data: any): void;
         /** Retrieve data object or function from the local window state. */
@@ -1886,6 +1888,7 @@ declare namespace TOOLKIT {
     }
     class CubeTextureLoader {
         name: string;
+        size: number;
         mapkey: string;
         material: BABYLON.Material;
         extension: string;
@@ -1896,6 +1899,10 @@ declare namespace TOOLKIT {
     class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         /** The name of this extension. */
         readonly name: string;
+        /** A tiny value used for diffuse IBL adjustments (default: 0.001) */
+        static readonly TINY_IBL_VALUE: number;
+        /** A factor used for specular IBL adjustments (default: 1.25) */
+        static readonly SPEC_IBL_FACTOR: number;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
@@ -1927,7 +1934,6 @@ declare namespace TOOLKIT {
         private _fileName;
         private _licenseName;
         private _licenseType;
-        private _globalEnvironmentPromise;
         private _pendingReflectionTextures;
         private static ScriptBundleCache;
         /** @hidden */
@@ -1958,18 +1964,6 @@ declare namespace TOOLKIT {
         loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): Promise<void> | null;
         private _loadSceneInternalAsync;
         private _loadSceneExAsync;
-        /**
-         * Applies global environment SH polynomials to a reflection texture.
-         * If environment isn't ready yet, queues the texture for deferred processing.
-         * @param reflectionTexture The reflection texture to update
-         * @param textureName Name for logging purposes
-         */
-        private _applySHToReflectionTexture;
-        /**
-         * Processes all pending reflection textures that were loaded before the global environment.
-         * Called once the environment texture is ready and has generated its SH polynomials.
-         */
-        private _processPendingReflectionTextures;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
         /** @hidden */
@@ -2011,7 +2005,7 @@ declare namespace TOOLKIT {
         private preProcessSceneProperties;
         private postProcessSceneProperties;
         private updateSkyboxEnvironment;
-        private applyUnitySHToScene;
+        private generateSphericalHarmonics;
         private lateProcessSceneProperties;
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
@@ -2050,7 +2044,6 @@ declare namespace TOOLKIT {
         dispose(): void;
     }
 }
-/** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
       * GLTF Custom Shader Material (BABYLON.PBRMaterial)
@@ -2069,8 +2062,11 @@ declare namespace TOOLKIT {
         private _floats;
         private _bools;
         private _ubos;
+        /** Track WGSL samplers emitted for this material to avoid duplicate declarations (WGSL has no preprocessor) */
+        private _wgslSamplers;
         protected shader: string;
         protected plugin: BABYLON.MaterialPluginBase;
+        private _unityLightingPlugin;
         getClassName(): string;
         constructor(name: string, scene: BABYLON.Scene);
         /** Adds a custom attribute property */
@@ -2079,6 +2075,8 @@ declare namespace TOOLKIT {
         checkUniform(uniformName: string, type: string, value?: any): void;
         /** Checks sampler values. Internal Use Only */
         checkSampler(samplerName: string, texture?: any): void;
+        /** Splits the IBL lighting contributions */
+        splitLighting(diffuseIbl: number, specularIbl: number): void;
         /** Adds a texture uniform property */
         addTextureUniform(name: string, texture: BABYLON.Texture): TOOLKIT.CustomShaderMaterial;
         /** Sets the texture uniform value */
@@ -2122,7 +2120,7 @@ declare namespace TOOLKIT {
         /** Has the specified texture */
         hasTexture(texture: BABYLON.BaseTexture): boolean;
         /** Gets this custom material uniforms */
-        getCustomUniforms(wgsl: boolean): TOOLKIT.CustomUniformProperty[];
+        getCustomUniforms(wgsl: boolean): any;
         /** Gets this custom material uniforms */
         getCustomSamplers(): string[];
         /** Gets this custom material attributes */
@@ -2134,7 +2132,9 @@ declare namespace TOOLKIT {
         /** Prepares the custom material defines */
         prepareCustomDefines(defines: BABYLON.MaterialDefines): void;
         /** Update custom material bindings */
-        updateCustomBindings(effect: BABYLON.UniformBuffer): void;
+        updateCustomBindings(effectOrUniformBuffer: BABYLON.UniformBuffer | BABYLON.Effect): void;
+        /** Update custom material bindings */
+        legacyUpdateCustomBindings(effect: BABYLON.UniformBuffer): void;
         /** Builds a custom uniform property */
         protected buildUniformProperty(uniformName: string, uniformType: string, uniformValue: any): void;
     }
@@ -2156,12 +2156,32 @@ declare namespace TOOLKIT {
          * @param resolveIncludes Indicates that any #include directive in the plugin code must be replaced by the corresponding code (default: false)
          */
         constructor(material: BABYLON.Material, name: string, priority: number, defines?: {}, addToPluginList?: boolean, enable?: boolean, resolveIncludes?: boolean);
-        get isEnabled(): boolean;
-        set isEnabled(enabled: boolean);
+        getIsEnabled(): boolean;
+        setIsEnabled(enabled: boolean): void;
         vertexDefinitions: string;
         fragmentDefinitions: string;
         /** Gets a reference to the custom shader material */
         getCustomShaderMaterial(): TOOLKIT.CustomShaderMaterial;
+    }
+    /**
+      * Unity-Style IBL split plugin
+      * - Lets you scale diffuse IBL and specular IBL independently, without duplicating environment / probe cubemaps.
+      * - Works for both scene.environmentTexture fallback and per-material reflectionTexture.
+      *
+      * Key idea:
+      *   We keep textures shared and adjust contributions in shader code:
+      *     diffuseIbl *= tkIblDiffuseScale
+      *     specularIbl *= tkIblSpecularScale
+      */
+    class UnityStyleLightingPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(material: TOOLKIT.CustomShaderMaterial, shaderName: string);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getClassName(): string;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** Provide custom uniforms (UBO) declarations */
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
     }
     /**
      * Babylon custom uniform items (GLTF)
@@ -2620,6 +2640,8 @@ declare namespace TOOLKIT {
         }, bitmapOptions?: ImageBitmapOptions, onComplete?: (bmd: ImageBitmap | null) => void): void;
         static DownloadImageBitmap(bmp: ImageBitmap | null, filename?: string, type?: "image/png" | "image/jpeg", quality?: number): HTMLCanvasElement | OffscreenCanvas;
         /** Initialize default shader material properties */
+        static MarkLinear(t?: BABYLON.BaseTexture | null): void;
+        static MarkGamma(t?: BABYLON.BaseTexture | null): void;
         /** Transforms position from world space into screen space. */
         static WorldToScreenPoint(scene: BABYLON.Scene, position: BABYLON.Vector3, camera?: BABYLON.Camera): BABYLON.Vector3;
         /** Transforms a point from screen space into world space. */
