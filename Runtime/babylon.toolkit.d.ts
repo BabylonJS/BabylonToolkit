@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.42.111- R1) */
+        /** Gets the toolkit framework version string (8.42.1000- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1966,10 +1966,7 @@ declare namespace TOOLKIT {
         private _loadSceneExAsync;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
-        /** @hidden */
-        loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.IMaterial, babylonMaterial: BABYLON.Material): Promise<void> | null;
-        /** @hidden */
-        private _loadMaterialPropertiesInternalAsync;
+        loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
         private _getCachedMaterialByIndex;
         private _getCachedLightmapByIndex;
         /** @hidden */
@@ -1982,12 +1979,6 @@ declare namespace TOOLKIT {
          */
         loadAnimationAsync(context: string, animation: BABYLON.GLTF2.Loader.IAnimation): Promise<BABYLON.AnimationGroup>;
         /**
-         * Loads a glTF animation.
-         * @param context The context when loading the asset
-         * @param animation The glTF animation property
-         * @returns A promise that resolves with the loaded Babylon animation group when the load is complete
-         */
-        /**
          * @hidden Define this method to modify the default behavior when loading data for mesh primitives.
          * @param context The context when loading the asset
          * @param name The mesh name when loading the asset
@@ -1999,7 +1990,7 @@ declare namespace TOOLKIT {
          */
         _loadMeshPrimitiveAsync(context: string, name: string, node: BABYLON.GLTF2.INode, mesh: BABYLON.GLTF2.IMesh, primitive: any, assign: (babylonMesh: BABYLON.AbstractMesh) => void): Promise<BABYLON.AbstractMesh>;
         private _setupBabylonMesh;
-        private _setupBabylonMaterials;
+        private _setupBabylonMultiMaterials;
         private _processLevelOfDetail;
         private _processShaderMaterials;
         private preProcessSceneProperties;
