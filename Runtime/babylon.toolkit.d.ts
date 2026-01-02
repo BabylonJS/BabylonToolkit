@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.42.1000- R1) */
+        /** Gets the toolkit framework version string (8.44.0- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -2001,6 +2001,7 @@ declare namespace TOOLKIT {
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
         private _parseCommonConstantProperties;
+        private _parseUniformAndSamplerProperties;
     }
     /**
      * Babylon Toolkit Editor - Loader Class
