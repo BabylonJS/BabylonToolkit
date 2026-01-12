@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.44.10- R1) */
+        /** Gets the toolkit framework version string (8.44.100- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1904,9 +1904,9 @@ declare namespace TOOLKIT {
         readonly name: string;
         /** A tiny value used for diffuse IBL adjustments (default: 0.001) */
         static readonly IBL_TINY_VALUE: number;
-        /** A factor used for specular IBL adjustments (default: 1.25) */
+        /** A factor used for specular IBL adjustments (default: 1.0) */
         static readonly IBL_SPEC_FACTOR: number;
-        /** The scale factor used for reflection probe IBL level adjustments (default: 0.5) */
+        /** The scale factor used for reflection probe power (default: 1.0) */
         static readonly IBL_PROBE_FACTOR: number;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
