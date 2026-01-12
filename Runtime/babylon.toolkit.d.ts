@@ -1897,6 +1897,7 @@ declare namespace TOOLKIT {
         prefiltered: boolean;
         boundingBoxSize: BABYLON.Vector3;
         boundingBoxPosition: BABYLON.Vector3;
+        reflectionProbePower: number;
     }
     class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         /** The name of this extension. */
@@ -1905,8 +1906,8 @@ declare namespace TOOLKIT {
         static readonly IBL_TINY_VALUE: number;
         /** A factor used for specular IBL adjustments (default: 1.25) */
         static readonly IBL_SPEC_FACTOR: number;
-        /** The scale factor used for IBL level adjustments (default: 0.75) */
-        static readonly IBL_LEVEL_SCALE: number;
+        /** The scale factor used for reflection probe IBL level adjustments (default: 0.5) */
+        static readonly IBL_PROBE_FACTOR: number;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
