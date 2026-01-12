@@ -1005,10 +1005,12 @@ declare namespace TOOLKIT {
         dispose(): void;
         /** Gets the script component class name */
         getClassName(): string;
-        /** Sets the script component property bag value */
-        protected setProperty(name: string, propertyValue: any): void;
+        /** Gets the script component property bag */
+        getProperties(): any;
         /** Gets the script component property bag value */
-        protected getProperty<T>(name: string, defaultValue?: T): T;
+        getProperty<T>(name: string, defaultValue?: T): T;
+        /** Sets the script component property bag value */
+        setProperty(name: string, propertyValue: any): void;
         /** Get the current time in seconds */
         getTime(): number;
         /** Get the current time in milliseconds */
@@ -1900,9 +1902,11 @@ declare namespace TOOLKIT {
         /** The name of this extension. */
         readonly name: string;
         /** A tiny value used for diffuse IBL adjustments (default: 0.001) */
-        static readonly TINY_IBL_VALUE: number;
+        static readonly IBL_TINY_VALUE: number;
         /** A factor used for specular IBL adjustments (default: 1.25) */
-        static readonly SPEC_IBL_FACTOR: number;
+        static readonly IBL_SPEC_FACTOR: number;
+        /** The scale factor used for IBL level adjustments (default: 0.75) */
+        static readonly IBL_LEVEL_SCALE: number;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
