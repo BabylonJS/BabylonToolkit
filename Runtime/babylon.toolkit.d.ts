@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.44.101- R1) */
+        /** Gets the toolkit framework version string (8.44.1001- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -89,6 +89,10 @@ declare namespace TOOLKIT {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        /** Default layer mask value */
+        static readonly DefaultLayerMask: number;
+        /** Hidden layer mask value (Unity Layer 28 - Value: 268435456) */
+        static readonly HiddenLayerMask: number;
         private static _HideLoadingScreen;
         static CVTOOLS_NAME: string;
         static CVTOOLS_MESH: string;
@@ -272,7 +276,12 @@ declare namespace TOOLKIT {
         static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
+        /** Add multiple shadow castor meshes to a shadow light. */
+        static AddShadowCastersToLight(light: BABYLON.IShadowLight, transforms: BABYLON.TransformNode[], includeChildren?: boolean): void;
+        /** Refresh the shadow cascades for a shadow light. */
         static RefreshShadowCascades(light: BABYLON.ShadowLight): void;
+        /** Refresh all shadow cascades for all shadow lights in the scene. */
+        static RefreshAllShadowCascades(scene: BABYLON.Scene): void;
         private static PhysicsViewersEnabled;
         static IsPhysicsViewerEnabled(): boolean;
         static TogglePhysicsViewer(scene: BABYLON.Scene): void;
@@ -2754,8 +2763,6 @@ declare namespace TOOLKIT {
         static CreateGuid(suffix?: string): string;
         /** TODO */
         static ValidateTransformGuid(node: BABYLON.TransformNode): void;
-        /** TODO */
-        static AddShadowCastersToLight(light: BABYLON.IShadowLight, transforms: BABYLON.TransformNode[], includeChildren?: boolean): void;
         /** TODO */
         static RegisterInstancedMeshBuffers(mesh: BABYLON.Mesh): void;
         /** TODO */
