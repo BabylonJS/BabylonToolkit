@@ -1,19 +1,6 @@
 declare namespace PROJECT {
     /**
     * Babylon Script Component
-    * @class AutoBodyGarage
-    */
-    class AutoBodyGarage extends TOOLKIT.ScriptComponent {
-        private m_bodyMaterial;
-        private m_bodyAbtractMesh;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        setupVehicleMaterials(bodyColor: BABYLON.Color3, wheelColor?: BABYLON.Color3, wheelType?: number, decalIndex?: number): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component
     * @class CheckpointManager
     */
     class CheckpointManager extends TOOLKIT.ScriptComponent {
