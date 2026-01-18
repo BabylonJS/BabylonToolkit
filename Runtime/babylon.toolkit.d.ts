@@ -2839,6 +2839,24 @@ declare namespace TOOLKIT {
         private GLSL_FormatTerrainFragmentDefintions;
         private GLSL_FormatTerrainFragmentUpdateColor;
     }
+    /**
+     * Grass Billboard Shader Material (BABYLON.PBRMaterial)
+     * @class GrassBillboardMaterial
+     */
+    class GrassBillboardMaterial extends TOOLKIT.CustomShaderMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+        update(): void;
+        getShaderName(): string;
+    }
+    /**
+     * Grass Billboard Shader Material Plugin (BABYLON.MaterialPluginBase)
+     * @class GrassBillboardMaterialPlugin
+     */
+    class GrassBillboardMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+    }
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
