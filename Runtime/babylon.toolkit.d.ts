@@ -2844,6 +2844,7 @@ declare namespace TOOLKIT {
      * @class GrassBillboardMaterial
      */
     class GrassBillboardMaterial extends TOOLKIT.CustomShaderMaterial {
+        private _windTimeAccum;
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
         getShaderName(): string;
