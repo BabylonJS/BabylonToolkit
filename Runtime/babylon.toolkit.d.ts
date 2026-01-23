@@ -89,6 +89,8 @@ declare namespace TOOLKIT {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        /** All layer mask value */
+        static readonly AllLayerMask: number;
         /** Default layer mask value */
         static readonly DefaultLayerMask: number;
         /** Hidden layer mask value (Unity Layer 28 - Value: 268435456) */
@@ -2235,6 +2237,47 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * Deterministic 2D Perlin noise (seeded).
+     * Used to approximate Unity Terrain detail noise behavior (stable placement/rotation/scale).
+     */
+    class Perlin2D {
+        private perm;
+        constructor(seed: number);
+        private fade;
+        private lerp;
+        private grad;
+        /**
+         * Returns Perlin noise in range approximately [-1, 1]
+         */
+        noise(x: number, y: number): number;
+    }
+    /** SimplexNoise - A fast javascript implementation of simplex noise by Jonas Wagner
+    Based on a speed-improved simplex noise algorithm for 2D, 3D and 4D in Java.
+    Which is based on example code by Stefan Gustavson (stegu@itn.liu.se).
+    With Optimisations by Peter Eastman (peastman@drizzle.stanford.edu).
+    Better rank ordering method by Stefan Gustavson in 2012.
+  
+    Copyright (c) 2022 Jonas Wagner
+  
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+  
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+  
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+    */
+    /**
      * A random() function, must return a number in the interval [0,1), just like Math.random().
      */
     type RandomFn = () => number;
@@ -2857,6 +2900,16 @@ declare namespace TOOLKIT {
         constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the uniforms used in the shader code */
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the samplers used in the shader code */
+        getSamplers(samplers: string[]): void;
+        /** This get the attributes used in the shader code */
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This prepares the shader defines */
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This is used to update the uniforms bound to a mesh */
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -5739,23 +5792,177 @@ declare namespace TOOLKIT {
         customData?: any;
     }
 }
-/** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-     * Babylon terrain generator pro class (Unity Terrain Builder System)
-     * @class TerrainGenerator - All rights reserved (c) 2024 Mackey Kinard
-    */
-    class TerrainGenerator extends TOOLKIT.ScriptComponent {
+     * Detail Layer Instance Data
+     */
+    interface IDetailLayerData {
+        layerindex?: number;
+        densitymap?: number[];
+        densitywidth?: number;
+        densityheight?: number;
+        minwidth?: number;
+        maxwidth?: number;
+        minheight?: number;
+        maxheight?: number;
+        noisespread?: number;
+        bendfactor?: number;
+        healthycolor?: number[];
+        drycolor?: number[];
+        colorvariationmap?: number[];
+        rendermode?: string;
+        useprototypemesh?: boolean;
+        useinstancing?: boolean;
+        prototypemeshnodeid?: string;
+        prototypemeshname?: string;
+        prototypetexturefile?: string;
+        prototypetexture?: any;
+        isvalid?: boolean;
+        maxdistance?: number;
+        noiseseed?: number;
+        positionjitter?: number;
+        positionsjitter?: number;
+        aligntoground?: number;
+        holeedgepadding?: number;
+        prototypelocalscale?: number[];
+        detailinstancepatches?: Array<{
+            patchX: number;
+            patchY: number;
+            bounds: number[];
+            transforms: number[];
+        }>;
+        densityparam?: number;
+    }
+    /**
+     * Terrain Properties Interface
+     */
+    interface ITerrainProperties {
+        name?: string;
+        terrainsize?: number[];
+        basemapdistance?: number;
+        treebillboarddistance?: number;
+        treecrossfadelength?: number;
+        treedistance?: number;
+        treeinstancecount?: number;
+        detailwidth?: number;
+        detailheight?: number;
+        detailpatchcount?: number;
+        detailresolution?: number;
+        detailresolutionperpatch?: number;
+        detailobjectdensity?: number;
+        detailobjectdistance?: number;
+        wavinggrassamount?: number;
+        wavinggrassspeed?: number;
+        wavinggrassstrength?: number;
+        wavinggrasstint?: number[];
+        detaillayers?: TOOLKIT.IDetailLayerData[];
+        detailscattermode?: string;
+    }
+    /**
+     * Babylon Script Component
+     * @class TerrainBuilder
+     */
+    class TerrainBuilder extends TOOLKIT.ScriptComponent {
+        private detailLayerContainers;
+        private detailMeshSources;
+        private static perlinNoiseCache;
+        static grassDryColorBias: number;
+        static grassHeightScale: number;
+        static grassCastShadows: boolean;
+        static grassColorCurvePower: number;
+        static grassColorDesaturation: number;
+        static grassColorSpatialWeight: number;
+        static detailChunkMode: number;
+        static detailChunkTargetInstances: number;
+        static detailChunkWorldSize: number;
+        static detailChunkMaxChunksPerAxis: number;
+        static detailChunkMaxTotalChunks: number;
+        static meshDetailChunkMode: number;
+        static meshDetailChunkTargetInstances: number;
+        static meshDetailChunkWorldSize: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
-        protected start(): void;
-        protected ready(): void;
-        protected update(): void;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
         protected destroy(): void;
+        /**
+         * Dispose all detail layer instances
+         */
+        private disposeDetailLayers;
+        /**
+         * Build detail prototypes for the terrain
+         * This recreates Unity's terrain grass and detail system in Babylon.js
+         */
+        static BuildDetailPrototypes(properties: TOOLKIT.ITerrainProperties, terrainTransform: BABYLON.TransformNode, scene: BABYLON.Scene, builderInstance?: TOOLKIT.TerrainBuilder): void;
+        /**
+         * Build mesh-based detail layer (3D mesh grass/rocks/etc)
+         */
+        private static BuildMeshDetailLayer;
+        /**
+         * Build billboard-based detail layer (2D grass billboards)
+         */
+        private static BuildBillboardDetailLayer;
+        /**
+         * Generate mesh detail instances from Unity's authoritative ComputeDetailInstanceTransforms export.
+         * This is used ONLY for mesh detail prototypes (rocks/props/etc) and is intended to match Unity 100%.
+         */
+        private static GenerateMeshInstancesFromUnityPatches;
+        /**
+         * Grass optimization:
+         * Generate grass thin-instance buffers directly from the density map without allocating
+         * per-instance Vector3/Color4 objects.
+         *
+         * IMPORTANT: This preserves grass color/behavior by reusing the exact same placement,
+         * height sampling, scale, and color math as GenerateInstancesFromDensityMap.
+         */
+        private static CreateGrassThinInstancesFromDensityMap;
+        /**
+         * Create thin instances for maximum performance
+         *
+         * IMPORTANT (Unity-style optimization):
+         * Babylon thin instances are frustum-culled using the *host mesh* bounding info.
+         * If you put an entire terrain's grass into one host mesh, it becomes "all-or-nothing".
+         *
+         * This implementation automatically *chunks* instances into a 2D grid (XZ) and creates
+         * one thin-instanced host mesh per chunk. Each chunk gets its own bounding box, so
+         * off-screen chunks are skipped by frustum culling (Unity terrain detail patch behavior).
+         *
+         * Drop-in compatibility:
+         * - The function signature is unchanged.
+         * - It returns the first created chunk mesh (or the only mesh if one chunk).
+         * - All chunk meshes are parented under the provided `parent` so disposal still works.
+         */
+        private static CreateDetailThinInstancesFromDensityMap;
+        /**
+         * Create billboard mesh for grass
+         */
+        private static CreateBillboardMesh;
+        /**
+         * Create crossed quads billboard (Unity GrassBillboard mode)
+         */
+        private static CreateCrossedQuadsBillboard;
+        /**
+         * Apply upward-pointing normals to a mesh
+         */
+        private static ApplyUpNormals;
+        /**
+         * Deterministic hash-based RNG for stable grass placement
+         */
+        private static HashToUnitFloat;
+        /**
+         * Get or create a cached Perlin2D noise instance for the given seed.
+         * This avoids recreating permutation tables for every grass blade.
+         */
+        private static GetPerlinNoise;
+        /**
+         * Convert Unity terrain detail rotation into Babylon terrain space.
+         * Density map axes are swapped (x/z), so we mirror the yaw to preserve painted orientation.
+         */
+        private static ConvertDetailRotation;
+        private static NormalizeRotation;
+        /**
+         * Convert an sRGB color value [0..1] to linear space using a gamma of ~2.2.
+         * This matches Unity's handling of color inputs for PBR lighting and preserves richer colors under linear lighting.
+         */
+        private static sRGBToLinear;
     }
 }
 declare namespace TOOLKIT {
