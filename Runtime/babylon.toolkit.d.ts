@@ -5849,6 +5849,7 @@ declare namespace TOOLKIT {
         detailpatchcount?: number;
         detailresolution?: number;
         detailresolutionperpatch?: number;
+        detailgrasscolorintensity?: number;
         detailobjectdensity?: number;
         detailobjectdistance?: number;
         wavinggrassamount?: number;
@@ -5859,19 +5860,27 @@ declare namespace TOOLKIT {
         detailscattermode?: string;
     }
     /**
+     * Color Correction Modes
+     */
+    enum ColorCorrectionMode {
+        None = 0,
+        ToGamma = 1,
+        ToLinear = 2
+    }
+    /**
      * Babylon Script Component
      * @class TerrainBuilder
      */
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
         private detailLayerContainers;
         private detailMeshSources;
-        private static perlinNoiseCache;
         static grassDryColorBias: number;
         static grassHeightScale: number;
         static grassCastShadows: boolean;
         static grassColorCurvePower: number;
         static grassColorDesaturation: number;
         static grassColorSpatialWeight: number;
+        static grassColorCorrectionMode: TOOLKIT.ColorCorrectionMode;
         static detailChunkMode: number;
         static detailChunkTargetInstances: number;
         static detailChunkWorldSize: number;
@@ -5936,9 +5945,9 @@ declare namespace TOOLKIT {
          */
         private static CreateBillboardMesh;
         /**
-         * Create crossed quads billboard (Unity GrassBillboard mode)
+         * Create a single quad billboard (Unity GrassBillboard mode)
          */
-        private static CreateCrossedQuadsBillboard;
+        private static CreateSingleQuadBillboard;
         /**
          * Apply upward-pointing normals to a mesh
          */
@@ -5948,21 +5957,21 @@ declare namespace TOOLKIT {
          */
         private static HashToUnitFloat;
         /**
-         * Get or create a cached Perlin2D noise instance for the given seed.
-         * This avoids recreating permutation tables for every grass blade.
+         * Normalize rotation angle to [0..2PI)
          */
-        private static GetPerlinNoise;
-        /**
-         * Convert Unity terrain detail rotation into Babylon terrain space.
-         * Density map axes are swapped (x/z), so we mirror the yaw to preserve painted orientation.
-         */
-        private static ConvertDetailRotation;
         private static NormalizeRotation;
         /**
-         * Convert an sRGB color value [0..1] to linear space using a gamma of ~2.2.
-         * This matches Unity's handling of color inputs for PBR lighting and preserves richer colors under linear lighting.
+         * Apply color correction based on mode
          */
-        private static sRGBToLinear;
+        private static DoColorCorrection;
+        /**
+         * Convert an sRGB color value [0..1] to linear space using a gamma of ~2.2.
+         */
+        private static GammaToLinear;
+        /**
+         * Convert a linear color value [0..1] to sRGB space using a gamma of ~2.2.
+         */
+        private static LinearToGamma;
     }
 }
 declare namespace TOOLKIT {
