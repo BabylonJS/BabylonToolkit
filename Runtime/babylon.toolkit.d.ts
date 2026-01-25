@@ -2891,6 +2891,8 @@ declare namespace TOOLKIT {
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
         getShaderName(): string;
+        setRotationEnabled(enabled: boolean): void;
+        getRotationEnabled(): boolean;
     }
     /**
      * Grass Billboard Shader Material Plugin (BABYLON.MaterialPluginBase)
@@ -2900,15 +2902,10 @@ declare namespace TOOLKIT {
         constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
-        /** This gets the uniforms used in the shader code */
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
-        /** This gets the samplers used in the shader code */
         getSamplers(samplers: string[]): void;
-        /** This get the attributes used in the shader code */
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        /** This prepares the shader defines */
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        /** This is used to update the uniforms bound to a mesh */
         bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
     }
 }
@@ -5874,12 +5871,9 @@ declare namespace TOOLKIT {
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
         private detailLayerContainers;
         private detailMeshSources;
-        static grassDryColorBias: number;
-        static grassHeightScale: number;
+        static grassRandomFlip: boolean;
         static grassCastShadows: boolean;
-        static grassColorCurvePower: number;
-        static grassColorDesaturation: number;
-        static grassColorSpatialWeight: number;
+        static grassHeightScale: number;
         static grassColorCorrectionMode: TOOLKIT.ColorCorrectionMode;
         static detailChunkMode: number;
         static detailChunkTargetInstances: number;
@@ -5948,6 +5942,14 @@ declare namespace TOOLKIT {
          * Create a single quad billboard (Unity GrassBillboard mode)
          */
         private static CreateSingleQuadBillboard;
+        /**
+         * Create crossed quads (Unity "Grass" mode, non-billboard).
+         * Two vertical quads intersecting at the center (one in X/Y, one in Z/Y).
+         *
+         * NOTE: This mesh relies on the GrassBillboardMaterial vertex shader using BOTH
+         * positionUpdated.x and positionUpdated.z when billboard rotation is disabled.
+         */
+        private static CreateCrossQuadGrass;
         /**
          * Apply upward-pointing normals to a mesh
          */
