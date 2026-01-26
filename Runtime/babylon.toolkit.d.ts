@@ -2893,6 +2893,10 @@ declare namespace TOOLKIT {
         getShaderName(): string;
         setRotationEnabled(enabled: boolean): void;
         getRotationEnabled(): boolean;
+        /** Set global wind direction used by the shader (x,y,z). Defaults to +X */
+        setWindDirection(x: number, y: number, z: number): void;
+        /** Get current wind direction Vector4 (w unused) */
+        getWindDirection(): BABYLON.Vector4;
     }
     /**
      * Grass Billboard Shader Material Plugin (BABYLON.MaterialPluginBase)
@@ -4635,6 +4639,121 @@ declare namespace TOOLKIT {
         static Utilsdefaults: (options: any, defaults: any) => any;
     }
 }
+declare namespace TOOLKIT {
+    /**
+     * Unity-Style Lens Distortion Plugin
+     * Implements barrel/pincushion distortion for post-processing
+     */
+    class LensDistortionPlugin {
+        private _distortionIntensity;
+        private _distortionIntensityX;
+        private _distortionIntensityY;
+        private _distortionCenterX;
+        private _distortionCenterY;
+        private _distortionScale;
+        private _isEnabled;
+        /**
+         * Gets the distortion intensity
+         */
+        get distortionIntensity(): number;
+        /**
+         * Sets the distortion intensity
+         */
+        set distortionIntensity(value: number);
+        /**
+         * Gets the horizontal distortion intensity
+         */
+        get distortionIntensityX(): number;
+        /**
+         * Sets the horizontal distortion intensity
+         */
+        set distortionIntensityX(value: number);
+        /**
+         * Gets the vertical distortion intensity
+         */
+        get distortionIntensityY(): number;
+        /**
+         * Sets the vertical distortion intensity
+         */
+        set distortionIntensityY(value: number);
+        /**
+         * Gets the horizontal center of distortion (0-1)
+         */
+        get distortionCenterX(): number;
+        /**
+         * Sets the horizontal center of distortion (0-1)
+         */
+        set distortionCenterX(value: number);
+        /**
+         * Gets the vertical center of distortion (0-1)
+         */
+        get distortionCenterY(): number;
+        /**
+         * Sets the vertical center of distortion (0-1)
+         */
+        set distortionCenterY(value: number);
+        /**
+         * Gets the distortion scale factor
+         */
+        get distortionScale(): number;
+        /**
+         * Sets the distortion scale factor
+         */
+        set distortionScale(value: number);
+        /**
+         * Gets whether the effect is enabled
+         */
+        get isEnabled(): boolean;
+        /**
+         * Updates the enabled state based on distortion values
+         */
+        private _updateEnabledState;
+        /**
+         * Creates a new LensDistortionPlugin
+         * @param options Plugin options (optional)
+         */
+        constructor(options?: {
+            distortionIntensity?: number;
+            distortionIntensityX?: number;
+            distortionIntensityY?: number;
+            distortionCenterX?: number;
+            distortionCenterY?: number;
+            distortionScale?: number;
+        });
+        /**
+         * Gets the uniforms for the shader
+         */
+        getUniforms(): {
+            [key: string]: {
+                type: string;
+                value: any;
+            };
+        };
+        /**
+         * Gets the GLSL fragment shader code for the distortion effect
+         */
+        getFragmentShaderCode(): string;
+        /**
+         * Gets the WGSL shader code for the distortion effect
+         */
+        getWGSLShaderCode(): string;
+        /**
+         * Creates a post-process version of the lens distortion effect
+         * @param scene The scene to create the post-process in
+         * @param camera The camera to attach the post-process to
+         * @param options Post-process options
+         * @returns The created post-process
+         */
+        static CreatePostProcess(scene: any, camera: any, options?: {
+            distortionIntensity?: number;
+            distortionIntensityX?: number;
+            distortionIntensityY?: number;
+            distortionCenterX?: number;
+            distortionCenterY?: number;
+            distortionScale?: number;
+        }): any;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -4762,6 +4881,26 @@ declare namespace TOOLKIT {
         DT_CROWDAGENT_STATE_INVALID = 0,///< The agent is not in a valid state.
         DT_CROWDAGENT_STATE_WALKING = 1,///< The agent is traversing a normal navigation mesh polygon.
         DT_CROWDAGENT_STATE_OFFMESH = 2
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Babylon Script Component
+     * @class PostProcessor
+     */
+    class PostProcessor extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+        protected static BuildPostProcessingVolume(volumeProperties: any, transform: BABYLON.TransformNode, scene: BABYLON.Scene, processorInstance?: TOOLKIT.PostProcessor): void;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -5847,6 +5986,7 @@ declare namespace TOOLKIT {
         detailresolution?: number;
         detailresolutionperpatch?: number;
         detailgrasscolorintensity?: number;
+        detailgrassreceiveshadows?: boolean;
         detailobjectdensity?: number;
         detailobjectdistance?: number;
         wavinggrassamount?: number;
@@ -5871,9 +6011,10 @@ declare namespace TOOLKIT {
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
         private detailLayerContainers;
         private detailMeshSources;
+        static grassHeightScale: number;
         static grassRandomFlip: boolean;
         static grassCastShadows: boolean;
-        static grassHeightScale: number;
+        static grassReceiveFog: boolean;
         static grassColorCorrectionMode: TOOLKIT.ColorCorrectionMode;
         static detailChunkMode: number;
         static detailChunkTargetInstances: number;
