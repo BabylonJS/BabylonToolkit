@@ -6344,6 +6344,14 @@ declare namespace TOOLKIT {
          */
         private disposeDetailLayers;
         /**
+         * Attempt to locate a serialized Unity WindZone payload for this terrain.
+         * The exporter may store WindZones outside of terrain.properties (e.g. terrain.windzones[]),
+         * so we probe a few likely metadata locations (properties, node.metadata, node.metadata.toolkit, etc).
+         *
+         * For now we return the "best" zone (prefer Directional and higher windMain).
+         */
+        static ExtractWindZoneOverride(properties: any, terrainTransform: BABYLON.TransformNode, builderInstance?: any): any | null;
+        /**
          * Build detail prototypes for the terrain
          * This recreates Unity's terrain grass and detail system in Babylon.js
          */
