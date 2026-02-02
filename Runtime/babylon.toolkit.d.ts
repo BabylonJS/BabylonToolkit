@@ -3003,26 +3003,47 @@ declare namespace TOOLKIT {
 declare namespace TOOLKIT {
     /**
      * Grass Standard Shader Material (BABYLON.StandardMaterial)
+     * Implements Unity-exact TerrainWaveGrass algorithm for rolling wave effect
+     * No billboard grass faces camera and waves with rolling bands effect
      * @class GrassStandardMaterial
      */
     class GrassStandardMaterial extends TOOLKIT.StandardShaderMaterial {
         private _windTimeAccum;
+        private _lastUpdateFrame;
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
         getShaderName(): string;
-        /** Set global wind direction used by the shader (x,y,z). Defaults to +X */
-        setWindDirection(x: number, y: number, z: number): void;
-        /** Get current wind direction Vector4 (w unused) */
-        getWindDirection(): BABYLON.Vector4;
+        getMaxDistance(): number;
+        setMaxDistance(distance: number): void;
+        getFadeStart(): number;
+        setFadeStart(distance: number): void;
+        getWaveSpeed(): number;
+        setWaveSpeed(speed: number): void;
+        getWaveSize(): number;
+        setWaveSize(size: number): void;
+        getWindAmount(): number;
+        setWindAmount(amount: number): void;
+        getWindTint(): BABYLON.Vector4;
+        setWindTint(tint: BABYLON.Vector4): void;
+        getShadowIntensity(): number;
+        setShadowIntensity(intensity: number): void;
     }
     /**
      * Grass Standard Shader Material Plugin (BABYLON.MaterialPluginBase)
+     * Implements Unity TerrainEngine.cginc TerrainWaveGrass algorithm exactly
      * @class GrassStandardMaterialPlugin
      */
     class GrassStandardMaterialPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
         constructor(customMaterial: TOOLKIT.StandardShaderMaterial, shaderName: string);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        private getWGSLVertexMainEnd;
+        private getWGSLVertexWorldPos;
+        private getGLSLVertexDefinitions;
+        private getGLSLVertexMainEnd;
+        private getGLSLVertexWorldPos;
+        private getWGSLFragmentCode;
+        private getGLSLFragmentCode;
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         getSamplers(samplers: string[]): void;
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -3033,26 +3054,49 @@ declare namespace TOOLKIT {
 declare namespace TOOLKIT {
     /**
      * Grass Billboard Shader Material (BABYLON.StandardMaterial)
+     * Implements Unity-exact TerrainWaveGrass algorithm for rolling wave effect
+     * No billboard grass faces camera and waves with rolling bands effect
      * @class GrassBillboardMaterial
      */
     class GrassBillboardMaterial extends TOOLKIT.StandardShaderMaterial {
         private _windTimeAccum;
+        private _lastUpdateFrame;
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
         getShaderName(): string;
-        /** Set global wind direction used by the shader (x,y,z). Defaults to +X */
-        setWindDirection(x: number, y: number, z: number): void;
-        /** Get current wind direction Vector4 (w unused) */
-        getWindDirection(): BABYLON.Vector4;
+        getMaxDistance(): number;
+        setMaxDistance(distance: number): void;
+        getFadeStart(): number;
+        setFadeStart(distance: number): void;
+        getWaveSpeed(): number;
+        setWaveSpeed(speed: number): void;
+        getWaveSize(): number;
+        setWaveSize(size: number): void;
+        getWindAmount(): number;
+        setWindAmount(amount: number): void;
+        getWindTint(): BABYLON.Vector4;
+        setWindTint(tint: BABYLON.Vector4): void;
+        getShadowIntensity(): number;
+        setShadowIntensity(intensity: number): void;
+        getSphericalBillboardEnabled(): boolean;
+        setSphericalBillboardEnabled(enabled: boolean): void;
     }
     /**
      * Grass Billboard Shader Material Plugin (BABYLON.MaterialPluginBase)
+     * Implements Unity TerrainEngine.cginc TerrainWaveGrass algorithm exactly
      * @class GrassBillboardMaterialPlugin
      */
     class GrassBillboardMaterialPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
         constructor(customMaterial: TOOLKIT.StandardShaderMaterial, shaderName: string);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        private getWGSLVertexMainEnd;
+        private getWGSLVertexWorldPos;
+        private getGLSLVertexDefinitions;
+        private getGLSLVertexMainEnd;
+        private getGLSLVertexWorldPos;
+        private getWGSLFragmentCode;
+        private getGLSLFragmentCode;
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         getSamplers(samplers: string[]): void;
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -3070,15 +3114,9 @@ declare namespace TOOLKIT {
         constructor(name: string, scene: BABYLON.Scene);
         update(): void;
         getShaderName(): string;
-        /** Set global wind direction used by the shader (x,y,z). Defaults to +X */
         setWindDirection(x: number, y: number, z: number): void;
-        /** Get current wind direction Vector4 (w unused) */
         getWindDirection(): BABYLON.Vector4;
     }
-    /**
-     * Tree Branch Shader Material Plugin (BABYLON.MaterialPluginBase)
-     * @class TreeBranchMaterialPlugin
-     */
     class TreeBranchMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
         constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
@@ -3088,6 +3126,14 @@ declare namespace TOOLKIT {
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
         bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Attempt to locate a serialized Unity WindZone payload for this terrain.
+         * The exporter may store WindZones outside of terrain.properties (e.g. terrain.windzones[]),
+         * so we probe a few likely metadata locations (properties, node.metadata, node.metadata.toolkit, etc).
+         *
+         * For now we return the "best" zone (prefer Directional and higher windMain).
+         */
+        static ExtractWindZoneOverride(properties: any, terrainTransform: BABYLON.TransformNode, builderInstance?: any): any | null;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -6284,27 +6330,15 @@ declare namespace TOOLKIT {
         detailpatchcount?: number;
         detailresolution?: number;
         detailresolutionperpatch?: number;
+        detailbillboardingmode?: number;
+        detailgrassshadowlevel?: number;
         detailgrassreceiveshadows?: boolean;
         detailobjectdensity?: number;
         detailobjectdistance?: number;
         wavinggrassamount?: number;
         wavinggrassspeed?: number;
-        wavinggrassstrength?: number;
+        wavinggrasssize?: number;
         wavinggrasstint?: number[];
-        windEnabled?: boolean;
-        windDirection?: number[];
-        windMain?: number;
-        windPulseFrequency?: number;
-        windPulseMagnitude?: number;
-        windTurbulence?: number;
-        windNoiseScale?: number;
-        windNoiseTextureFile?: string | null;
-        windUseNoiseTexture?: boolean;
-        windSeed?: number;
-        windGustAmount?: number;
-        wavinggrassheightattenuation?: number;
-        wavinggrassphasevariance?: number;
-        wavinggrassgustscale?: number;
         detaillayers?: TOOLKIT.IDetailLayerData[];
         detailscattermode?: string;
     }
@@ -6343,14 +6377,6 @@ declare namespace TOOLKIT {
          * Dispose all detail layer instances
          */
         private disposeDetailLayers;
-        /**
-         * Attempt to locate a serialized Unity WindZone payload for this terrain.
-         * The exporter may store WindZones outside of terrain.properties (e.g. terrain.windzones[]),
-         * so we probe a few likely metadata locations (properties, node.metadata, node.metadata.toolkit, etc).
-         *
-         * For now we return the "best" zone (prefer Directional and higher windMain).
-         */
-        static ExtractWindZoneOverride(properties: any, terrainTransform: BABYLON.TransformNode, builderInstance?: any): any | null;
         /**
          * Build detail prototypes for the terrain
          * This recreates Unity's terrain grass and detail system in Babylon.js
