@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.46.1- R1) */
+        /** Gets the toolkit framework version string (8.50.0- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3038,12 +3038,14 @@ declare namespace TOOLKIT {
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
         private getWGSLVertexMainEnd;
+        private getWGSLVaryingDefinitions;
         private getWGSLVertexWorldPos;
         private getGLSLVertexDefinitions;
         private getGLSLVertexMainEnd;
         private getGLSLVertexWorldPos;
         private getWGSLFragmentCode;
         private getGLSLFragmentCode;
+        private getGLSLFragmentDefinitions;
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         getSamplers(samplers: string[]): void;
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -3091,12 +3093,14 @@ declare namespace TOOLKIT {
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
         private getWGSLVertexMainEnd;
+        private getWGSLVaryingDefinitions;
         private getWGSLVertexWorldPos;
         private getGLSLVertexDefinitions;
         private getGLSLVertexMainEnd;
         private getGLSLVertexWorldPos;
         private getWGSLFragmentCode;
         private getGLSLFragmentCode;
+        private getGLSLFragmentDefinitions;
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         getSamplers(samplers: string[]): void;
         getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -6313,6 +6317,10 @@ declare namespace TOOLKIT {
             transforms: number[];
         }>;
         densityparam?: number;
+        usedensityscaling?: boolean;
+        density?: number;
+        targetcoverage?: number;
+        detailscattermode?: string;
     }
     /**
      * Terrain Properties Interface
