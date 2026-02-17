@@ -1,138 +1,5 @@
 declare namespace PROJECT {
     /**
-     * Detail Layer Instance Data
-     */
-    interface IDetailLayerData {
-        layerindex?: number;
-        densitymap?: number[];
-        densitywidth?: number;
-        densityheight?: number;
-        minwidth?: number;
-        maxwidth?: number;
-        minheight?: number;
-        maxheight?: number;
-        noisespread?: number;
-        bendfactor?: number;
-        healthycolor?: number[];
-        drycolor?: number[];
-        rendermode?: string;
-        useprototypemesh?: boolean;
-        useinstancing?: boolean;
-        prototypemeshnodeid?: string;
-        prototypemeshname?: string;
-        prototypetexturefile?: string;
-        prototypetexture?: any;
-        isvalid?: boolean;
-        maxdistance?: number;
-    }
-    /**
-     * Terrain Properties Interface
-     */
-    interface ITerrainProperties {
-        name?: string;
-        terrainsize?: number[];
-        basemapdistance?: number;
-        treebillboarddistance?: number;
-        treecrossfadelength?: number;
-        treedistance?: number;
-        treeinstancecount?: number;
-        detailwidth?: number;
-        detailheight?: number;
-        detailpatchcount?: number;
-        detailresolution?: number;
-        detailresolutionperpatch?: number;
-        detailobjectdensity?: number;
-        detailobjectdistance?: number;
-        detailrotationoffset?: number;
-        wavinggrassamount?: number;
-        wavinggrassspeed?: number;
-        wavinggrassstrength?: number;
-        wavinggrasstint?: number[];
-        detaillayers?: PROJECT.IDetailLayerData[];
-        detailscattermode?: string;
-    }
-    /**
-     * Babylon Script Component
-     * @class TerrainBuilder
-     */
-    class TerrainBuilder extends TOOLKIT.ScriptComponent {
-        private detailLayerContainers;
-        private detailMeshSources;
-        private detailLayerCullInfo;
-        private windTime;
-        static grassTintIntensity: number;
-        static grassDryColorBias: number;
-        static grassHeightScale: number;
-        static grassCastShadows: boolean;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected update(): void;
-        protected destroy(): void;
-        /**
-         * Update wind animation for waving grass
-         */
-        private updateWindAnimation;
-        /**
-         * Per-frame culling for detail layer instances (Unity-style max distance)
-         */
-        private updateDetailLayerCulling;
-        /**
-         * Dispose all detail layer instances
-         */
-        private disposeDetailLayers;
-        /**
-         * Build detail prototypes for the terrain
-         * This recreates Unity's terrain grass and detail system in Babylon.js
-         */
-        static BuildDetailPrototypes(properties: PROJECT.ITerrainProperties, terrainTransform: BABYLON.TransformNode, scene: BABYLON.Scene, builderInstance?: PROJECT.TerrainBuilder): void;
-        /**
-         * Build mesh-based detail layer (3D mesh grass/rocks/etc)
-         */
-        private static BuildMeshDetailLayer;
-        /**
-         * Build billboard-based detail layer (2D grass billboards)
-         */
-        private static BuildBillboardDetailLayer;
-        /**
-         * Generate detail instances from Unity's density map
-         */
-        private static GenerateInstancesFromDensityMap;
-        /**
-         * Deterministic hash-based RNG for stable grass placement
-         */
-        private static HashToUnitFloat;
-        /**
-         * Convert an sRGB color value [0..1] to linear space using a gamma of ~2.2.
-         * This matches Unity's handling of color inputs for PBR lighting and preserves richer colors under linear lighting.
-         */
-        private static sRGBToLinear;
-        /**
-         * Convert Unity terrain detail rotation into Babylon terrain space.
-         * Density map axes are swapped (x/z), so we mirror the yaw to preserve painted orientation.
-         */
-        private static ConvertDetailRotation;
-        private static NormalizeRotation;
-        /**
-         * Create thin instances for maximum performance
-         */
-        private static CreateThinInstances;
-        /**
-         * Create billboard mesh for grass
-         */
-        private static CreateBillboardMesh;
-        /**
-         * Create crossed quads billboard (Unity GrassBillboard mode)
-         */
-        private static CreateCrossedQuadsBillboard;
-        /**
-         * Create vertical billboard (Unity Grass mode - faces camera)
-         */
-        private static CreateVerticalBillboard;
-        private static ApplyUpNormals;
-    }
-}
-declare namespace PROJECT {
-    /**
     * Babylon Script Component
     * @class CheckpointManager
     */
@@ -623,6 +490,9 @@ declare namespace PROJECT {
         topSpeedDampener: number;
         lowSpeedSteering: number;
         highSpeedSteering: number;
+        brakeSteerAssist: number;
+        brakeSteerMinFactor: number;
+        brakeSteerMaxSpeedMph: number;
         donutEngineFactor: number;
         donutTurningRadius: number;
         donutTransitionSpeed: number;
@@ -644,6 +514,7 @@ declare namespace PROJECT {
         maxReversePower: number;
         handBrakingForce: number;
         handBrakingTimer: number;
+        footBrakingFactor: number;
         skidRotationTimeout: number;
         linearBrakingForce: number;
         burnoutFrictionSlip: number;
