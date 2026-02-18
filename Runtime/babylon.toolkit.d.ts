@@ -4124,28 +4124,30 @@ declare namespace TOOLKIT {
         private _bypasseffects;
         private _bypassreverbzones;
         private _bypasslistenereffects;
-        private _enablelegacyaudio;
         private _initializedReadyInstance;
         private _isAudioPlaying;
         private _isAudioPaused;
+        private _isAudioSpatial;
         getSoundClip(): BABYLON.StaticSound | BABYLON.Sound;
         /** Register handler that is triggered when the audio clip is ready */
         onReadyObservable: BABYLON.Observable<BABYLON.StaticSound | BABYLON.Sound>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
+        protected after(): void;
         protected destroy(): void;
         protected awakeAudioSource(): Promise<void>;
         protected startAudioSource(): void;
+        protected updateAudioSource(): Promise<void>;
         protected destroyAudioSource(): void;
-        /**
-         * Gets the ready status for track
-         */
-        isReady(): boolean;
         /**
          * Is legacy audio engine enabled
          */
         isLegacy(): boolean;
+        /**
+         * Gets the ready status for track
+         */
+        isReady(): boolean;
         /**
          * Gets the playing status for track
          */
@@ -4243,10 +4245,6 @@ declare namespace TOOLKIT {
          */
         getSpatialSound(): BABYLON.AbstractSpatialAudio;
         /**
-         * Sets the spatial sound option of the track (BABYLON.StaticSound)
-         * @param value Define the value of the spatial sound
-         */
-        /**
          * Attaches the spatial sound to the transform node (BABYLON.StaticSound)
          * @param transform Define the transform node to attach the spatial sound to
          */
@@ -4283,8 +4281,6 @@ declare namespace TOOLKIT {
         static AttachSpatialCamera(node: BABYLON.Node): Promise<void>;
         /** Detaches Current Audio Spatial Camera */
         static DetachSpatialCamera(): Promise<void>;
-        /** Manually Update Spatial Camera Position And Rotation */
-        static UpdateSpatialCamera(position: BABYLON.Vector3, rotation: BABYLON.Quaternion): Promise<void>;
         /** Create Audio Engine Version 2 Buffered Sound Instance */
         static CreateSoundBuffer(source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options?: Partial<BABYLON.IStaticSoundBufferOptions>): Promise<BABYLON.StaticSoundBuffer>;
         /** Create Audio Engine Version 2 Static Sound Instance */
