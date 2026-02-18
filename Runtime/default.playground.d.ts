@@ -678,12 +678,12 @@ declare namespace PROJECT {
         fastCameraShake: boolean;
         lowSpeedShaking: number;
         highSpeedShaking: number;
+        autoAttachCamera: boolean;
         private firstPerson;
         private cameraPivot;
         private targetEulers;
         private cameraRotation;
         private cameraPivotOffset;
-        private autoAttachCamera;
         private motionBlurAttached;
         protected m_freeCamera: BABYLON.FreeCamera;
         protected m_motionBlur: BABYLON.MotionBlurPostProcess;
