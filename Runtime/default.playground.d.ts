@@ -526,8 +526,9 @@ declare namespace PROJECT {
         burnoutTriggerMark: number;
         burnoutTransition: number;
         enableAutoBurnouts: boolean;
-        driftTriggerAngle: number;
+        driftMaximumSpeed: number;
         driftTriggerSpeed: number;
+        driftSteerThreshold: number;
         enableAutoDrifting: boolean;
         penaltyGroundTag: string;
         minPenaltySpeed: number;

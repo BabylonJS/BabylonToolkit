@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.51.2- R1) */
+        /** Gets the toolkit framework version string (8.52.0- R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4558,37 +4558,11 @@ declare namespace TOOLKIT {
         burnoutFrictionUpdateSpeed: number;
         handbrakeWheelStiffness: number;
         burnoutWheelStiffness: number;
-        driftWheelStiffness: number;
-        static MUSTANG_GT_FRONT_WHEEL_CONFIG: {
-            suspensionRestLength: number;
-            maxSuspensionTravel: number;
-            radius: number;
-            suspensionStiffness: number;
-            dampingCompression: number;
-            dampingRelaxation: number;
-            frictionSlip: number;
-            rollInfluence: number;
-            maxSuspensionForce: number;
-            isFrontWheel: boolean;
-            invertDirection: boolean;
-        };
-        static MUSTANG_GT_REAR_WHEEL_CONFIG: {
-            suspensionRestLength: number;
-            maxSuspensionTravel: number;
-            radius: number;
-            suspensionStiffness: number;
-            dampingCompression: number;
-            dampingRelaxation: number;
-            frictionSlip: number;
-            rollInfluence: number;
-            maxSuspensionForce: number;
-            isFrontWheel: boolean;
-            invertDirection: boolean;
-        };
         stabilizeVelocity: boolean;
         multiRaycastEnabled: boolean;
         multiRaycastMultiplier: number;
         enableRoughTrackLogging: boolean;
+        enableDriftDebugLogging: boolean;
         private frameCounter;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
@@ -4609,15 +4583,18 @@ declare namespace TOOLKIT {
         rearLeftContactTag: string;
         rearRightContactTag: string;
         isDriftModeEnabled: boolean;
+        driftWheelStiffness: number;
         driftSpeedThreshold: number;
-        driftMaxSpeed: number;
+        driftMaximumSpeed: number;
         driftSteeringThreshold: number;
-        driftGripReduction: number;
         driftTransitionSpeed: number;
+        driftActivationThreshold: number;
+        driftDeactivationThreshold: number;
+        driftVisualSkidThreshold: number;
         private driftIntensity;
         private previousSteeringInput;
         private steeringChangeRate;
-        private driftDirection;
+        private driftModeActive;
         arcadeSteerAssistFactor: number;
         handBrakePreserveFactor: number;
         donutModeTransitionFactor: number;
@@ -4756,12 +4733,10 @@ declare namespace TOOLKIT {
         private calculateSteeringChangeRate;
         isDriftSystemEnabled(): boolean;
         setDriftSystemEnabled(enabled: boolean): void;
-        setDriftMaxSpeed(maxSpeed: number): void;
-        getDriftMaxSpeed(): number;
+        setDriftMaximumSpeed(maxSpeed: number): void;
+        getDriftMaximumSpeed(): number;
         setDriftSpeedThreshold(threshold: number): void;
         getDriftSpeedThreshold(): number;
-        setDriftGripReduction(reduction: number): void;
-        getDriftGripReduction(): number;
         setDriftSteeringThreshold(threshold: number): void;
         getDriftSteeringThreshold(): number;
         /**
@@ -4769,13 +4744,11 @@ declare namespace TOOLKIT {
          * @param settings - Object containing drift settings.
          * @param settings.maxSpeed - Maximum speed for drift effect.
          * @param settings.speedThreshold - Minimum speed to start drifting.
-         * @param settings.gripReduction - Grip reduction factor (0.0-1.0).
          * @param settings.steeringThreshold - Minimum steering input to trigger drift.
          */
         setDriftSettings(settings: {
             maxSpeed?: number;
             speedThreshold?: number;
-            gripReduction?: number;
             steeringThreshold?: number;
         }): void;
         getDriftIntensity(): number;
@@ -4848,6 +4821,7 @@ declare namespace TOOLKIT {
         rotationBoost: number;
         locked: boolean;
         skidinfo: number;
+        driftInfo: number;
         skidThreshold: number;
         lateralImpulse: number;
         constructor(options: any);
@@ -5275,6 +5249,8 @@ declare namespace TOOLKIT {
         getPhysicsSteeringAngle(wheel: number): number;
         setPhysicsSteeringAngle(angle: number, wheel: number): void;
         resetDefaultFrictionSlip(): void;
+        getCenterOfMassOffset(): BABYLON.Vector3;
+        setCenterOfMassOffset(center: BABYLON.Vector3): void;
         setEnableFrictionUpdates(enabled: boolean): void;
         getEnableFrictionUpdates(): boolean;
         getSkiddingFrictionUpdateSpeed(): number;
@@ -5362,12 +5338,10 @@ declare namespace TOOLKIT {
         setDonutTransitionSpeed(speed: number): void;
         isDriftSystemEnabled(): boolean;
         setDriftSystemEnabled(enabled: boolean): void;
-        setDriftMaxSpeed(maxSpeed: number): void;
-        getDriftMaxSpeed(): number;
+        setDriftMaximumSpeed(maxSpeed: number): void;
+        getDriftMaximumSpeed(): number;
         setDriftSpeedThreshold(threshold: number): void;
         getDriftSpeedThreshold(): number;
-        setDriftGripReduction(reduction: number): void;
-        getDriftGripReduction(): number;
         setDriftSteeringThreshold(threshold: number): void;
         getDriftSteeringThreshold(): number;
         setLaunchBoostEnabled(enabled: boolean): void;
