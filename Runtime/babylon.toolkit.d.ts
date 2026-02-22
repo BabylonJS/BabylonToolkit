@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.52.0- R1) */
+        /** Gets the toolkit framework version string (8.52.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4550,6 +4550,43 @@ declare namespace TOOLKIT {
         smoothFlyingImpulse: number;
         stabilizingForce: number;
         maxImpulseForce: number;
+        speedDampingEnabled: boolean;
+        speedDampingMinSpeed: number;
+        speedDampingMaxSpeed: number;
+        speedDampingMaxScale: number;
+        frontDampingBias: number;
+        rearDampingBias: number;
+        bumpStopEnabled: boolean;
+        bumpStopStartRatio: number;
+        bumpStopStiffnessScale: number;
+        pitchLoadBalanceEnabled: boolean;
+        pitchLoadBalanceSpeed: number;
+        pitchLoadBalanceFront: number;
+        pitchLoadBalanceRear: number;
+        downforceFrontBias: number;
+        downforceBlendRate: number;
+        downforceMinContacts: number;
+        downforceHalfWheelbase: number;
+        heaveDampingEnabled: boolean;
+        heaveDampingStrength: number;
+        heaveDampingStartKmh: number;
+        heaveDampingFullKmh: number;
+        pitchDampingEnabled: boolean;
+        pitchDampingStrength: number;
+        pitchDampingStartKmh: number;
+        chassisLevelingEnabled: boolean;
+        chassisLevelingStrength: number;
+        chassisLevelingStartKmh: number;
+        maxPitchAngleDeg: number;
+        pitchTrimEnabled: boolean;
+        pitchTrimStrength: number;
+        pitchTrimStartDeg: number;
+        pitchTrimMaxDeg: number;
+        suspensionLockEnabled: boolean;
+        suspensionLockStartKmh: number;
+        suspensionLockFullKmh: number;
+        suspensionLockStrength: number;
+        suspensionLockMaxCompress: number;
         enableFrictionUpdates: boolean;
         maxVisualExtensionLimit: number;
         maxVisualCompressionLimit: number;
@@ -4564,6 +4601,7 @@ declare namespace TOOLKIT {
         enableRoughTrackLogging: boolean;
         enableDriftDebugLogging: boolean;
         private frameCounter;
+        private _smoothedYawVel;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
         isArcadeHandBrakeActive: boolean;
@@ -4613,6 +4651,9 @@ declare namespace TOOLKIT {
         private burnoutCooldownTimer;
         private burnoutModeEngaged;
         private burnoutPowerBoost;
+        private _downforceSmoothed;
+        enableStabilityLogging: boolean;
+        stabilityLogInterval: number;
         private baseRotationBoost;
         private donutRotationBoost;
         private currentRotationBoost;
@@ -4625,6 +4666,22 @@ declare namespace TOOLKIT {
         private currentLaunchBoost;
         private launchBoostActive;
         private launchBoostAccumulation;
+        private skidMomentumBank;
+        private skidMomentumTimer;
+        skidMomentumScale: number;
+        skidMomentumDecay: number;
+        skidMomentumWindow: number;
+        skidBurnoutComboEnabled: boolean;
+        skidComboBurstDuration: number;
+        skidComboBurstMaxMul: number;
+        skidComboBurstMinSpeedMph: number;
+        private skidComboBurstTimer;
+        private skidComboBurstMul;
+        velocityRealignEnabled: boolean;
+        velocityRealignStrength: number;
+        velocityRealignSnapFraction: number;
+        velocityRealignMinSpeed: number;
+        enableBurnoutLogging: boolean;
         private currentSteeringInput;
         private handbrakeAngularVelocity;
         private handbrakeEngaged;
@@ -4697,6 +4754,14 @@ declare namespace TOOLKIT {
         getCurrentRotationBoost(): number;
         getArcadeWheelSkidTimer(): number;
         getArcadeHandBrakingTimer(): number;
+        /** Current banked skid energy (0 = empty, 1+ = strong combo hit ready).  */
+        getSkidMomentumBank(): number;
+        /** Seconds remaining in the combo window (0 = expired). */
+        getSkidMomentumTimer(): number;
+        /** True when a usable skid-to-burnout combo is banked and still within the window. */
+        isSkidBurnoutComboReady(): boolean;
+        /** Force-clear the combo bank (e.g. on crash or reset). */
+        clearSkidMomentumBank(): void;
         setBurnoutCooldownTime(time: number): void;
         getBurnoutCooldownTime(): number;
         setArcadeWheelSkidLimit(limit: number): void;
@@ -4719,7 +4784,10 @@ declare namespace TOOLKIT {
         getStabilizeVelocityEnabled(): boolean;
         setSkipFrictionSlipUpdate(skip: boolean): void;
         getSkipFrictionSlipUpdate(): boolean;
+        private applyHighSpeedHeaveDamping;
+        private applyHighSpeedPitchDamping;
         private applyVelocityBasedStabilization;
+        private getAbsoluteSpeedKmh;
         private applyPredictiveNormalStabilization;
         private updateBurnoutCoefficient;
         private updateBurnoutDriveState;
@@ -5392,6 +5460,123 @@ declare namespace TOOLKIT {
         setMaxVisualCompressionLimit(limit: number): void;
         setLoggingEnabled(enabled: boolean): void;
         getLoggingEnabled(): boolean;
+        /** Enables concise stability diagnostics: speed, contacts, pitch, suspension, downforce. */
+        setStabilityLoggingEnabled(enabled: boolean): void;
+        getStabilityLoggingEnabled(): boolean;
+        /** Sets the frame interval between periodic stability log lines (default 120 = 2 s at 60 fps). */
+        setStabilityLogInterval(frames: number): void;
+        getStabilityLogInterval(): number;
+        /** Master switch for speed-scaled suspension damping. */
+        setSpeedDampingEnabled(enabled: boolean): void;
+        getSpeedDampingEnabled(): boolean;
+        /** km/h at which damping starts scaling (default 50). */
+        setSpeedDampingMinSpeed(kmh: number): void;
+        getSpeedDampingMinSpeed(): number;
+        /** km/h at which damping reaches its maximum scale (default 200). */
+        setSpeedDampingMaxSpeed(kmh: number): void;
+        getSpeedDampingMaxSpeed(): number;
+        /** Maximum damping multiplier at top speed (default 2.5). */
+        setSpeedDampingMaxScale(scale: number): void;
+        getSpeedDampingMaxScale(): number;
+        /** Front axle damping bias relative to speed scale (default 1.4 – more anti-nosedive). */
+        setFrontDampingBias(bias: number): void;
+        getFrontDampingBias(): number;
+        /** Rear axle damping bias relative to speed scale (default 1.0). */
+        setRearDampingBias(bias: number): void;
+        getRearDampingBias(): number;
+        /** Master switch for progressive bump-stop. */
+        setBumpStopEnabled(enabled: boolean): void;
+        getBumpStopEnabled(): boolean;
+        /** Travel fraction (0–1) where bump-stop begins stiffening (default 0.75 = 75%). */
+        setBumpStopStartRatio(ratio: number): void;
+        getBumpStopStartRatio(): number;
+        /** Peak spring stiffness multiplier at full bump-stop (default 6.0). */
+        setBumpStopStiffnessScale(scale: number): void;
+        getBumpStopStiffnessScale(): number;
+        /** Master switch for speed-based front/rear pitch load balancing. */
+        setPitchLoadBalanceEnabled(enabled: boolean): void;
+        getPitchLoadBalanceEnabled(): boolean;
+        /** km/h at which full pitch-balance effect is reached (default 80). */
+        setPitchLoadBalanceSpeed(kmh: number): void;
+        getPitchLoadBalanceSpeed(): number;
+        /** Front spring stiffness multiplier at pitchLoadBalanceSpeed (default 1.5). */
+        setPitchLoadBalanceFront(mult: number): void;
+        getPitchLoadBalanceFront(): number;
+        /** Rear spring stiffness multiplier at pitchLoadBalanceSpeed (default 0.95). */
+        setPitchLoadBalanceRear(mult: number): void;
+        getPitchLoadBalanceRear(): number;
+        /** Front/rear fraction of downforce to apply at front axle anchor (0.5 = even, default 0.45). */
+        setDownforceFrontBias(bias: number): void;
+        getDownforceFrontBias(): number;
+        /** Low-pass blend rate for smoothing downforce transitions, 0–1 (default 0.12). */
+        setDownforceBlendRate(rate: number): void;
+        getDownforceBlendRate(): number;
+        /** Minimum wheels-on-ground required to apply any downforce (default 2). */
+        setDownforceMinContacts(count: number): void;
+        getDownforceMinContacts(): number;
+        /** Approximate half-wheelbase [m] for front/rear downforce anchor split (default 1.4). */
+        setDownforceHalfWheelbase(meters: number): void;
+        getDownforceHalfWheelbase(): number;
+        /** Enable/disable direct heave (vertical) velocity damping at high speed. Default true. */
+        setHeaveDampingEnabled(enabled: boolean): void;
+        getHeaveDampingEnabled(): boolean;
+        /** Fraction of upward velocity removed per tick at full effect, 0–1 (default 0.12). */
+        setHeaveDampingStrength(strength: number): void;
+        getHeaveDampingStrength(): number;
+        /** Speed [km/h] at which heave damping begins to engage (default 140). */
+        setHeaveDampingStartKmh(kmh: number): void;
+        getHeaveDampingStartKmh(): number;
+        /** Speed [km/h] at which heave damping reaches full strength (default 260). */
+        setHeaveDampingFullKmh(kmh: number): void;
+        getHeaveDampingFullKmh(): number;
+        /** Enable/disable direct pitch/roll angular damping at high speed. Default true. */
+        setPitchDampingEnabled(enabled: boolean): void;
+        getPitchDampingEnabled(): boolean;
+        /** Fraction of pitch/roll angular velocity removed per tick, 0–1 (default 0.09). */
+        setPitchDampingStrength(strength: number): void;
+        getPitchDampingStrength(): number;
+        /** Speed [km/h] at which pitch damping begins to engage (default 100). */
+        setPitchDampingStartKmh(kmh: number): void;
+        getPitchDampingStartKmh(): number;
+        /** Enable/disable active chassis leveling to restore flat orientation at speed. Default true. */
+        setChassisLevelingEnabled(enabled: boolean): void;
+        getChassisLevelingEnabled(): boolean;
+        /** Corrective angular velocity injected per unit pitch error per speedFactor (default 0.025). */
+        setChassisLevelingStrength(strength: number): void;
+        getChassisLevelingStrength(): number;
+        /** Speed [km/h] where chassis leveling begins (default 80). */
+        setChassisLevelingStartKmh(kmh: number): void;
+        getChassisLevelingStartKmh(): number;
+        /** Hard cap on nose-down chassis pitch angle at speed [degrees]. 0 = disabled. Default 3.0. */
+        setMaxPitchAngleDeg(deg: number): void;
+        getMaxPitchAngleDeg(): number;
+        /** Enable/disable adaptive pitch-trim that shifts downforce to rear when nose-diving. Default true. */
+        setPitchTrimEnabled(enabled: boolean): void;
+        getPitchTrimEnabled(): boolean;
+        /** Max fraction of downforce shifted to rear at full nose-down (0=off, 1=all rear). Default 0.90. */
+        setPitchTrimStrength(strength: number): void;
+        getPitchTrimStrength(): number;
+        /** Nose-down pitch angle [degrees] where trim starts. Default 1.0. */
+        setPitchTrimStartDeg(deg: number): void;
+        getPitchTrimStartDeg(): number;
+        /** Nose-down pitch angle [degrees] where trim reaches full pitchTrimStrength. Default 4.0. */
+        setPitchTrimMaxDeg(deg: number): void;
+        getPitchTrimMaxDeg(): number;
+        /** Enable/disable high-speed suspension compression cap (prevents wheel-in-body at extreme compression). Default false. */
+        setSuspensionLockEnabled(enabled: boolean): void;
+        getSuspensionLockEnabled(): boolean;
+        /** Speed [km/h] where suspension lock begins (~93 mph). Default 150. */
+        setSuspensionLockStartKmh(kmh: number): void;
+        getSuspensionLockStartKmh(): number;
+        /** Speed [km/h] where suspension lock reaches full strength (~143 mph). Default 230. */
+        setSuspensionLockFullKmh(kmh: number): void;
+        getSuspensionLockFullKmh(): number;
+        /** Fraction of over-compression resistance at full lock speed, 0–1. Default 0.40. */
+        setSuspensionLockStrength(strength: number): void;
+        getSuspensionLockStrength(): number;
+        /** Max compression ratio allowed before the lock resists (0=none, 1=full). Default 0.40 (40%). */
+        setSuspensionLockMaxCompress(ratio: number): void;
+        getSuspensionLockMaxCompress(): number;
         setMultiRaycastEnabled(enable: boolean): void;
         getMultiRaycastEnabled(): boolean;
         setMultiRaycastRadiusScale(scale: number): void;

@@ -615,6 +615,7 @@ declare namespace PROJECT {
         protected updateVehicleState(): void;
         protected destroyVehicleState(): void;
         private burnoutButton;
+        private donutButton;
         private burnoutTimer;
         private restoreTimer;
         private cooldownTimer;
@@ -635,7 +636,7 @@ declare namespace PROJECT {
         /** Gets the current vehicle lateral slip angle in radians. */
         getCurrentSlipRadians(signed: boolean): number;
         /** Drives the raycast vehicle with the specfied movement properties. */
-        drive(throttle: number, steering: number, braking: boolean, burnout: boolean, booster?: number, autopilot?: boolean, nos?: boolean): void;
+        drive(throttle: number, steering: number, braking: boolean, burnout: boolean, booster?: number, autopilot?: boolean, nos?: boolean, donut?: boolean): void;
         private syncVehicleState;
         private currentPitch;
         private currentRoll;
@@ -720,6 +721,8 @@ declare namespace PROJECT {
         rightHandBrake: number;
         leftBurnoutBoost: number;
         rightBurnoutBoost: number;
+        leftDonutBoost: number;
+        rightDonutBoost: number;
     }
     class VehicleInputController extends TOOLKIT.ScriptComponent {
         private playerDeltaX;
@@ -811,6 +814,10 @@ declare namespace PROJECT {
         buttonBurnout: number;
         leftWheelBurnout: number;
         rightWheelBurnout: number;
+        keyboardDonut: number;
+        buttonDonut: number;
+        leftWheelDonut: number;
+        rightWheelDonut: number;
         raceLineNode: number;
         minLookAhead: number;
         maxLookAhead: number;
