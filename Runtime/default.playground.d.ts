@@ -422,6 +422,10 @@ declare namespace PROJECT {
         private engineBraking;
         private shiftHysteresis;
         private velocityCompensation;
+        private visualSteerBoost;
+        private steeringGradient;
+        private ackermanSteerLeft;
+        private ackermanSteerRight;
         private SPIN_FL_Rotation;
         private SPIN_FR_Rotation;
         private SPIN_RL_Rotation;
@@ -490,6 +494,7 @@ declare namespace PROJECT {
         topSpeedDampener: number;
         lowSpeedSteering: number;
         highSpeedSteering: number;
+        gravityMultiplier: number;
         brakeSteerAssist: number;
         brakeSteerMinFactor: number;
         brakeSteerMaxSpeedMph: number;
@@ -504,10 +509,8 @@ declare namespace PROJECT {
         raycastDriveType: number;
         maxRadiusMultiplier: number;
         stabilizeVelocity: boolean;
-        gravitationalForce: number;
-        smoothFlyingForce: number;
-        transmissionRatio: number;
         differentialRatio: number;
+        transmissionRatio: number;
         minBoosterSpeed: number;
         maxBoosterTime: number;
         maxFrontBraking: number;
@@ -528,8 +531,8 @@ declare namespace PROJECT {
         enableAutoBurnouts: boolean;
         driftMaximumSpeed: number;
         driftTriggerSpeed: number;
-        driftSteerThreshold: number;
-        enableAutoDrifting: boolean;
+        driftTriggerAngle: number;
+        foorBrakeDrifting: boolean;
         penaltyGroundTag: string;
         minPenaltySpeed: number;
         linearWheelDrag: number;
@@ -635,6 +638,7 @@ declare namespace PROJECT {
         getCurrentSlipAngle(signed: boolean): number;
         /** Gets the current vehicle lateral slip angle in radians. */
         getCurrentSlipRadians(signed: boolean): number;
+        private ackermanSteering;
         /** Drives the raycast vehicle with the specfied movement properties. */
         drive(throttle: number, steering: number, braking: boolean, burnout: boolean, booster?: number, autopilot?: boolean, nos?: boolean, donut?: boolean): void;
         private syncVehicleState;

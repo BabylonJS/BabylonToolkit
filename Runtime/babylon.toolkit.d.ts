@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.52.0 - R1) */
+        /** Gets the toolkit framework version string (8.52.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4538,6 +4538,7 @@ declare namespace TOOLKIT {
      * @script HavokRaycastVehicle
      */
     class HavokRaycastVehicle {
+        static GROUND_MESH_TAG: string;
         static WHEEL_SPEED_SCALE: number;
         chassisBody: BABYLON.PhysicsBody;
         wheelInfos: TOOLKIT.HavokWheelInfo[];
@@ -4546,64 +4547,42 @@ declare namespace TOOLKIT {
         indexRightAxis: number;
         indexForwardAxis: number;
         indexUpAxis: number;
-        minimumWheelContacts: number;
-        smoothFlyingImpulse: number;
-        stabilizingForce: number;
-        maxImpulseForce: number;
-        speedDampingEnabled: boolean;
-        speedDampingMinSpeed: number;
-        speedDampingMaxSpeed: number;
-        speedDampingMaxScale: number;
-        frontDampingBias: number;
-        rearDampingBias: number;
-        bumpStopEnabled: boolean;
-        bumpStopStartRatio: number;
-        bumpStopStiffnessScale: number;
-        pitchLoadBalanceEnabled: boolean;
-        pitchLoadBalanceSpeed: number;
-        pitchLoadBalanceFront: number;
-        pitchLoadBalanceRear: number;
-        downforceFrontBias: number;
-        downforceBlendRate: number;
-        downforceMinContacts: number;
-        downforceHalfWheelbase: number;
-        heaveDampingEnabled: boolean;
-        heaveDampingStrength: number;
-        heaveDampingStartKmh: number;
-        heaveDampingFullKmh: number;
-        pitchDampingEnabled: boolean;
-        pitchDampingStrength: number;
-        pitchDampingStartKmh: number;
-        chassisLevelingEnabled: boolean;
-        chassisLevelingStrength: number;
-        chassisLevelingStartKmh: number;
-        maxPitchAngleDeg: number;
-        pitchTrimEnabled: boolean;
-        pitchTrimStrength: number;
-        pitchTrimStartDeg: number;
-        pitchTrimMaxDeg: number;
-        suspensionLockEnabled: boolean;
-        suspensionLockStartKmh: number;
-        suspensionLockFullKmh: number;
-        suspensionLockStrength: number;
-        suspensionLockMaxCompress: number;
         enableFrictionUpdates: boolean;
-        maxVisualExtensionLimit: number;
-        maxVisualCompressionLimit: number;
         currentVehicleSpeedKmHour: number;
+        frontPartialGripCompensation: number;
+        frontRecontactGripBoost: number;
         skiddingFrictionUpdateSpeed: number;
         burnoutFrictionUpdateSpeed: number;
         handbrakeWheelStiffness: number;
         burnoutWheelStiffness: number;
+        driftWheelStiffness: number;
+        arcadeSteeringAssist: number;
+        correctedAngularVelocity: BABYLON.Vector3;
+        angularDamping: BABYLON.Vector3;
         stabilizeVelocity: boolean;
-        multiRaycastEnabled: boolean;
+        adaptiveRaycastEnabled: boolean;
         multiRaycastMultiplier: number;
-        enableRoughTrackLogging: boolean;
-        enableDriftDebugLogging: boolean;
+        useSphericalShapeCasting: boolean;
+        shapeCastRadiusMultiplier: number;
+        shapeCastNormalSmoothing: number;
+        shapeCastSkidSmoothing: number;
+        shapeCastSuspensionSmoothing: number;
+        private shapeCastSphereShapes;
+        private shapeCastLocalResult;
+        private shapeCastWorldResult;
+        private shapeCastPrevNormals;
+        private shapeCastPrevHitPoints;
+        private shapeCastPrevDistances;
+        private shapeCastNormalInitialized;
+        private shapeCastSceneRef;
+        private previousWheelForces;
+        private _proxyNormalTemp;
+        private _smoothNormalFirstActive;
+        enableTrackLogging: boolean;
         private frameCounter;
-        private _smoothedYawVel;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
+        isArcadeFootBrakeActive: boolean;
         isArcadeHandBrakeActive: boolean;
         isArcadeWheelSkidActive: boolean;
         arcadeFrontSideFactor: number;
@@ -4613,6 +4592,19 @@ declare namespace TOOLKIT {
         arcadeHandBrakingDelay: number;
         arcadeHandBrakingTimer: number;
         arcadeHandBrakeTransitionFactor: number;
+        skidFxSkidInfoThreshold: number;
+        wallScrapeFxMinSpeedKmh: number;
+        wallScrapeFxNormalYMax: number;
+        wallScrapeFxSideImpulseMin: number;
+        wallScrapeFxMinSuspensionJounce: number;
+        wallScrapeFxMinSpeedDropKmhPerSec: number;
+        wallScrapeFxMinLateralJerk: number;
+        wallScrapeFxHoldTime: number;
+        curbRumbleFxMinSpeedKmh: number;
+        curbRumbleFxNormalYMin: number;
+        curbRumbleFxNormalYMax: number;
+        curbRumbleFxMinSuspensionJounce: number;
+        curbRumbleFxHoldTime: number;
         minPenaltySpeed: number;
         penaltyWheelSlip: number;
         penaltyGroundTag: string;
@@ -4621,20 +4613,12 @@ declare namespace TOOLKIT {
         rearLeftContactTag: string;
         rearRightContactTag: string;
         isDriftModeEnabled: boolean;
-        driftWheelStiffness: number;
         driftSpeedThreshold: number;
-        driftMaximumSpeed: number;
+        driftMaxSpeed: number;
         driftSteeringThreshold: number;
+        driftGripReduction: number;
         driftTransitionSpeed: number;
-        driftActivationThreshold: number;
-        driftDeactivationThreshold: number;
-        driftVisualSkidThreshold: number;
         private driftIntensity;
-        private previousSteeringInput;
-        private steeringChangeRate;
-        private driftModeActive;
-        arcadeSteerAssistFactor: number;
-        handBrakePreserveFactor: number;
         donutModeTransitionFactor: number;
         donutEngineMultiplier: number;
         donutTransitionSpeed: number;
@@ -4651,9 +4635,6 @@ declare namespace TOOLKIT {
         private burnoutCooldownTimer;
         private burnoutModeEngaged;
         private burnoutPowerBoost;
-        private _downforceSmoothed;
-        enableStabilityLogging: boolean;
-        stabilityLogInterval: number;
         private baseRotationBoost;
         private donutRotationBoost;
         private currentRotationBoost;
@@ -4666,27 +4647,33 @@ declare namespace TOOLKIT {
         private currentLaunchBoost;
         private launchBoostActive;
         private launchBoostAccumulation;
-        private skidMomentumBank;
-        private skidMomentumTimer;
-        skidMomentumScale: number;
-        skidMomentumDecay: number;
-        skidMomentumWindow: number;
-        skidBurnoutComboEnabled: boolean;
-        skidComboBurstDuration: number;
-        skidComboBurstMaxMul: number;
-        skidComboBurstMinSpeedMph: number;
-        private skidComboBurstTimer;
-        private skidComboBurstMul;
-        velocityRealignEnabled: boolean;
-        velocityRealignStrength: number;
-        velocityRealignSnapFraction: number;
-        velocityRealignMinSpeed: number;
-        enableBurnoutLogging: boolean;
         private currentSteeringInput;
         private handbrakeAngularVelocity;
         private handbrakeEngaged;
         private raycastResult;
+        private shapeCastQuery;
         private skipFrictionSlipUpdate;
+        private shouldPlaySkidFxSignal;
+        private shouldPlaySkidFxPerWheel;
+        private shouldPlayDriftFxSignal;
+        private shouldPlayDriftFxPerWheel;
+        driftFxIntensityThreshold: number;
+        private shouldPlayWallScrapeFxSignal;
+        private shouldPlayWallScrapeFxPerWheel;
+        private shouldPlayCurbRumbleFxSignal;
+        private shouldPlayCurbRumbleFxPerWheel;
+        private wallScrapeFxGlobalTimer;
+        private wallScrapeFxPerWheelTimer;
+        private curbRumbleFxPerWheelTimer;
+        private previousContactFxVelocity;
+        private previousContactFxLocalLateralSpeed;
+        private hasPreviousContactFxSample;
+        private previousSuspensionLengthForContactFx;
+        private previousSuspensionLengthForRoughness;
+        private previousAngularVelocity;
+        private hasValidPreviousAngularVelocity;
+        private currentTimeStep;
+        private previousYawBudget;
         constructor(options: any);
         addToWorld(world: any): void;
         addWheel(options: any): number;
@@ -4701,6 +4688,8 @@ declare namespace TOOLKIT {
         setRearWheelsRotationBoost(boost: number): void;
         setFrontWheelsRotationBoost(boost: number): void;
         setArcadeSteeringInput(steering: number): void;
+        setisArcadeFootBrakeActive(active: boolean): void;
+        getisArcadeFootBrakeActive(): boolean;
         setisArcadeHandBrakeActive(active: boolean): void;
         getisArcadeHandBrakeActive(): boolean;
         setIsArcadeWheelSkidActive(active: boolean): void;
@@ -4754,14 +4743,21 @@ declare namespace TOOLKIT {
         getCurrentRotationBoost(): number;
         getArcadeWheelSkidTimer(): number;
         getArcadeHandBrakingTimer(): number;
-        /** Current banked skid energy (0 = empty, 1+ = strong combo hit ready).  */
-        getSkidMomentumBank(): number;
-        /** Seconds remaining in the combo window (0 = expired). */
-        getSkidMomentumTimer(): number;
-        /** True when a usable skid-to-burnout combo is banked and still within the window. */
-        isSkidBurnoutComboReady(): boolean;
-        /** Force-clear the combo bank (e.g. on crash or reset). */
-        clearSkidMomentumBank(): void;
+        shouldPlaySkidFx(wheelIndex?: number): boolean;
+        getShouldPlaySkidFx(): boolean;
+        getWheelShouldPlaySkidFx(wheelIndex: number): boolean;
+        shouldPlayWallScrapeFx(wheelIndex?: number): boolean;
+        getShouldPlayWallScrapeFx(): boolean;
+        getWheelShouldPlayWallScrapeFx(wheelIndex: number): boolean;
+        shouldPlayCurbRumbleFx(wheelIndex?: number): boolean;
+        getShouldPlayCurbRumbleFx(): boolean;
+        getWheelShouldPlayCurbRumbleFx(wheelIndex: number): boolean;
+        shouldPlayContactFx(wheelIndex?: number): boolean;
+        getShouldPlayContactFx(): boolean;
+        getWheelShouldPlayContactFx(wheelIndex: number): boolean;
+        shouldPlayDriftFx(wheelIndex?: number): boolean;
+        getShouldPlayDriftFx(): boolean;
+        getWheelShouldPlayDriftFx(wheelIndex: number): boolean;
         setBurnoutCooldownTime(time: number): void;
         getBurnoutCooldownTime(): number;
         setArcadeWheelSkidLimit(limit: number): void;
@@ -4776,18 +4772,25 @@ declare namespace TOOLKIT {
         setPenaltyGroundTag(tag: string): void;
         setLoggingEnabled(enabled: boolean): void;
         getLoggingEnabled(): boolean;
-        setMultiRaycastEnabled(enabled: boolean): void;
-        getMultiRaycastEnabled(): boolean;
+        setAdaptiveRaycastEnabled(enabled: boolean): void;
+        getAdaptiveRaycastEnabled(): boolean;
         setMultiRaycastRadiusScale(radiusMultiplier: number): void;
         getMultiRaycastRadiusScale(): number;
         setStabilizeVelocityEnabled(enabled: boolean): void;
         getStabilizeVelocityEnabled(): boolean;
+        setUseSphericalShapeCasting(enabled: boolean): void;
+        getUseSphericalShapeCasting(): boolean;
+        setShapeCastRadiusMultiplier(multiplier: number): void;
+        getShapeCastRadiusMultiplier(): number;
+        setShapeCastNormalSmoothing(factor: number): void;
+        getShapeCastNormalSmoothing(): number;
+        setShapeCastSkidSmoothing(factor: number): void;
+        getShapeCastSkidSmoothing(): number;
+        setShapeCastSuspensionSmoothing(factor: number): void;
+        getShapeCastSuspensionSmoothing(): number;
         setSkipFrictionSlipUpdate(skip: boolean): void;
         getSkipFrictionSlipUpdate(): boolean;
-        private applyHighSpeedHeaveDamping;
-        private applyHighSpeedPitchDamping;
         private applyVelocityBasedStabilization;
-        private getAbsoluteSpeedKmh;
         private applyPredictiveNormalStabilization;
         private updateBurnoutCoefficient;
         private updateBurnoutDriveState;
@@ -4798,30 +4801,41 @@ declare namespace TOOLKIT {
         private getEasedDonutTransitionFactor;
         getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
         getCurrentSpeedKmHour(): number;
-        private calculateSteeringChangeRate;
         isDriftSystemEnabled(): boolean;
         setDriftSystemEnabled(enabled: boolean): void;
-        setDriftMaximumSpeed(maxSpeed: number): void;
-        getDriftMaximumSpeed(): number;
+        setDriftInfo(info: number): void;
+        setDriftMaxSpeed(maxSpeed: number): void;
+        getDriftMaxSpeed(): number;
         setDriftSpeedThreshold(threshold: number): void;
         getDriftSpeedThreshold(): number;
+        setDriftGripReduction(reduction: number): void;
+        getDriftGripReduction(): number;
         setDriftSteeringThreshold(threshold: number): void;
         getDriftSteeringThreshold(): number;
         /**
-         * Set drift settings for high-speed drifting mechanics.
-         * @param settings - Object containing drift settings.
-         * @param settings.maxSpeed - Maximum speed for drift effect.
-         * @param settings.speedThreshold - Minimum speed to start drifting.
-         * @param settings.steeringThreshold - Minimum steering input to trigger drift.
+         * Legacy drift tuning values retained for API compatibility.
+         * These values no longer drive physics in this class.
          */
         setDriftSettings(settings: {
             maxSpeed?: number;
             speedThreshold?: number;
+            gripReduction?: number;
             steeringThreshold?: number;
         }): void;
         getDriftIntensity(): number;
         isDrifting(): boolean;
+        private updateWheelDriftInfo;
         private updateDriftState;
+        private updateDriftFxSignal;
+        private getSteeringAuthorityInput;
+        private getSteeringMagnitude;
+        private getSignedFrontSteeringAngleRad;
+        private getApproxWheelbaseMeters;
+        private getFrontWheelContactSnapshot;
+        private getRearWheelGroundContactCount;
+        private shouldAllowSkidFxFromMode;
+        private updateSkidFxSignal;
+        private updateContactFxSignals;
         updateVehicle(timeStep: number): void;
         updateSuspension(timeStep: number): void;
         removeFromWorld(world: any): void;
@@ -4833,8 +4847,61 @@ declare namespace TOOLKIT {
         updateWheelTransform(wheelIndex: number): void;
         getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
         updateFriction(timeStep: number): void;
+        /**
+         * SPHERICAL SHAPE CASTING - AAA Need For Speed / Burnout style ground contact detection.
+         *
+         * WHY SHAPECASTING IS SUPERIOR FOR ARCADE RACING:
+         * ================================================
+         * 1. SMOOTH CONTACT NORMALS: A sphere naturally integrates over surface irregularities.
+         *    Where a thin ray catches every micro-edge and triangle seam on rough mesh colliders,
+         *    the sphere's contact normal is the averaged surface gradient over its contact patch.
+         *    This eliminates the per-frame normal jitter that causes chassis bouncing/twisting.
+         *
+         * 2. CURB AND OBSTACLE HANDLING: Thin rays get "caught" on small vertical edges (curbs,
+         *    track seams, mesh collider triangle boundaries). A sphere of radius ~0.65x wheel radius
+         *    smoothly rides over obstacles shorter than that radius. The contact point slides along
+         *    the sphere surface instead of snagging — exactly like a real tire's contact patch.
+         *
+         * 3. BANKED SURFACE STABILITY: On NASCAR-style banked turns, thin rays can miss or produce
+         *    inconsistent normals because each ray in the multi-ray pattern hits the angled surface
+         *    at different depths. A sphere gives ONE consistent contact normal representing the
+         *    average slope under the wheel, keeping suspension forces coherent across all 4 wheels.
+         *
+         * 4. SKID/DRIFT SMOOTHNESS (THE KEY FEATURE): During high-speed drifting, the rear wheels
+         *    are moving laterally across the surface. Thin rays sampling different triangle faces
+         *    produce frame-to-frame normal discontinuities → suspension force spikes → bouncing.
+         *    The sphere's continuous contact patch produces smooth normal transitions even when
+         *    sliding across rough mesh colliders at 100+ mph. Combined with temporal normal
+         *    smoothing (shapeCastNormalSmoothing + shapeCastSkidSmoothing), this gives the buttery
+         *    drift feel of NFS/Burnout without any artificial constraints.
+         *
+         * 5. TEMPORAL SMOOTHING LAYER: On top of the inherently smoother sphere contact, we apply
+         *    per-wheel normal history blending. Base smoothing (shapeCastNormalSmoothing ~0.35)
+         *    handles regular driving. During skid/drift states, shapeCastSkidSmoothing (~0.55)
+         *    adds extra temporal averaging — the normal changes are damped so the chassis can't
+         *    jerk/twist even on the roughest mesh colliders.
+         *
+         * HAVOK SHAPECASTING API:
+         * - Uses TOOLKIT.RigidbodyPhysics.ShapecastToRef() which calls havokPlugin.shapeCast()
+         * - query.shape = PhysicsShapeSphere (created once per wheel, reused every frame)
+         * - query.startPosition = wheel hardpoint (chassis connection point world)
+         * - query.endPosition = hardpoint + suspension direction * (restLength + radius)
+         * - query.rotation = identity (sphere is rotationally symmetric)
+         * - query.ignoreBody = chassis body (don't hit ourselves)
+         * - Returns hitPoint, hitNormal, hitFraction, body via ShapeCastResult
+         *
+         * The sphere radius is wheel.radius * shapeCastRadiusMultiplier (default 0.65).
+         * Smaller radius = more precise but less smoothing. Larger = smoother but may miss
+         * narrow gaps. 0.65 is the sweet spot found through NFS-style arcade tuning.
+         */
+        private performSphericalShapecast;
+        /**
+         * Disposes all per-wheel sphere physics shapes created for shapecasting.
+         * Call this when the vehicle is destroyed or the shapecast system is disabled.
+         */
+        disposeShapeCastShapes(): void;
+        private getAdaptiveFrontProbeExtension;
         private performSingleRaycast;
-        private performThinMultiRaycast;
     }
     /**
      * Babylon JavaScript File
@@ -4872,6 +4939,7 @@ declare namespace TOOLKIT {
         suspensionRelativeVelocity: number;
         suspensionForce: number;
         skidInfo: number;
+        driftInfo: number;
         slipInfo: number;
         suspensionLength: number;
         sideImpulse: number;
@@ -4888,8 +4956,6 @@ declare namespace TOOLKIT {
         steeringAngle: number;
         rotationBoost: number;
         locked: boolean;
-        skidinfo: number;
-        driftInfo: number;
         skidThreshold: number;
         lateralImpulse: number;
         constructor(options: any);
@@ -5319,6 +5385,10 @@ declare namespace TOOLKIT {
         resetDefaultFrictionSlip(): void;
         getCenterOfMassOffset(): BABYLON.Vector3;
         setCenterOfMassOffset(center: BABYLON.Vector3): void;
+        getAngularDamping(): BABYLON.Vector3;
+        setAngularDamping(damping: BABYLON.Vector3): void;
+        getArcadeSteeringAssist(): number;
+        setArcadeSteeringAssist(assist: number): void;
         setEnableFrictionUpdates(enabled: boolean): void;
         getEnableFrictionUpdates(): boolean;
         getSkiddingFrictionUpdateSpeed(): number;
@@ -5346,14 +5416,10 @@ declare namespace TOOLKIT {
         setFrontWheelsRotationBoost(boost: number): void;
         /** Sets vehicle arcade steering input for sliding assist using physics vehicle object. (Advanced Use Only) */
         setArcadeSteeringInput(steering: number): void;
-        /** Gets vehicle arcade steering assist factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeSteerAssistFactor(): number;
-        /** Sets vehicle arcade steering assist factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeSteerAssistFactor(factor: number): void;
-        /** Gets vehicle arcade momentum preserve factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeMomentumPreserveFactor(): number;
-        /** Sets vehicle arcade momentum preserve factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeMomentumPreserveFactor(factor: number): void;
+        /** Gets vehicle arcade footbrake state using physics vehicle object. (Advanced Use Only) */
+        getisArcadeFootBrakeActive(): boolean;
+        /** Sets vehicle arcade footbrake state using physics vehicle object. (Advanced Use Only) */
+        setisArcadeFootBrakeActive(active: boolean): void;
         /** Gets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
         getisArcadeHandBrakeActive(): boolean;
         /** Sets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
@@ -5382,6 +5448,25 @@ declare namespace TOOLKIT {
         getArcadeWheelSkidTimer(): number;
         /** Gets vehicle arcade wheel skid countdown timer using physics vehicle object. (Advanced Use Only) */
         getArcadeHandBrakingTimer(): number;
+        shouldPlaySkidFx(wheelIndex?: number): boolean;
+        /** Gets per-wheel mode-aware skid FX gate from physics vehicle object. */
+        getWheelShouldPlaySkidFx(wheelIndex: number): boolean;
+        /** Gets wall-scrape contact FX gate from physics vehicle object. */
+        shouldPlayWallScrapeFx(wheelIndex?: number): boolean;
+        /** Gets curb-rumble contact FX gate from physics vehicle object. */
+        shouldPlayCurbRumbleFx(wheelIndex?: number): boolean;
+        /** Gets any non-tire contact FX gate (wall scrape or curb rumble). */
+        shouldPlayContactFx(wheelIndex?: number): boolean;
+        /** Gets wall-scrape contact FX gate for a specific wheel. */
+        getWheelShouldPlayWallScrapeFx(wheelIndex: number): boolean;
+        /** Gets curb-rumble contact FX gate for a specific wheel. */
+        getWheelShouldPlayCurbRumbleFx(wheelIndex: number): boolean;
+        /** Gets any non-tire contact FX gate for a specific wheel. */
+        getWheelShouldPlayContactFx(wheelIndex: number): boolean;
+        /** Gets any drifting FX gate (wall scrape or curb rumble). */
+        shouldPlayDriftFx(wheelIndex?: number): boolean;
+        /** Gets any drifting FX gate for a specific wheel. */
+        getWheelShouldPlayDriftFx(wheelIndex: number): boolean;
         /** Gets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
         getArcadeFrontSideFactor(): number;
         /** Sets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
@@ -5410,8 +5495,7 @@ declare namespace TOOLKIT {
         getDriftMaximumSpeed(): number;
         setDriftSpeedThreshold(threshold: number): void;
         getDriftSpeedThreshold(): number;
-        setDriftSteeringThreshold(threshold: number): void;
-        getDriftSteeringThreshold(): number;
+        isBurnoutModeEngaged(): boolean;
         setLaunchBoostEnabled(enabled: boolean): void;
         getLaunchBoostEnabled(): boolean;
         setLaunchBoostDuration(duration: number): void;
@@ -5422,7 +5506,6 @@ declare namespace TOOLKIT {
         getLaunchBoostDecaySpeed(): number;
         setBurnoutKickStrength(strength: number): void;
         getBurnoutKickStrength(): number;
-        isBurnoutModeEngaged(): boolean;
         setBurnoutFrictionSlip(slip: number): void;
         getBurnoutFrictionSlip(): number;
         setBurnoutFrictionGrip(grip: number): void;
@@ -5442,147 +5525,24 @@ declare namespace TOOLKIT {
         getBurnoutTransitionSpeed(): number;
         setBurnoutCoefficient(coefficient: number): void;
         getBurnoutCoefficient(): number;
-        /** Gets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        getStabilizingForce(): number;
-        /** Sets vehicle stable force using physics vehicle object. (Advanved Use Only) */
-        setStabilizingForce(force: number): void;
-        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
-        getSmoothFlyingImpulse(): number;
-        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
-        setSmoothFlyingImpulse(impulse: number): void;
-        /** Gets vehicle max visual extension limit using physics vehicle object. (Advanved Use Only) */
-        getMaxVisualExtensionLimit(): number;
-        /** Sets vehicle max visual extension limit using physics vehicle object. (Advanved Use Only) */
-        setMaxVisualExtensionLimit(limit: number): void;
-        /** Gets vehicle max visual compression limit using physics vehicle object. (Advanved Use Only) */
-        getMaxVisualCompressionLimit(): number;
-        /** Sets vehicle max visual compression limit using physics vehicle object. (Advanved Use Only) */
-        setMaxVisualCompressionLimit(limit: number): void;
         setLoggingEnabled(enabled: boolean): void;
         getLoggingEnabled(): boolean;
-        /** Enables concise stability diagnostics: speed, contacts, pitch, suspension, downforce. */
-        setStabilityLoggingEnabled(enabled: boolean): void;
-        getStabilityLoggingEnabled(): boolean;
-        /** Sets the frame interval between periodic stability log lines (default 120 = 2 s at 60 fps). */
-        setStabilityLogInterval(frames: number): void;
-        getStabilityLogInterval(): number;
-        /** Master switch for speed-scaled suspension damping. */
-        setSpeedDampingEnabled(enabled: boolean): void;
-        getSpeedDampingEnabled(): boolean;
-        /** km/h at which damping starts scaling (default 50). */
-        setSpeedDampingMinSpeed(kmh: number): void;
-        getSpeedDampingMinSpeed(): number;
-        /** km/h at which damping reaches its maximum scale (default 200). */
-        setSpeedDampingMaxSpeed(kmh: number): void;
-        getSpeedDampingMaxSpeed(): number;
-        /** Maximum damping multiplier at top speed (default 2.5). */
-        setSpeedDampingMaxScale(scale: number): void;
-        getSpeedDampingMaxScale(): number;
-        /** Front axle damping bias relative to speed scale (default 1.4 – more anti-nosedive). */
-        setFrontDampingBias(bias: number): void;
-        getFrontDampingBias(): number;
-        /** Rear axle damping bias relative to speed scale (default 1.0). */
-        setRearDampingBias(bias: number): void;
-        getRearDampingBias(): number;
-        /** Master switch for progressive bump-stop. */
-        setBumpStopEnabled(enabled: boolean): void;
-        getBumpStopEnabled(): boolean;
-        /** Travel fraction (0–1) where bump-stop begins stiffening (default 0.75 = 75%). */
-        setBumpStopStartRatio(ratio: number): void;
-        getBumpStopStartRatio(): number;
-        /** Peak spring stiffness multiplier at full bump-stop (default 6.0). */
-        setBumpStopStiffnessScale(scale: number): void;
-        getBumpStopStiffnessScale(): number;
-        /** Master switch for speed-based front/rear pitch load balancing. */
-        setPitchLoadBalanceEnabled(enabled: boolean): void;
-        getPitchLoadBalanceEnabled(): boolean;
-        /** km/h at which full pitch-balance effect is reached (default 80). */
-        setPitchLoadBalanceSpeed(kmh: number): void;
-        getPitchLoadBalanceSpeed(): number;
-        /** Front spring stiffness multiplier at pitchLoadBalanceSpeed (default 1.5). */
-        setPitchLoadBalanceFront(mult: number): void;
-        getPitchLoadBalanceFront(): number;
-        /** Rear spring stiffness multiplier at pitchLoadBalanceSpeed (default 0.95). */
-        setPitchLoadBalanceRear(mult: number): void;
-        getPitchLoadBalanceRear(): number;
-        /** Front/rear fraction of downforce to apply at front axle anchor (0.5 = even, default 0.45). */
-        setDownforceFrontBias(bias: number): void;
-        getDownforceFrontBias(): number;
-        /** Low-pass blend rate for smoothing downforce transitions, 0–1 (default 0.12). */
-        setDownforceBlendRate(rate: number): void;
-        getDownforceBlendRate(): number;
-        /** Minimum wheels-on-ground required to apply any downforce (default 2). */
-        setDownforceMinContacts(count: number): void;
-        getDownforceMinContacts(): number;
-        /** Approximate half-wheelbase [m] for front/rear downforce anchor split (default 1.4). */
-        setDownforceHalfWheelbase(meters: number): void;
-        getDownforceHalfWheelbase(): number;
-        /** Enable/disable direct heave (vertical) velocity damping at high speed. Default true. */
-        setHeaveDampingEnabled(enabled: boolean): void;
-        getHeaveDampingEnabled(): boolean;
-        /** Fraction of upward velocity removed per tick at full effect, 0–1 (default 0.12). */
-        setHeaveDampingStrength(strength: number): void;
-        getHeaveDampingStrength(): number;
-        /** Speed [km/h] at which heave damping begins to engage (default 140). */
-        setHeaveDampingStartKmh(kmh: number): void;
-        getHeaveDampingStartKmh(): number;
-        /** Speed [km/h] at which heave damping reaches full strength (default 260). */
-        setHeaveDampingFullKmh(kmh: number): void;
-        getHeaveDampingFullKmh(): number;
-        /** Enable/disable direct pitch/roll angular damping at high speed. Default true. */
-        setPitchDampingEnabled(enabled: boolean): void;
-        getPitchDampingEnabled(): boolean;
-        /** Fraction of pitch/roll angular velocity removed per tick, 0–1 (default 0.09). */
-        setPitchDampingStrength(strength: number): void;
-        getPitchDampingStrength(): number;
-        /** Speed [km/h] at which pitch damping begins to engage (default 100). */
-        setPitchDampingStartKmh(kmh: number): void;
-        getPitchDampingStartKmh(): number;
-        /** Enable/disable active chassis leveling to restore flat orientation at speed. Default true. */
-        setChassisLevelingEnabled(enabled: boolean): void;
-        getChassisLevelingEnabled(): boolean;
-        /** Corrective angular velocity injected per unit pitch error per speedFactor (default 0.025). */
-        setChassisLevelingStrength(strength: number): void;
-        getChassisLevelingStrength(): number;
-        /** Speed [km/h] where chassis leveling begins (default 80). */
-        setChassisLevelingStartKmh(kmh: number): void;
-        getChassisLevelingStartKmh(): number;
-        /** Hard cap on nose-down chassis pitch angle at speed [degrees]. 0 = disabled. Default 3.0. */
-        setMaxPitchAngleDeg(deg: number): void;
-        getMaxPitchAngleDeg(): number;
-        /** Enable/disable adaptive pitch-trim that shifts downforce to rear when nose-diving. Default true. */
-        setPitchTrimEnabled(enabled: boolean): void;
-        getPitchTrimEnabled(): boolean;
-        /** Max fraction of downforce shifted to rear at full nose-down (0=off, 1=all rear). Default 0.90. */
-        setPitchTrimStrength(strength: number): void;
-        getPitchTrimStrength(): number;
-        /** Nose-down pitch angle [degrees] where trim starts. Default 1.0. */
-        setPitchTrimStartDeg(deg: number): void;
-        getPitchTrimStartDeg(): number;
-        /** Nose-down pitch angle [degrees] where trim reaches full pitchTrimStrength. Default 4.0. */
-        setPitchTrimMaxDeg(deg: number): void;
-        getPitchTrimMaxDeg(): number;
-        /** Enable/disable high-speed suspension compression cap (prevents wheel-in-body at extreme compression). Default false. */
-        setSuspensionLockEnabled(enabled: boolean): void;
-        getSuspensionLockEnabled(): boolean;
-        /** Speed [km/h] where suspension lock begins (~93 mph). Default 150. */
-        setSuspensionLockStartKmh(kmh: number): void;
-        getSuspensionLockStartKmh(): number;
-        /** Speed [km/h] where suspension lock reaches full strength (~143 mph). Default 230. */
-        setSuspensionLockFullKmh(kmh: number): void;
-        getSuspensionLockFullKmh(): number;
-        /** Fraction of over-compression resistance at full lock speed, 0–1. Default 0.40. */
-        setSuspensionLockStrength(strength: number): void;
-        getSuspensionLockStrength(): number;
-        /** Max compression ratio allowed before the lock resists (0=none, 1=full). Default 0.40 (40%). */
-        setSuspensionLockMaxCompress(ratio: number): void;
-        getSuspensionLockMaxCompress(): number;
-        setMultiRaycastEnabled(enable: boolean): void;
-        getMultiRaycastEnabled(): boolean;
+        setAdaptiveRaycastEnabled(enable: boolean): void;
+        getAdaptiveRaycastEnabled(): boolean;
         setMultiRaycastRadiusScale(scale: number): void;
         getMultiRaycastRadiusScale(): number;
         setStabilizeVelocityEnabled(enabled: boolean): void;
         getStabilizeVelocityEnabled(): boolean;
+        setUseSphericalShapeCasting(enabled: boolean): void;
+        getUseSphericalShapeCasting(): boolean;
+        setShapeCastRadiusMultiplier(multiplier: number): void;
+        getShapeCastRadiusMultiplier(): number;
+        setShapeCastNormalSmoothing(factor: number): void;
+        getShapeCastNormalSmoothing(): number;
+        setShapeCastSkidSmoothing(factor: number): void;
+        getShapeCastSkidSmoothing(): number;
+        setShapeCastSuspensionSmoothing(factor: number): void;
+        getShapeCastSuspensionSmoothing(): number;
         protected setupWheelInformation(): void;
         tickVehicleController(step: number): void;
         updateWheelInformation(): void;
@@ -5608,11 +5568,11 @@ declare namespace TOOLKIT {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
-        protected late(): void;
+        protected fixed(): void;
         protected destroy(): void;
         protected awakeRigidbodyState(): void;
         protected updateRigidbodyState(): void;
-        protected lateRigidbodyState(): void;
+        protected fixedRigidbodyState(): void;
         protected destroyRigidbodyState(): void;
         /** Checks if rigidbody is kinematic. */
         isKinematic(): boolean;
@@ -5747,6 +5707,157 @@ declare namespace TOOLKIT {
          * Softbody-Imposter type
          */
         static SoftbodyImpostor: number;
+        private static _factorAngVel;
+        private static _factorLinVel;
+        private static _factorLocalVel;
+        private static _dampingAngVel;
+        private static _dampingLinVel;
+        private static _dampingLocalVel;
+        private static _tempMatrix;
+        /**
+         * Exact equivalent of Bullet Physics btRigidBody::setDamping(linearDamping, angularDamping).
+         *
+         * In Bullet, damping is applied per-step as: velocity *= pow(1 - damping, timeStep)
+         * This creates an exponential decay that smoothly reduces velocity over time.
+         *
+         * Babylon.js/Havok PhysicsBody already has setLinearDamping() and setAngularDamping()
+         * which provide the same functionality. This utility wraps them in a single call
+         * matching Bullet's API for easy porting.
+         *
+         * @param body - The Babylon.js PhysicsBody to apply damping to
+         * @param linearDamping - Linear velocity damping (0.0 = no damping, 1.0 = full damping).
+         *                       Typical values: 0.0-0.1 for vehicles, 0.3-0.5 for floating objects
+         * @param angularDamping - Angular velocity damping (0.0 = no damping, 1.0 = full damping).
+         *                        Typical values: 0.05-0.3 for normal objects, 0.5-0.9 for vehicles
+         *                        that should resist unwanted rotation.
+         *                        Higher values prevent the car from rotating freely — only
+         *                        Ackerman steering forces and direct physics contacts will turn it.
+         */
+        static SetDamping: (body: BABYLON.PhysicsBody, linearDamping: number, angularDamping: number) => void;
+        /**
+         * Get the current linear and angular damping values from a PhysicsBody.
+         * Equivalent to Bullet's btRigidBody::getLinearDamping() / getAngularDamping().
+         *
+         * @param body - The Babylon.js PhysicsBody to query
+         * @returns Object with linearDamping and angularDamping values
+         */
+        static GetDamping: (body: BABYLON.PhysicsBody) => {
+            linearDamping: number;
+            angularDamping: number;
+        };
+        /**
+         * Apply Bullet-style per-step damping manually. Use this when you need frame-rate-independent
+         * damping that exactly matches Bullet's btRigidBody::applyDamping(timeStep).
+         *
+         * Bullet formula: velocity *= pow(1 - damping, timeStep)
+         *
+         * This is useful for per-axis damping control that Havok's built-in setAngularDamping
+         * doesn't provide (Havok applies uniform damping to all axes).
+         *
+         * @param body - The PhysicsBody to damp
+         * @param linearDamping - Linear damping coefficient (0.0-1.0)
+         * @param angularDamping - Angular damping coefficient (0.0-1.0)
+         * @param timeStep - Physics time step (typically 1/60)
+         */
+        static ApplyDamping: (body: BABYLON.PhysicsBody, linearDamping: number, angularDamping: number, timeStep: number) => void;
+        /**
+         * Apply Bullet-style per-step damping with per-axis control for angular velocity.
+         * This allows damping pitch and roll differently from yaw — essential for vehicles
+         * where you want to prevent unwanted pitch/roll wobble but preserve yaw for steering.
+         *
+         * @param body - The PhysicsBody to damp
+         * @param angularDampingX - Pitch damping (local X axis). Higher = less pitch wobble.
+         * @param angularDampingY - Yaw damping (local Y axis). Higher = less free yaw rotation.
+         * @param angularDampingZ - Roll damping (local Z axis). Higher = less roll wobble.
+         * @param timeStep - Physics time step (typically 1/60)
+         */
+        static ApplyPerAxisAngularDamping: (body: BABYLON.PhysicsBody, angularDampingX: number, angularDampingY: number, angularDampingZ: number, timeStep: number) => void;
+        /**
+         * Exact equivalent of Bullet Physics btRigidBody::setAngularFactor(btVector3).
+         *
+         * In Bullet, this is applied every integration step in btRigidBody::integrateVelocities():
+         *   m_angularVelocity += m_invInertiaTensorWorld * m_totalTorque * step;
+         *   m_angularVelocity *= m_angularFactor;  // <-- THIS is what setAngularFactor controls
+         *
+         * Each component is a per-axis multiplier applied DIRECTLY to angular velocity every step:
+         *   0.0 = completely locked (NO rotation allowed on this axis)
+         *   0.5 = half the angular velocity survives each step (strong resistance)
+         *   1.0 = fully free (normal physics behavior)
+         *
+         * KEY DIFFERENCE FROM setAngularDamping / SetDamping:
+         *   - SetDamping uses exponential decay: velocity *= pow(1-damping, dt). Gradual slowdown, never fully stops.
+         *   - SetAngularFactor is a DIRECT multiplier: velocity *= factor. A factor of 0.0 = instant zero velocity.
+         *
+         * KEY DIFFERENCE FROM setting inertia to 0 (the current workaround):
+         *   - Inertia=0 makes the body infinitely resistant to NEW torques on that axis,
+         *     but doesn't clamp EXISTING angular velocity from prior frames or impulses.
+         *   - SetAngularFactor zeroes out angular velocity every step regardless of source.
+         *     Even if an impulse or collision adds angular velocity, it's removed next step.
+         *
+         * WORKS IN LOCAL CHASSIS SPACE (body-relative axes):
+         *   X = pitch (nose up/down)
+         *   Y = yaw (steering/turning left/right)
+         *   Z = roll (lean left/right)
+         *
+         * Common vehicle configurations:
+         *   SetAngularFactor(body, 1, 1, 1)     - Fully free (default, no constraint)
+         *   SetAngularFactor(body, 0, 1, 0)     - Only yaw allowed (prevents pitch & roll)
+         *   SetAngularFactor(body, 0.3, 1, 0.3) - Mostly locked pitch/roll, free yaw (arcade racing)
+         *   SetAngularFactor(body, 0, 0, 0)     - Completely locked (no rotation at all)
+         *   SetAngularFactor(body, 1, 0, 1)     - Free pitch/roll, locked yaw (unusual but possible)
+         *
+         * @param body - The Babylon.js PhysicsBody to constrain
+         * @param factorX - Pitch axis multiplier (0.0 = locked, 1.0 = free)
+         * @param factorY - Yaw axis multiplier (0.0 = locked, 1.0 = free)
+         * @param factorZ - Roll axis multiplier (0.0 = locked, 1.0 = free)
+         */
+        static SetAngularFactor: (body: BABYLON.PhysicsBody, factorX: number, factorY: number, factorZ: number) => void;
+        /**
+         * Exact equivalent of Bullet Physics btRigidBody::setLinearFactor(btVector3).
+         *
+         * In Bullet, this is applied every integration step in btRigidBody::integrateVelocities():
+         *   m_linearVelocity += m_totalForce * (m_inverseMass * step);
+         *   m_linearVelocity *= m_linearFactor;  // <-- THIS is what setLinearFactor controls
+         *
+         * Each component is a per-axis multiplier applied DIRECTLY to linear velocity every step:
+         *   0.0 = completely locked (NO movement allowed on this axis)
+         *   0.5 = half the linear velocity survives each step (strong resistance)
+         *   1.0 = fully free (normal physics behavior)
+         *
+         * WORKS IN WORLD SPACE (matching Bullet's behavior):
+         *   X = world left/right
+         *   Y = world up/down
+         *   Z = world forward/back
+         *
+         * Common configurations:
+         *   SetLinearFactor(body, 1, 1, 1)   - Fully free (default)
+         *   SetLinearFactor(body, 1, 0, 1)   - Locked vertical (2D game on XZ plane)
+         *   SetLinearFactor(body, 1, 1, 0)   - Locked depth (2D game on XY plane)
+         *   SetLinearFactor(body, 0, 0, 0)   - Completely locked (no translation)
+         *
+         * NOTE: Unlike SetAngularFactor which works in body-local space, SetLinearFactor
+         * works in WORLD space, matching Bullet's implementation where linear factor is
+         * applied to the world-space linear velocity directly.
+         *
+         * @param body - The Babylon.js PhysicsBody to constrain
+         * @param factorX - World X axis multiplier (0.0 = locked, 1.0 = free)
+         * @param factorY - World Y axis multiplier (0.0 = locked, 1.0 = free)
+         * @param factorZ - World Z axis multiplier (0.0 = locked, 1.0 = free)
+         */
+        static SetLinearFactor: (body: BABYLON.PhysicsBody, factorX: number, factorY: number, factorZ: number) => void;
+        /**
+         * Combined SetAngularFactor + SetLinearFactor in a single call.
+         * Matches calling both btRigidBody::setAngularFactor() and btRigidBody::setLinearFactor()
+         * in the same integration step.
+         *
+         * IMPORTANT: Must be called every physics step (e.g., in updateVehicle) to maintain
+         * the constraint, just like Bullet applies factors every integrateVelocities() call.
+         *
+         * @param body - The Babylon.js PhysicsBody to constrain
+         * @param linearFactor - World-space linear velocity factors (x, y, z)
+         * @param angularFactor - Local-space angular velocity factors (x=pitch, y=yaw, z=roll)
+         */
+        static SetFactors: (body: BABYLON.PhysicsBody, linearFactor: BABYLON.Vector3, angularFactor: BABYLON.Vector3) => void;
     }
     class PhyscisContainerData {
         shape: BABYLON.PhysicsShape;
@@ -6430,6 +6541,234 @@ declare namespace TOOLKIT {
         lights?: any;
         trails?: any;
         customData?: any;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * MeshNormalProxy — JavaScript-side equivalent of Bullet's btSmoothTriangleMesh for BabylonJS/Havok.
+     *
+     * THE PROBLEM:
+     * Havok physics (via BabylonJS) returns raw physics collision normals from raycasts/shapecasts.
+     * On triangle mesh shapes built from rough or low-poly meshes, these normals are computed per-triangle
+     * by the physics engine and have no knowledge of the artist's smooth vertex normals. This causes
+     * the same "edge seam" problem that btSmoothTriangleMesh was designed to fix in Bullet Physics:
+     *   - Visible jerks/snaps as wheels cross triangle boundaries
+     *   - Random angular impulses when hitting shared triangle edges
+     *   - Car flipping on terrain that looks smooth but has harsh underlying triangles
+     *
+     * THE AMMO.JS SOLUTION (btSmoothTriangleMesh):
+     * In the original Bullet-based implementation, the collision system stored per-vertex normals
+     * directly in the mesh collider data (addTriangleNormals), and the SphereTriangleDetector
+     * used the triangle INDEX from the physics hit to look up and barycentric-interpolate those
+     * stored vertex normals. This replaced the raw Havok collision normal with a smooth,
+     * vertex-weighted normal that matched the visual mesh — eliminating seam artifacts entirely.
+     *
+     * THE HAVOK SOLUTION (MeshNormalProxy):
+     * Since Havok does NOT expose triangle indices from raycasts/shapecasts and does NOT allow
+     * setting vertex normals on the collision shape, we replicate btSmoothTriangleMesh entirely
+     * in JavaScript as a post-process step:
+     *
+     *   1. BUILD: Extract vertex positions + vertex normals from the BABYLON.Mesh before physics runs.
+     *             Build a 2D XZ spatial hash for fast O(1) average lookup of nearby triangles.
+     *
+     *   2. QUERY: After Havok returns a raycast/shapecast hit point (world space), transform it to
+     *             the mesh's local space, search the spatial hash for candidate triangles, find the
+     *             closest triangle that contains the projection of the hit point, compute barycentric
+     *             coordinates, and interpolate the three vertex normals.
+     *
+     *   3. OVERRIDE: Replace the raw Havok normal with this smooth interpolated normal BEFORE the
+     *                temporal smoothing step in HavokRaycastVehicle. This replicates exactly what
+     *                btSmoothTriangleMesh::interpolateMeshNormal() did inside Bullet.
+     *
+     * RESULT: Smooth, seam-free driving on any mesh surface — identical to the AmmoJS implementation.
+     *
+     * USAGE:
+     *   // 1. Get the mesh and its associated physics body:
+     *   var trackMesh = scene.getMeshByName("TrackCollider");
+     *
+     *   // 2. Build proxy from mesh geometry (call once after mesh loads):
+     *   var proxy = new TOOLKIT.MeshNormalProxy();
+     *   proxy.buildFromMesh(trackMesh, 2.0); // cellSize=2.0m is good for most racing tracks
+     *
+     *   // 3. Register with the vehicle (physicsBody auto-detected from mesh):
+     *   myHavokVehicle.registerSmoothMeshNormal(trackMesh, trackMesh.physicsBody, proxy);
+     *
+     *   // 4. The vehicle will automatically use smooth normals for all wheel contacts on that body.
+     *
+     * NOTE: For non-uniformly scaled meshes, call proxy.setUseNormalTransposeInverse(true) for
+     *       correct normal shearing correction. Not needed for uniformly scaled or unscaled meshes.
+     *
+     * @class MeshNormalProxy - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class MeshNormalProxy {
+        /** Blend factor between smooth proxy normal (0.0) and raw Havok normal (1.0).
+         *  Default 0.0 = full proxy (matches btSmoothTriangleMesh behavior).
+         *  Use 0.05-0.15 to retain a tiny bit of physics behavior for dynamic surfaces. */
+        blendWithPhysicsNormal: number;
+        /** Max distance (in local space) from hit point to nearest triangle centroid before
+         *  falling back to raw physics normal. Prevents proxy from affecting unrelated surfaces. */
+        maxLookupDistance: number;
+        /** Number of spatial hash cells to search in radius (1 = 3x3, 2 = 5x5).
+         *  Increase to 2 for meshes with large triangles (terrain, coarse geometry). */
+        searchRadius: number;
+        /** Enable triangle plane projection test for more accurate lookup.
+         *  When true, only accepts triangles where the hit point projects inside the triangle.
+         *  Slightly more expensive but eliminates rare cross-seam misattributions. */
+        useProjectionTest: boolean;
+        private _v0x;
+        private _v0y;
+        private _v0z;
+        private _v1x;
+        private _v1y;
+        private _v1z;
+        private _v2x;
+        private _v2y;
+        private _v2z;
+        private _n0x;
+        private _n0y;
+        private _n0z;
+        private _n1x;
+        private _n1y;
+        private _n1z;
+        private _n2x;
+        private _n2y;
+        private _n2z;
+        private _fnx;
+        private _fny;
+        private _fnz;
+        private _cx;
+        private _cy;
+        private _cz;
+        private _triangleCount;
+        private _hashGrid;
+        private _cellSize;
+        private _hashOriginX;
+        private _hashOriginZ;
+        private _sourceMesh;
+        private _worldMatrix;
+        private _invWorldMatrix;
+        private _matrixDirty;
+        private _scratchV0;
+        private _scratchV1;
+        private _scratchV2;
+        private _scratchLocal;
+        private _scratchBarry;
+        /** Number of triangles in the proxy */
+        get triangleCount(): number;
+        /** Cell size of the spatial hash in local-space units */
+        get cellSize(): number;
+        /** The mesh this proxy was built from */
+        get sourceMesh(): BABYLON.AbstractMesh;
+        /**
+         * Builds the smooth normal proxy from a BabylonJS mesh.
+         * Extracts vertex positions and normals from the mesh geometry and constructs a 2D XZ
+         * spatial hash for fast per-frame querying during vehicle wheel contact processing.
+         *
+         * IMPORTANT: Call this AFTER the mesh's geometry is fully loaded and BEFORE physics
+         * simulation starts. For runtime-loaded meshes, call after the mesh's ImportMesh promise resolves.
+         *
+         * @param mesh      The BabylonJS mesh to extract geometry from. Must have vertex normals.
+         * @param cellSize  Spatial hash cell size in mesh local units (default 2.0).
+         *                  Rule of thumb: ~70% of the average triangle edge length.
+         *                  Use 0.5-1.0 for detailed urban meshes, 2.0-5.0 for terrain/large tracks.
+         * @returns true if successful, false if geometry data was unavailable.
+         */
+        buildFromMesh(mesh: BABYLON.AbstractMesh, cellSize?: number): boolean;
+        /**
+         * Marks the cached world/inverse matrices as dirty for re-computation.
+         * Call this once per frame for kinematic (moving) meshes.
+         * For static meshes (racing tracks, terrain) this is NEVER needed — the matrix is computed once.
+         */
+        invalidateTransform(): void;
+        /**
+         * Returns the smooth interpolated normal at the given world-space hit point.
+         * Equivalent to btSmoothTriangleMesh::interpolateMeshNormal() from the AmmoJS implementation.
+         *
+         * Algorithm:
+         *   1. Transform world hit point → local mesh space (using cached inverse world matrix)
+         *   2. XZ spatial hash lookup for candidate triangles near the local hit point
+         *   3. Find the best triangle: projection of hit point inside triangle + minimum plane distance
+         *   4. Compute barycentric coordinates (Cramer's rule, equivalent to btSmoothTriangleMesh::barycentricCoordinates)
+         *   5. Linear interpolation of vertex normals with barycentric weights
+         *   6. Transform interpolated normal → world space via world matrix basis
+         *   7. Normalize and write to resultNormal
+         *
+         * @param worldHitPoint   Hit point in world space (from Havok raycast/shapecast result)
+         * @param resultNormal    Output: receives the smooth interpolated normal in world space
+         * @param rawHavokNormal  Optional: raw Havok normal for blend fallback (used when blendWithPhysicsNormal > 0)
+         * @returns true if a valid smooth normal was written to resultNormal; false = use raw Havok normal
+         */
+        getNormalAtPointToRef(worldHitPoint: BABYLON.Vector3, resultNormal: BABYLON.Vector3, rawHavokNormal?: BABYLON.Vector3): boolean;
+        /**
+         * Disposes the proxy and frees all allocated memory.
+         * Call this when the mesh is removed from the scene or the vehicle is destroyed.
+         */
+        dispose(): void;
+        /**
+         * Computes barycentric coordinates of projected point (px,py,pz) in triangle at index t.
+         * Uses Cramer's rule (same algorithm as btSmoothTriangleMesh::barycentricCoordinates).
+         * Returns [u, v, w] where point ≈ u*v0 + v*v1 + w*v2.
+         * NOTE: Uses Y coordinate instead of dropping it — works correctly for ramps and all orientations.
+         */
+        private _barycentricScratch;
+        private _computeBarycentricInline;
+    }
+    /**
+     * SmoothMeshNormalSystem — Registry and manager for MeshNormalProxy instances.
+     *
+     * Maps PhysicsBody → MeshNormalProxy so HavokRaycastVehicle can quickly look up
+     * whether the surface a wheel just hit has a smooth normal proxy registered.
+     *
+     * This is analogous to adding a body to a "smooth mesh" list in a btDiscreteDynamicsWorld.
+     *
+     * USAGE:
+     *   // Central singleton (create once in game setup):
+     *   TOOLKIT.SmoothMeshNormalSystem.instance.register(body, proxy);
+     *
+     *   // In vehicle: auto-used via HavokRaycastVehicle.registerSmoothMeshNormal()
+     */
+    class SmoothMeshNormalSystem {
+        private static _instance;
+        /** Global singleton instance */
+        static get instance(): SmoothMeshNormalSystem;
+        private _registry;
+        /**
+         * Registers a MeshNormalProxy for a physics body.
+         * @param body  Physics body of the mesh collider
+         * @param proxy Pre-built MeshNormalProxy (call proxy.buildFromMesh() first)
+         */
+        register(body: BABYLON.PhysicsBody, proxy: MeshNormalProxy): void;
+        /**
+         * Unregisters and optionally disposes the proxy for a physics body.
+         * @param body          Physics body to unregister
+         * @param disposeProxy  If true, calls proxy.dispose() after unregistering
+         */
+        unregister(body: BABYLON.PhysicsBody, disposeProxy?: boolean): void;
+        /**
+         * Looks up the smooth normal proxy for a given physics body.
+         * Returns null if no proxy is registered for this body.
+         */
+        lookup(body: BABYLON.PhysicsBody): MeshNormalProxy;
+        /** Returns true if a proxy is registered for the given body */
+        has(body: BABYLON.PhysicsBody): boolean;
+        /** Number of registered proxies */
+        get count(): number;
+        /**
+         * Disposes all registered proxies and clears the registry.
+         */
+        disposeAll(): void;
+        /**
+         * Convenience method: builds a MeshNormalProxy from a mesh, registers it for the
+         * mesh's physics body, and returns the proxy. All-in-one setup call.
+         *
+         * @param mesh      Mesh collider with geometry
+         * @param body      Physics body associated with the mesh (must be set up before calling)
+         * @param cellSize  Spatial hash cell size (default 2.0m)
+         * @param blendWithPhysics  Blend factor 0.0=full proxy, 1.0=full Havok (default 0.0)
+         * @returns The built proxy, or null on failure
+         */
+        static buildAndRegister(mesh: BABYLON.AbstractMesh, body: BABYLON.PhysicsBody, cellSize?: number, blendWithPhysics?: number): MeshNormalProxy;
     }
 }
 declare namespace TOOLKIT {
