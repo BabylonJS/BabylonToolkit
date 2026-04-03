@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (8.52.1 - R1) */
+        /** Gets the toolkit framework version string (9.0.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -562,6 +562,7 @@ declare namespace TOOLKIT {
          * @param showDebugMesh Whether to show a debug mesh
          */
         static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        static DestroyNavigationMeshData(): void;
         /** Toggle full screen scene mode. */
         static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Enter full screen scene mode. */
@@ -4530,487 +4531,300 @@ declare namespace TOOLKIT {
         }): any;
     }
 }
-/** Babylon Toolkit Namespace */
+/**
+ * btRaycastVehicle.ts - Complete port of Bullet Physics btRaycastVehicle
+ * for BabylonJS with Havok Physics Plugin.
+ *
+ * Original: Copyright (c) 2005 Erwin Coumans http://continuousphysics.com/Bullet/
+ * Extensions: Mackey Kinard (multi-raycast, flying stabilization, track stabilization)
+ *
+ * Usage:
+ *   const tuning = new TOOLKIT.btVehicleTuning();
+ *   const raycaster = new TOOLKIT.btDefaultVehicleRaycaster(query);
+ *   const vehicle = new TOOLKIT.btRaycastVehicle(tuning, chassisBody, raycaster);
+ *   vehicle.addWheel(connPoint, wheelDir, wheelAxle, restLen, radius, tuning, isFront);
+ *   // Each physics step:
+ *   vehicle.updateVehicle(deltaTime);
+ *   // Visual transforms:
+ *   wheelMesh.position.copyFrom(vehicle.getWheelInfo(i).worldTransformPosition);
+ *   wheelMesh.rotationQuaternion.copyFrom(vehicle.getWheelInfo(i).worldTransformRotation);
+ */
 declare namespace TOOLKIT {
-    /**
-     * https://forum.babylonjs.com/t/havok-raycastvehicle/40314
-     * https://forum.babylonjs.com/u/raggar
-     * @script HavokRaycastVehicle
-     */
-    class HavokRaycastVehicle {
+    class btVehicleTuning {
+        suspensionStiffness: number;
+        suspensionCompression: number;
+        suspensionDamping: number;
+        maxSuspensionTravelCm: number;
+        frictionSlip: number;
+        maxSuspensionForce: number;
+    }
+    class btVehicleRaycasterResult {
+        hitPointInWorld: BABYLON.Vector3;
+        hitNormalInWorld: BABYLON.Vector3;
+        distFraction: number;
+    }
+    interface IbtVehicleRaycaster {
+        castRay(from: BABYLON.Vector3, to: BABYLON.Vector3, result: btVehicleRaycasterResult): any;
+    }
+    class btDefaultVehicleRaycaster implements IbtVehicleRaycaster {
+        private _raycastResult;
+        private _query;
+        constructor(query?: BABYLON.IRaycastQuery);
+        castRay(from: BABYLON.Vector3, to: BABYLON.Vector3, result: btVehicleRaycasterResult): any;
+    }
+    class btWheelRaycastInfo {
+        contactNormalWS: BABYLON.Vector3;
+        contactPointWS: BABYLON.Vector3;
+        suspensionLength: number;
+        hardPointWS: BABYLON.Vector3;
+        wheelDirectionWS: BABYLON.Vector3;
+        wheelAxleWS: BABYLON.Vector3;
+        isInContact: boolean;
+        groundObject: any;
+    }
+    class btWheelInfo {
+        raycastInfo: btWheelRaycastInfo;
+        worldTransformPosition: BABYLON.Vector3;
+        worldTransformRotation: BABYLON.Quaternion;
+        chassisConnectionPointCS: BABYLON.Vector3;
+        wheelDirectionCS: BABYLON.Vector3;
+        wheelAxleCS: BABYLON.Vector3;
+        suspensionRestLength: number;
+        maxSuspensionTravelCm: number;
+        wheelRadius: number;
+        suspensionStiffness: number;
+        dampingCompression: number;
+        dampingRelaxation: number;
+        frictionSlip: number;
+        maxSuspensionForce: number;
+        isFrontWheel: boolean;
+        steering: number;
+        rotation: number;
+        deltaRotation: number;
+        rollInfluence: number;
+        engineForce: number;
+        brake: number;
+        clippedInvContactDotSuspension: number;
+        suspensionRelativeVelocity: number;
+        suspensionForce: number;
+        skidInfo: number;
+        clientInfo: any;
+        steeringAngle: number;
+        rotationBoost: number;
+        defaultFriction: number;
+        invertWheelDirection: boolean;
+        maxVisualTravelRange: number;
+        _prevContactNormalWS: BABYLON.Vector3;
+        _prevSuspensionLength: number;
+        _prevSuspensionForce: number;
+        _hasPrevSuspState: boolean;
+        transform: BABYLON.TransformNode;
+        spinner: BABYLON.TransformNode;
+        constructor(ci: {
+            chassisConnectionCS: BABYLON.Vector3;
+            wheelDirectionCS: BABYLON.Vector3;
+            wheelAxleCS: BABYLON.Vector3;
+            suspensionRestLength: number;
+            maxSuspensionTravelCm: number;
+            wheelRadius: number;
+            suspensionStiffness: number;
+            dampingCompression: number;
+            dampingRelaxation: number;
+            frictionSlip: number;
+            maxSuspensionForce: number;
+            isFrontWheel: boolean;
+        });
+        getSuspensionRestLength(): number;
+    }
+    class btRaycastVehicle {
+        static FILTER_GROUP_CAR_COLLIDERS: number;
+        static FILTER_GROUP_WALL_COLLIDERS: number;
+        static FILTER_GROUP_CURB_COLLIDERS: number;
+        static FILTER_GROUP_GROUND_COLLIDERS: number;
+        static FILTER_GROUP_ALL_COLLIDERS: number;
         static GROUND_MESH_TAG: string;
-        static WHEEL_SPEED_SCALE: number;
-        chassisBody: BABYLON.PhysicsBody;
-        wheelInfos: TOOLKIT.HavokWheelInfo[];
-        sliding: boolean;
-        world: any;
-        indexRightAxis: number;
-        indexForwardAxis: number;
-        indexUpAxis: number;
-        enableFrictionUpdates: boolean;
-        currentVehicleSpeedKmHour: number;
-        frontPartialGripCompensation: number;
-        frontRecontactGripBoost: number;
-        skiddingFrictionUpdateSpeed: number;
-        burnoutFrictionUpdateSpeed: number;
-        handbrakeWheelStiffness: number;
-        burnoutWheelStiffness: number;
-        driftWheelStiffness: number;
-        arcadeSteeringAssist: number;
-        correctedAngularVelocity: BABYLON.Vector3;
+        static CURB_MESH_TAG: string;
+        private _chassisBody;
+        private _vehicleRaycaster;
+        private _wheelInfo;
+        private _indexRightAxis;
+        private _indexUpAxis;
+        private _indexForwardAxis;
+        private _currentVehicleSpeedKmHour;
+        enableMultiRaycast: boolean;
+        minimumWheelContacts: number;
+        trackConnectionAccel: number;
+        smoothFlyingImpulse: number;
         angularDamping: BABYLON.Vector3;
-        stabilizeVelocity: boolean;
-        adaptiveRaycastEnabled: boolean;
-        multiRaycastMultiplier: number;
-        useSphericalShapeCasting: boolean;
-        shapeCastRadiusMultiplier: number;
-        shapeCastNormalSmoothing: number;
-        shapeCastSkidSmoothing: number;
-        shapeCastSuspensionSmoothing: number;
-        private shapeCastSphereShapes;
-        private shapeCastLocalResult;
-        private shapeCastWorldResult;
-        private shapeCastPrevNormals;
-        private shapeCastPrevHitPoints;
-        private shapeCastPrevDistances;
-        private shapeCastNormalInitialized;
-        private shapeCastSceneRef;
-        private previousWheelForces;
-        private _proxyNormalTemp;
-        private _smoothNormalFirstActive;
-        enableTrackLogging: boolean;
-        private frameCounter;
+        onUpdateVehicleChassis: (step: number, wheelsOnGround: number, stabilizationUp: BABYLON.Vector3) => void;
+        minContactDotSuspension: number;
+        suspensionForceSmoothing: number;
+        suspensionDampingOverdrive: number;
+        sideToSideStabilityEnabled: boolean;
+        sideToSideStabilityStartKmh: number;
+        sideToSideStabilityFullKmh: number;
+        stabilizationDebug: boolean;
+        stabilizationDebugInterval: number;
+        downforceCoefficient: number;
+        constantDownforce: number;
+        stabilizationNormalSmoothing: number;
+        airborneGroundNormalHoldTime: number;
+        groundedAutoLevelEnabled: boolean;
+        groundedAutoLevelStrength: number;
+        groundedAutoLevelDeadzoneDeg: number;
+        groundedAutoLevelSettleDeg: number;
+        groundedAutoLevelSettleScale: number;
+        groundedAutoLevelHysteresisDeg: number;
+        groundedAutoLevelStartKmh: number;
+        groundedAutoLevelFullKmh: number;
+        groundedAutoLevelMaxRate: number;
+        groundedAutoLevelPartialContactBoost: number;
+        groundedAutoLevelSlideScale: number;
+        groundedAutoLevelTrackNormalMinDot: number;
+        airborneTrackConnectionStartKmh: number;
+        airborneTrackConnectionFullKmh: number;
+        airborneTrackConnectionMaxAccel: number;
+        airborneRiseDamping: number;
+        airborneMaxRiseSpeed: number;
+        private _stabilizationGroundNormal;
+        private _stabilizationHasGroundNormal;
+        private _stabilizationAirborneTime;
+        private _stabDebugTimer;
+        private _stabPrevWheelsOnGround;
+        private _stabPrevClampActive;
+        private _stabDbgUpSource;
+        private _stabDbgFlyingActive;
+        private _stabDbgFlyingAlignDot;
+        private _stabDbgFlyingAxisMagnitude;
+        private _stabDbgRollRate;
+        private _stabDbgYawRate;
+        private _stabDbgPitchRate;
+        private _stabDbgTrackConnectionForce;
+        private _stabDbgAirborneTrackAccel;
+        private _stabDbgAirborneRiseSpeed;
+        private _stabDbgAirborneRiseImpulse;
+        private _stabDbgGroundLevelActive;
+        private _stabDbgGroundLevelAlignDot;
+        private _stabDbgGroundLevelRate;
+        private _stabDbgGroundLevelTiltDeg;
+        private _stabDbgGroundLevelReason;
+        private _stabPrevGroundLevelActive;
+        private _groundedAutoLevelWasActive;
+        private _stabDbgBaseDownforce;
+        private _stabDbgAeroDownforce;
+        private _stabDbgStabilizingRawImpulse;
+        private _stabDbgStabilizingImpulse;
+        private _stabDbgStabilizingClampHit;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
         isArcadeFootBrakeActive: boolean;
         isArcadeHandBrakeActive: boolean;
         isArcadeWheelSkidActive: boolean;
-        arcadeFrontSideFactor: number;
-        arcadeRearSideFactor: number;
-        arcadeWheelSkidLimit: number;
-        arcadeWheelSkidTimer: number;
-        arcadeHandBrakingDelay: number;
-        arcadeHandBrakingTimer: number;
-        arcadeHandBrakeTransitionFactor: number;
-        skidFxSkidInfoThreshold: number;
-        wallScrapeFxMinSpeedKmh: number;
-        wallScrapeFxNormalYMax: number;
-        wallScrapeFxSideImpulseMin: number;
-        wallScrapeFxMinSuspensionJounce: number;
-        wallScrapeFxMinSpeedDropKmhPerSec: number;
-        wallScrapeFxMinLateralJerk: number;
-        wallScrapeFxHoldTime: number;
-        curbRumbleFxMinSpeedKmh: number;
-        curbRumbleFxNormalYMin: number;
-        curbRumbleFxNormalYMax: number;
-        curbRumbleFxMinSuspensionJounce: number;
-        curbRumbleFxHoldTime: number;
-        minPenaltySpeed: number;
-        penaltyWheelSlip: number;
-        penaltyGroundTag: string;
-        frontLeftContactTag: string;
-        frontRightContactTag: string;
-        rearLeftContactTag: string;
-        rearRightContactTag: string;
-        isDriftModeEnabled: boolean;
-        driftSpeedThreshold: number;
-        driftMaxSpeed: number;
-        driftSteeringThreshold: number;
-        driftGripReduction: number;
-        driftTransitionSpeed: number;
-        private driftIntensity;
-        donutModeTransitionFactor: number;
-        donutEngineMultiplier: number;
-        donutTransitionSpeed: number;
-        donutTurnRadius: number;
-        private donutModeEngaged;
-        private donutModeEngineBoost;
-        defaultBurnoutCoefficient: number;
-        burnoutCoefficient: number;
-        burnoutTargetCoefficient: number;
-        burnoutTransitionSpeed: number;
-        burnoutFrictionSlip: number;
-        burnoutFrictionGrip: number;
-        private burnoutCooldownDuration;
-        private burnoutCooldownTimer;
-        private burnoutModeEngaged;
-        private burnoutPowerBoost;
-        private baseRotationBoost;
-        private donutRotationBoost;
-        private currentRotationBoost;
-        launchBoostEnabled: boolean;
-        launchBoostMultiplier: number;
-        launchBoostDuration: number;
-        launchBoostDecaySpeed: number;
-        burnoutKickStrength: number;
-        kickEnergyBuildup: number;
-        private currentLaunchBoost;
-        private launchBoostActive;
-        private launchBoostAccumulation;
-        private currentSteeringInput;
-        private handbrakeAngularVelocity;
-        private handbrakeEngaged;
-        private raycastResult;
-        private shapeCastQuery;
-        private skipFrictionSlipUpdate;
-        private shouldPlaySkidFxSignal;
-        private shouldPlaySkidFxPerWheel;
-        private shouldPlayDriftFxSignal;
-        private shouldPlayDriftFxPerWheel;
-        driftFxIntensityThreshold: number;
-        private shouldPlayWallScrapeFxSignal;
-        private shouldPlayWallScrapeFxPerWheel;
-        private shouldPlayCurbRumbleFxSignal;
-        private shouldPlayCurbRumbleFxPerWheel;
-        private wallScrapeFxGlobalTimer;
-        private wallScrapeFxPerWheelTimer;
-        private curbRumbleFxPerWheelTimer;
-        private previousContactFxVelocity;
-        private previousContactFxLocalLateralSpeed;
-        private hasPreviousContactFxSample;
-        private previousSuspensionLengthForContactFx;
-        private previousSuspensionLengthForRoughness;
-        private previousAngularVelocity;
-        private hasValidPreviousAngularVelocity;
-        private currentTimeStep;
-        private previousYawBudget;
-        constructor(options: any);
-        addToWorld(world: any): void;
-        addWheel(options: any): number;
+        burnoutFrictionFloor: number;
+        frictionRestoreSpeed: number;
+        arcadeBurnoutWheelSpinGain: number;
+        arcadeDonutWheelSpinGain: number;
+        arcadeBurnoutDirectionChangeSpeedKmh: number;
+        arcadeBurnoutDirectionChangeGripScale: number;
+        arcadeWheelSpinBuildSpeed: number;
+        arcadeWheelSpinRecoverySpeed: number;
+        arcadeWheelSpinAirDamping: number;
+        arcadeWheelSpinMaxAngularVelocity: number;
+        arcadeSkidFadeInSpeed: number;
+        arcadeSkidFadeOutSpeed: number;
+        private _forwardWS;
+        private _axle;
+        private _forwardImpulse;
+        private _sideImpulse;
+        private _arcadeSkidInfo;
+        private _arcadePreviousWheelSpin;
+        sideFrictionStiffness: number;
+        private _chassisMass;
+        private _chassisInvMass;
+        private _chassisTransform;
+        private _rayResults;
+        private _sv1;
+        private _sv2;
+        private _sv3;
+        private _sv4;
+        private _sv5;
+        private _sv6;
+        private _sv7;
+        private _sv8;
+        private _sv9;
+        private _sv10;
+        private _sq1;
+        private _sq2;
+        private _sm1;
+        private _sm2;
+        private _sm3;
+        private _sm4;
+        private _vapLinVel;
+        private _vapAngVel;
+        private _vapRelPos;
+        private _vapCenter;
+        private _vapCross;
+        private _rsbVel1;
+        private _crfVel1;
+        private _basisCols;
+        private _stb1;
+        private _stb2;
+        private _stb3;
+        private _stb4;
+        private _stb5;
+        constructor(tuning: btVehicleTuning, chassisBody: BABYLON.PhysicsBody, raycaster: IbtVehicleRaycaster);
+        addWheel(connectionPointCS: BABYLON.Vector3, wheelDirectionCS: BABYLON.Vector3, wheelAxleCS: BABYLON.Vector3, suspensionRestLength: number, wheelRadius: number, tuning: btVehicleTuning, isFrontWheel: boolean): btWheelInfo;
         getNumWheels(): number;
-        getWheelInfo(wheelIndex: number): TOOLKIT.HavokWheelInfo;
+        getWheelInfo(index: number): btWheelInfo;
+        setSteeringValue(steering: number, wheelIndex: number): void;
         getSteeringValue(wheelIndex: number): number;
-        setSteeringValue(value: number, wheelIndex: number): void;
-        applyEngineForce(value: number, wheelIndex: number): void;
-        setHandBrake(brake: number, wheelIndex: number): void;
-        setWheelRotationBoost(wheelIndex: number, boost: number): void;
-        setAllWheelsRotationBoost(boost: number): void;
-        setRearWheelsRotationBoost(boost: number): void;
-        setFrontWheelsRotationBoost(boost: number): void;
-        setArcadeSteeringInput(steering: number): void;
-        setisArcadeFootBrakeActive(active: boolean): void;
-        getisArcadeFootBrakeActive(): boolean;
-        setisArcadeHandBrakeActive(active: boolean): void;
-        getisArcadeHandBrakeActive(): boolean;
+        applyEngineForce(force: number, wheelIndex: number): void;
+        setBrake(brake: number, wheelIndex: number): void;
+        getCurrentSpeedKmHour(): number;
+        getRigidBody(): BABYLON.PhysicsBody;
+        getRightAxis(): number;
+        getUpAxis(): number;
+        getForwardAxis(): number;
+        setCoordinateSystem(rightIndex: number, upIndex: number, forwardIndex: number): void;
+        getForwardVector(): BABYLON.Vector3;
+        getForwardVectorToRef(result: BABYLON.Vector3): void;
+        cacheMassProperties(): void;
+        setIsArcadeBurnoutActive(active: boolean): void;
+        getIsArcadeBurnoutActive(): boolean;
+        setIsArcadeDonutActive(active: boolean): void;
+        getIsArcadeDonutActive(): boolean;
+        setIsArcadeFootBrakeActive(active: boolean): void;
+        getIsArcadeFootBrakeActive(): boolean;
+        setIsArcadeHandBrakeActive(active: boolean): void;
+        getIsArcadeHandBrakeActive(): boolean;
         setIsArcadeWheelSkidActive(active: boolean): void;
         getIsArcadeWheelSkidActive(): boolean;
-        setEnableFrictionUpdates(enabled: boolean): void;
-        getEnableFrictionUpdates(): boolean;
-        setLaunchBoostEnabled(enabled: boolean): void;
-        getLaunchBoostEnabled(): boolean;
-        setLaunchBoostDuration(duration: number): void;
-        getLaunchBoostDuration(): number;
-        setLaunchBoostMultiplier(multiplier: number): void;
-        getLaunchBoostMultiplier(): number;
-        setLaunchBoostDecaySpeed(speed: number): void;
-        getLaunchBoostDecaySpeed(): number;
-        setBurnoutKickStrength(strength: number): void;
-        getBurnoutKickStrength(): number;
-        setIsArcadeBurnoutModeActive(active: boolean): void;
-        getIsArcadeBurnoutModeActive(): boolean;
-        setIsArcadeDonutModeActive(active: boolean): void;
-        setArcadeFrontSideFactor(factor: number): void;
-        setArcadeRearSideFactor(factor: number): void;
-        getDonutModeTransitionFactor(): number;
-        getEasedDonutModeTransitionFactor(): number;
-        getDonutModeEngineBoost(): number;
-        isDonutModeEngaged(): boolean;
-        setDonutEngineMultiplier(multiplier: number): void;
-        setDonutTurnRadius(radius: number): void;
-        setDonutTransitionSpeed(speed: number): void;
-        setBurnoutWheelStiffness(scale: number): void;
-        getBurnoutWheelStiffness(): number;
-        setHandbrakeWheelStiffness(scale: number): void;
-        getHandbrakeWheelStiffness(): number;
-        setDriftWheelStiffness(scale: number): void;
-        getDriftWheelStiffness(): number;
-        setDefaultBurnoutCoefficient(coefficient: number): void;
-        getDefaultBurnoutCoefficient(): number;
-        setActiveBurnoutCoefficient(coefficient: number): void;
-        getActiveBurnoutCoefficient(): number;
-        getBurnoutPowerBoost(): number;
-        isBurnoutModeEngaged(): boolean;
-        setBurnoutFrictionSlip(slip: number): void;
-        getBurnoutFrictionSlip(): number;
-        setBurnoutFrictionGrip(grip: number): void;
-        getBurnoutFrictionGrip(): number;
-        getBurnoutTransitionSpeed(): number;
-        setBurnoutTransitionSpeed(speed: number): void;
-        setBaseRotationBoost(boost: number): void;
-        setDonutRotationBoost(boost: number): void;
-        getBaseRotationBoost(): number;
-        getDonutRotationBoost(): number;
-        getCurrentRotationBoost(): number;
-        getArcadeWheelSkidTimer(): number;
-        getArcadeHandBrakingTimer(): number;
-        shouldPlaySkidFx(wheelIndex?: number): boolean;
-        getShouldPlaySkidFx(): boolean;
-        getWheelShouldPlaySkidFx(wheelIndex: number): boolean;
-        shouldPlayWallScrapeFx(wheelIndex?: number): boolean;
-        getShouldPlayWallScrapeFx(): boolean;
-        getWheelShouldPlayWallScrapeFx(wheelIndex: number): boolean;
-        shouldPlayCurbRumbleFx(wheelIndex?: number): boolean;
-        getShouldPlayCurbRumbleFx(): boolean;
-        getWheelShouldPlayCurbRumbleFx(wheelIndex: number): boolean;
-        shouldPlayContactFx(wheelIndex?: number): boolean;
-        getShouldPlayContactFx(): boolean;
-        getWheelShouldPlayContactFx(wheelIndex: number): boolean;
-        shouldPlayDriftFx(wheelIndex?: number): boolean;
-        getShouldPlayDriftFx(): boolean;
-        getWheelShouldPlayDriftFx(wheelIndex: number): boolean;
-        setBurnoutCooldownTime(time: number): void;
-        getBurnoutCooldownTime(): number;
-        setArcadeWheelSkidLimit(limit: number): void;
-        getArcadeWheelSkidLimit(): number;
-        setArcadeHandBrakeDelay(delay: number): void;
-        getArcadeHandBrakeDelay(): number;
-        getMinPenaltySpeed(): number;
-        setMinPenaltySpeed(speed: number): void;
-        getPenaltyWheelSlip(): number;
-        setPenaltyWheelSlip(slip: number): void;
-        getPenaltyGroundTag(): string;
-        setPenaltyGroundTag(tag: string): void;
-        setLoggingEnabled(enabled: boolean): void;
-        getLoggingEnabled(): boolean;
-        setAdaptiveRaycastEnabled(enabled: boolean): void;
-        getAdaptiveRaycastEnabled(): boolean;
-        setMultiRaycastRadiusScale(radiusMultiplier: number): void;
-        getMultiRaycastRadiusScale(): number;
-        setStabilizeVelocityEnabled(enabled: boolean): void;
-        getStabilizeVelocityEnabled(): boolean;
-        setUseSphericalShapeCasting(enabled: boolean): void;
-        getUseSphericalShapeCasting(): boolean;
-        setShapeCastRadiusMultiplier(multiplier: number): void;
-        getShapeCastRadiusMultiplier(): number;
-        setShapeCastNormalSmoothing(factor: number): void;
-        getShapeCastNormalSmoothing(): number;
-        setShapeCastSkidSmoothing(factor: number): void;
-        getShapeCastSkidSmoothing(): number;
-        setShapeCastSuspensionSmoothing(factor: number): void;
-        getShapeCastSuspensionSmoothing(): number;
-        setSkipFrictionSlipUpdate(skip: boolean): void;
-        getSkipFrictionSlipUpdate(): boolean;
-        private applyVelocityBasedStabilization;
-        private applyPredictiveNormalStabilization;
-        private updateBurnoutCoefficient;
-        private updateBurnoutDriveState;
-        private updateWheelRotationBoost;
-        updateCurrentFrictionSlip(timeStep: number): void;
-        resetDefaultFrictionSlip(): void;
-        getAngularDampingReduction(): number;
-        private getEasedDonutTransitionFactor;
-        getVehicleAxisWorld(axisIndex: number, result: BABYLON.Vector3): BABYLON.Vector3;
-        getCurrentSpeedKmHour(): number;
-        isDriftSystemEnabled(): boolean;
-        setDriftSystemEnabled(enabled: boolean): void;
-        setDriftInfo(info: number): void;
-        setDriftMaxSpeed(maxSpeed: number): void;
-        getDriftMaxSpeed(): number;
-        setDriftSpeedThreshold(threshold: number): void;
-        getDriftSpeedThreshold(): number;
-        setDriftGripReduction(reduction: number): void;
-        getDriftGripReduction(): number;
-        setDriftSteeringThreshold(threshold: number): void;
-        getDriftSteeringThreshold(): number;
-        /**
-         * Legacy drift tuning values retained for API compatibility.
-         * These values no longer drive physics in this class.
-         */
-        setDriftSettings(settings: {
-            maxSpeed?: number;
-            speedThreshold?: number;
-            gripReduction?: number;
-            steeringThreshold?: number;
-        }): void;
-        getDriftIntensity(): number;
-        isDrifting(): boolean;
-        private updateWheelDriftInfo;
-        private updateDriftState;
-        private updateDriftFxSignal;
-        private getSteeringAuthorityInput;
-        private getSteeringMagnitude;
-        private getSignedFrontSteeringAngleRad;
-        private getApproxWheelbaseMeters;
-        private getFrontWheelContactSnapshot;
-        private getRearWheelGroundContactCount;
-        private shouldAllowSkidFxFromMode;
-        private updateSkidFxSignal;
-        private updateContactFxSignals;
-        updateVehicle(timeStep: number): void;
-        updateSuspension(timeStep: number): void;
-        removeFromWorld(world: any): void;
-        private calculateSurfaceRoughness;
-        private isValidDrivableSurface;
-        private calculateSurfaceAngle;
-        performCasting(wheel: TOOLKIT.HavokWheelInfo): number;
-        updateWheelTransformWorld(wheel: TOOLKIT.HavokWheelInfo): void;
-        updateWheelTransform(wheelIndex: number): void;
-        getWheelTransformWorld(wheelIndex: number): BABYLON.TransformNode;
-        updateFriction(timeStep: number): void;
-        /**
-         * SPHERICAL SHAPE CASTING - AAA Need For Speed / Burnout style ground contact detection.
-         *
-         * WHY SHAPECASTING IS SUPERIOR FOR ARCADE RACING:
-         * ================================================
-         * 1. SMOOTH CONTACT NORMALS: A sphere naturally integrates over surface irregularities.
-         *    Where a thin ray catches every micro-edge and triangle seam on rough mesh colliders,
-         *    the sphere's contact normal is the averaged surface gradient over its contact patch.
-         *    This eliminates the per-frame normal jitter that causes chassis bouncing/twisting.
-         *
-         * 2. CURB AND OBSTACLE HANDLING: Thin rays get "caught" on small vertical edges (curbs,
-         *    track seams, mesh collider triangle boundaries). A sphere of radius ~0.65x wheel radius
-         *    smoothly rides over obstacles shorter than that radius. The contact point slides along
-         *    the sphere surface instead of snagging — exactly like a real tire's contact patch.
-         *
-         * 3. BANKED SURFACE STABILITY: On NASCAR-style banked turns, thin rays can miss or produce
-         *    inconsistent normals because each ray in the multi-ray pattern hits the angled surface
-         *    at different depths. A sphere gives ONE consistent contact normal representing the
-         *    average slope under the wheel, keeping suspension forces coherent across all 4 wheels.
-         *
-         * 4. SKID/DRIFT SMOOTHNESS (THE KEY FEATURE): During high-speed drifting, the rear wheels
-         *    are moving laterally across the surface. Thin rays sampling different triangle faces
-         *    produce frame-to-frame normal discontinuities → suspension force spikes → bouncing.
-         *    The sphere's continuous contact patch produces smooth normal transitions even when
-         *    sliding across rough mesh colliders at 100+ mph. Combined with temporal normal
-         *    smoothing (shapeCastNormalSmoothing + shapeCastSkidSmoothing), this gives the buttery
-         *    drift feel of NFS/Burnout without any artificial constraints.
-         *
-         * 5. TEMPORAL SMOOTHING LAYER: On top of the inherently smoother sphere contact, we apply
-         *    per-wheel normal history blending. Base smoothing (shapeCastNormalSmoothing ~0.35)
-         *    handles regular driving. During skid/drift states, shapeCastSkidSmoothing (~0.55)
-         *    adds extra temporal averaging — the normal changes are damped so the chassis can't
-         *    jerk/twist even on the roughest mesh colliders.
-         *
-         * HAVOK SHAPECASTING API:
-         * - Uses TOOLKIT.RigidbodyPhysics.ShapecastToRef() which calls havokPlugin.shapeCast()
-         * - query.shape = PhysicsShapeSphere (created once per wheel, reused every frame)
-         * - query.startPosition = wheel hardpoint (chassis connection point world)
-         * - query.endPosition = hardpoint + suspension direction * (restLength + radius)
-         * - query.rotation = identity (sphere is rotationally symmetric)
-         * - query.ignoreBody = chassis body (don't hit ourselves)
-         * - Returns hitPoint, hitNormal, hitFraction, body via ShapeCastResult
-         *
-         * The sphere radius is wheel.radius * shapeCastRadiusMultiplier (default 0.65).
-         * Smaller radius = more precise but less smoothing. Larger = smoother but may miss
-         * narrow gaps. 0.65 is the sweet spot found through NFS-style arcade tuning.
-         */
-        private performSphericalShapecast;
-        /**
-         * Disposes all per-wheel sphere physics shapes created for shapecasting.
-         * Call this when the vehicle is destroyed or the shapecast system is disabled.
-         */
-        disposeShapeCastShapes(): void;
-        private getAdaptiveFrontProbeExtension;
-        private performSingleRaycast;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokWheelInfo
-     */
-    class HavokWheelInfo {
-        maxSuspensionTravel: number;
-        customSlidingRotationalSpeed: number;
-        useCustomSlidingRotationalSpeed: number;
-        sliding: boolean;
-        chassisConnectionPointLocal: BABYLON.Vector3;
-        chassisConnectionPointWorld: BABYLON.Vector3;
-        directionLocal: BABYLON.Vector3;
-        directionWorld: BABYLON.Vector3;
-        axleLocal: BABYLON.Vector3;
-        axleWorld: BABYLON.Vector3;
-        suspensionRestLength: number;
-        suspensionMaxLength: number;
-        radius: number;
-        suspensionStiffness: number;
-        dampingCompression: number;
-        dampingRelaxation: number;
-        frictionSlip: number;
-        frictionPenalty: boolean;
-        frictionLerping: boolean;
-        steering: number;
-        rotation: number;
-        deltaRotation: number;
-        rollInfluence: number;
-        maxSuspensionForce: number;
-        engineForce: number;
-        brake: number;
-        isFrontWheel: boolean;
-        clippedInvContactDotSuspension: number;
-        suspensionRelativeVelocity: number;
-        suspensionForce: number;
-        skidInfo: number;
-        driftInfo: number;
-        slipInfo: number;
-        suspensionLength: number;
-        sideImpulse: number;
-        forwardImpulse: number;
-        raycastResult: BABYLON.PhysicsRaycastResult;
-        physicsShape: BABYLON.PhysicsShapeSphere;
-        worldTransform: BABYLON.TransformNode;
-        visualTravelRange: number;
-        invertDirection: boolean;
-        isInContact: boolean;
-        hub: BABYLON.TransformNode;
-        spinner: BABYLON.TransformNode;
-        defaultFriction: number;
-        steeringAngle: number;
-        rotationBoost: number;
-        locked: boolean;
-        skidThreshold: number;
-        lateralImpulse: number;
-        constructor(options: any);
-        updateWheel(chassis: any): void;
-    }
-    /**
-     * Babylon JavaScript File
-     * @script HavokVehicleUtilities
-     */
-    class HavokVehicleUtilities {
-        static directions: BABYLON.Vector3[];
-        static calcRollingFriction_vel1: BABYLON.Vector3;
-        static calcRollingFriction_vel2: BABYLON.Vector3;
-        static calcRollingFriction_vel: BABYLON.Vector3;
-        static updateFriction_surfNormalWS_scaled_proj: BABYLON.Vector3;
-        static updateFriction_axle: BABYLON.Vector3[];
-        static updateFriction_forwardWS: BABYLON.Vector3[];
-        static sideFrictionStiffness2: number;
-        static castRay_rayvector: BABYLON.Vector3;
-        static castRay_target: BABYLON.Vector3;
-        static torque: BABYLON.Vector3;
-        static tmpVec1: BABYLON.Vector3;
-        static tmpVec2: BABYLON.Vector3;
-        static tmpVec3: BABYLON.Vector3;
-        static tmpVec4: BABYLON.Vector3;
-        static tmpVec5: BABYLON.Vector3;
-        static tmpVec6: BABYLON.Vector3;
-        static tmpVel2: BABYLON.Vector3;
-        static tmpMat1: BABYLON.Matrix;
-        static velocityAt: (body: BABYLON.PhysicsBody, pos: any, res: any) => any;
-        static bodyPosition: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyLinearVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyAngularVelocity: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyTransform: (body: BABYLON.PhysicsBody, res: any) => any;
-        static addImpulseAt: (body: BABYLON.PhysicsBody, impulse: any, point: any) => void;
-        static addForceAt: (body: BABYLON.PhysicsBody, force: any, point: any) => void;
-        static bodyOrientation: (body: BABYLON.PhysicsBody, res: any) => any;
-        static bodyMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInvMass: (body: BABYLON.PhysicsBody) => number;
-        static bodyInertiaWorld: (body: BABYLON.PhysicsBody, res: any) => any;
-        static calcRollingFriction(body0: BABYLON.PhysicsBody, body1: BABYLON.PhysicsBody, frictionPosWorld: any, frictionDirectionWorld: any, maxImpulse: any, numWheelsOnGround?: number): number;
-        static computeImpulseDenominator_r0: BABYLON.Vector3;
-        static computeImpulseDenominator_c0: BABYLON.Vector3;
-        static computeImpulseDenominator_vec: BABYLON.Vector3;
-        static computeImpulseDenominator_m: BABYLON.Vector3;
-        static bodyPositionVec: BABYLON.Vector3;
-        static bodyInertiaVec: BABYLON.Vector3;
-        static computeImpulseDenominator(body: BABYLON.PhysicsBody, pos: any, normal: any): number;
-        static resolveSingleBilateral_vel1: BABYLON.Vector3;
-        static resolveSingleBilateral_vel2: BABYLON.Vector3;
-        static resolveSingleBilateral_vel: BABYLON.Vector3;
-        static resolveSingleBilateral(body1: BABYLON.PhysicsBody, pos1: any, body2: BABYLON.PhysicsBody, pos2: any, normal: any): number;
-        static chassis_velocity_at_contactPoint: BABYLON.Vector3;
-        static relpos: BABYLON.Vector3;
-        static Utilsdefaults: (options: any, defaults: any) => any;
+        resetSuspension(): void;
+        getChassisWorldTransform(): BABYLON.Matrix;
+        private updateWheelTransformsWS;
+        updateWheelTransform(wheelIndex: number, interpolatedTransform?: boolean): void;
+        private rayCast;
+        private getGravityUpToRef;
+        private computeStabilizationUpVector;
+        private resetStabilizationDebugFrame;
+        private logStabilizationDebug;
+        private applyFlyingStabilization;
+        private applyGroundedAutoLevel;
+        private applyTrackConnectionAndDownforce;
+        updateVehicle(step: number): void;
+        private updateSuspension;
+        private resolveWheelSpinDirection;
+        private updateArcadeWheelRotationBoost;
+        private getWheelAngularVelocity;
+        private getArcadeBurnoutDirectionChangeFactor;
+        private updateArcadeSkidInfo;
+        private updateFriction;
+        private velocityAtWorldPoint;
+        private resolveSingleBilateral;
+        private calcRollingFriction;
+        getSignedFrontSteeringAngleRad(): number;
+        getApproxWheelbaseMeters(): number;
+        dispose(): void;
     }
 }
 declare namespace TOOLKIT {
@@ -5347,204 +5161,138 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-     * Babylon toolkit raycast vehicle pro class (Unity Style Wheeled Vehicle System)
-     * @class RaycastVehicle - All rights reserved (c) 2024 Mackey Kinard
+     * Babylon raycast vehicle controller pro class (Native Bullet Physics 2.82)
+     * @class RaycastVehicle - All rights reserved (c) 2020 Mackey Kinard
      */
     class RaycastVehicle {
+        private static TempVector;
+        private static AutoSuspensionForceReserve;
         private _centerMass;
         private _chassisMesh;
         private _tempVectorPos;
-        private _lockedWheelIndexes;
-        getPhysicsBody(): BABYLON.PhysicsBody;
+        lockedWheelIndexes: number[];
+        getCenterMassOffset(): BABYLON.Vector3;
+        getInternalVehicle(): TOOLKIT.btRaycastVehicle;
+        getUpAxis(): number;
+        getRightAxis(): number;
+        getForwardAxis(): number;
+        getForwardVector(): BABYLON.Vector3;
         getNumWheels(): number;
-        getWheelInfo(wheel: number): TOOLKIT.HavokWheelInfo;
-        getWheelTransform(wheel: number): BABYLON.TransformNode;
-        updateWheelTransform(wheel: number): void;
+        getWheelInfo(wheel: number): TOOLKIT.btWheelInfo;
+        resetSuspension(): void;
+        setEngineForce(power: number, wheel: number): void;
+        setBrakingForce(brake: number, wheel: number): void;
+        updateWheelTransform(wheel: number, interpolate: boolean): void;
+        getWheelTransformPosition(wheel: number): BABYLON.Vector3;
+        getWheelTransformRotation(wheel: number): BABYLON.Quaternion;
         getRawCurrentSpeedKph(): number;
         getRawCurrentSpeedMph(): number;
         getAbsCurrentSpeedKph(): number;
         getAbsCurrentSpeedMph(): number;
-        protected m_vehicleColliders: any[];
-        protected m_vehicle: TOOLKIT.HavokRaycastVehicle;
+        getVehicleTuningSystem(): TOOLKIT.btVehicleTuning;
+        getChassisWorldTransform(): BABYLON.Matrix;
         protected m_scene: BABYLON.Scene;
-        constructor(scene: BABYLON.Scene, entity: BABYLON.TransformNode, center: BABYLON.Vector3);
+        protected m_vehicle: TOOLKIT.btRaycastVehicle;
+        protected m_vehicleTuning: TOOLKIT.btVehicleTuning;
+        protected m_vehicleRaycaster: TOOLKIT.btDefaultVehicleRaycaster;
+        protected m_vehicleColliders: any[];
+        protected m_tempPosition: BABYLON.Vector3;
+        protected m_wheelDirectionCS0: BABYLON.Vector3;
+        protected m_wheelAxleCS: BABYLON.Vector3;
+        constructor(scene: BABYLON.Scene, entity: BABYLON.AbstractMesh, center: BABYLON.Vector3);
         dispose(): void;
-        setHandBrake(brake: number, wheel: number): void;
-        setEngineForce(power: number, wheel: number): void;
-        applyEngineBrake(brake: number, smoothing?: number): void;
+        /** Gets the rigidbody raycast vehicle controller for the entity. Note: Wheel collider metadata informaion is required for raycast vehicle control. */
+        static GetInstance(scene: BABYLON.Scene, rigidbody: TOOLKIT.RigidbodyPhysics): TOOLKIT.RaycastVehicle;
+        tickVehicleController(step: number): void;
+        /** Gets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
+        getAngularDamping(): BABYLON.Vector3;
+        /** Sets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
+        setAngularDamping(damping: BABYLON.Vector3): void;
+        /** Gets vehicle enable multi raycast flag using physics vehicle object. (Advanved Use Only) */
+        getEnableMultiRaycast(): boolean;
+        /** Sets vehicle enable multi raycast flag using physics vehicle object. (Advanved Use Only) */
+        setEnableMultiRaycast(flag: boolean): void;
+        /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
+        getSmoothFlyingImpulse(): number;
+        /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
+        setSmoothFlyingImpulse(impulse: number): void;
+        /** Enables or disables grounded auto leveling after wall/curb hits. (Advanved Use Only) */
+        setGroundedAutoLevelEnabled(flag: boolean): void;
+        /** Sets grounded auto-leveling correction strength. (Advanved Use Only) */
+        setGroundedAutoLevelStrength(strength: number): void;
+        /** Sets grounded auto-leveling deadzone angle in degrees. (Advanved Use Only) */
+        setGroundedAutoLevelDeadzone(degrees: number): void;
+        /** Sets the low-angle settle band for grounded auto-leveling in degrees. (Advanved Use Only) */
+        setGroundedAutoLevelSettleDeg(degrees: number): void;
+        /** Sets the strength scale used inside the grounded auto-level settle band. (Advanved Use Only) */
+        setGroundedAutoLevelSettleScale(scale: number): void;
+        /** Sets the hysteresis band around the grounded auto-level settle cutoff in degrees. (Advanved Use Only) */
+        setGroundedAutoLevelHysteresis(degrees: number): void;
+        /** Sets speed range where grounded auto-leveling ramps to full strength. (Advanved Use Only) */
+        setGroundedAutoLevelSpeedRange(startKmh: number, fullKmh: number): void;
+        /** Sets max grounded auto-leveling correction rate in rad/s. (Advanved Use Only) */
+        setGroundedAutoLevelMaxRate(rate: number): void;
+        /** Gets vehicle track connection accel force using physics vehicle object. (Advanved Use Only) */
+        getTrackConnectionAccel(): number;
+        /** Sets vehicle track connection accel force using physics vehicle object. (Advanved Use Only) */
+        setTrackConnectionAccel(force: number): void;
+        /** Sets max extra downward accel used while fully airborne at high speed. (Advanved Use Only) */
+        setAirborneTrackConnectionMaxAccel(accel: number): void;
+        /** Sets speed range where airborne pull-down ramps from base to max accel. (Advanved Use Only) */
+        setAirborneTrackConnectionSpeedRange(startKmh: number, fullKmh: number): void;
+        /** Sets airborne upward velocity damping rate. (Advanved Use Only) */
+        setAirborneRiseDamping(rate: number): void;
+        /** Sets hard cap on upward speed while fully airborne. 0 disables the cap. (Advanved Use Only) */
+        setAirborneMaxRiseSpeed(speed: number): void;
+        /** Gets vehicle min wheel contact count using physics vehicle object. (Advanved Use Only) */
+        getMinimumWheelContacts(): number;
+        /** Sets vehicle min wheel contact count using physics vehicle object. (Advanved Use Only) */
+        setMinimumWheelContacts(contacts: number): void;
+        /** Gets vehicle aerodynamic downforce coefficient N/(m/s)^2. (Advanved Use Only) */
+        getDownforceCoefficient(): number;
+        /** Sets vehicle aerodynamic downforce coefficient N/(m/s)^2. (Advanved Use Only) */
+        setDownforceCoefficient(value: number): void;
+        /** Gets vehicle constant downforce as a fraction of vehicle weight. (Advanved Use Only) */
+        getConstantDownforce(): number;
+        /** Sets vehicle constant downforce as a fraction of vehicle weight. (Advanved Use Only) */
+        setConstantDownforce(value: number): void;
         /** Gets the internal wheel index by id string. */
         getWheelIndexByID(id: string): number;
         /** Gets the internal wheel index by name string. */
         getWheelIndexByName(name: string): number;
         /** Gets the internal wheel collider information. */
         getWheelColliderInfo(wheel: number): number;
+        /** Sets the internal wheel hub transform mesh by index. Used to rotate and bounce wheels. */
+        setWheelTransformMesh(wheel: number, transform: BABYLON.TransformNode): void;
+        protected ensureNodeRotationQuaternion(node: BABYLON.TransformNode): BABYLON.Quaternion;
+        protected normalizeWheelRotation(angle: number): number;
+        protected syncWheelSpinnerRotation(wheelinfo: any): void;
+        protected rebaseWheelSpinnerRotation(wheelinfo: any): void;
+        getArcadeBurnoutActive(): boolean;
+        setArcadeBurnoutActive(active: boolean): void;
+        getArcadeDonutActive(): boolean;
+        setArcadeDonutActive(active: boolean): void;
+        getArcadeFootBrakeActive(): boolean;
+        setArcadeFootBrakeActive(active: boolean): void;
+        getArcadeHandBrakeActive(): boolean;
+        setArcadeHandBrakeActive(active: boolean): void;
+        getArcadeWheelSkidActive(): boolean;
+        setArcadeWheelSkidActive(active: boolean): void;
+        /** Sets vehicle arcade burnout direction change speed using physics vehicle object. (Advanced Use Only) */
+        setArcadeBurnoutDirectionChangeSpeed(mph: number): void;
+        /** Gets an approximate wheelbase length in meters for the vehicle. Used for some advanced handling calculations. */
+        getApproxWheelbaseMeters(): number;
+        /** Gets the signed front wheel steering angle in radians. Used for some advanced handling calculations. */
+        getSignedFrontSteeringAngleRad(): number;
+        /** Sets vehicle arcade burnout min speed to trigger direction change using physics vehicle object. (Advanced Use Only) */
+        setUpdateVehicleChassisHandler(handler: (step: number, wheelsOnGround: number, stabilizationUp: BABYLON.Vector3) => void): void;
         getVisualSteeringAngle(wheel: number): number;
         setVisualSteeringAngle(angle: number, wheel: number): void;
         getPhysicsSteeringAngle(wheel: number): number;
         setPhysicsSteeringAngle(angle: number, wheel: number): void;
-        resetDefaultFrictionSlip(): void;
-        getCenterOfMassOffset(): BABYLON.Vector3;
-        setCenterOfMassOffset(center: BABYLON.Vector3): void;
-        getAngularDamping(): BABYLON.Vector3;
-        setAngularDamping(damping: BABYLON.Vector3): void;
-        getArcadeSteeringAssist(): number;
-        setArcadeSteeringAssist(assist: number): void;
-        setEnableFrictionUpdates(enabled: boolean): void;
-        getEnableFrictionUpdates(): boolean;
-        getSkiddingFrictionUpdateSpeed(): number;
-        setSkiddingFrictionUpdateSpeed(speed: number): void;
-        getBurnoutFrictionUpdateSpeed(): number;
-        setBurnoutFrictionUpdateSpeed(speed: number): void;
-        setBurnoutCooldownTime(time: number): void;
-        getBurnoutCooldownTime(): number;
-        setBurnoutWheelStiffness(scale: number): void;
-        getBurnoutWheelStiffness(): number;
-        setHandbrakeWheelStiffness(scale: number): void;
-        getHandbrakeWheelStiffness(): number;
-        setDriftWheelStiffness(scale: number): void;
-        getDriftWheelStiffness(): number;
-        setLockedWheelIndexes(indexes: number[]): void;
-        getLockedWheelIndexes(): number[];
-        getAngularDampingReduction(): number;
-        /** Sets rotation boost for a specific wheel using physics vehicle object. (Advanced Use Only) */
-        setWheelRotationBoost(wheelIndex: number, boost: number): void;
-        /** Sets rotation boost for all wheels using physics vehicle object. (Advanced Use Only) */
-        setAllWheelsRotationBoost(boost: number): void;
-        /** Sets rotation boost for rear wheels only using physics vehicle object. (Advanced Use Only) */
-        setRearWheelsRotationBoost(boost: number): void;
-        /** Sets rotation boost for front wheels only using physics vehicle object. (Advanced Use Only) */
-        setFrontWheelsRotationBoost(boost: number): void;
-        /** Sets vehicle arcade steering input for sliding assist using physics vehicle object. (Advanced Use Only) */
-        setArcadeSteeringInput(steering: number): void;
-        /** Gets vehicle arcade footbrake state using physics vehicle object. (Advanced Use Only) */
-        getisArcadeFootBrakeActive(): boolean;
-        /** Sets vehicle arcade footbrake state using physics vehicle object. (Advanced Use Only) */
-        setisArcadeFootBrakeActive(active: boolean): void;
-        /** Gets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
-        getisArcadeHandBrakeActive(): boolean;
-        /** Sets vehicle arcade handbrake state using physics vehicle object. (Advanced Use Only) */
-        setisArcadeHandBrakeActive(active: boolean): void;
-        /** Gets vehicle arcade burnout mode state using physics vehicle object. (Advanced Use Only) */
-        getIsArcadeBurnoutModeActive(): boolean;
-        /** Sets vehicle arcade burnout mode state using physics vehicle object. (Advanced Use Only) */
-        setIsArcadeBurnoutModeActive(active: boolean): void;
-        /** Sets vehicle arcade wheel skid state using physics vehicle object. (Advanced Use Only) */
-        setIsArcadeWheelSkidActive(active: boolean): void;
-        /** Gets vehicle arcade wheel skid state using physics vehicle object. (Advanced Use Only) */
-        getIsArcadeWheelSkidActive(): boolean;
-        /** Gets vehicle arcade donut mode state using physics vehicle object. (Advanced Use Only) */
-        getIsArcadeDonutModeActive(): boolean;
-        /** Sets vehicle arcade donut mode state using physics vehicle object. (Advanced Use Only) */
-        setIsArcadeDonutModeActive(active: boolean): void;
-        /** Sets vehicle arcade hand brake delay using physics vehicle object. (Advanced Use Only) */
-        setArcadeHandBrakeDelay(factor: number): void;
-        /** Gets vehicle arcade hand brake delay using physics vehicle object. (Advanced Use Only) */
-        getArcadeHandBrakeDelay(): number;
-        /** Sets vehicle arcade wheel skid limit using physics vehicle object. (Advanced Use Only) */
-        setArcadeWheelSkidLimit(factor: number): void;
-        /** Gets vehicle arcade wheel skid limit using physics vehicle object. (Advanced Use Only) */
-        getArcadeWheelSkidLimit(): number;
-        /** Gets vehicle arcade wheel skid countdown timer using physics vehicle object. (Advanced Use Only) */
-        getArcadeWheelSkidTimer(): number;
-        /** Gets vehicle arcade wheel skid countdown timer using physics vehicle object. (Advanced Use Only) */
-        getArcadeHandBrakingTimer(): number;
-        shouldPlaySkidFx(wheelIndex?: number): boolean;
-        /** Gets per-wheel mode-aware skid FX gate from physics vehicle object. */
-        getWheelShouldPlaySkidFx(wheelIndex: number): boolean;
-        /** Gets wall-scrape contact FX gate from physics vehicle object. */
-        shouldPlayWallScrapeFx(wheelIndex?: number): boolean;
-        /** Gets curb-rumble contact FX gate from physics vehicle object. */
-        shouldPlayCurbRumbleFx(wheelIndex?: number): boolean;
-        /** Gets any non-tire contact FX gate (wall scrape or curb rumble). */
-        shouldPlayContactFx(wheelIndex?: number): boolean;
-        /** Gets wall-scrape contact FX gate for a specific wheel. */
-        getWheelShouldPlayWallScrapeFx(wheelIndex: number): boolean;
-        /** Gets curb-rumble contact FX gate for a specific wheel. */
-        getWheelShouldPlayCurbRumbleFx(wheelIndex: number): boolean;
-        /** Gets any non-tire contact FX gate for a specific wheel. */
-        getWheelShouldPlayContactFx(wheelIndex: number): boolean;
-        /** Gets any drifting FX gate (wall scrape or curb rumble). */
-        shouldPlayDriftFx(wheelIndex?: number): boolean;
-        /** Gets any drifting FX gate for a specific wheel. */
-        getWheelShouldPlayDriftFx(wheelIndex: number): boolean;
-        /** Gets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeFrontSideFactor(): number;
-        /** Sets vehicle arcade front side factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeFrontSideFactor(factor: number): void;
-        /** Gets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
-        getArcadeRearSideFactor(): number;
-        /** Sets vehicle arcade rear side factor using physics vehicle object. (Advanced Use Only) */
-        setArcadeRearSideFactor(factor: number): void;
-        /** Gets vehicle donut mode transition factor using physics vehicle object. (Advanced Use Only) */
-        getDonutModeTransitionFactor(): number;
-        /** Gets vehicle donut mode eased transition factor using physics vehicle object. (Advanced Use Only) */
-        getEasedDonutModeTransitionFactor(): number;
-        /** Gets vehicle donut mode engine boost using physics vehicle object. (Advanced Use Only) */
-        getDonutModeEngineBoost(): number;
-        /** Gets whether donut mode is engaged using physics vehicle object. (Advanced Use Only) */
-        isDonutModeEngaged(): boolean;
-        /** Sets vehicle donut engine multiplier using physics vehicle object. (Advanced Use Only) */
-        setDonutEngineMultiplier(multiplier: number): void;
-        /** Sets vehicle donut turn radius using physics vehicle object. (Advanced Use Only) */
-        setDonutTurnRadius(radius: number): void;
-        /** Sets vehicle donut transition speed using physics vehicle object. (Advanced Use Only) */
-        setDonutTransitionSpeed(speed: number): void;
-        isDriftSystemEnabled(): boolean;
-        setDriftSystemEnabled(enabled: boolean): void;
-        setDriftMaximumSpeed(maxSpeed: number): void;
-        getDriftMaximumSpeed(): number;
-        setDriftSpeedThreshold(threshold: number): void;
-        getDriftSpeedThreshold(): number;
-        isBurnoutModeEngaged(): boolean;
-        setLaunchBoostEnabled(enabled: boolean): void;
-        getLaunchBoostEnabled(): boolean;
-        setLaunchBoostDuration(duration: number): void;
-        getLaunchBoostDuration(): number;
-        setLaunchBoostMultiplier(multiplier: number): void;
-        getLaunchBoostMultiplier(): number;
-        setLaunchBoostDecaySpeed(speed: number): void;
-        getLaunchBoostDecaySpeed(): number;
-        setBurnoutKickStrength(strength: number): void;
-        getBurnoutKickStrength(): number;
-        setBurnoutFrictionSlip(slip: number): void;
-        getBurnoutFrictionSlip(): number;
-        setBurnoutFrictionGrip(grip: number): void;
-        getBurnoutFrictionGrip(): number;
-        getMinPenaltySpeed(): number;
-        setMinPenaltySpeed(speed: number): void;
-        getPenaltyWheelSlip(): number;
-        setPenaltyWheelSlip(slip: number): void;
-        getPenaltyGroundTag(): string;
-        setPenaltyGroundTag(tag: string): void;
-        setBaseRotationBoost(multiplier: number): void;
-        getBaseRotationBoost(): number;
-        setDonutRotationBoost(multiplier: number): void;
-        getDonutRotationBoost(): number;
-        getBurnoutPowerBoost(): number;
-        setBurnoutTransitionSpeed(speed: number): void;
-        getBurnoutTransitionSpeed(): number;
-        setBurnoutCoefficient(coefficient: number): void;
-        getBurnoutCoefficient(): number;
-        setLoggingEnabled(enabled: boolean): void;
-        getLoggingEnabled(): boolean;
-        setAdaptiveRaycastEnabled(enable: boolean): void;
-        getAdaptiveRaycastEnabled(): boolean;
-        setMultiRaycastRadiusScale(scale: number): void;
-        getMultiRaycastRadiusScale(): number;
-        setStabilizeVelocityEnabled(enabled: boolean): void;
-        getStabilizeVelocityEnabled(): boolean;
-        setUseSphericalShapeCasting(enabled: boolean): void;
-        getUseSphericalShapeCasting(): boolean;
-        setShapeCastRadiusMultiplier(multiplier: number): void;
-        getShapeCastRadiusMultiplier(): number;
-        setShapeCastNormalSmoothing(factor: number): void;
-        getShapeCastNormalSmoothing(): number;
-        setShapeCastSkidSmoothing(factor: number): void;
-        getShapeCastSkidSmoothing(): number;
-        setShapeCastSuspensionSmoothing(factor: number): void;
-        getShapeCastSuspensionSmoothing(): number;
         protected setupWheelInformation(): void;
-        tickVehicleController(step: number): void;
+        private applyAutoSuspensionForce;
+        private getWheelForwardPosition;
         updateWheelInformation(): void;
         protected lockedWheelInformation(wheel: number): boolean;
         protected deleteWheelInformation(): void;
@@ -5564,7 +5312,7 @@ declare namespace TOOLKIT {
         private static RaycastDestination;
         private _isKinematic;
         private _centerOfMass;
-        protected m_raycastVehicle: any;
+        protected m_raycastVehicle: TOOLKIT.RaycastVehicle;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
@@ -6641,7 +6389,10 @@ declare namespace TOOLKIT {
         private _cy;
         private _cz;
         private _triangleCount;
-        private _hashGrid;
+        private _cellTriangles;
+        private _htKeys;
+        private _htStarts;
+        private _htCounts;
         private _cellSize;
         private _hashOriginX;
         private _hashOriginZ;
@@ -6650,10 +6401,10 @@ declare namespace TOOLKIT {
         private _invWorldMatrix;
         private _matrixDirty;
         private _scratchV0;
-        private _scratchV1;
-        private _scratchV2;
         private _scratchLocal;
-        private _scratchBarry;
+        private _candidatesBuf;
+        private _uniqueBuf;
+        private _seenSet;
         /** Number of triangles in the proxy */
         get triangleCount(): number;
         /** Cell size of the spatial hash in local-space units */
@@ -6705,6 +6456,19 @@ declare namespace TOOLKIT {
          * Call this when the mesh is removed from the scene or the vehicle is destroyed.
          */
         dispose(): void;
+        /**
+         * Encodes a 2D grid coordinate pair into a single integer Map key.
+         * Avoids string concatenation ("hx|hz") which was the primary source of GC pressure
+         * during buildFromMesh and getNormalAtPointToRef.
+         * Supports grid coordinates in ±32767 — for cellSize=2m that covers ±65534m per axis.
+         */
+        private _makeHashKey;
+        /**
+         * Binary search for a cell key in the sorted _htKeys Uint32Array.
+         * Returns the index into _htKeys/_htStarts/_htCounts if found; -1 if not found.
+         * O(log N) where N = occupied cells — typically 10–17 comparisons per query.
+         */
+        private _bsearchCell;
         /**
          * Computes barycentric coordinates of projected point (px,py,pz) in triangle at index t.
          * Uses Cramer's rule (same algorithm as btSmoothTriangleMesh::barycentricCoordinates).
