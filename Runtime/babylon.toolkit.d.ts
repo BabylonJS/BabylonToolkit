@@ -4655,20 +4655,19 @@ declare namespace TOOLKIT {
         minimumWheelContacts: number;
         trackConnectionAccel: number;
         smoothFlyingImpulse: number;
+        sideFrictionStiffness: number;
+        downforceCoefficient: number;
+        constantDownforce: number;
         angularDamping: BABYLON.Vector3;
         onUpdateVehicleChassis: (step: number, wheelsOnGround: number, stabilizationUp: BABYLON.Vector3) => void;
+        wheelSkidFadeInSpeed: number;
+        wheelSkidFadeOutSpeed: number;
         minContactDotSuspension: number;
         suspensionForceSmoothing: number;
         suspensionDampingOverdrive: number;
         sideToSideStabilityEnabled: boolean;
         sideToSideStabilityStartKmh: number;
         sideToSideStabilityFullKmh: number;
-        stabilizationDebug: boolean;
-        stabilizationDebugInterval: number;
-        downforceCoefficient: number;
-        constantDownforce: number;
-        stabilizationNormalSmoothing: number;
-        airborneGroundNormalHoldTime: number;
         groundedAutoLevelEnabled: boolean;
         groundedAutoLevelStrength: number;
         groundedAutoLevelDeadzoneDeg: number;
@@ -4681,6 +4680,8 @@ declare namespace TOOLKIT {
         groundedAutoLevelPartialContactBoost: number;
         groundedAutoLevelSlideScale: number;
         groundedAutoLevelTrackNormalMinDot: number;
+        stabilizationNormalSmoothing: number;
+        airborneGroundNormalHoldTime: number;
         airborneTrackConnectionStartKmh: number;
         airborneTrackConnectionFullKmh: number;
         airborneTrackConnectionMaxAccel: number;
@@ -4689,39 +4690,21 @@ declare namespace TOOLKIT {
         private _stabilizationGroundNormal;
         private _stabilizationHasGroundNormal;
         private _stabilizationAirborneTime;
-        private _stabDebugTimer;
-        private _stabPrevWheelsOnGround;
-        private _stabPrevClampActive;
-        private _stabDbgUpSource;
-        private _stabDbgFlyingActive;
-        private _stabDbgFlyingAlignDot;
-        private _stabDbgFlyingAxisMagnitude;
-        private _stabDbgRollRate;
-        private _stabDbgYawRate;
-        private _stabDbgPitchRate;
-        private _stabDbgTrackConnectionForce;
-        private _stabDbgAirborneTrackAccel;
-        private _stabDbgAirborneRiseSpeed;
-        private _stabDbgAirborneRiseImpulse;
-        private _stabDbgGroundLevelActive;
-        private _stabDbgGroundLevelAlignDot;
-        private _stabDbgGroundLevelRate;
-        private _stabDbgGroundLevelTiltDeg;
-        private _stabDbgGroundLevelReason;
-        private _stabPrevGroundLevelActive;
         private _groundedAutoLevelWasActive;
-        private _stabDbgBaseDownforce;
-        private _stabDbgAeroDownforce;
-        private _stabDbgStabilizingRawImpulse;
-        private _stabDbgStabilizingImpulse;
-        private _stabDbgStabilizingClampHit;
+        private _arcadeHandbrakeWasActive;
+        private _yawAssistWasActive;
+        private _yawDebugHasPrevRate;
+        private _yawDebugPrevRate;
+        private _yawDebugPrevSlipAngleDeg;
+        private _yawDampingOverride;
+        private _driftReleaseTimer;
+        private _driftReleaseYawAtRelease;
+        private _driftReleaseYawSign;
         isArcadeBurnoutModeActive: boolean;
         isArcadeDonutModeActive: boolean;
         isArcadeFootBrakeActive: boolean;
         isArcadeHandBrakeActive: boolean;
-        isArcadeWheelSkidActive: boolean;
-        burnoutFrictionFloor: number;
-        frictionRestoreSpeed: number;
+        arcadeSteeringAssist: number;
         arcadeBurnoutWheelSpinGain: number;
         arcadeDonutWheelSpinGain: number;
         arcadeBurnoutDirectionChangeSpeedKmh: number;
@@ -4730,15 +4713,14 @@ declare namespace TOOLKIT {
         arcadeWheelSpinRecoverySpeed: number;
         arcadeWheelSpinAirDamping: number;
         arcadeWheelSpinMaxAngularVelocity: number;
-        arcadeSkidFadeInSpeed: number;
-        arcadeSkidFadeOutSpeed: number;
+        arcadeHandbrakeYawCutoffDeg: number;
+        arcadeDriftReleaseDuration: number;
         private _forwardWS;
         private _axle;
         private _forwardImpulse;
         private _sideImpulse;
         private _arcadeSkidInfo;
         private _arcadePreviousWheelSpin;
-        sideFrictionStiffness: number;
         private _chassisMass;
         private _chassisInvMass;
         private _chassisTransform;
@@ -4772,6 +4754,9 @@ declare namespace TOOLKIT {
         private _stb3;
         private _stb4;
         private _stb5;
+        private _yawAssistLocalAngVel;
+        private _yawAssistCorrected;
+        private _yawAssistInvTransform;
         constructor(tuning: btVehicleTuning, chassisBody: BABYLON.PhysicsBody, raycaster: IbtVehicleRaycaster);
         addWheel(connectionPointCS: BABYLON.Vector3, wheelDirectionCS: BABYLON.Vector3, wheelAxleCS: BABYLON.Vector3, suspensionRestLength: number, wheelRadius: number, tuning: btVehicleTuning, isFrontWheel: boolean): btWheelInfo;
         getNumWheels(): number;
@@ -4797,8 +4782,6 @@ declare namespace TOOLKIT {
         getIsArcadeFootBrakeActive(): boolean;
         setIsArcadeHandBrakeActive(active: boolean): void;
         getIsArcadeHandBrakeActive(): boolean;
-        setIsArcadeWheelSkidActive(active: boolean): void;
-        getIsArcadeWheelSkidActive(): boolean;
         resetSuspension(): void;
         getChassisWorldTransform(): BABYLON.Matrix;
         private updateWheelTransformsWS;
@@ -4806,8 +4789,6 @@ declare namespace TOOLKIT {
         private rayCast;
         private getGravityUpToRef;
         private computeStabilizationUpVector;
-        private resetStabilizationDebugFrame;
-        private logStabilizationDebug;
         private applyFlyingStabilization;
         private applyGroundedAutoLevel;
         private applyTrackConnectionAndDownforce;
@@ -4819,6 +4800,8 @@ declare namespace TOOLKIT {
         private getArcadeBurnoutDirectionChangeFactor;
         private updateArcadeSkidInfo;
         private updateFriction;
+        private beginDriftRelease;
+        private applyHandbrakeYawAssist;
         private velocityAtWorldPoint;
         private resolveSingleBilateral;
         private calcRollingFriction;
@@ -5204,14 +5187,14 @@ declare namespace TOOLKIT {
         /** Gets the rigidbody raycast vehicle controller for the entity. Note: Wheel collider metadata informaion is required for raycast vehicle control. */
         static GetInstance(scene: BABYLON.Scene, rigidbody: TOOLKIT.RigidbodyPhysics): TOOLKIT.RaycastVehicle;
         tickVehicleController(step: number): void;
-        /** Gets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
-        getAngularDamping(): BABYLON.Vector3;
-        /** Sets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
-        setAngularDamping(damping: BABYLON.Vector3): void;
         /** Gets vehicle enable multi raycast flag using physics vehicle object. (Advanved Use Only) */
         getEnableMultiRaycast(): boolean;
         /** Sets vehicle enable multi raycast flag using physics vehicle object. (Advanved Use Only) */
         setEnableMultiRaycast(flag: boolean): void;
+        /** Gets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
+        getAngularDampingControl(): BABYLON.Vector3;
+        /** Sets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
+        setAngularDampingControl(damping: BABYLON.Vector3): void;
         /** Gets vehicle smooth flying impulse force using physics vehicle object. (Advanved Use Only) */
         getSmoothFlyingImpulse(): number;
         /** Sets vehicle smooth flying impulse using physics vehicle object. (Advanved Use Only) */
@@ -5268,6 +5251,14 @@ declare namespace TOOLKIT {
         protected normalizeWheelRotation(angle: number): number;
         protected syncWheelSpinnerRotation(wheelinfo: any): void;
         protected rebaseWheelSpinnerRotation(wheelinfo: any): void;
+        /** Gets the wheel skid fade-in speed. Higher values = faster release transition (~3.0 = ~0.35s). (Advanced Use Only) */
+        getWheelSkidFadeInSpeed(): number;
+        /** Sets the wheel skid fade-in speed. Controls how quickly skid effect ramps up during handbrake slides. (Advanced Use Only) */
+        setWheelSkidFadeInSpeed(value: number): void;
+        /** Gets the wheel skid fade-out speed. Higher values = faster release transition (~3.0 = ~0.35s). (Advanced Use Only) */
+        getWheelSkidFadeOutSpeed(): number;
+        /** Sets the wheel skid fade-out speed. Controls how quickly skid effect ramps up during handbrake slides. (Advanced Use Only) */
+        setWheelSkidFadeOutSpeed(value: number): void;
         getArcadeBurnoutActive(): boolean;
         setArcadeBurnoutActive(active: boolean): void;
         getArcadeDonutActive(): boolean;
@@ -5276,8 +5267,16 @@ declare namespace TOOLKIT {
         setArcadeFootBrakeActive(active: boolean): void;
         getArcadeHandBrakeActive(): boolean;
         setArcadeHandBrakeActive(active: boolean): void;
-        getArcadeWheelSkidActive(): boolean;
-        setArcadeWheelSkidActive(active: boolean): void;
+        getArcadeMaxHandBrakeAngle(): number;
+        setArcadeMaxHandBrakeAngle(degrees: number): void;
+        /** Gets the arcade steering yaw assist strength. (Advanced Use Only) */
+        getArcadeSteeringAssist(): number;
+        /** Sets the arcade steering yaw assist strength. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeSteeringAssist(value: number): void;
+        /** Gets the arcade drift release duration. (Advanced Use Only) */
+        getArcadeDriftReleaseDuration(): number;
+        /** Sets the arcade drift release duration. (Advanced Use Only) */
+        setArcadeDriftReleaseDuration(value: number): void;
         /** Sets vehicle arcade burnout direction change speed using physics vehicle object. (Advanced Use Only) */
         setArcadeBurnoutDirectionChangeSpeed(mph: number): void;
         /** Gets an approximate wheelbase length in meters for the vehicle. Used for some advanced handling calculations. */
