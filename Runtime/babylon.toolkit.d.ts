@@ -2078,6 +2078,7 @@ declare namespace TOOLKIT {
         private _unityLightingPlugin;
         getClassName(): string;
         constructor(name: string, scene: BABYLON.Scene);
+        initMaterial(): void;
         /** Adds a custom attribute property */
         addAttribute(attributeName: string): void;
         /** Checks uniform values. Internal Use Only */
@@ -2374,6 +2375,7 @@ declare namespace TOOLKIT {
         protected plugin: BABYLON.MaterialPluginBase;
         getClassName(): string;
         constructor(name: string, scene: BABYLON.Scene);
+        initMaterial(): void;
         /** Adds a custom attribute property */
         addAttribute(attributeName: string): void;
         /** Checks uniform values. Internal Use Only */
@@ -2947,6 +2949,7 @@ declare namespace TOOLKIT {
     class UniversalTerrainMaterial extends TOOLKIT.CustomShaderMaterial {
         protected terrainInfo: any;
         constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
         update(): void;
         getShaderName(): string;
         getTerrainInfo(): any;
@@ -3012,6 +3015,7 @@ declare namespace TOOLKIT {
         private _windTimeAccum;
         private _lastUpdateFrame;
         constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
         update(): void;
         getShaderName(): string;
         getMaxDistance(): number;
@@ -3065,6 +3069,7 @@ declare namespace TOOLKIT {
         private _windTimeAccum;
         private _lastUpdateFrame;
         constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
         update(): void;
         getShaderName(): string;
         getMaxDistance(): number;
@@ -3117,6 +3122,7 @@ declare namespace TOOLKIT {
     class TreeBranchMaterial extends TOOLKIT.CustomShaderMaterial {
         private _windTimeAccum;
         constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
         update(): void;
         getShaderName(): string;
         setWindDirection(x: number, y: number, z: number): void;
