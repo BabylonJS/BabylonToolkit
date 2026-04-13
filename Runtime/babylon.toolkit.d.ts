@@ -4614,6 +4614,8 @@ declare namespace TOOLKIT {
         suspensionRelativeVelocity: number;
         suspensionForce: number;
         skidInfo: number;
+        skidFxLevel: number;
+        skidFxPeak: number;
         clientInfo: any;
         steeringAngle: number;
         rotationBoost: number;
@@ -4624,6 +4626,16 @@ declare namespace TOOLKIT {
         _prevSuspensionLength: number;
         _prevSuspensionForce: number;
         _hasPrevSuspState: boolean;
+        _rayHistoryLengths: number[];
+        _rayHistoryNormalsX: number[];
+        _rayHistoryNormalsY: number[];
+        _rayHistoryNormalsZ: number[];
+        _rayHistoryIndex: number;
+        _rayHistoryCount: number;
+        _smoothedSuspensionLength: number;
+        _smoothedContactNormal: BABYLON.Vector3;
+        _smoothedContactNormalValid: boolean;
+        _contactLossFrames: number;
         transform: BABYLON.TransformNode;
         spinner: BABYLON.TransformNode;
         constructor(ci: {
@@ -4671,6 +4683,21 @@ declare namespace TOOLKIT {
         minContactDotSuspension: number;
         suspensionForceSmoothing: number;
         suspensionDampingOverdrive: number;
+        raycastSmoothingEnabled: boolean;
+        raycastHistoryBufferSize: number;
+        raycastLengthCompressionAlpha: number;
+        raycastLengthRelaxationAlpha: number;
+        raycastNormalSmoothingAlpha: number;
+        raycastOutlierRejectionEnabled: boolean;
+        raycastOutlierThresholdMeters: number;
+        raycastMaxLengthChangePerSecond: number;
+        raycastContactLossGraceFrames: number;
+        raycastDebugLogEnabled: boolean;
+        raycastDebugLogIntervalFrames: number;
+        raycastDebugLogSpikeThresholdMeters: number;
+        raycastDebugLogWheelMask: number;
+        private _raycastDebugFrameCounter;
+        private _raycastMedianScratch;
         sideToSideStabilityEnabled: boolean;
         sideToSideStabilityStartKmh: number;
         sideToSideStabilityFullKmh: number;
@@ -4699,9 +4726,8 @@ declare namespace TOOLKIT {
         private _groundedAutoLevelWasActive;
         private _arcadeHandbrakeWasActive;
         private _yawAssistWasActive;
-        private _yawDebugHasPrevRate;
-        private _yawDebugPrevRate;
-        private _yawDebugPrevSlipAngleDeg;
+        private _yawAssistLastRateDelta;
+        private _yawAssistHbFrames;
         private _yawDampingOverride;
         private _driftReleaseTimer;
         private _driftReleaseYawAtRelease;
@@ -4719,8 +4745,21 @@ declare namespace TOOLKIT {
         arcadeWheelSpinRecoverySpeed: number;
         arcadeWheelSpinAirDamping: number;
         arcadeWheelSpinMaxAngularVelocity: number;
-        arcadeHandbrakeYawCutoffDeg: number;
+        x: any;
         arcadeDriftReleaseDuration: number;
+        arcadeHandbrakeYawCutoffDeg: number;
+        arcadeHandbrakeYawKickRate: number;
+        arcadeHandbrakeYawKickShape: number;
+        arcadeHandbrakeYawKickSteerAttack: number;
+        arcadeHandbrakeYawKickGainBoost: number;
+        arcadeHandbrakeYawKickMaxDeltaPerFrame: number;
+        arcadeHandbrakeYawKickSustainFloor: number;
+        arcadeYawAssistVelocityRedirectEnabled: boolean;
+        arcadeYawAssistVelocityRedirectCoupling: number;
+        arcadeDriftReleasePreventOppositeSpin: boolean;
+        arcadeSkidFxReleaseTau: number;
+        arcadeSkidFxReleaseFloorEnabled: boolean;
+        arcadeSkidFxReleaseFloorShape: number;
         private _forwardWS;
         private _axle;
         private _forwardImpulse;
@@ -4793,6 +4832,8 @@ declare namespace TOOLKIT {
         private updateWheelTransformsWS;
         updateWheelTransform(wheelIndex: number, interpolatedTransform?: boolean): void;
         private rayCast;
+        private smoothRaycastHit;
+        private logRaycastHit;
         private getGravityUpToRef;
         private computeStabilizationUpVector;
         private applyFlyingStabilization;
@@ -4806,6 +4847,7 @@ declare namespace TOOLKIT {
         private getArcadeBurnoutDirectionChangeFactor;
         private updateArcadeSkidInfo;
         private updateFriction;
+        private updateSkidFxEnvelopes;
         private beginDriftRelease;
         private applyHandbrakeYawAssist;
         private velocityAtWorldPoint;
@@ -5197,6 +5239,10 @@ declare namespace TOOLKIT {
         getEnableMultiRaycast(): boolean;
         /** Sets vehicle enable multi raycast flag using physics vehicle object. (Advanved Use Only) */
         setEnableMultiRaycast(flag: boolean): void;
+        /** Gets vehicle raycast smoothing flag using physics vehicle object. (Advanved Use Only) */
+        getEnableRaycastSmoothing(): boolean;
+        /** Sets vehicle raycast smoothing flag using physics vehicle object. (Advanved Use Only) */
+        setEnableRaycastSmoothing(flag: boolean): void;
         /** Gets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
         getAngularDampingControl(): BABYLON.Vector3;
         /** Sets vehicle angular damping using physics vehicle object. (Advanved Use Only) */
@@ -5265,6 +5311,10 @@ declare namespace TOOLKIT {
         getWheelSkidFadeOutSpeed(): number;
         /** Sets the wheel skid fade-out speed. Controls how quickly skid effect ramps up during handbrake slides. (Advanced Use Only) */
         setWheelSkidFadeOutSpeed(value: number): void;
+        /** Gets the arcade steering assist strength. (Advanced Use Only) */
+        getArcadeSteeringAssist(): number;
+        /** Sets the arcade steering yaw assist strength. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeSteeringAssist(value: number): void;
         getArcadeBurnoutActive(): boolean;
         setArcadeBurnoutActive(active: boolean): void;
         getArcadeDonutActive(): boolean;
@@ -5275,10 +5325,14 @@ declare namespace TOOLKIT {
         setArcadeHandBrakeActive(active: boolean): void;
         getArcadeMaxHandBrakeAngle(): number;
         setArcadeMaxHandBrakeAngle(degrees: number): void;
-        /** Gets the arcade steering yaw assist strength. (Advanced Use Only) */
-        getArcadeSteeringAssist(): number;
-        /** Sets the arcade steering yaw assist strength. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
-        setArcadeSteeringAssist(value: number): void;
+        /** Gets the arcade handbrake yaw kick rate. (Advanced Use Only) */
+        getArcadeMaxHandBrakeKick(): number;
+        /** Sets the arcade handbrake yaw kick rate. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeMaxHandBrakeKick(value: number): void;
+        /** Gets the arcade drift release tau. (Advanced Use Only) */
+        getArcadeDriftReleaseLinger(): number;
+        /** Sets the arcade drift release tau. (Advanced Use Only) */
+        setArcadeDriftReleaseLinger(value: number): void;
         /** Gets the arcade drift release duration. (Advanced Use Only) */
         getArcadeDriftReleaseDuration(): number;
         /** Sets the arcade drift release duration. (Advanced Use Only) */
