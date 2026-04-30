@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.0.0 - R1) */
+        /** Gets the toolkit framework version string (9.0.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -5302,9 +5302,15 @@ declare namespace TOOLKIT {
         arcadeWheelSpinRecoverySpeed: number;
         arcadeWheelSpinAirDamping: number;
         arcadeWheelSpinMaxAngularVelocity: number;
+        arcadeStationaryBurnoutWheelSpinGain: number;
+        arcadeStationaryBurnoutMinAngularVelocity: number;
         arcadeSkidFadeInSpeed: number;
         arcadeSkidFadeOutSpeed: number;
         arcadeYawCapMultiplier: number;
+        wheelAtRestSpeedThresholdKmh: number;
+        wheelSpinDebugLogEnabled: boolean;
+        wheelSpinDebugLogIntervalFrames: number;
+        private _wheelSpinDebugLogCounter;
         private _postHandbrakeLogFrames;
         private _postHandbrakeLogCounter;
         private _wasAnyArcadeModeActive;
@@ -5925,6 +5931,28 @@ declare namespace TOOLKIT {
         private getWheelForwardPosition;
         /** Returns true when the wheel is slipping from normal tire saturation only, excluding arcade handbrake/burnout/donut states and the protected post-handbrake release window. */
         getNaturalWheelSlip(wheelIndex: number): boolean;
+        /** Gets the chassis-center linear speed threshold (km/h) below which the
+         *  visual wheel rotation update is suppressed (when no arcade mode is
+         *  active). 0 disables the suppression entirely.
+         *  Use this if you see residual wheel spin after a handbrake/burnout/donut
+         *  combo brings the car to a stop — chassis yaw can keep bleeding off and
+         *  drive `groundAngularVelocity` for a fraction of a second otherwise. */
+        getWheelAtRestSpeedThresholdKmh(): number;
+        /** Sets the chassis-center linear speed threshold (km/h) below which the
+         *  visual wheel rotation update is suppressed (when no arcade mode is
+         *  active). 0 disables the suppression. */
+        setWheelAtRestSpeedThresholdKmh(value: number): void;
+        /** Enables or disables per-tick wheel spin diagnostics. When enabled the
+         *  vehicle prints chassis lin/ang velocity, per-wheel ground angular
+         *  velocity, rotationBoost, deltaRotation, arcade mode flags, and whether
+         *  at-rest suppression fired. Use this to diagnose visible spin after the
+         *  car has stopped — the printout shows whether it is coming from
+         *  rotationBoost or from `groundAngularVelocity` (residual chassis yaw). */
+        setWheelSpinDebugLogEnabled(enabled: boolean): void;
+        /** Gets whether per-tick wheel spin diagnostics are enabled. */
+        getWheelSpinDebugLogEnabled(): boolean;
+        /** Sets the print interval (in physics ticks) for the wheel spin debug log. */
+        setWheelSpinDebugLogIntervalFrames(frames: number): void;
         updateWheelInformation(): void;
         protected lockedWheelInformation(wheel: number): boolean;
         protected deleteWheelInformation(): void;
