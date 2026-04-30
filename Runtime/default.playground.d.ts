@@ -202,10 +202,6 @@ declare namespace PROJECT {
         private frontRightContactNormal;
         private rearLeftContactNormal;
         private rearRightContactNormal;
-        private frontLeftSensorLine;
-        private frontRightSensorLine;
-        private rearLeftSensorLine;
-        private rearRightSensorLine;
         private startRaycastPosition;
         private endRaycastPosition;
         private smokeIntensityFactor;
@@ -254,14 +250,34 @@ declare namespace PROJECT {
         protected m_lastPosition: BABYLON.Vector3;
         protected m_positionCenter: BABYLON.Vector3;
         protected m_scaledVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
         protected destroy(): void;
         protected updateVehicleProperties(): void;
-        private castWheelContactRays;
         private createSmokeParticleSystem;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon Script Component
+     * @class SideCameraController
+     */
+    class SideCameraController extends TOOLKIT.ScriptComponent {
+        private _camera;
+        private _adt;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
+        protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
+        private enableWindowView;
     }
 }
 declare namespace PROJECT {
@@ -317,7 +333,7 @@ declare namespace PROJECT {
 }
 declare namespace PROJECT {
     /**
-     * Babylon standard rigidbody vehicle controller class (Havok Physics Engine)
+     * Babylon standard rigidbody vehicle controller class (Native Bullet Physics 2.82)
      * @class StandardCarController
      */
     class StandardCarController extends TOOLKIT.ScriptComponent {
@@ -325,6 +341,7 @@ declare namespace PROJECT {
         static DEFAULT_PITCH_FACTOR: number;
         static DEFAULT_SPEED_FACTOR: number;
         static DEFAULT_DONUT_FACTOR: number;
+        static DEFAULT_BRAKE_DEADZONE: number;
         static SimplexNoise2D: TOOLKIT.NoiseFunction2D;
         MIN_RPM: number;
         MAX_RPM: number;
@@ -337,23 +354,28 @@ declare namespace PROJECT {
         private steeringWheelAxis;
         private maxSteeringAngle;
         private maxSteeringSpeed;
-        private minSkiddingSpeed;
         private gearIndex;
         private shiftingTime;
         private shiftingSide;
         private shiftingBrake;
         private engineForce;
+        private footBraking;
         private handBraking;
         private linearDamping;
+        private angularDamping;
         private forwardSpeed;
         private absoluteSpeed;
         private americanSpeed;
         private gradientSpeed;
+        private smoothedGradientSpeed;
+        private smoothedSteeringSpeed;
         private frontWheelPower;
         private backWheelPower;
         private wheelBrakingForce;
         private enginePitchLevel;
         private smokeIntensityFactor;
+        private handBrakingHoldTimer;
+        private _prevHandBrakeRequested;
         private raycastVehicle;
         private brakeLightsMesh;
         private brakeLightsTrans;
@@ -395,6 +417,18 @@ declare namespace PROJECT {
         private engineRPM;
         private pitchRPM;
         private shiftRPM;
+        private wheelRPM;
+        private transmissionInputRPM;
+        private actualEngineRPM;
+        private targetEngineRPM;
+        private throttleRPM;
+        private engineLoad;
+        private gearShiftCooldown;
+        private isShifting;
+        private shiftDirection;
+        private clutchEngagement;
+        private engineBraking;
+        private shiftHysteresis;
         private SKID_FL;
         private SKID_FR;
         private SKID_RL;
@@ -409,29 +443,13 @@ declare namespace PROJECT {
         private BACK_RIGHT;
         private WHEEL_SKID_PITCH;
         private POWER_BOOST_PITCH;
-        private wheelRPM;
-        private transmissionInputRPM;
-        private actualEngineRPM;
-        private targetEngineRPM;
-        private throttleRPM;
-        private engineLoad;
-        private gearShiftCooldown;
-        private isShifting;
-        private shiftDirection;
-        private clutchEngagement;
-        private engineBraking;
-        private shiftHysteresis;
-        private velocityCompensation;
-        private visualSteerBoost;
-        private steeringGradient;
-        private ackermanSteerLeft;
-        private ackermanSteerRight;
         private SPIN_FL_Rotation;
         private SPIN_FR_Rotation;
         private SPIN_RL_Rotation;
         private SPIN_RR_Rotation;
         isBraking(): boolean;
         isBoosting(): boolean;
+        private allowRollingReverseBurnout;
         getFootBraking(): boolean;
         getHandBraking(): boolean;
         getLinearVelocity(): BABYLON.Vector3;
@@ -439,6 +457,7 @@ declare namespace PROJECT {
         getCurrentTurning(): number;
         getCurrentSkidding(): boolean;
         getBurnoutButton(): boolean;
+        getDonutButton(): boolean;
         getReverseThrottle(): boolean;
         getEnginePitchLevel(): number;
         getCurrentBurnout(): boolean;
@@ -471,6 +490,19 @@ declare namespace PROJECT {
         getWheelBurnoutEnabled(): boolean;
         getWheelDonutsEnabled(): boolean;
         getCurrentDonutSpinTime(): number;
+        isStartPositionLocked(): boolean;
+        /**
+         * Snap the car to its current transform position and lock it there.
+         * Engine revs, burnout state machine, and wheel spin visuals continue to run.
+         * Call this when placing the car on the grid before the countdown starts.
+         */
+        lockStartPosition(): void;
+        /**
+         * Release the position lock. If the car had a stationary burnout actively built up,
+         * the burnout launch kick fires immediately for an explosive start.
+         * Call this on GO / when the countdown finishes.
+         */
+        unlockStartPosition(): void;
         getSmokeIntensityFactor(): number;
         getWheelVelocityOffset(): BABYLON.Vector3;
         smokeTexture: BABYLON.Texture;
@@ -479,8 +511,6 @@ declare namespace PROJECT {
         smokeIntensity: number;
         smokeOpacity: number;
         smokeDonuts: number;
-        noiseTimeScale: number;
-        noiseTimeFactor: number;
         maxSteerBoost: number;
         overSteerSpeed: number;
         overSteerTimeout: number;
@@ -489,60 +519,82 @@ declare namespace PROJECT {
         powerChangeRate: number;
         powerCoefficient: number;
         boosterCoefficient: number;
-        frictionLerpSpeed: number;
-        burnoutLerpSpeed: number;
-        topSpeedDampener: number;
+        gravitationalForce: number;
+        driftSpeedDampener: number;
         lowSpeedSteering: number;
         highSpeedSteering: number;
-        gravityMultiplier: number;
-        brakeSteerAssist: number;
-        brakeSteerMinFactor: number;
-        brakeSteerMaxSpeedMph: number;
-        donutEngineFactor: number;
+        steeringInputCurve: number;
+        debugSteering: boolean;
+        debugSteeringEveryNFrames: number;
+        private _debugSteeringCounter;
+        debugDonut: boolean;
+        debugDonutEveryNFrames: number;
+        private _donutLogCounter;
+        maximumYawRateLow: number;
+        maximumYawRateHigh: number;
+        arcadeYawCapMultiplier: number;
         donutTurningRadius: number;
-        donutTransitionSpeed: number;
-        burnoutRotationBoost: number;
-        donutRotationBoost: number;
-        skiddingTurnAssist: number;
-        handbrakePreserve: number;
-        burnoutFirstGearMultiplier: number;
-        raycastDriveType: number;
-        maxRadiusMultiplier: number;
-        stabilizeVelocity: boolean;
-        differentialRatio: number;
+        donutPowerBlend: number;
+        donutSpeedScaling: number;
+        donutAngularDamping: number;
+        donutFrontPowerFactor: number;
+        donutFrontFriction: number;
+        donutRearFriction: number;
+        donutCoefficient: number;
+        roadConnectAccel: number;
+        smoothFlyingImpulse: number;
+        stableDownImpulse: number;
+        constImpulseForce: number;
         transmissionRatio: number;
-        minBoosterSpeed: number;
+        differentialRatio: number;
+        burnoutFirstGearMultiplier: number;
         maxBoosterTime: number;
+        minBoosterSpeed: number;
         maxFrontBraking: number;
         maxReversePower: number;
+        minBrakingForce: number;
+        maxBrakingForce: number;
         handBrakingForce: number;
         handBrakingTimer: number;
-        footBrakingFactor: number;
-        skidRotationTimeout: number;
+        defaultBrakingWindow: number;
+        counterSteerLockoutWindowPercent: number;
+        counterSteerLockoutDeadzone: number;
         linearBrakingForce: number;
-        burnoutFrictionSlip: number;
-        burnoutFrictionGrip: number;
-        burnoutCooldownTime: number;
+        angularBrakingForce: number;
+        frontSkidFriction: number;
+        rearSkidFriction: number;
         burnoutTimeDelay: number;
         burnoutWheelPitch: number;
         burnoutCoefficient: number;
         burnoutTriggerMark: number;
-        burnoutTransition: number;
+        stationaryBurnoutPrimeSpeedMph: number;
+        stationaryBurnoutPrimeHoldTime: number;
+        stationaryBurnoutPrimeReleaseSpeedMph: number;
+        stationaryBurnoutRevMinRpmOffset: number;
+        stationaryBurnoutRevMaxFactor: number;
+        stationaryBurnoutRevLerpSpeed: number;
+        normalLaunchTractionRamp: number;
+        normalLaunchTractionMin: number;
+        burnoutLaunchKickDuration: number;
+        burnoutLaunchKickMultiplier: number;
+        burnoutLaunchFrictionRestore: number;
+        debugLaunch: boolean;
+        debugLaunchEveryNFrames: number;
+        positionLocked: boolean;
         enableAutoBurnouts: boolean;
-        driftMaximumSpeed: number;
-        driftTriggerSpeed: number;
-        driftTriggerAngle: number;
-        foorBrakeDrifting: boolean;
-        penaltyGroundTag: string;
+        assertBurnoutFlagThroughRestore: boolean;
+        grassPenaltyMask: number;
+        curbPenaltyMask: number;
         minPenaltySpeed: number;
         linearWheelDrag: number;
-        penaltyWheelSlip: number;
+        frictionWheelSlip: number;
         showSensorLines: boolean;
         powerBooster: boolean;
         linkTrackManager: boolean;
         playVehicleSounds: boolean;
         postNetworkAttributes: boolean;
         wheelDriveType: number;
+        gearBoxMultiplier: number;
         currentPitchScale: number;
         gearBoxPitchScale: number;
         gearBoxShiftDelay: number;
@@ -551,16 +603,21 @@ declare namespace PROJECT {
         gearBoxShiftDownRanges: number[];
         throttleBrakingForce: number;
         throttleEngineSpeed: number;
-        maxSkiddingTimer: number;
-        brakeRecoveryDelay: number;
-        brakeRecoverySpeed: number;
-        extraRotationSpeed: number;
-        maxRotationSpeed: number;
+        frictionLerpSpeed: number;
+        burnoutLerpSpeed: number;
+        skidTurningAssist: number;
+        skidSteeringKick: number;
+        skidSteeringAngle: number;
+        skidReleaseWindow: number;
+        skidReleaseLinger: number;
         ackermanWheelBase: number;
         ackermanRearTrack: number;
         ackermanTurnRadius: number;
         ackermanMaxRadius: number;
         ackermanTurnFactor: number;
+        radiusBrakingForce: number;
+        steeringSlewTau: number;
+        minSteeringSlew: number;
         readBurnoutMeter(): number;
         resetBurnoutMeter(): void;
         readDonutMeter(): number;
@@ -593,12 +650,11 @@ declare namespace PROJECT {
         boosterTransform: BABYLON.TransformNode;
         chassisTransform: BABYLON.TransformNode;
         tiltChassisEulers: BABYLON.Vector3;
-        private maxWheelDistanceFactor;
-        private minUpwardAngleFactor;
-        protected m_frontLeftWheel: TOOLKIT.HavokWheelInfo;
-        protected m_frontRightWheel: TOOLKIT.HavokWheelInfo;
-        protected m_backLeftWheel: TOOLKIT.HavokWheelInfo;
-        protected m_backRightWheel: TOOLKIT.HavokWheelInfo;
+        protected m_physicsWorld: any;
+        protected m_frontLeftWheel: TOOLKIT.btWheelInfo;
+        protected m_frontRightWheel: TOOLKIT.btWheelInfo;
+        protected m_backLeftWheel: TOOLKIT.btWheelInfo;
+        protected m_backRightWheel: TOOLKIT.btWheelInfo;
         protected m_frontLeftWheelSkid: number;
         protected m_frontRightWheelSkid: number;
         protected m_backLeftWheelSkid: number;
@@ -608,7 +664,6 @@ declare namespace PROJECT {
         protected m_linearVelocity: BABYLON.Vector3;
         protected m_lastPosition: BABYLON.Vector3;
         protected m_scaledVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
         protected update(): void;
@@ -617,35 +672,44 @@ declare namespace PROJECT {
         protected initVehicleState(): void;
         protected updateVehicleState(): void;
         protected destroyVehicleState(): void;
-        private burnoutButton;
         private donutButton;
+        private burnoutButton;
         private burnoutTimer;
+        private burnoutElapsed;
         private restoreTimer;
+        private restoreTimerDuration;
         private cooldownTimer;
         private wheelDonuts;
         private wheelBurnout;
+        private _prevBurnoutButton;
+        private _burnoutLatchedDriveSign;
+        private _stationaryBurnoutPrimed;
+        private _stationaryBurnoutPrimeTimer;
+        private _prevStationaryBurnoutWanted;
+        private _burnoutLaunchKickTimer;
+        private _burnoutLaunchHoldRpm;
+        private _launchLogCounter;
+        private _handBrakeEntrySteerSign;
+        private _lockedPosition;
+        private _lockedRotationQuaternion;
         private wheelSkidding;
         private donutSpinTime;
         private currentForward;
         private currentTurning;
+        private rampedTurning;
         private currentBoosting;
         private currentSkidding;
-        private currentSlipAngle;
         private currentDrivePower;
         private targetDrivePower;
         private animatorSteerAngle;
-        /** Gets the current vehicle lateral slip angle in degrees. */
-        getCurrentSlipAngle(signed: boolean): number;
-        /** Gets the current vehicle lateral slip angle in radians. */
-        getCurrentSlipRadians(signed: boolean): number;
-        private ackermanSteering;
+        private _burnoutLogCounter;
         /** Drives the raycast vehicle with the specfied movement properties. */
         drive(throttle: number, steering: number, braking: boolean, burnout: boolean, booster?: number, autopilot?: boolean, nos?: boolean, donut?: boolean): void;
+        private processAckermanSteering;
         private syncVehicleState;
         private currentPitch;
         private currentRoll;
         private previousSpeed;
-        private angularVelocity;
         private syncVehicleTilting;
         private updateGearShifting;
         private shouldUpshift;
@@ -655,9 +719,61 @@ declare namespace PROJECT {
         private getIdleRPM;
         private writeTransformMetadata;
         private getVehicleEngineTorque;
-        private calculateDefaultEngineTorqueCurve;
         private createSmokeParticleSystem;
         private updateCurrentSkidInfo;
+        private updateCurrentContactMask;
+        private updateCurrentBrakeDamping;
+        private updateCurrentRotationDelta;
+        private updateCurrentRotationBoost;
+        private updateCurrentFrictionSlip;
+        private frontLeftContact;
+        private frontRightContact;
+        private rearLeftContact;
+        private rearRightContact;
+        private frontLeftContactTag;
+        private frontRightContactTag;
+        private rearLeftContactTag;
+        private rearRightContactTag;
+        private frontLeftContactMask;
+        private frontRightContactMask;
+        private rearLeftContactMask;
+        private rearRightContactMask;
+        private frontLeftContactPoint;
+        private frontRightContactPoint;
+        private rearLeftContactPoint;
+        private rearRightContactPoint;
+        private frontLeftContactNormal;
+        private frontRightContactNormal;
+        private rearLeftContactNormal;
+        private rearRightContactNormal;
+        private frontLeftFrictionLerping;
+        private frontRightFrictionLerping;
+        private rearLeftFrictionLerping;
+        private rearRightFrictionLerping;
+        private frontLeftFrictionPenalty;
+        private frontRightFrictionPenalty;
+        private rearLeftFrictionPenalty;
+        private rearRightFrictionPenalty;
+        private startRaycastPosition;
+        private endRaycastPosition;
+        private downDirection;
+        private downDistance;
+        getFrontLeftWheelContact(): boolean;
+        getFrontRightWheelContact(): boolean;
+        getRearLeftWheelContact(): boolean;
+        getRearRightWheelContact(): boolean;
+        getFrontLeftWheelContactTag(): string;
+        getFrontRightWheelContactTag(): string;
+        getRearLeftWheelContactTag(): string;
+        getRearRightWheelContactTag(): string;
+        getFrontLeftWheelContactPoint(): BABYLON.Vector3;
+        getFrontRightWheelContactPoint(): BABYLON.Vector3;
+        getRearLeftWheelContactPoint(): BABYLON.Vector3;
+        getRearRightWheelContactPoint(): BABYLON.Vector3;
+        getFrontLeftWheelContactNormal(): BABYLON.Vector3;
+        getFrontRightWheelContactNormal(): BABYLON.Vector3;
+        getRearLeftWheelContactNormal(): BABYLON.Vector3;
+        getRearRightWheelContactNormal(): BABYLON.Vector3;
     }
 }
 declare namespace PROJECT {
@@ -734,6 +850,7 @@ declare namespace PROJECT {
         private playerMouseX;
         private playerMouseY;
         private ackermanRadius;
+        private autoturnRadius;
         private recoveryRadius;
         private waypointPosition;
         private waypointCount;
@@ -757,6 +874,12 @@ declare namespace PROJECT {
         private avoidanceLerp;
         private avoidanceTimer;
         private avoidanceValue;
+        private _avoidanceSteerSmoothed;
+        private _debugAvoidanceCounter;
+        private _frontThreatHit;
+        private _frontThreatDistance;
+        private _frontThreatSensor;
+        private _frontThreatTag;
         private randomTurning;
         private randomBoosting;
         private randomDistance;
@@ -857,6 +980,20 @@ declare namespace PROJECT {
         avoidanceSpeed: number;
         avoidanceTimeout: number;
         avoidanceDistance: number;
+        avoidanceSteeringGain: number;
+        avoidanceSteeringGainHigh: number;
+        avoidanceSteerSmoothing: number;
+        avoidanceSteerDeadband: number;
+        frontSlowdownGain: number;
+        frontSlowdownMinThrottle: number;
+        frontBrakeProximity: number;
+        frontBrakeForce: number;
+        frontHardBrakeProximity: number;
+        frontHardBrakeStrength: number;
+        avoidanceProximityBoost: number;
+        avoidanceSteerCarryover: number;
+        debugAvoidance: boolean;
+        debugAvoidanceEveryNFrames: number;
         private reversingFlag;
         private reversingTime;
         private reversingWait;
@@ -913,6 +1050,54 @@ declare namespace PROJECT {
         private static AdvDynamicTexture;
         /** Get the default fullscreen user interface advanced dynamic texture */
         static GetFullscreenUI(scene: BABYLON.Scene, sampling?: number): BABYLON.GUI.AdvancedDynamicTexture;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Double Sided Shader Material (BABYLON.PBRMaterial)
+     * Disables backface culling so both sides of geometry are rendered.
+     * Ported from Unity "Custom/DoubleSided".
+     * @class DoubleSided
+     */
+    class DoubleSided extends TOOLKIT.CustomShaderMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
+        update(): void;
+        getShaderName(): string;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Vertex Color Splat Shader Material (BABYLON.PBRMaterial)
+     * Blends albedo (Splat1) with a second texture (Splat3) using vertex color blue channel.
+     * Ported from Unity "Custom/Vertex Color Splat Surf Shader".
+     * @class Splat
+     */
+    class VertexSplat extends TOOLKIT.CustomShaderMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+        awake(): void;
+        update(): void;
+        getShaderName(): string;
+        getCustomVertexCode(wgsl: boolean): string;
+    }
+    /**
+     * Vertex Color Splat Shader Plugin (BABYLON.MaterialPluginBase)
+     * @class VertexSplatPlugin
+     */
+    class VertexSplatPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the uniforms used in the shader code */
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** This gets the samplers used in the shader code */
+        getSamplers(samplers: string[]): void;
+        /** This get the attributes used in the shader code */
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This prepares the shader defines */
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** This is used to update the uniforms bound to a mesh */
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
     }
 }
 declare namespace PROJECT {
