@@ -10,5 +10,5 @@ Modern ES6 Style Code Instructions: https://github.com/codewrxai/AI-Agent-Person
 ---
 Custom Shader Code Instructions: https://github.com/codewrxai/AI-Agent-Personas/blob/master/babylon-toolkit/shader-materials.md
 ---
-Project Install Instructions: https://github.com/codewrxai/AI-Agent-Personas/blob/master/babylon-toolkit/project-installer.md
+Project Installation Instructions: https://github.com/codewrxai/AI-Agent-Personas/blob/master/babylon-toolkit/project-installer.md
 ---
