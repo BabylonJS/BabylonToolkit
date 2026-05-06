@@ -39,6 +39,7 @@ Or node package manager (ES6):
  npm install @babylonjs-toolkit/next
 ```
 
+
 # Node Package Manager
 
 Universal runtime library packages.
@@ -60,6 +61,7 @@ Or in web applications:
 ```typescript
  await TOOLKIT.SceneManager.InitializeRuntime(engine);
 ```
+
 
 # Entity Component System
 
@@ -177,14 +179,15 @@ SceneManager.RegisterClass("SampleScript", SampleScript);
 
 # AI Coding Assistants
 
-The @codewrx <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> have been extensively trained for web game development. The default <a target="_blank" href="https://github.com/codewrxai/AI-Agent-Personas">Agent Personas</a> can be downloaded and used as a prompt with any external AI solutions. 
+@codewrx agents have been extensively trained for web game development. The default <a target="_blank" href="https://github.com/codewrxai/AI-Agent-Personas">Agent Persona Prompt</a> can be used as code instructions for any AI. 
 
-<a target="_blank" href="https://github.com/codewrxai/AI-Babylon-Toolkit/tree/master/Examples">Training Examples</a> can be referenced as context for agents.
+The <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> can be used to easily accessed in your browser or VSCode.
 
 
 # Content Creation Tools
 
 The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity">Unity Exporter</a> and <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unreal">Unreal Exporter</a> plugins allow you to export interactive GLTF content and scripts
+
 
 User Interface Guide
 ---------------------
@@ -193,8 +196,6 @@ The <a target="_blank" href="https://github.com/BabylonJS/BabylonToolkit/tree/ma
 
 Starter Template Repos
 ----------------------
-<a target="_blank" href="https://github.com/MackeyK24/UMD-StarterAssets">React Starter Assets Template (UMD)</a>
-
 <a target="_blank" href="https://github.com/MackeyK24/ES6-StarterAssets">React Starter Assets Template (ES6)</a>
 
 <a target="_blank" href="https://github.com/MackeyK24/NJS-StarterAssets">React Starter Assets Template (NEXT.JS)</a>
