@@ -181,7 +181,7 @@ SceneManager.RegisterClass("SampleScript", SampleScript);
 
 @codewrx agents have been extensively trained for web game development. The default <a target="_blank" href="https://github.com/codewrxai/AI-Agent-Personas">Agent Persona Prompt</a> can be used as code instructions for any AI. 
 
-The <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> and <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> can be used to easily accessed in your browser or VSCode.
+For your convenience, the <a target="_blank" href="https://chatgpt.com/g/g-68329759940c8191bff103476e6220b0-babylon-toolkit-agent">ChatGPT Agent</a> and <a target="_blank" href="https://marketplace.visualstudio.com/items?itemName=MackeyKinard.codewrx-babylon-agent">Copilot Agent</a> can be easily accessed in your browser or VSCode.
 
 
 # Content Creation Tools
