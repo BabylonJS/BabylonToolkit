@@ -1,6 +1,6 @@
 # AI Web Game Development
 
-The Babylon Toolkit is an advanced game development framework for BabylonJS that helps developers build native web games and interactive 3D applications using familiar Unity-like workflows. It provides modern game-engine mechanics, including a Unity-style script component system, runtime libraries, Unity exporter tools, scene management, project deployment, and support for components such as physics, animation state machines, character controllers, navigation, vehicles, audio, video, and terrain tools depending on the edition. In simple terms, it lets developers use Unity-style content creation and scripting patterns to create BabylonJS-powered web games faster, then export and run those projects in the browser.
+The <a target="_blank" href="https://www.babylontoolkit.com">Babylon Toolkit</a> is an advanced game development framework for BabylonJS that helps developers build native web games and interactive 3D applications using familiar Unity-like workflows. It provides modern game-engine mechanics, including a Unity-style script component system, runtime libraries, Unity exporter tools, scene management, project deployment, and support for components such as physics, animation state machines, character controllers, navigation, vehicles, audio, video, and terrain tools depending on the edition. In simple terms, it lets developers use Unity-style content creation and scripting patterns to create BabylonJS-powered web games faster, then export and run those projects in the browser.
 
 # Babylon Toolkit Agent Persona
 
