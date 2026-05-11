@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.1.0 - R1) */
+        /** Gets the toolkit framework version string (9.5.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -136,14 +136,24 @@ declare namespace TOOLKIT {
          * @param options The runtime options.
          * @returns a waitable promise.
          */
-        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions): Promise<void>;
+        static InitializePlayground(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions, scene?: BABYLON.Scene, inputOptions?: {
+            contextMenu?: boolean;
+            pointerLock?: boolean;
+            preventDefault?: boolean;
+            useCapture?: boolean;
+        }): Promise<void>;
         /**
          * Initialize the babylon toolkit runtime environment (REQUIRED)
          * @param engine The engine instance.
          * @param options The runtime options.
          * @returns a waitable promise.
          */
-        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions): Promise<void>;
+        static InitializeRuntime(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, options?: TOOLKIT.IRuntimeOptions, scene?: BABYLON.Scene, inputOptions?: {
+            contextMenu?: boolean;
+            pointerLock?: boolean;
+            preventDefault?: boolean;
+            useCapture?: boolean;
+        }): Promise<void>;
         /**
          * Initialize the scene loader plugin
          */
@@ -186,25 +196,6 @@ declare namespace TOOLKIT {
          * @param timeout The timeout value to wait for all required scene files to fully load. Default 60 seconds.
          */
         static SetOnSceneReadyHandler(filenames: string[], handler: () => void, timeout?: number, debug?: boolean): void;
-        /**
-         * Executes a React router navigation to the specified route
-         * @param scene The scene instance.
-         * @param route The route path to navigate.
-         * @param options The navigation options.
-         * @optional To force a full page reload, use: window.location assign or replace to set the route. (No From App State Supported)
-         * @optional Use { replace: true } in nav options to replace current history entry instead of pushing a new one.
-         * @example SceneManager.NavigateTo(scene, "/babylon?scene=samplescene.gltf", { replace: true });
-         */
-        static NavigateTo(scene: BABYLON.Scene, route: string, options?: any, useWindowLocation?: boolean): void;
-        /** Sets the React router navigation hook on the scene
-         * @param scene The scene instance.
-         * @param navigateToFunction The react router navigate function.
-         */
-        static SetReactNavigationHook(scene: BABYLON.Scene, navigateToFunction: any): void;
-        /** Deletes the React router navigation hook on the scene
-         * @param scene The scene instance.
-         */
-        static DeleteReactNavigationHook(scene: BABYLON.Scene): void;
         private static SceneParsingEnabled;
         /** Enable scene loader parsing plugin */
         static EnableSceneParsing(enabled: boolean): void;
@@ -1119,6 +1110,13 @@ declare namespace TOOLKIT {
         private static ParseAutoProperties;
         private static UnpackObjectProperty;
     }
+    /**
+     * Babylon game mode controller class (Unreal Engine Style Game Modes)
+     * @class GameModeController - All rights reserved (c) 2024 Mackey Kinard
+     */
+    abstract class GameModeController extends TOOLKIT.ScriptComponent {
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+    }
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
@@ -1374,6 +1372,7 @@ declare namespace TOOLKIT {
     }
     /**
      * Babylon toolkit runtime initialization options
+     * @param enableUserInput enable user input. Default false.
      * @param hardwareScalingLevel set hardware scaling level. Set to 0 to skip. Default (1 / window.devicePixelRatio).
      * @param initSceneFileLoaders initialize scene file loaders. Default true.
      * @param loadAsyncRuntimeLibs load async runtime libraries. Default true.
@@ -1384,6 +1383,7 @@ declare namespace TOOLKIT {
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
      */
     interface IRuntimeOptions {
+        enableUserInput?: boolean;
         hardwareScalingLevel?: number;
         initSceneFileLoaders?: boolean;
         loadAsyncRuntimeLibs?: boolean;
@@ -5254,44 +5254,6 @@ declare namespace TOOLKIT {
         isArcadeHandBrakeActive: boolean;
         isArcadeWheelSkidActive: boolean;
         isArcadeYawAssistActive: boolean;
-        arcadeYawAssistDebugLogEnabled: boolean;
-        arcadeYawAssistDebugLogIntervalFrames: number;
-        arcadeYawAssistDebugLogEdgeEvents: boolean;
-        arcadeHandbrakeKickStrengthDegPerSec: number;
-        arcadeHandbrakeKickFrames: number;
-        arcadeHandbrakeYawAuthority: number;
-        arcadeHandbrakeMaxYawRateDegPerSec: number;
-        arcadeHandbrakeReferenceSpeedKmh: number;
-        arcadeHandbrakeSpeedGateEnabled: boolean;
-        arcadeHandbrakeLowSpeedShape: number;
-        arcadeHandbrakeDirectYawEnabled: boolean;
-        arcadeHandbrakeDirectYawDegPerSec: number;
-        arcadeHandbrakeDirectYawDurationMs: number;
-        arcadeHandbrakeDirectYawFadeMs: number;
-        arcadeDonutDirectYawEnabled: boolean;
-        arcadeDonutDirectYawDegPerSec: number;
-        arcadeDonutDirectYawDurationMs: number;
-        arcadeDonutDirectYawFadeMs: number;
-        arcadeHandbrakeMaxSlideAngleDeg: number;
-        arcadeHandbrakeCounterSteerClampEnabled: boolean;
-        arcadeHandbrakeCounterSteerYawThresholdDegPerSec: number;
-        arcadeHandbrakeClampReleaseFadeMs: number;
-        arcadeHandbrakeSteerSlewLimitEnabled: boolean;
-        arcadeHandbrakeSteerSlewLimitDegPerSec: number;
-        private _wasArcadeHandBrakeActive;
-        private _wasArcadeYawAssistApplyingForce;
-        private _handbrakeKickJzRemaining;
-        private _handbrakeKickFramesRemaining;
-        private _arcadeHandbrakeLatchedDriveSign;
-        private _arcadeHandbrakeHoldElapsedSec;
-        private _arcadeHandbrakeSlewedSteerRad;
-        private _arcadeHandbrakeClampReleaseFadeSec;
-        private _arcadeDonutHoldElapsedSec;
-        private _arcadeYawAssistDebugFrameCounter;
-        private _arcadeYawAssistLastKickRad;
-        private _arcadeYawAssistLastIaddPerWheel;
-        private _arcadeYawAssistLastClampScalar;
-        private _arcadeYawAssistLastLeverSum;
         burnoutFrictionFloor: number;
         frictionRestoreSpeed: number;
         arcadeBurnoutWheelSpinGain: number;
@@ -5304,16 +5266,20 @@ declare namespace TOOLKIT {
         arcadeWheelSpinMaxAngularVelocity: number;
         arcadeStationaryBurnoutWheelSpinGain: number;
         arcadeStationaryBurnoutMinAngularVelocity: number;
+        arcadeHandbrakeYawCapMultiplier: number;
+        arcadeBurnoutYawCapMultiplier: number;
+        arcadeDonutYawCapMultiplier: number;
         arcadeSkidFadeInSpeed: number;
         arcadeSkidFadeOutSpeed: number;
-        arcadeYawCapMultiplier: number;
         wheelAtRestSpeedThresholdKmh: number;
-        wheelSpinDebugLogEnabled: boolean;
-        wheelSpinDebugLogIntervalFrames: number;
-        private _wheelSpinDebugLogCounter;
-        private _postHandbrakeLogFrames;
-        private _postHandbrakeLogCounter;
-        private _wasAnyArcadeModeActive;
+        arcadeHandbrakeAssistEnabled: boolean;
+        currentSteeringInput: number;
+        arcadeDonutDirectYawEnabled: boolean;
+        arcadeDonutDirectYawDegPerSec: number;
+        arcadeDonutDirectYawDurationMs: number;
+        arcadeDonutDirectYawFadeMs: number;
+        private _arcadeDonutHoldElapsedSec;
+        private _arcadeDonutDirectionSign;
         private _forwardWS;
         private _axle;
         private _forwardImpulse;
@@ -5321,6 +5287,11 @@ declare namespace TOOLKIT {
         private _arcadeSkidInfo;
         private _arcadePreviousWheelSpin;
         sideFrictionStiffness: number;
+        arcadeSideSlipSaturationEnabled: boolean;
+        arcadeSideSlipPeakDeg: number;
+        arcadeSideSlipFalloffDeg: number;
+        arcadeSideSlipFalloffFactor: number;
+        arcadeSideSlipMinSpeedMps: number;
         private _chassisMass;
         private _chassisInvMass;
         private _chassisTransform;
@@ -5395,6 +5366,8 @@ declare namespace TOOLKIT {
         private applyTrackConnectionAndDownforce;
         updateVehicle(step: number): void;
         private updateSuspension;
+        private getSteeringAuthorityInput;
+        private getSteeringMagnitude;
         private applyEasyDonutYawAssist;
         private applyHandbrakeYawAssist;
         private resolveWheelSpinDirection;
@@ -5880,34 +5853,26 @@ declare namespace TOOLKIT {
         getArcadeSteeringAssist(): number;
         /** Sets the arcade steering yaw assist strength. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
         setArcadeSteeringAssist(value: number): void;
-        /** Gets the arcade donut direct yaw in degrees per second. (Advanced Use Only) */
+        /** Gets the arcade donut direct yaw enabled state. (Advanced Use Only) */
+        getArcadeDonutDirectYawEnabled(): boolean;
+        /** Sets the arcade donut direct yaw enabled state. (Advanced Use Only) */
+        setArcadeDonutDirectYawEnabled(value: boolean): void;
+        /** Gets the arcade donut direct yaw degrees per second. (Advanced Use Only) */
         getArcadeDonutDirectYawDegPerSec(): number;
-        /** Sets the arcade donut direct yaw in degrees per second. (Advanced Use Only) */
+        /** Sets the arcade donut direct yaw degrees per second. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
         setArcadeDonutDirectYawDegPerSec(value: number): void;
-        /** Gets the arcade handbrake direct yaw in degrees per second. (Advanced Use Only) */
-        getArcadeHandbrakeDirectYawDegPerSec(): number;
-        /** Sets the arcade handbrake direct yaw in degrees per second. (Advanced Use Only) */
-        setArcadeHandbrakeDirectYawDegPerSec(value: number): void;
-        /** Gets the arcade handbrake max slide angle in degrees. (Advanced Use Only) */
-        getArcadeHandbrakeMaxSlideAngleDeg(): number;
-        /** Sets the arcade handbrake max slide angle in degrees. (Advanced Use Only) */
-        setArcadeHandbrakeMaxSlideAngleDeg(value: number): void;
-        /** Gets the arcade handbrake bicycle yaw authority. (Advanced Use Only) */
-        getArcadeHandbrakeBicycleYawAuthority(): number;
-        /** Sets the arcade handbrake bicycle yaw authority. (Advanced Use Only) */
-        setArcadeHandbrakeBicycleYawAuthority(value: number): void;
-        /** Gets the arcade handbrake max yaw rate in degrees per second. (Advanced Use Only) */
-        getArcadeHandbrakeMaxYawRateDegPerSec(): number;
-        /** Sets the arcade handbrake max yaw rate in degrees per second. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
-        setArcadeHandbrakeMaxYawRateDegPerSec(value: number): void;
-        /** Gets the arcade handbrake reference speed in km/h. (Advanced Use Only) */
-        getArcadeHandbrakeReferenceSpeedKmh(): number;
-        /** Sets the arcade handbrake reference speed in km/h. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
-        setArcadeHandbrakeReferenceSpeedKmh(value: number): void;
-        /** Gets the arcade handbrake kick strength in degrees per second. (Advanced Use Only) */
-        getArcadeHandbrakeKickStrengthDegPerSec(): number;
-        /** Sets the arcade handbrake kick strength in degrees per second. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
-        setArcadeHandbrakeKickStrengthDegPerSec(value: number): void;
+        /** Gets the arcade handbrake yaw cap multiplier. (Advanced Use Only) */
+        getArcadeHandbrakeYawCapMultiplier(): number;
+        /** Sets the arcade handbrake yaw cap multiplier. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeHandbrakeYawCapMultiplier(value: number): void;
+        /** Gets the arcade burnout yaw cap multiplier. (Advanced Use Only) */
+        getArcadeBurnoutYawCapMultiplier(): number;
+        /** Sets the arcade burnout yaw cap multiplier. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeBurnoutYawCapMultiplier(value: number): void;
+        /** Gets the arcade donut yaw cap multiplier. (Advanced Use Only) */
+        getArcadeDonutYawCapMultiplier(): number;
+        /** Sets the arcade donut yaw cap multiplier. Higher values kick the rear end around more aggressively during skids. (Advanced Use Only) */
+        setArcadeDonutYawCapMultiplier(value: number): void;
         getArcadeBurnoutActive(): boolean;
         setArcadeBurnoutActive(active: boolean): void;
         getArcadeDonutActive(): boolean;
@@ -5942,17 +5907,7 @@ declare namespace TOOLKIT {
          *  visual wheel rotation update is suppressed (when no arcade mode is
          *  active). 0 disables the suppression. */
         setWheelAtRestSpeedThresholdKmh(value: number): void;
-        /** Enables or disables per-tick wheel spin diagnostics. When enabled the
-         *  vehicle prints chassis lin/ang velocity, per-wheel ground angular
-         *  velocity, rotationBoost, deltaRotation, arcade mode flags, and whether
-         *  at-rest suppression fired. Use this to diagnose visible spin after the
-         *  car has stopped — the printout shows whether it is coming from
-         *  rotationBoost or from `groundAngularVelocity` (residual chassis yaw). */
-        setWheelSpinDebugLogEnabled(enabled: boolean): void;
-        /** Gets whether per-tick wheel spin diagnostics are enabled. */
-        getWheelSpinDebugLogEnabled(): boolean;
-        /** Sets the print interval (in physics ticks) for the wheel spin debug log. */
-        setWheelSpinDebugLogIntervalFrames(frames: number): void;
+        /** Updates the wheel hub transforms to match the current wheel state. Call this after any physics step that may have changed the wheel state, or after changing wheel properties. */
         updateWheelInformation(): void;
         protected lockedWheelInformation(wheel: number): boolean;
         protected deleteWheelInformation(): void;
