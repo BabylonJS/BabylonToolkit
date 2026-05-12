@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.5.10 - R1) */
+        /** Gets the toolkit framework version string (9.5.15 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -186,6 +186,12 @@ declare namespace TOOLKIT {
          * @param scene The scene instance.
          */
         static FocusRenderCanvas(scene: BABYLON.Scene): void;
+        /** Show the splash screen */
+        static ShowSplashScreen(): void;
+        /** Hide the splash screen with optional delay and fade effect */
+        static HideSplashScreen(scene?: BABYLON.Scene, delayMs?: number): void;
+        /** Update the status text on the splash screen (Direct Access Hack) */
+        static UpdateSplashScreenStatus(text: string): void;
         private static SceneLoaderFileNames;
         private static SceneLoaderPropertyBag;
         private static SceneLoaderHandledFlag;
@@ -1115,9 +1121,12 @@ declare namespace TOOLKIT {
      * @class GameModeController - All rights reserved (c) 2024 Mackey Kinard
      */
     abstract class GameModeController extends TOOLKIT.ScriptComponent {
+        postCreateSceneDelayMs: number;
+        hideSplashScreenDelayMs: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected createSceneHandled: boolean;
         protected preCreateScene(props: any): Promise<void>;
+        protected postCreateScene(props: any): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -4045,6 +4054,13 @@ declare namespace TOOLKIT {
         static GetDisplayMode(): string;
         /** Get the current window orientation */
         static GetOrientation(): string;
+        /**
+         * Sets the window location to navigate to a new url.
+         * @param url The URL to navigate.
+         * @param replace Whether to replace the current history entry instead of pushing a new one.
+         * @example GameManager.SetLocation("/play?scene=samplescene.gltf&mode=FreeCameraMode", { replace: true });
+         */
+        static SetLocation(url: string, replace?: boolean): void;
         /** Open alert message dialog. */
         static AlertMessage(text: string, title?: string): any;
         /**  Gets the names query string from page url. */
