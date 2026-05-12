@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.5.0 - R1) */
+        /** Gets the toolkit framework version string (9.5.10 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1116,6 +1116,8 @@ declare namespace TOOLKIT {
      */
     abstract class GameModeController extends TOOLKIT.ScriptComponent {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected createSceneHandled: boolean;
+        protected preCreateScene(props: any): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
