@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.5.15 - R1) */
+        /** Gets the toolkit framework version string (9.6.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1125,8 +1125,8 @@ declare namespace TOOLKIT {
         hideSplashScreenDelayMs: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected createSceneHandled: boolean;
-        protected preCreateScene(props: any): Promise<void>;
-        protected postCreateScene(props: any): Promise<void>;
+        protected preCreateScene(data: string): Promise<void>;
+        protected postCreateScene(data: string): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
