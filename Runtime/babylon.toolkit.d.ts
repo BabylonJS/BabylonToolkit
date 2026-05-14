@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.6.0 - R1) */
+        /** Gets the toolkit framework version string (9.6.2 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1121,6 +1121,7 @@ declare namespace TOOLKIT {
      * @class GameModeController - All rights reserved (c) 2024 Mackey Kinard
      */
     abstract class GameModeController extends TOOLKIT.ScriptComponent {
+        autoHideSplashScreen: boolean;
         postCreateSceneDelayMs: number;
         hideSplashScreenDelayMs: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
