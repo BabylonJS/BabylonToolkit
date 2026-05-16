@@ -1126,8 +1126,8 @@ declare namespace TOOLKIT {
         hideSplashScreenDelayMs: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected createSceneHandled: boolean;
-        protected preCreateScene(data: string): Promise<void>;
-        protected postCreateScene(data: string): Promise<void>;
+        protected preCreateScene(data?: any): Promise<void>;
+        protected postCreateScene(data?: any): Promise<void>;
     }
 }
 /** Babylon Toolkit Namespace */
