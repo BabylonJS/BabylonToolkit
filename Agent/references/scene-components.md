@@ -157,14 +157,14 @@ When asked to create a scene `component reference` for interfactive gltf scene f
 }
 ```
 
-You can then generate a `component reference` markdown result breakdown of all the components in the scene. Be sure to include anything need that other AI can use to create game logic using interactive scene components. Cross reference any components found with with the AI Training Example Reference at https://github.com/babylonjs/babylontoolkit/tree/master/agent/references/training-reference.md for detailed class information.
+You can then generate a `component reference` markdown result breakdown of all the components in the scene. Be sure to include anything need that other AI can use to create game logic using interactive scene components. Cross reference any components found with with the AI Training Example Reference at https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/training-reference.md for detailed class information.
 
 ## Declaration File Class Information
 
 Check the declaration files for detail class information
 
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/references/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/references/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
 
 ---
 

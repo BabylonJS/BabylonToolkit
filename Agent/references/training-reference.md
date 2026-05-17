@@ -13,16 +13,16 @@ Use it as the first context block when an AI agent is asked to generate or updat
 
 ## Source Directory
 
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/references/training-references/README.md: Root index for all examples.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/playgrounds/README.md: Playground focused examples.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/playgrounds/01-DemoRotator.md: Minimal ScriptComponent rotation pattern.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/playgrounds/02-DemoBobber.md: Parameterized ScriptComponent motion pattern.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/playgrounds/03-DemoUserInput.md: Input driven movement and optional mouse look pattern.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/playgrounds/04-DemoSampleScene.md: Async scene load + physics + player controller pattern.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/declarations/README.md: Declaration focused index for toolkit and DLC class surface.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
-- https://github.com/babylonjs/babylontoolkit/tree/master/agent/training/training-references/projects/README.md: Project level examples.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/training-references/README.md: Root index for all examples.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/playgrounds/README.md: Playground focused examples.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/playgrounds/01-DemoRotator.md: Minimal ScriptComponent rotation pattern.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/playgrounds/02-DemoBobber.md: Parameterized ScriptComponent motion pattern.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/playgrounds/03-DemoUserInput.md: Input driven movement and optional mouse look pattern.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/playgrounds/04-DemoSampleScene.md: Async scene load + physics + player controller pattern.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/declarations/README.md: Declaration focused index for toolkit and DLC class surface.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
+- https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/training/training-references/projects/README.md: Project level examples.
 
 ## Quick Routing Guide
 
