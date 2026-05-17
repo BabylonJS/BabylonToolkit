@@ -517,7 +517,7 @@ function Home() {
           <p>Your questions, answered</p>
           <ul>
             <li>
-              <a href="https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/react-framework.md" target="_blank">
+              <a href="https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/react-framework.md" target="_blank">
                 <img className="logo" src={babylonLogo} alt="" />
                 Babylon Toolkit
               </a>

@@ -134,14 +134,14 @@ When installing the `Babylon Toolkit React Framework Submodule`, always include 
 
 #### React Framework User Interface Documentation Link
 
-Reference the REACT UI Framework Documentation at https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/react-framework.md
+Reference the REACT UI Framework Documentation at https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/react-framework.md
 
 ### Babylon Toolkit Content Creation Tools 
 
 The **Babylon Toolkit Unity Exporter** (https://github.com/BabylonJS/BabylonToolkit/tree/master/Editors/Unity) is a **Content Creation Tool** used to export interactive
 scene files with extra UnityGLTF metadata to instantiate **Babylon Toolkit Script Components** classes that have be encoded as **extras**.
 
-Reference the GLTF Interactive Scene Content at https://github.com/BabylonJS/BabylonToolkit/tree/master/Agent/references/scene-components.md
+Reference the GLTF Interactive Scene Content at https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/scene-components.md
 
 ### Babylon Toolkit Project Installation
 
