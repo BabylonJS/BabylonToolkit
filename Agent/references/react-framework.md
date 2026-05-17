@@ -233,7 +233,7 @@ export default defineConfig(({ mode }) => ({
 
 To add submodule:
 ```
-git submodule add https://github.com/codewrxai/React-Framework.git src/babylon
+git submodule add https://github.com/babylontoolkit/ReactFramework.git src/babylon
 git commit -m "Add babylon toolkit react framework submodule"
 ```
 
@@ -292,7 +292,7 @@ const readline = require("readline");
 const fs = require("fs");
 const path = require("path");
 
-const SUBMODULE_URL = "https://github.com/codewrxai/React-Framework.git";
+const SUBMODULE_URL = "https://github.com/babylontoolkit/ReactFramework.git";
 const SUBMODULE_PATH = "src/babylon";
 
 function ask(question) {

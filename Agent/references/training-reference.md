@@ -13,16 +13,16 @@ Use it as the first context block when an AI agent is asked to generate or updat
 
 ## Source Directory
 
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/training-references/README.md: Root index for all examples.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/playgrounds/README.md: Playground focused examples.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/playgrounds/01-DemoRotator.md: Minimal ScriptComponent rotation pattern.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/playgrounds/02-DemoBobber.md: Parameterized ScriptComponent motion pattern.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/playgrounds/03-DemoUserInput.md: Input driven movement and optional mouse look pattern.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/playgrounds/04-DemoSampleScene.md: Async scene load + physics + player controller pattern.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/declarations/README.md: Declaration focused index for toolkit and DLC class surface.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/training-references/projects/README.md: Project level examples.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/README.md: Root index for all examples.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/playgrounds/README.md: Playground focused examples.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/playgrounds/01-DemoRotator.md: Minimal ScriptComponent rotation pattern.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/playgrounds/02-DemoBobber.md: Parameterized ScriptComponent motion pattern.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/playgrounds/03-DemoUserInput.md: Input driven movement and optional mouse look pattern.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/playgrounds/04-DemoSampleScene.md: Async scene load + physics + player controller pattern.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/declarations/README.md: Declaration focused index for toolkit and DLC class surface.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/projects/README.md: Project level examples.
 
 ## Quick Routing Guide
 
@@ -32,8 +32,8 @@ Use this lookup before generating code:
 - Need tunable public fields and time-based animation: use `02-DemoBobber.md`.
 - Need input-driven movement, configurable speed, or optional mouse look: use `03-DemoUserInput.md`.
 - Need async loading, runtime initialization, physics, or character control: use `04-DemoSampleScene.md`.
-- Need to discover available classes, properties, and methods before writing code: use `declarations/babylon.toolkit.d.ts` and `declarations/default.playground.d.ts`.
-- Need broad sample discovery context: start with `babylon-toolkit/training-references/README.md` and `babylon-toolkit/training-references/playgrounds/README.md`.
+- Need to discover available classes, properties, and methods before writing code: use `training/declarations/babylon.toolkit.d.ts` and `training/declarations/default.playground.d.ts`.
+- Need broad sample discovery context: start with `training/README.md` and `training/playgrounds/README.md`.
 
 ## Declaration File Discovery
 

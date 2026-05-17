@@ -163,8 +163,8 @@ You can then generate a `component reference` markdown result breakdown of all t
 
 Check the declaration files for detail class information
 
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/training-references/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
-- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/references/training-references/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/declarations/babylon.toolkit.d.ts: Babylon Toolkit type and API declarations.
+- https://raw.githubusercontent.com/BabylonJS/BabylonToolkit/master/Agent/training/declarations/default.playground.d.ts: Default playground and DLC runtime declarations.
 
 ---
 

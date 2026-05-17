@@ -102,7 +102,7 @@ import { StandardCarController } from "@babylonjs-toolkit/dlc/racing/StandardCar
 
 ### Babylon Toolkit Starter Repository 
 
-* **ES6 Starter Project**: `https://github.com/codewrxai/Starter-Project.git`
+* **ES6 Starter Project**: `https://github.com/babylontoolkit/StarterAssets.git`
 
 #### IMPORTANT - GITHUB STARTER PROJECT CLONING WITH SUBMODULES
 
@@ -114,7 +114,7 @@ The Babylon Toolkit React Framework can be installed to a project as a github su
 
 To add submodule:
 ```
-git submodule add https://github.com/codewrxai/React-Framework.git src/babylon
+git submodule add https://github.com/babylontoolkit/ReactFramework.git src/babylon
 git commit -m "Add babylon toolkit react framework submodule"
 ```
 
