@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.8.0 - R1) */
+        /** Gets the toolkit framework version string (9.9.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -25,6 +25,10 @@ declare namespace TOOLKIT {
         static RenderLoopReady: boolean;
         /** Pauses the main page render loop */
         static PauseRenderLoop: boolean;
+        /** Defines whether the toolkit scene simulation is currently playing (true) or paused for editing (false). Defaults to true so shipped runtimes are unaffected. The editor sets this false for a static edit mode and true to enter live play mode. Use SetScenePlaying() to also freeze/resume the physics world. */
+        static ScenePlaying: boolean;
+        /** Cached physics engine time step used to resume the simulation after a pause. */
+        private static PhysicsTimeStep;
         /** The webgl render context has been lost flag */
         static LostRenderContext: boolean;
         /** Set the preload auto update progress flag */
@@ -259,6 +263,15 @@ declare namespace TOOLKIT {
         static GetTimeMilliseconds(): number;
         /** Get the delta time animation ratio for 60 fps */
         static GetAnimationRatio(scene: BABYLON.Scene): number;
+        /**
+         * Sets whether the toolkit scene simulation is playing (true) or paused for editing (false).
+         * When paused: the script component life-cycle (awake/start/update/late/step/fixed) is halted and the
+         * physics world simulation is frozen (time step set to 0). When resumed: the physics time step is
+         * restored and the game time baseline is reset. Shipped runtimes default to playing so are unaffected.
+         * @param playing defines whether the scene simulation should run.
+         * @param scene defines the optional target scene (defaults to the last created scene).
+         */
+        static SetScenePlaying(playing: boolean, scene?: BABYLON.Scene): void;
         /** Run a function on the next render loop. */
         static RunOnce(scene: BABYLON.Scene, func: () => void, timeout?: number): void;
         /** Disposes entire scene and release all resources */
