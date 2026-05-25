@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.9.3 - R1) */
+        /** Gets the toolkit framework version string (9.9.26 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -158,6 +158,17 @@ declare namespace TOOLKIT {
             preventDefault?: boolean;
             useCapture?: boolean;
         }): Promise<void>;
+        /**
+         * Initialize the babylon toolkit physics engine
+         * @param scene The scene instance.
+         * @param gravity The gravity vector for the physics engine. If null, defaults to (0, -9.81, 0).
+         * @param autoDelete If true, the physics engine will be automatically deleted from the global scope when the scene is disposed. Default is true.
+         * @param useDeltaForWorldStep If true, the physics plugin will use the delta time between frames for world stepping. Default is false, which uses a fixed time step.
+         * @param hpInjection Optional Havok physics injection object to pass to the Havok plugin constructor. This can be used to inject a custom Havok instance or configuration.
+         * @param pluginParameters Optional Havok plugin parameters object to pass to the Havok plugin constructor. This can be used to configure the Havok plugin with specific settings.
+         * @returns a waitable promise.
+         */
+        static InitializePhysicsEngine(scene: BABYLON.Scene, gravity?: BABYLON.Vector3, autoDelete?: boolean, useDeltaForWorldStep?: boolean, hpInjection?: any, pluginParameters?: BABYLON.HavokPluginParameters): Promise<void>;
         /**
          * Initialize the scene loader plugin
          */
@@ -480,9 +491,9 @@ declare namespace TOOLKIT {
         /** Finds all script components on the transform. */
         static FindScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, recursive?: boolean): T[];
         /** Finds a script component on the transform with the specfied class name. */
-        static FindScriptComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T;
+        static FindScriptComponent<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, alias: string, recursive?: boolean): T;
         /** Finds all script components on the transform with the specfied class name. */
-        static FindAllScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, klass: string, recursive?: boolean): T[];
+        static FindAllScriptComponents<T extends TOOLKIT.ScriptComponent>(transform: BABYLON.TransformNode, alias: string, recursive?: boolean): T[];
         /** Finds the transform object metedata in the scene. */
         static FindSceneMetadata(transform: BABYLON.TransformNode): any;
         /** Finds the specfied camera rig in the scene. */
@@ -2960,9 +2971,9 @@ declare namespace TOOLKIT {
         /** TODO */
         static SearchAllTransformNodesForTags(query: string, nodes: BABYLON.Node[]): BABYLON.Node[];
         /** TODO */
-        static SearchTransformNodeForScript(klass: string, nodes: BABYLON.Node[]): BABYLON.Node;
+        static SearchTransformNodeForScript(alias: string, nodes: BABYLON.Node[]): BABYLON.Node;
         /** TODO */
-        static SearchAllTransformNodesForScript(klass: string, nodes: BABYLON.Node[]): BABYLON.Node[];
+        static SearchAllTransformNodesForScript(alias: string, nodes: BABYLON.Node[]): BABYLON.Node[];
         /** TODO */
         static CreateGuid(suffix?: string): string;
         /** TODO */
@@ -5012,6 +5023,7 @@ declare namespace PROJECT {
      * @class DebugInformation
      */
     class DebugInformation extends TOOLKIT.ScriptComponent {
+        static GetVersion(): string;
         private keys;
         private show;
         private popup;
