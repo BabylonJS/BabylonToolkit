@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.9.26 - R1) */
+        /** Gets the toolkit framework version string (9.9.29 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -6569,6 +6569,7 @@ declare namespace TOOLKIT {
         static InputKeyDownHandler(keyCode: number, event?: MouseEvent | TouchEvent | PointerEvent | KeyboardEvent): any;
         /** Process the specified input key down request */
         static InputKeyUpHandler(keyCode: number, event?: MouseEvent | TouchEvent | PointerEvent | KeyboardEvent): any;
+        private static _registeredUpdateScenes;
         private static input;
         private static keymap;
         private static scroll;
