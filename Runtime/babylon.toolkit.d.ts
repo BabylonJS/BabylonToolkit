@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.9.29 - R1) */
+        /** Gets the toolkit framework version string (9.9.33 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -2959,7 +2959,7 @@ declare namespace TOOLKIT {
         };
         /** TODO */
         /** TODO */
-        static InstantiateClass(className: string): any;
+        static InstantiateClass(className: string, silentFail?: boolean): any;
         /** TODO */
         static GetSimpleClassName(obj: any): string;
         /** TODO */
