@@ -1,13 +1,20 @@
-declare namespace PROJECT {
+declare namespace MY {
     /**
      * Babylon Script Component
-     * @class MyCustomRotator
+     * @class CustomRotator
      */
-    class MyCustomRotator extends TOOLKIT.ScriptComponent {
+    class CustomRotator extends TOOLKIT.ScriptComponent {
         rotationSpeed: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        awake(): void;
-        start(): void;
+        protected awake(): void;
+        protected start(): void;
+        protected ready(): void;
         protected update(): void;
+        protected late(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected after(): void;
+        protected reset(): void;
+        protected destroy(): void;
     }
 }
