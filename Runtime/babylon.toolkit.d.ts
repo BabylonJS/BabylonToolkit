@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.9.33 - R1) */
+        /** Gets the toolkit framework version string (9.10.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -536,6 +536,8 @@ declare namespace TOOLKIT {
         static MAX_AGENT_RADIUS: number;
         /** Register handler that is triggered when the navigation mesh is ready */
         static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
+        /** Fires right before the navigation mesh data is destroyed, so crowds/agents can release themselves. */
+        static OnNavMeshDestroyObservable: BABYLON.Observable<BABYLON.Scene>;
         private static NavMeshPlugin;
         private static NavMeshSurface;
         private static NavMeshDebugger;
@@ -583,7 +585,7 @@ declare namespace TOOLKIT {
          * @param showDebugMesh Whether to show a debug mesh
          */
         static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
-        static DestroyNavigationMeshData(): void;
+        static DestroyNavigationMeshData(scene?: BABYLON.Scene): void;
         /** Toggle full screen scene mode. */
         static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Enter full screen scene mode. */
@@ -1141,13 +1143,22 @@ declare namespace TOOLKIT {
         private static UnpackObjectProperty;
     }
     /**
-     * Babylon game mode controller class (Unreal Engine Style Game Modes)
-     * @class GameModeController - All rights reserved (c) 2024 Mackey Kinard
+     * Babylon toolkit scene controller class (React Framework - Scene Viewer Main Entry Point)
+     * @class SceneController - All rights reserved (c) 2024 Mackey Kinard
      */
-    abstract class GameModeController extends TOOLKIT.ScriptComponent {
+    abstract class SceneController extends TOOLKIT.ScriptComponent {
+        /** Automatically hide the splash screen after the scene is initialized. Default is true. */
         autoHideSplashScreen: boolean;
+        /** Delay in milliseconds to trigger the createScene function on the script component. Note: This is required to ensure the scene is fully initialized before createScene is called. Default is 1000 milliseconds. */
         postCreateSceneDelayMs: number;
+        /** Prewarm the scene and optionally hide the splash screen after a delay. Note: This is required to trigger the createScene function on the script component. Default is 3000 milliseconds. */
         hideSplashScreenDelayMs: number;
+        /**
+         * @param transform The transform node associated with this scene controller.
+         * @param scene The Babylon.js scene instance.
+         * @param properties Additional properties for the scene controller.
+         * @param alias An optional alias for the scene controller.
+         */
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected createSceneHandled: boolean;
         protected preCreateScene(data?: any): Promise<void>;
@@ -1988,19 +1999,38 @@ declare namespace TOOLKIT {
         private _licenseName;
         private _licenseType;
         private _pendingReflectionTextures;
-        private _deferredCustomMaterials;
         private static ScriptBundleCache;
         /** @hidden */
         constructor(loader: BABYLON.GLTF2.GLTFLoader);
         /** @hidden */
         dispose(): void;
+        /**
+         * @hidden Async extension factory used by the glTF loader extension registry.
+         *
+         * The glTF loader awaits each registered extension factory inside _loadExtensionsAsync()
+         * AFTER the glTF JSON has been parsed (loader._gltf is populated) but BEFORE _extensionsOnLoading()
+         * and any scene/node/material loading runs. This is the only safe place to await the project
+         * script bundle so that custom material classes (eg. vertex splat shaders) are registered on the
+         * global scope before createMaterial() needs to instantiate them.
+         *
+         * IMPORTANT: We cannot await the bundle inside loadSceneAsync(). The loader's re-entrancy guard
+         * (_applyExtensions -> _activeLoaderExtensionFunctions) is only held across the SYNCHRONOUS call
+         * into this._loader.loadSceneAsync(). Awaiting before that call clears the guard, so the base loader
+         * re-dispatches back into this extension -> infinite recursion / hang. The factory phase has no such
+         * guard, so awaiting here is safe and deterministic.
+         */
+        static CreateExtensionAsync(loader: BABYLON.GLTF2.GLTFLoader): Promise<TOOLKIT.CVTOOLS_unity_metadata>;
+        /**
+         * Reads the project script bundle (script/project) from the parsed glTF scene metadata and loads it.
+         * Safe to await: this runs during the extension factory phase, before any material is created.
+         */
+        preloadProjectScriptBundleAsync(): Promise<void>;
         /** @hidden */
         onLoading(): void;
         /** @hidden */
         onReady(): void;
         /** @hidden */
         onComplete(): void;
-        loadProjectScriptAsync(): Promise<void>;
         getScriptBundleTag(): string;
         getScriptBundleUrl(): string;
         finishComplete(): void;
@@ -2018,7 +2048,6 @@ declare namespace TOOLKIT {
         /** @hidden */
         loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): Promise<void> | null;
         private _loadSceneInternalAsync;
-        private _resolveDeferredCustomMaterials;
         private _loadSceneExAsync;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
@@ -3968,6 +3997,8 @@ declare namespace PROJECT {
         private _positionLocked;
         private _prevHandBrakeRequested;
         private _donutEngineScale;
+        private _donutEntryBlend;
+        private _donutEntrySpeedMps;
         private steeringWheelHub;
         private steeringWheelAxis;
         private maxSteeringAngle;
@@ -4165,11 +4196,8 @@ declare namespace PROJECT {
         donutFrontWheelPull: number;
         donutYawDegPerSec: number;
         donutYawResponse: number;
-        donutSpeedGovernorEnabled: boolean;
-        donutSpeedGovernorGain: number;
-        donutSpeedGovernorResponse: number;
-        donutSpeedGovernorMinScale: number;
-        donutSpeedGovernorMaxScale: number;
+        donutSlipAngle: number;
+        donutEntryTime: number;
         donutVelocityPinEnabled: boolean;
         donutVelocityPinResponse: number;
         roadConnectAccel: number;
@@ -4220,9 +4248,15 @@ declare namespace PROJECT {
         debugFrictionRestore: boolean;
         debugFrictionRestoreEveryNFrames: number;
         debugFrictionSnapDelta: number;
+        skidSlideEnabled: boolean;
+        skidSlideMinAngle: number;
+        skidSlideMaxAngle: number;
+        skidSlideMinSpeed: number;
+        skidRecoverDuration: number;
+        skidRecoverCurve: number;
+        debugSkidSlide: boolean;
+        debugSkidSlideEveryNFrames: number;
         skidReleaseBrakeFadeTime: number;
-        skidReleaseFrictionLerpScale: number;
-        skidReleaseFrictionRestoreSpeed: number;
         skidReleaseSnapRatio: number;
         skidStopFrictionResetSpeed: number;
         skidLaunchFrictionResetSpeed: number;
@@ -4350,6 +4384,11 @@ declare namespace PROJECT {
         private _handBrakeEntrySteerSign;
         private _skidReleaseBrakeTimer;
         private _skidFrictionRestorePending;
+        private _skidRecoverActive;
+        private _skidRecoverElapsed;
+        private _skidRecoverFrontStart;
+        private _skidRecoverRearStart;
+        private _skidSlideLogCounter;
         private _burnoutExitArcadeFadeTimer;
         private _burnoutExitFrictionRampTimer;
         private _burnoutExitArcadeReleaseTimer;
@@ -4394,6 +4433,8 @@ declare namespace PROJECT {
         private getVehicleEngineTorque;
         private createSmokeParticleSystem;
         private updateCurrentSkidInfo;
+        private computeSlideSkid;
+        private logSkidSlide;
         private updateCurrentContactMask;
         private hasPenaltyContactMask;
         private updateCurrentBrakeDamping;
@@ -4405,6 +4446,7 @@ declare namespace PROJECT {
         private resetSkidFrictionForStopOrLaunch;
         private restoreWheelFrictionToDefault;
         private isWheelFrictionAtDefault;
+        private updateSkidFrictionRecovery;
         private updateCurrentFrictionSlip;
         private armBurnoutExitSmoothing;
         private clearBurnoutExitSmoothing;
@@ -8344,7 +8386,6 @@ declare namespace TOOLKIT {
         static GLOBAL_CROWD_INSTANCE: boolean;
         private crowd;
         private type;
-        private speed;
         private baseOffset;
         private avoidRadius;
         private avoidHeight;
@@ -8365,6 +8406,11 @@ declare namespace TOOLKIT {
         private currentRotation;
         private currentVelocity;
         private currentWaypoint;
+        private m_navStatus;
+        private m_stuckCounter;
+        private m_reachObserver;
+        private m_navMeshDestroyObserver;
+        speed: number;
         heightOffset: number;
         angularSpeed: number;
         updatePosition: boolean;
@@ -8373,6 +8419,8 @@ declare namespace TOOLKIT {
         velocityEpsilon: number;
         offMeshVelocity: number;
         stoppingDistance: number;
+        reachRadius: number;
+        stuckFrameThreshold: number;
         isReady(): boolean;
         isNavigating(): boolean;
         isTeleporting(): boolean;
@@ -8387,6 +8435,10 @@ declare namespace TOOLKIT {
         getCurrentVelocity(): BABYLON.Vector3;
         getAgentParameters(): BABYLON.IAgentParameters;
         setAgentParameters(parameters: BABYLON.IAgentParameters): void;
+        /** Gets the current navigation move status */
+        getNavStatus(): TOOLKIT.NavMoveStatus;
+        /** Returns true if the agent is currently stuck and unable to reach its destination */
+        isStuck(): boolean;
         /** Register handler that is triggered when the agent is ready for navigation */
         onReadyObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered before the navigation update */
@@ -8395,6 +8447,8 @@ declare namespace TOOLKIT {
         onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the navigation is complete */
         onNavCompleteObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the agent becomes stuck */
+        onNavStuckObservable: BABYLON.Observable<BABYLON.TransformNode>;
         protected m_agentState: number;
         protected m_agentIndex: number;
         protected m_agentReady: boolean;
@@ -8416,9 +8470,9 @@ declare namespace TOOLKIT {
         /** Move agent relative to current position. */
         move(offset: BABYLON.Vector3, closetPoint?: boolean): void;
         /** Teleport agent to destination point. */
-        teleport(destination: BABYLON.Vector3, closetPoint?: boolean): void;
+        teleport(destination: BABYLON.Vector3, closetPoint?: boolean, initialRotation?: BABYLON.Quaternion): void;
         /** Sets agent current destination point. */
-        setDestination(destination: BABYLON.Vector3, closetPoint?: boolean): void;
+        setDestination(destination: BABYLON.Vector3, closetPoint?: boolean, initialRotation?: BABYLON.Quaternion): void;
         /** Sets agent current acceleration speed. */
         setAcceleration(speed: number): void;
         /** Sets agent current movement speed. */
@@ -8447,6 +8501,17 @@ declare namespace TOOLKIT {
         getAgentWaypointToRef(result: BABYLON.Vector3): void;
         /** Cancel current waypoint path navigation. */
         cancelNavigation(): void;
+        /**
+         * Releases this agent's crowd binding so it can be safely rebuilt against a freshly baked
+         * navigation mesh. A Recast crowd (dtCrowd) holds a raw pointer to the dtNavMesh it was created
+         * against and is ticked every frame by the plugin's render observer; if the navMesh is freed
+         * while the crowd is alive, the next crowd update reads freed WASM memory ("memory access out
+         * of bounds"). Call this BEFORE destroying/rebuilding the navmesh — SceneManager.DestroyNavigationMeshData()
+         * broadcasts OnNavMeshDestroyObservable to invoke it automatically. After release,
+         * updateNavigationAgent() lazily recreates the crowd and re-adds the agent once new navigation
+         * data is available.
+         */
+        releaseNavigationCrowd(): void;
         /** Gets debug destination mesh. */
         getDebugDestinationMesh(): BABYLON.Mesh;
         /** Shows or hides the debug destination mesh. */
@@ -8459,6 +8524,21 @@ declare namespace TOOLKIT {
         DT_CROWDAGENT_STATE_INVALID = 0,///< The agent is not in a valid state.
         DT_CROWDAGENT_STATE_WALKING = 1,///< The agent is traversing a normal navigation mesh polygon.
         DT_CROWDAGENT_STATE_OFFMESH = 2
+    }
+    /**
+     * Navigation agent move status — reliable states trackable via the Recast V2 API.
+     * - Idle:      No destination set.
+     * - Moving:    Navigating toward destination; crowd system is steering the agent.
+     * - Reached:   Destination reached (driven by crowd.onReachTargetObservable + distance fallback).
+     * - Stuck:     Velocity near-zero for stuckFrameThreshold consecutive frames while navigating.
+     * - Cancelled: cancelNavigation() was explicitly called while Moving.
+     */
+    enum NavMoveStatus {
+        Idle = "idle",
+        Moving = "moving",
+        Reached = "reached",
+        Stuck = "stuck",
+        Cancelled = "cancelled"
     }
 }
 declare namespace TOOLKIT {
