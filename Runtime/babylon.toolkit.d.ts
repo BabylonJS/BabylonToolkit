@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.10.1 - R1) */
+        /** Gets the toolkit framework version string (9.11.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -2086,6 +2086,7 @@ declare namespace TOOLKIT {
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
         private _parseCommonConstantProperties;
+        private _applyRepoWatermark;
         private _parseUniformAndSamplerProperties;
     }
     /**
@@ -6954,7 +6955,7 @@ declare namespace TOOLKIT {
         static GetHardwareScalingLevel(): number;
         /** Quit the Windows Runtime host application. */
         static QuitWindowsApplication(): void;
-        static PrintToScreen(text: string, color?: string): void;
+        static PrintToScreen(text: string, color?: string, duration?: number): void;
         private static PrintElement;
     }
 }

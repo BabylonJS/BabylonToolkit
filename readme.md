@@ -48,8 +48,6 @@ UMD - https://www.npmjs.com/package/babylonjs-toolkit
 
 ES6 - https://www.npmjs.com/package/@babylonjs-toolkit/next
 
-DLC - https://www.npmjs.com/package/@babylonjs-toolkit/dlc
-
 
 # Initialize Scene Manager
 On the playgrounds:
