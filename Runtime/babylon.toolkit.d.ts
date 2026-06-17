@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.11.1 - R1) */
+        /** Gets the toolkit framework version string (9.12.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1967,6 +1967,13 @@ declare namespace TOOLKIT {
         static readonly IBL_SPEC_FACTOR: number;
         /** The scale factor used for reflection probe power (default: 1.0) */
         static readonly IBL_PROBE_FACTOR: number;
+        /**
+         * Suppresses the derived diffuse irradiance (spherical polynomial) on a local reflection probe so it
+         * contributes specular only, matching Unity's specular-only reflection probe model. Babylon lazily
+         * integrates a spherical polynomial from the cube faces the first time a PBR material reads it, so
+         * nulling the value alone is not enough - we must also flag it as computed to stop regeneration.
+         */
+        static SuppressReflectionProbeDiffuse(texture: BABYLON.BaseTexture): void;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
@@ -2086,8 +2093,8 @@ declare namespace TOOLKIT {
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
         private _parseCommonConstantProperties;
-        private _applyRepoWatermark;
         private _parseUniformAndSamplerProperties;
+        private applyRepoWatermark;
     }
     /**
      * Babylon Toolkit Editor - Loader Class
