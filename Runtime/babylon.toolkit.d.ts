@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.12.11 - R1) */
+        /** Gets the toolkit framework version string (9.12.101 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1982,7 +1982,7 @@ declare namespace TOOLKIT {
          * material would lose all baked IBL ambient. When no global SH is available we fall back to specular-only
          * (suppressed diffuse), preserving the previous Unity behavior.
          */
-        static ApplyGlobalReflectionProbeDiffuse(texture: BABYLON.BaseTexture, scene: BABYLON.Scene): void;
+        static ApplyGlobalReflectionProbeDiffuse(texture: BABYLON.BaseTexture, scene: BABYLON.Scene, createPolynomialsFromFaces?: boolean): void;
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
