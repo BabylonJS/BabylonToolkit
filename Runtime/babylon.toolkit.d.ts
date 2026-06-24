@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.12.101 - R1) */
+        /** Gets the toolkit framework version string (9.12.1011 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1983,6 +1983,29 @@ declare namespace TOOLKIT {
          * (suppressed diffuse), preserving the previous Unity behavior.
          */
         static ApplyGlobalReflectionProbeDiffuse(texture: BABYLON.BaseTexture, scene: BABYLON.Scene, createPolynomialsFromFaces?: boolean): void;
+        /** Tracks whether the global box-projection reflection shader fix has been installed (install-once). */
+        private static _boxProjectionShaderPatched;
+        /**
+         * Installs a Unity-faithful per-pixel containment test into Babylon's shared `parallaxCorrectNormal`
+         * box-projection helper (patches both the GLSL and WGSL copies of the `helperFunctions` shader include).
+         *
+         * Babylon applies box (local cubemap) projection to EVERY pixel of a material that has a reflection
+         * bounding box, with no skybox fallback. Surfaces that sit OUTSIDE the probe box - e.g. a tall building
+         * reflecting a ground-level racetrack probe - therefore hit the slab-intersection math in its invalid
+         * regime (exit distance <= 0) and sample the dark box floor, turning glossy/metallic surfaces black.
+         *
+         * Unity instead evaluates probe contribution per-pixel: "When a pixel of an object is outside of any
+         * reflection probe volume, Unity uses the skybox reflection." This injects exactly that rule - if the
+         * shaded world position is outside the probe box on any axis, return the un-projected (infinite)
+         * reflection vector so the pixel reflects the environment (the probe's sky hemisphere) instead of the
+         * dark face. Pixels INSIDE the box are byte-for-byte unchanged, so ground reflections keep their
+         * parallax correction.
+         *
+         * The patch is install-once, idempotent (sentinel guarded) and FAIL-SAFE: if a future Babylon release
+         * renames or reformats the helper so the anchor is not found, it logs a warning and leaves the stock
+         * shader untouched (reverting to Babylon's default behavior) rather than emitting a broken shader.
+         * See README.md ("Box-Projected Reflection Shader Patch") for the full rationale.
+         */
         /** Defines whether this extension is enabled. */
         enabled: boolean;
         private _webgpu;
