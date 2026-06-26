@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.12.1011 - R1) */
+        /** Gets the toolkit framework version string (9.12.1101 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -8587,6 +8587,7 @@ declare namespace TOOLKIT {
     class NavigationAgent extends TOOLKIT.ScriptComponent {
         static TARGET_ANGLE_FACTOR: number;
         static ANGULAR_SPEED_RATIO: number;
+        static BRAKING_CUSHION_FACTOR: number;
         static GLOBAL_CROWD_INSTANCE: boolean;
         private crowd;
         private type;
@@ -8615,6 +8616,7 @@ declare namespace TOOLKIT {
         private m_reachObserver;
         private m_navMeshDestroyObserver;
         speed: number;
+        reachRadius: number;
         heightOffset: number;
         angularSpeed: number;
         updatePosition: boolean;
@@ -8623,8 +8625,10 @@ declare namespace TOOLKIT {
         velocityEpsilon: number;
         offMeshVelocity: number;
         stoppingDistance: number;
-        reachRadius: number;
+        minLookAtDistance: number;
+        enableLookAtDistance: boolean;
         stuckFrameThreshold: number;
+        updateFlags: number;
         isReady(): boolean;
         isNavigating(): boolean;
         isTeleporting(): boolean;
@@ -8669,7 +8673,9 @@ declare namespace TOOLKIT {
         protected destroy(): void;
         private awakeNavigationAgent;
         private updateNavigationAgent;
+        private getLookAtStopDistance;
         private updateAgentParameters;
+        private applyAgentUpdateFlags;
         private destroyNavigationAgent;
         /** Move agent relative to current position. */
         move(offset: BABYLON.Vector3, closetPoint?: boolean): void;
@@ -8687,6 +8693,9 @@ declare namespace TOOLKIT {
         setOptimizationRange(range: number): void;
         /** Sets agent current collision query range (Defines how close a collision element must be before it is considered for steering behaviors). */
         setCollisionQueryRange(range: number): void;
+        /** Sets the Detour crowd update flags bitmask (ANTICIPATE_TURNS=1, OBSTACLE_AVOIDANCE=2,
+         *  SEPARATION=4, OPTIMIZE_VIS=8, OPTIMIZE_TOPO=16). Use 0 for a single agent to avoid doorway crawl/stall. */
+        setUpdateFlags(flags: number): void;
         /** Sets agent current radius. */
         setAgentRadius(radius: number): void;
         /** Sets agent current height. */
