@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.12.1101 - R1) */
+        /** Gets the toolkit framework version string (9.14.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -35,8 +35,6 @@ declare namespace TOOLKIT {
         static AutoUpdateProgress: boolean;
         /** Set the capsule collider shape type */
         static PhysicsCapsuleShape: number;
-        /** Set the support srgb buffers flag */
-        static SupportSRGBBuffers: boolean;
         /** The animation start mode. Defaults to NONE. */
         static AnimationStartMode: number;
         /** When loading glTF animations, which are defined in seconds, target them to this FPS. Defaults to 60 for new behavior. Set to 1 for old behavior */
