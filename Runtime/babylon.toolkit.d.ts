@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.14.0 - R1) */
+        /** Gets the toolkit framework version string (9.15.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1150,7 +1150,7 @@ declare namespace TOOLKIT {
         /** Delay in milliseconds to trigger the createScene function on the script component. Note: This is required to ensure the scene is fully initialized before createScene is called. Default is 1000 milliseconds. */
         postCreateSceneDelayMs: number;
         /** Prewarm the scene and optionally hide the splash screen after a delay. Note: This is required to trigger the createScene function on the script component. Default is 3000 milliseconds. */
-        hideSplashScreenDelayMs: number;
+        scenePrewarmDurationMs: number;
         /**
          * @param transform The transform node associated with this scene controller.
          * @param scene The Babylon.js scene instance.
@@ -2113,7 +2113,29 @@ declare namespace TOOLKIT {
         _loadMeshPrimitiveAsync(context: string, name: string, node: BABYLON.GLTF2.INode, mesh: BABYLON.GLTF2.IMesh, primitive: any, assign: (babylonMesh: BABYLON.AbstractMesh) => void): Promise<BABYLON.AbstractMesh>;
         private _setupBabylonMesh;
         private _setupBabylonMultiMaterials;
+        /**
+         * Rebuilds Unity-style LOD switching from the per-node `lods`/`distances` metadata (this project does
+         * not use MSFT_lod). Each `lods` entry is one LOD level and is either a single renderer name (a
+         * `string`, `"*"` = the group root) or the names of every renderer in that level (a `string[]`); legacy
+         * single-renderer metadata (all strings) parses unchanged. `distances[i]` is the far threshold of level
+         * `i` and `distances[N-1]` doubles as the cull threshold.
+         *
+         * HYBRID strategy, decided per group after normalization:
+         *  - Native fast path (every level resolves to exactly one mesh): `master.addLODLevel(distances[i-1], mesh)`
+         *    for the detail levels plus a final `addLODLevel(cull, null)` band - identical perf/behavior to
+         *    legacy content. Native LOD cannot be used on an InstancedMesh master, so unused detail instances
+         *    are disposed as the legacy code did.
+         *  - Custom switcher (any level has >1 mesh): a single `onBeforeRenderObservable` handler that toggles
+         *    all meshes of a level together on band transitions, because native `addLODLevel` is strictly
+         *    1 master -> 1 replacement and cannot express N renderers per level.
+         */
         private _processLevelOfDetail;
+        /**
+         * Registers a single per-frame LOD switcher for a group that has at least one level with multiple
+         * renderers (native `addLODLevel` cannot represent that structurally). Toggles every mesh of the active
+         * level together, only on band transitions, and tears the observer down on scene/root dispose.
+         */
+        private _setupLevelOfDetailSwitcher;
         private _processShaderMaterials;
         private preProcessSceneProperties;
         private postProcessSceneProperties;
