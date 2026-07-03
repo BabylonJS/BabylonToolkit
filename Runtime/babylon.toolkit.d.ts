@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.15.0 - R1) */
+        /** Gets the toolkit framework version string (9.15.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -1147,9 +1147,9 @@ declare namespace TOOLKIT {
     abstract class SceneController extends TOOLKIT.ScriptComponent {
         /** Automatically hide the splash screen after the scene is initialized. Default is true. */
         autoHideSplashScreen: boolean;
-        /** Delay in milliseconds to trigger the createScene function on the script component. Note: This is required to ensure the scene is fully initialized before createScene is called. Default is 1000 milliseconds. */
+        /** Delay in milliseconds to trigger the createScene function on the script component. Note: This is required to ensure the scene is fully initialized before createScene is called. Default is 500 milliseconds. */
         postCreateSceneDelayMs: number;
-        /** Prewarm the scene and optionally hide the splash screen after a delay. Note: This is required to trigger the createScene function on the script component. Default is 3000 milliseconds. */
+        /** Prewarm the scene and optionally hide the splash screen after a delay. Note: This is required to trigger the createScene function on the script component. Default is 2500 milliseconds. */
         scenePrewarmDurationMs: number;
         /**
          * @param transform The transform node associated with this scene controller.
