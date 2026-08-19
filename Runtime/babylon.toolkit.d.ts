@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.20.0 - R1) */
+        /** Gets the toolkit framework version string (9.20.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -57,7 +57,18 @@ declare namespace TOOLKIT {
         static FogExp2DensityScale: number;
         /** Set the linear fog density scale factor */
         static FogLinearDensityScale: number;
-        /** Set the terrain shader color correction value */
+        /**
+         * Set the terrain shader color correction value - the exponent the terrain shader applies to the
+         * detail (layers) atlas via `pow(color.rgb, gamma)` in sampleTextureAtlas2D. A value of 1.0 disables it.
+         *
+         * This MUST stay 1.0 while the atlas is loaded as an sRGB texture. Babylon's glTF loader derives the
+         * color space from the texture info - `useSRGBBuffer = !textureInfo.nonColorData` - and our detail
+         * atlas is color, so the GPU already performs the sRGB -> linear decode when sampling. The old 2.2
+         * did that conversion by hand back when the atlas arrived as a plain linear buffer; leaving it on now
+         * applies gamma a SECOND time (0.5 -> 0.218), which is what made terrain render far too dark while
+         * ordinary meshes looked correct. Hardware decode is also the better of the two, because filtering
+         * and mipmapping then happen in linear space.
+         */
         static TerrainColorCorrection: number;
         /** Set the allow camera movement flag */
         static AllowCameraMovement: boolean;
@@ -1982,6 +1993,24 @@ declare namespace TOOLKIT {
          */
         static ApplyGlobalReflectionProbeDiffuse(texture: BABYLON.BaseTexture, scene: BABYLON.Scene, createPolynomialsFromFaces?: boolean): void;
         /** Tracks whether the global box-projection reflection shader fix has been installed (install-once). */
+        /**
+         * Custom sampler names that carry DATA, not color, and must be loaded into a LINEAR buffer.
+         *
+         * Babylon's glTF loader decides the color space from the texture info: internally it calls
+         * `_createTextureAsync(..., useSRGBBuffer: !textureInfo.nonColorData)`. Every standard glTF slot
+         * (normalTexture, occlusionTexture, metallicRoughnessTexture, ...) sets `nonColorData = true` on
+         * itself before loading, which is why stock materials are correct. Textures referenced from our
+         * CVTOOLS `customTextures` extras have no such marking, so they all defaulted to an sRGB hardware
+         * buffer - the GPU then applies an sRGB->linear decode to values that were never color.
+         *
+         * For the terrain that is destructive: a normal atlas texel of 0.5 decodes to 0.214, so every
+         * terrain fragment gets a normal tilted ~39 degrees off, and the splat weights are gamma-crushed
+         * on top of it. The result is terrain that renders far too dark while ordinary meshes look right.
+         * The details/layers atlas IS color and must stay sRGB, so only mark the true data maps.
+         */
+        private static readonly NonColorDataSamplers;
+        /** True when a custom sampler holds linear data and must not be loaded as an sRGB color texture. */
+        static IsNonColorDataSampler(samplerName: string): boolean;
         private static _boxProjectionShaderPatched;
         /**
          * Installs a Unity-faithful per-pixel containment test into Babylon's shared `parallaxCorrectNormal`
@@ -4722,6 +4751,303 @@ declare namespace PROJECT {
         getFrontRightWheelContactNormal(): BABYLON.Vector3;
         getRearLeftWheelContactNormal(): BABYLON.Vector3;
         getRearRightWheelContactNormal(): BABYLON.Vector3;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Babylon standard kart controller class — Mario Kart style drifting on a raycast vehicle.
+     * @class StandardKartController
+     *
+     * =========================================================================================
+     * WHAT THIS IS, AND HOW IT RELATES TO StandardCarController
+     * =========================================================================================
+     *
+     * The same stack, with exactly ONE layer swapped. Rig it in Unity the way you rig a car:
+     * a rigidbody chassis, four wheel colliders, four wheel meshes, exhaust points. Export the
+     * scene as interactive glTF and the parser attaches this component.
+     *
+     *   Havok rigidbody        gravity, RAMPS, AIR, walls, kart-vs-kart      << unchanged
+     *   TOOLKIT.RaycastVehicle suspension, wheel raycasts, ground normals    << unchanged
+     *   wheel meshes/spinners  visuals, skid, smoke                          << unchanged
+     *   ---------------------------------------------------------------------------------
+     *   ground-plane direction Bullet tyre friction + Ackermann steering     << REPLACED
+     *
+     * That last line is the whole component. Jumps, ramps and flight come from Havok exactly as
+     * they do for the car, because the chassis is still a Havok body being thrown off a lip.
+     *
+     * =========================================================================================
+     * WHY THE TYRE MODEL HAS TO GO, AND NOT JUST BE RETUNED
+     * =========================================================================================
+     *
+     * A Mario Kart drift is NOT a friction simulation, and no amount of tuning `frictionSlip`
+     * produces one. It is kinematic — a decreed offset between where the kart POINTS and where it
+     * GOES. Mario Kart Wii's shipped code, reimplemented function-for-function by vabold/Kinoko
+     * and validated frame-perfect against world-record ghost replays, is three lines:
+     *
+     *     // KartMove::calcDirs()
+     *     mat.setAxisRotation(DEG2RAD * m_outsideDriftAngle, m_smoothedUp);  // travel = R(angle) * nose
+     *     // KartMove::calcAcceleration()
+     *     EGG::Vector3f nextSpeed = m_speed * m_vel1Dir;                     // scalar x unit vector
+     *     // KartMove::controlOutsideDriftAngle()
+     *     m_outsideDriftAngle += 150.0f * driftManualTightness;              // ramped to a flat 45
+     *
+     * Velocity is a SCALAR along a UNIT VECTOR. There is no lateral velocity term anywhere in the
+     * kart module, and `grep -rni "friction|grip|slipangle|cornering"` over Kinoko's kart source
+     * returns nothing. The sideways look is produced by decree, not emerged from forces.
+     *
+     * So while a drift is live this component takes the ground plane: it drops `frictionSlip` to
+     * `driftFrictionSlip` (the same field the car's handbrake already uses, so nothing new is
+     * being invented) and writes the chassis' planar velocity direction itself. The VERTICAL
+     * component is never touched, which is what leaves gravity, the suspension and every ramp
+     * launch entirely to Havok.
+     *
+     * =========================================================================================
+     * WHAT IT DOES NOT TOUCH
+     * =========================================================================================
+     *
+     * The velocity write is planar only, decomposed against the wheels' averaged contact normal
+     * rather than world up — so a drift on a banked corner stays in the road's plane instead of
+     * trying to climb out of it. Airborne, it writes nothing at all: `RaycastVehicle`'s own
+     * flying impulse, rise damping and auto-level own the air, and the drift angle simply holds
+     * until the wheels touch down. You land still sideways and still drifting.
+     */
+    class StandardKartController extends TOOLKIT.ScriptComponent {
+        /** Extra yaw authority during the hop. MKW `calcRotation`: a bare 1.4 literal. */
+        static readonly HOP_TURN_BOOST: number;
+        /** Airtime past which the drift stops controlling its angle. MKW: 5 frames. */
+        static readonly AIRBORNE_ANGLE_HOLD: number;
+        /** Planar speed below which the travel direction is left alone. Normalisation guard. */
+        static readonly RESTING_SPEED: number;
+        chassisTransform: BABYLON.TransformNode;
+        exhaustLeftTransform: BABYLON.TransformNode;
+        exhaustRightTransform: BABYLON.TransformNode;
+        private frontLeftWheelTrans;
+        private frontRightWheelTrans;
+        private backLeftWheelTrans;
+        private backRightWheelTrans;
+        private frontLeftWheelCollider;
+        private frontRightWheelCollider;
+        private backLeftWheelCollider;
+        private backRightWheelCollider;
+        private frontLeftWheelMesh;
+        private frontRightWheelMesh;
+        private backLeftWheelMesh;
+        private backRightWheelMesh;
+        /** Top speed, metres per second. */
+        topSpeed: number;
+        /** Seconds from rest to top speed. */
+        accelerationTime: number;
+        /** Deceleration off throttle, m/s^2. */
+        coastDeceleration: number;
+        /** Braking deceleration, m/s^2. */
+        brakeDeceleration: number;
+        /** Gravity multiplier on the chassis body. Arcade karts want more than Earth. */
+        gravitationalForce: number;
+        /** Yaw rate at full lock while NOT drifting, radians per second. */
+        steeringYawRate: number;
+        /** Seconds for keyboard steering to ramp centre to full lock. */
+        steeringRamp: number;
+        /** Visual steering angle of the front wheels, degrees. Cosmetic. */
+        maxSteeringAngle: number;
+        driftEnabled: boolean;
+        /**
+         * Yaw rate with the stick held FULLY INTO the drift, radians per second.
+         *
+         * 1.658 = 95 deg/s, Mario Kart 8's measured full-lock stop. THE size of the drift: the
+         * traced radius is `speed / (driftYawRate * realTurn)` and nothing else in the model moves
+         * it — not the angle, not the slide, not the surface.
+         */
+        driftYawRate: number;
+        /**
+         * Stick and direction shares. `realTurn = stickShare * stick + baseShare * driftDirection`.
+         *
+         * MKW ships 0.4 / 0.6, which floors counter-steer at 0.2 of full lock so a held drift can
+         * NEVER be straightened. Accurate, and it makes a held drift a donut — measured at 1.97
+         * complete circles in eight seconds with five metres of net displacement. 0.5 / 0.5 puts
+         * the floor at zero: full counter-steer drives straight while still drifting. Worse model
+         * of Mario Kart Wii, better kart to drive. Set 0.4 / 0.6 for strict MKW.
+         */
+        driftStickShare: number;
+        driftBaseShare: number;
+        /** Body-vs-travel angle a drift settles at, degrees. MKW: 45, all 36 vehicles. */
+        driftTargetAngle: number;
+        /** Hard clamp on that angle, degrees. MKW's `startManualDrift` clamp. */
+        driftMaxAngle: number;
+        /** Rate the angle ramps on at, degrees per second. */
+        driftAngleRampRate: number;
+        /** Rate it bleeds off at after release. MKW: 0.8 deg/frame = 48 deg/s, four times slower. */
+        driftAngleUnwindRate: number;
+        /** Seconds the entry hop lasts. The line is frozen for all of it. */
+        hopDuration: number;
+        /** Upward impulse of the entry hop. */
+        hopImpulse: number;
+        /** Speed below which a drift cannot start or survive. MKW: 0.55 x top speed. */
+        minimumDriftSpeed: number;
+        /** Steering magnitude needed at touchdown to latch a direction. */
+        driftLatchThreshold: number;
+        /** Fraction of speed kept per second while drifting. 1 makes drifting free. */
+        driftSpeedRetention: number;
+        /**
+         * Wheel friction while the drift owns the ground plane.
+         *
+         * Near-zero, and it must be: the tyres and the decree cannot both be right about the same
+         * axis in the same step. Left at its normal value the friction hauls the velocity back
+         * toward the nose that the decree keeps pushing it away from, at over 100 m/s^2 — most of
+         * it pointing down the path, so it reads as the kart braking hard in every corner.
+         */
+        driftFrictionSlip: number;
+        miniTurboEnabled: boolean;
+        /** Seconds of drift for each of the three spark stages. */
+        miniTurboTime: number;
+        superMiniTurboTime: number;
+        ultraMiniTurboTime: number;
+        /** Boost speed multiplier and duration per stage. */
+        boostSpeedFactor: number;
+        boostDurationMini: number;
+        boostDurationSuper: number;
+        boostDurationUltra: number;
+        /** Planar pace, m/s. */
+        get currentSpeed(): number;
+        /** Nose minus travel, radians. THE number: how sideways the kart actually is. */
+        get slideAngle(): number;
+        /** 0 none, 1 hop, 2 drifting. */
+        get driftState(): number;
+        /** -1 left, +1 right, 0 unlatched. */
+        get driftDirection(): number;
+        /** 0 none, 1 mini, 2 super, 3 ultra. */
+        get driftStage(): number;
+        /** True while no wheel is in contact. */
+        get isAirborne(): boolean;
+        private _rigidbody;
+        private _raycastVehicle;
+        private _engineAudioSource;
+        private FRONT_LEFT;
+        private FRONT_RIGHT;
+        private BACK_LEFT;
+        private BACK_RIGHT;
+        private _defaultFriction;
+        private _steer;
+        private _throttle;
+        private _brake;
+        private _driftHeld;
+        private _driftWasHeld;
+        /** Last values handed in by `drive()`. Consumed by `readInput` each frame. */
+        private _steerRequest;
+        private _driftRequest;
+        private _externalBoost;
+        private _driftState;
+        private _driftDirection;
+        private _driftStage;
+        private _driftTime;
+        private _hopTime;
+        private _hopSteer;
+        private _hopPending;
+        /**
+         * Body-vs-travel angle, radians, signed in the world frame.
+         *
+         * NEGATIVE means travel lies to the LEFT of the nose, which is a RIGHT-hand drift: nose
+         * turned into the corner, tail hung out. Signed in the world rather than outward-positive
+         * because it is used to ROTATE a vector, and because it has to survive `_driftDirection`
+         * going to zero — the unwind runs for the best part of a second after the drift ends.
+         */
+        private _driftAngle;
+        private _yawRate;
+        private _planarSpeed;
+        private _groundedWheels;
+        private _airborneTime;
+        private _boostTimer;
+        private _boostFactor;
+        private readonly _groundNormal;
+        private readonly _groundForward;
+        private readonly _velocity;
+        private readonly _angular;
+        private readonly _travel;
+        private readonly _scratchA;
+        private readonly _scratchB;
+        private readonly _worldMatrix;
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected step(): void;
+        protected destroy(): void;
+        /** Reads every inspector property. Mirrors StandardCarController's own awake. */
+        protected awakeKartState(): void;
+        /** Resolves the rig and takes hold of the raycast vehicle. */
+        protected initKartState(): void;
+        /** Maps the Unity wheel colliders onto raycast vehicle wheel indexes, and binds the meshes. */
+        private resolveWheelIndexes;
+        /** Remembers the rig's authored friction so the drift can hand it back exactly. */
+        private captureDefaultFriction;
+        protected destroyKartState(): void;
+        protected updateKartState(): void;
+        /**
+         * THE INPUT ENTRY POINT. Same contract as `StandardCarController.drive`.
+         *
+         * This component reads NO input of its own, deliberately: in this library the vehicle
+         * controller is a driver, and `VehicleInputController` is the thing that decides what the
+         * driver is being told to do — keyboard, gamepad, pedals, a network peer or an AI. One
+         * surface, any number of writers, and the AI needs no second code path.
+         *
+         * @param throttle  -1..1. Positive drives, negative brakes and then reverses.
+         * @param steering  -1..1. Ramped internally by `steeringRamp`; pass it raw.
+         * @param drifting  the drift control, HELD not tapped. Press opens the hop, release ends
+         *                  the drift and pays out whatever mini-turbo was charged.
+         * @param booster   0..1 external boost, from an item or a pad. Scales top speed.
+         */
+        drive(throttle: number, steering: number, drifting: boolean, booster?: number): void;
+        /** Consumes the last `drive()` call. Ramping happens here so it is frame-rate correct. */
+        private readInput;
+        /**
+         * Averages the wheels' contact normals and builds the ground-plane basis.
+         *
+         * From `RaycastVehicle`'s own raycasts, not a second cast of our own — the suspension has
+         * already paid for those and a separate probe could disagree with the wheels the kart is
+         * visibly standing on.
+         */
+        private readGroundFrame;
+        private advanceMachine;
+        private updateDriftStage;
+        private releaseDrift;
+        /**
+         * Integrates the drift angle. MKW `controlOutsideDriftAngle`, and it really is this short:
+         * a constant-rate ramp toward a constant, with no stick, no speed and no surface in it.
+         *
+         * That is the fact most imitations get wrong. Making the angle a function of steering means
+         * steering out of a drift flattens it, so the flattest drift is the one a player driving
+         * the racing line holds all the way round the corner.
+         */
+        private integrateDriftAngle;
+        /** True while this component, rather than the tyres, decides where the kart is going. */
+        private ownsGroundPlane;
+        /**
+         * Hands the tyres' lateral grip out of the way for exactly as long as the decree lasts.
+         *
+         * Both halves must agree or the model breaks in a way that is very hard to see: grip
+         * pulling the velocity back toward a nose the decree keeps pushing it away from, at over
+         * 100 m/s^2, most of it down the path — so it reads as mysterious braking, not as a fight.
+         */
+        private applyFrictionOwnership;
+        private updateBoost;
+        protected stepKartState(): void;
+        /** Pace is a scalar, start to finish. There is no lateral velocity term anywhere. */
+        private integratePace;
+        /**
+         * THE DECREE. Sets the ground-plane velocity to `speed * R(driftAngle) * nose`.
+         *
+         * Rodrigues about the ground normal for a vector already in that plane: `R(v) = v cos +
+         * (n x v) sin`. Decomposed against the CONTACT normal rather than world up, so a drift on
+         * a banked corner stays in the road's plane. The component along the normal is preserved
+         * untouched, which is what leaves gravity, the suspension and the hop entirely alone.
+         */
+        private applyTravelDirection;
+        /** Replaces only the yaw about the ground normal. Pitch and roll stay with the suspension. */
+        private applyYawRate;
+        /** Front wheels turn with the stick. Purely cosmetic — the yaw is decreed, not steered. */
+        private updateWheelVisuals;
+        private restoreFriction;
+        /** Hard reset. MKW's `clearDrift` — respawn and control locks, where the pose must vanish. */
+        clearDrift(): void;
+        private static MoveTowards;
     }
 }
 declare namespace PROJECT {
