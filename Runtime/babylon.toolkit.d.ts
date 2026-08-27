@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.22.1 - R1) */
+        /** Gets the toolkit framework version string (9.22.2 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -3912,6 +3912,5974 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace PROJECT {
+    /** `LapCounter.cs:67`. Unity's tag on the timing line. Not corrected, not tidied (D-8). */
+    const KART_FINISH_LINE_TAG: string;
+    /**
+     * `LapCounter.cs:115-123` — `stopDriftRot()`'s nominal length: 120 iterations x 0.01 s.
+     *
+     * **NOMINAL, because Unity's realised length is frame-rate dependent and this port's is not.**
+     * `WaitForSeconds(0.01f)` cannot resume inside a frame, so at 60 fps the coroutine takes ~2 s and
+     * at 144 fps ~0.83 s. This is the same shape as `RotatePlayerJumpPanel`'s 0.6 s (D-10.1), and it
+     * is resolved the same way: take the nominal figure and make the approach rate-independent.
+     */
+    const KART_STOP_DRIFT_ROT_SECONDS: number;
+    /**
+     * `LapCounter.cs:121` — `Quaternion.Lerp(..., 8f * Time.deltaTime)`. Per second.
+     *
+     * Exported for the record and for tests; the unwind itself is applied by the KART, which is the
+     * component that composes the model child's rotation, and which uses its own `modelYawRate` — the
+     * same 8 from the same family of Unity lines (`Player.cs:1626`). Two constants that happen to
+     * agree are not one constant, so this one is kept, cited, and pinned equal to that one by a test.
+     */
+    const KART_STOP_DRIFT_ROT_RATE: number;
+    /**
+     * How far above a checkpoint's own point a recovery puts the kart, units.
+     *
+     * **A PORT INVENTION, declared as one.** Unity's checkpoints are authored transforms and its
+     * respawn positions come from `OutOfBounds.cs`'s own list, so there is no source line for this.
+     * It exists because a checkpoint's point sits ON the racing surface and a kart placed exactly
+     * there starts the frame interpenetrating the deck. Three units matches the track's own grid
+     * clearance for a 1.643-unit chassis sphere.
+     */
+    const KART_CHECKPOINT_RESPAWN_LIFT: number;
+    /**
+     * One checkpoint, duck-typed.
+     *
+     * `node` is the only required field, and it is what the trigger is matched against — Unity
+     * compares `other.transform == checkpoints.GetChild(currentCheckpointVal)`, i.e. by IDENTITY and
+     * not by tag, so this does too. `position` and `heading` are optional and describe where a
+     * recovery should put the kart; without them the node's own world transform is used, which is
+     * Unity's shape (a checkpoint there is an empty authored where the kart should reappear).
+     *
+     * The distinction matters for this port's own track, whose checkpoint triggers are 90 units tall
+     * and sunk 4 units so a clipped chassis still crosses them — their node position is 41 units above
+     * the road and is emphatically not a place to put a kart.
+     */
+    interface IKartCheckpoint {
+        node: BABYLON.TransformNode;
+        position?: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        /**
+         * Where a recovery should put the kart, when that is not simply `position`.
+         *
+         * **OPTIONAL, AND IT EXISTS BECAUSE A CHECKPOINT'S OWN POINT CAN BE UNDERGROUND.** A track
+         * that places checkpoints along a PLAN centreline — the arc-length line answering "where does
+         * the racing line run", not "how high is the road here" — puts that point several units under
+         * the deck anywhere the road is banked. Measured on this project's own circuit: three of its
+         * eight checkpoints, by 1.60, 2.65 and 1.96 units.
+         *
+         * Respawning there is not a cosmetic glitch. The kart is placed inside the corner mesh, falls
+         * through it, trips the out-of-bounds volume, and is respawned to the same bad point — a loop
+         * with no input that breaks it.
+         *
+         * This component cannot detect that on its own: it has no height sampler and no business
+         * owning one. So the track supplies the surface answer here and this prefers it. Absent, the
+         * behaviour is exactly what it was — `position` plus the lift.
+         */
+        respawnPosition?: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        /** Heading about world up, radians. */
+        heading?: number;
+    }
+    /**
+     * `LapCounter.cs` (146 lines). The lap rule, the checkpoint ring, the position key and the finish.
+     *
+     * **REGISTERED UNDER ONE NAME AND ONE ONLY** — `PROJECT.KartLapCounter`, at the bottom of this
+     * file. No `PROJECT.LapCounter` alias: the Unity project exports this component under this name
+     * and this casing, so both ends agree and there is nothing to bridge. A test asserts the NEGATIVE
+     * as well, so a stray alias cannot creep back in.
+     *
+     * **SERIALIZED FIELD SPELLINGS ARE A SEPARATE AXIS AND STAY UNITY'S** — `LAPCOUNT`,
+     * `currentCheckpointVal`, `totalCheckpointVal`, `checkpointsVisited`, `distanceToNextCheckpoint`,
+     * `Position`, `endPosition`. The property bag arrives keyed by FIELD name, and D-8 records three
+     * shipped instances of a field read under the port's own spelling being silently dropped.
+     *
+     * @class KartLapCounter
+     */
+    class KartLapCounter extends TOOLKIT.ScriptComponent {
+        /** `LapCounter.cs:8` — **starts at 1, not 0.** The lap you are ON, not the laps completed. */
+        LAPCOUNT: number;
+        /** `LapCounter.cs:13`. Which checkpoint is next. Wraps to 0 at the count (`:40-43`). */
+        currentCheckpointVal: number;
+        /** `LapCounter.cs:15`. Checkpoints passed across the whole race. The position sort's key. */
+        totalCheckpointVal: number;
+        /** `LapCounter.cs:11`. One flag per checkpoint, cleared on every counted lap. */
+        checkpointsVisited: boolean[];
+        /** `LapCounter.cs:17`. The position sort's TIE-BREAK key. See `calculateDist`. */
+        distanceToNextCheckpoint: number;
+        /** `LapCounter.cs:18`. One-based rank, written by the race manager's sort. */
+        Position: number;
+        /** `LapCounter.cs:20`. Latched at the finish. Non-zero is also the "already finished" test. */
+        endPosition: number;
+        /**
+         * `LapCounter.cs:48`/`:54` — Unity's `gameObject.tag == "Player"`.
+         *
+         * Only the player's lap counter ends the race; an AI's counts its own laps and does not touch
+         * `RACE_COMPLETED`. There is no opponent system here (NG-1), so this defaults `true` and the
+         * single racer is the player. Carried rather than assumed so the field is already right when
+         * opponents land.
+         */
+        isPlayer: boolean;
+        /** The checkpoint ring, in lap order. Index 0 is the first checkpoint after the line. */
+        protected checkpoints: IKartCheckpoint[];
+        /** The kart on this same transform, duck-typed, resolved once in `start()`. */
+        protected kart: any;
+        /** The race manager, duck-typed. Set by the game mode; never imported. */
+        race: any;
+        /**
+         * Reads the authored property bag, under Unity's spellings (D-8).
+         *
+         * `LAPCOUNT` is the one a track or a prefab actually authors. The rest are read because a
+         * Unity export writes whatever the Inspector showed, and a declared-but-unread field is a
+         * field whose authored value is silently dropped — which is the failure mode D-8 exists for.
+         */
+        protected awake(): void;
+        /**
+         * Resolves the kart and subscribes to the trigger observables.
+         *
+         * **THE SAME PLUMBING THE CONTROLLER USES, DELIBERATELY.** `enableCollisionEvents()` plus
+         * `onTriggerEnterObservable` is exactly how `StandardKartController.attachCollisionEvents`
+         * wires itself, so both components see the same events from the same body in the same
+         * post-step window. Two different subscription mechanisms on one rigidbody would be two
+         * different delivery orders, which is the sort of thing that makes a lap count depend on
+         * component attach order.
+         *
+         * **AND THE KART'S OWN HANDLER IGNORES BOTH OF OUR TAGS, WHICH WAS CHECKED RATHER THAN
+         * ASSUMED.** `onVolumeEnter`'s dispatch has arms for `Water`, `OutOfBounds`, `AntiGravity`,
+         * `AntiGravityFalse`, `JumpPanel`, `GliderPanelFly`, `Boost`, `CancelDownForce`,
+         * `ColliderInAir` and `TrickCollider` — and none for `NextLapCollider` or `Checkpoint`. So the
+         * two timing tags fall through it untouched and cannot disturb the kart's own state.
+         */
+        protected start(): void;
+        /**
+         * Finds the kart controller on this transform without importing it.
+         *
+         * Duck-typed on two members no other component on a kart root carries together, which is the
+         * same test `KartOutOfBounds.resolveKart` uses and for the same reason: an import here would be
+         * circular in the UMD build.
+         */
+        protected resolveKart(): any;
+        /**
+         * Hands over the ordered checkpoint ring and sizes the visited array (`LapCounter.cs:28-32`).
+         *
+         * Unity sizes it from `checkpoints.childCount` in `Start()`; here the mode hands the list over,
+         * because the track builds them and there is no parent-transform convention to lean on.
+         * Re-callable: it resets the cursor and the visited array, which is what makes a track swap or
+         * a test's second race start from a clean ring rather than from the previous one's cursor.
+         */
+        setCheckpoints(checkpoints: IKartCheckpoint[]): void;
+        /** The checkpoint ring, in lap order. A copy — a caller cannot reorder the race. */
+        getCheckpoints(): IKartCheckpoint[];
+        /** `LapCounter.cs:102-113`. Whether every checkpoint on this lap has been visited. */
+        checkAllPoints(): boolean;
+        /**
+         * `LapCounter.cs:65-100`. The whole lap rule, transcribed.
+         *
+         * Order matters and is Unity's: the finish line is tested FIRST and by tag, and everything
+         * else is tested by IDENTITY against the checkpoint the cursor is on. A trigger that is
+         * neither does nothing at all, which is what lets a boost pad and a checkpoint sit on the same
+         * stretch of road without interfering.
+         */
+        protected onTimingTrigger(other: BABYLON.TransformNode): void;
+        /**
+         * Tells the kart where a recovery should put it.
+         *
+         * **`setRespawnPoint` ALONE, AND NEVER `clearTransientState()` (D-12).** The kart's own
+         * docblock says "a race manager calls this from its checkpoint logic", and the split is
+         * load-bearing: a checkpoint inside an anti-gravity section has to hand the kart back **still
+         * in anti-gravity**, or the recovery drops it off the wall it was recovered onto. SPEC.md is
+         * explicit that "a later tidy-up that merges the two would pass every test in the suite and
+         * break the race case" — so this calls the race contract and nothing else.
+         */
+        protected applyRespawnPoint(checkpoint: IKartCheckpoint): void;
+        /** A checkpoint's own point, or its node's world position when it does not carry one. */
+        protected checkpointPosition(checkpoint: IKartCheckpoint): BABYLON.Vector3;
+        /**
+         * Where a recovery goes — `respawnPosition` when the track supplied one, else `position`.
+         *
+         * **A SEPARATE ACCESSOR RATHER THAN A CHANGE TO `checkpointPosition`, AND THE SPLIT IS
+         * LOAD-BEARING.** That method feeds two callers: this one, and `calculateDist`, which
+         * measures how far the kart is along the lap and is the key the position sort runs on.
+         * Folding the surface height into it would move every distance figure in the race — quietly,
+         * because the sort would still work and only the numbers would differ. The two questions are
+         * "where is this checkpoint on the plan" and "where is it safe to put a kart", and only the
+         * second one wants the deck.
+         *
+         * See `IKartCheckpoint.respawnPosition` for what happens when the plan point is used for
+         * a recovery on a banked corner.
+         */
+        protected checkpointRespawnPosition(checkpoint: IKartCheckpoint): BABYLON.Vector3;
+        /**
+         * A checkpoint's facing, as a quaternion about world up.
+         *
+         * Built from the authored heading when there is one. Falling back to the node's own rotation
+         * reads `rotationQuaternion` **directly** rather than deriving a facing from `getWorldMatrix()`
+         * — Conventions:539-596, and this is the destructive category: the result is written back as an
+         * orientation, so a value cached from the last render would be put back as the truth.
+         */
+        protected checkpointRotation(checkpoint: IKartCheckpoint): BABYLON.Quaternion;
+        /**
+         * `LapCounter.cs:37-63` — Unity's `Update()`.
+         *
+         * **SELF-TICKING, unlike `KartRaceManager`, and the asymmetry is deliberate.** The race
+         * manager is driven by the game mode because its countdown has to be started at a moment the
+         * mode chooses and because `chargeLaunch` must run before it in the frame (the mode owns that
+         * ordering). This component has no such ordering constraint — Unity runs it from `Update()`
+         * like any other MonoBehaviour — so it runs from its own `update()` and the mode must NOT tick
+         * it as well. `tick(dt)` is public purely so a test can drive it without a render loop.
+         */
+        protected update(): void;
+        /**
+         * One frame of the lap counter.
+         *
+         * @param dt Seconds since the last call.
+         */
+        tick(dt: number): void;
+        /**
+         * `LapCounter.cs:54-60`. The finish.
+         *
+         * Four things happen once and only once, and `endPosition == 0` is the latch that makes it
+         * once: set `RACE_COMPLETED`, record the finishing position, stop the drift, and unwind the
+         * model child's rotation.
+         *
+         * `endPosition` doubling as the latch is Unity's, and it works because `Position` is
+         * one-based — a racer who has finished has a non-zero `endPosition` by construction. It is
+         * transcribed rather than replaced with a boolean because the field is serialized and a Unity
+         * export authors it.
+         */
+        protected checkForFinish(): void;
+        /** Whether the post-finish unwind is still running. Answered by the kart, which owns it. */
+        isStopDriftRotRunning(): boolean;
+        /**
+         * `LapCounter.cs:125-145`. The position sort's tie-break key.
+         *
+         * Projects the kart-to-next-checkpoint vector onto the segment direction between the PREVIOUS
+         * checkpoint and the next one, and takes the magnitude. Unity's `Vector3.Project(a, b)` is
+         * `b * (a·b / b·b)`, so the magnitude is `|a·b| / |b|`.
+         *
+         * **IT IS A PROJECTION AND NOT A DISTANCE, WHICH IS THE POINT.** Unity's own commented-out
+         * line at `:143` is the naive `Vector3.Distance`, and it was replaced for a reason: on a
+         * curved track two racers equidistant from the same checkpoint as the crow flies can be a long
+         * way apart ALONG THE TRACK, and the sort would rank them arbitrarily. Projecting onto the
+         * segment measures progress down the road, which is what a race position means.
+         *
+         * Ported now even though the field is one racer long today, because the alternative — write it
+         * when opponents land — means re-deriving four lines against a system that already has bugs of
+         * its own, which is exactly how transcription errors get in.
+         *
+         * **ONE DEVIATION, NAMED HERE BECAUSE IT IS INVISIBLE OTHERWISE.** `LapCounter.cs:131`, `:135`
+         * and `:138` all read `checkpoints.GetChild(i).position` — the checkpoint NODE's world
+         * position. This reads `checkpointPosition()`, which prefers the checkpoint's AUTHORED point
+         * and falls back to the node only when there is none. On a Unity track the two are the same
+         * thing, because a checkpoint there is an empty authored where you want it. On THIS track they
+         * are 41 units apart vertically: the trigger boxes are 90 units tall and sunk 4, so their node
+         * origin floats well above the road.
+         *
+         * **AND ON THIS TRACK IT CHANGES THIS METHOD'S ANSWER BY NOTHING, WHICH IS WORTH SAYING RATHER
+         * THAN OVERSTATING.** An earlier version of this note claimed using the node would "tilt every
+         * segment direction". It would not: every trigger sits at the same `y`, so the 41 units are a
+         * CONSTANT offset on both endpoints and cancel exactly out of `next - previous`. The segment
+         * direction is bit-identical either way here. The preference is real but it earns its keep
+         * elsewhere — at `applyRespawnPoint`, which would otherwise drop the kart from 41 units up —
+         * and on any track that spaces its checkpoints at different heights, where the offset stops
+         * being constant and the cancellation stops holding. Pinned by a test that builds a ring where
+         * the two answers genuinely differ, precisely because this track cannot show the difference.
+         */
+        protected calculateDist(): void;
+        /**
+         * Puts the counter back to the start of a race.
+         *
+         * Not a port of anything — Unity reloads the scene. It exists because this port's state is on
+         * an instance rather than in a fresh scene, and because a test that could not rewind would
+         * need a new component per assertion.
+         */
+        resetLaps(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * `OutOfBounds.cs`. The three recovery flags Unity keeps beside `Player` rather than inside it.
+     * @class KartOutOfBounds
+     */
+    class KartOutOfBounds extends TOOLKIT.ScriptComponent {
+        /** `OutOfBounds.cs:8`. The kart is in water and is being fished out. */
+        FellInWater: boolean;
+        /** `OutOfBounds.cs:9`. The kart is off the track and is being put back. */
+        outOfBounds: boolean;
+        /**
+         * `OutOfBounds.cs:10` — Unity's own comment on this line is `//for camera`.
+         *
+         * **THE ONE FLAG WITH A READER OUTSIDE THE RECOVERY CODE.** `Camerafollow.cs:44` skips its
+         * ENTIRE update while this is true, which is what stops the view whipping across the level
+         * while a respawn is in flight. `StandardKartCamera` already honours it through the kart
+         * target interface; this field is how a Unity-authored prefab's value gets there.
+         */
+        PlayerBeingMoved: boolean;
+        /** The kart on this same transform, resolved once. Null on a node that carries no controller. */
+        private kart;
+        protected awake(): void;
+        /**
+         * Pushes the authored values ONTO the kart, once, then never again.
+         *
+         * `start` and not `awake`: component awake order is not guaranteed, and writing into a kart
+         * that has not read its own properties yet would be overwritten moments later.
+         */
+        protected start(): void;
+        /**
+         * Mirrors the kart's live state back onto this component every frame.
+         *
+         * **ONE DIRECTION ONLY, and deliberately.** The kart is the owner: it runs the respawn timer
+         * and it is what actually sets and clears these. Writing them back the other way each frame
+         * would let a stale value here fight the state machine there, and the bug that produces — a
+         * respawn that will not finish — is exactly the kind that is hard to attribute.
+         */
+        protected update(): void;
+        /** The `StandardKartController` on this transform, found by duck typing rather than by import. */
+        private findKart;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * `3,2,1UI.controller` -> state `3,2,1,Go` -> `m_Speed: 0.33`.
+     *
+     * Every wall-clock figure in this file is a clip time divided by this. Kept as its own named
+     * constant rather than folded into the six results so that the derivation is visible and so that
+     * a test can mutate it and watch every beat move — which is what proves the reading rather than
+     * merely restating it.
+     */
+    const COUNTDOWN_CLIP_SPEED: number;
+    /**
+     * What a countdown beat IS, so the dispatcher can be a table rather than five `if`s.
+     *
+     * A plain `enum`, not a `const enum`: `tsconfig.app.json` sets `isolatedModules: true`, under
+     * which esbuild cannot inline a `const enum` across module boundaries — and this one is exported.
+     * It also matches `EKartBoostSource` and `EKartDriftState` next door, and a plain enum survives
+     * the UMD promotion as an object the runtime can name a member of.
+     */
+    enum EKartCountdownEvent {
+        /** `UtilityFunctions.countDownNoise()` — one of the three "3, 2, 1" beeps. */
+        Beep = 0,
+        /** `UtilityFunctions.goSound()`. */
+        Go = 1,
+        /** `UtilityFunctions.raceStarted()` — the green light. */
+        Start = 2
+    }
+    /** One scheduled beat: what fires, and the wall-clock second it fires at. */
+    interface IKartCountdownBeat {
+        kind: EKartCountdownEvent;
+        /** Seconds after `startCountdown()`. Clip time / `COUNTDOWN_CLIP_SPEED`. */
+        at: number;
+    }
+    /**
+     * The five beats, in order, in wall-clock seconds.
+     *
+     * **DERIVED HERE RATHER THAN WRITTEN OUT**, so that mutating `COUNTDOWN_CLIP_SPEED` moves every
+     * one of them together. A table of six pre-divided literals would let the speed and the beats
+     * disagree, which is the failure mode that made this reading worth checking twice.
+     */
+    const KART_COUNTDOWN_BEATS: IKartCountdownBeat[];
+    /** `3,2,1,Go.anim`'s `m_StopTime` in wall clock. Nothing fires here; it is when the UI clears. */
+    const KART_COUNTDOWN_LENGTH: number;
+    /** `RACE_MANAGER.cs:102` — `if (sortTime > 0.1f)`. The position sort's period, seconds. */
+    const KART_POSITION_SORT_INTERVAL: number;
+    /**
+     * `RACE_MANAGER.cs`. The race lifecycle: two flags, two clocks, the countdown and the sort.
+     *
+     * **REGISTERED UNDER ONE NAME AND ONE ONLY** — `PROJECT.KartRaceManager`, at the bottom of this
+     * file. There is deliberately no `PROJECT.RACE_MANAGER` alias, and adding one would be a
+     * regression rather than a convenience. glTF rehydration keys on the exported MonoBehaviour name,
+     * so a Unity prefab carrying `RACE_MANAGER` would fail to resolve against a port name — and that
+     * is answered by **owning the other end**: the Unity project exports this component under this
+     * name and this casing, so both ends agree and there is nothing to bridge. Dual registration only
+     * papers over a mismatch. A test asserts the NEGATIVE as well, so a stray alias cannot creep back.
+     *
+     * **SERIALIZED FIELD SPELLINGS ARE A SEPARATE AXIS AND STAY UNITY'S** — `RACE_STARTED`,
+     * `RACE_COMPLETED`, `countDownTime`, `RaceTime`, `MAXLAPS`, capitals and all. The property bag
+     * arrives from `extras.metadata.components` keyed by FIELD name, and D-8 records three shipped
+     * instances of a field read under the port's own spelling being silently dropped: the default
+     * stands and nothing looks broken. A class alias is a lookup key; a field name is a payload key.
+     *
+     * **THESE ARE INSTANCE FIELDS WHERE UNITY'S ARE `static`.** `RACE_MANAGER.RACE_STARTED` and
+     * `RACE_COMPLETED` are statics (`:34-35`), which is how a MonoBehaviour on another GameObject
+     * reads them without a reference. Statics on a port that a test suite stands up dozens of times in
+     * one process are a different thing entirely — one leaked `true` would make every later scene
+     * start mid-race, and the failure would look like a flaky test rather than a shared global. So
+     * they are per-instance and the mode pushes them onto the kart and the camera, exactly as
+     * `KartOutOfBounds` mirrors its three flags one way (D-10.3).
+     *
+     * @class KartRaceManager
+     */
+    class KartRaceManager extends TOOLKIT.ScriptComponent {
+        /** `RACE_MANAGER.cs:34` — the green light. Set by the countdown; read by the kart and camera. */
+        RACE_STARTED: boolean;
+        /** `RACE_MANAGER.cs:35` — the finish. Set by the LAP COUNTER (`LapCounter.cs:56`), not here. */
+        RACE_COMPLETED: boolean;
+        /**
+         * `RACE_MANAGER.cs:64`. Seconds since the countdown was triggered.
+         *
+         * **IT NEVER STOPS, AND THAT IS TRANSCRIBED RATHER THAN OVERLOOKED.** `:88-91` accumulates
+         * while `startCountDownInternalTimer` is set, and `:190` sets that flag `true` and **nothing
+         * anywhere sets it back to `false`** — so in Unity this clock runs for the whole race, not
+         * just for the countdown. Nobody notices because its only reader is `ComputerDriver.cs:174`,
+         * which is itself gated on `!RACE_STARTED`.
+         *
+         * It is kept faithful because it is free to keep and a "fix" would be an invention. Anything
+         * that wants "is the countdown on screen" should ask `isCountdownRunning()`, which is a real
+         * answer, rather than comparing this against a length.
+         */
+        countDownTime: number;
+        /**
+         * `RACE_MANAGER.cs:25`. Elapsed race time, seconds.
+         *
+         * Accumulates **only** while `RACE_STARTED && !RACE_COMPLETED` (`:93-95`), which is what makes
+         * it the finishing time rather than a session clock: it does not run during the countdown and
+         * it stops dead on the line.
+         */
+        RaceTime: number;
+        /** `RACE_MANAGER.cs:70` — `public int MAXLAPS = 3;`. */
+        MAXLAPS: number;
+        /**
+         * `RACE_MANAGER.cs:28`. Every racer's lap counter, duck-typed.
+         *
+         * Duck-typed rather than imported: `KartLapCounter` is a sibling in the same UMD
+         * namespace and importing it here would be circular. All this file reads is
+         * `totalCheckpointVal`, `distanceToNextCheckpoint` and `Position`.
+         */
+        lapCounters: any[];
+        /** `RACE_MANAGER.cs:29`. The last sort's result, first place first. */
+        sortedRacers: any[];
+        /**
+         * Fired on each of the three beeps (`UtilityFunctions.countDownNoise()`), zero-based.
+         *
+         * A settable callback rather than an event bus, for the same reason everything else here is
+         * duck-typed: a promotable component may not import the app's bus, and a race mode that wants
+         * to post a HUD message can assign one line. `null` means nobody is listening, which is the
+         * bench's case and every unit test's.
+         */
+        onCountdownBeep: ((index: number) => void) | null;
+        /** Fired at the GO sound (`UtilityFunctions.goSound()`), 0.0505052 s before the green light. */
+        onGoSound: (() => void) | null;
+        /** Fired when `RACE_STARTED` goes true (`UtilityFunctions.raceStarted()`). */
+        onRaceStart: (() => void) | null;
+        /** `RACE_MANAGER.cs:65`. Set by `startCountdown()`; never cleared, exactly as Unity's is. */
+        private countDownClockRunning;
+        /** How many of `KART_COUNTDOWN_BEATS` have fired. The cursor that makes each one one-shot. */
+        private countdownBeat;
+        /** `RACE_MANAGER.cs:32`. Seconds since the last position sort. */
+        private sortTime;
+        /**
+         * Reads the authored property bag.
+         *
+         * Every key is Unity's own spelling (D-8). `MAXLAPS` is the one a track or a race mode
+         * actually authors; the rest are here because a Unity export writes whatever the Inspector
+         * showed, and a field this component declares but does not read is a field whose authored
+         * value is silently dropped.
+         */
+        protected awake(): void;
+        /**
+         * Starts the countdown clock — the equivalent of Unity's `Timer` animator trigger.
+         *
+         * `RACE_MANAGER.cs:189` fires that trigger and sets `startCountDownInternalTimer` on the same
+         * line, so the clip and the clock start together and every figure in this file's header is
+         * measured from HERE. The five seconds of pre-roll above it are not ported — see the header.
+         */
+        startCountdown(): void;
+        /** Whether the countdown clip would still be on screen. Not the same as "the clock is running". */
+        isCountdownRunning(): boolean;
+        /** How many of the five beats have fired. 0 before the first beep, 5 after the green light. */
+        getCountdownBeat(): number;
+        /**
+         * How many beeps have sounded — 0, 1, 2 or 3. What a HUD paints as "3", "2", "1".
+         *
+         * Derived from the cursor rather than counted separately, because two counters for one fact
+         * is two things that can disagree.
+         */
+        getBeepCount(): number;
+        /**
+         * One frame of the race clock. Called by the game mode; nothing here runs off `update()`.
+         *
+         * **DRIVEN RATHER THAN SELF-TICKING, AND THAT IS THE TESTABILITY DECISION.** A component that
+         * read its own `getDeltaSeconds()` could only be tested by standing up a scene and rendering,
+         * which would put a `NullEngine` and a render loop between a test and five arithmetic
+         * thresholds. Handed a `dt`, the whole countdown is testable with no harness at all — which is
+         * what lets the rate sweep run 30, 60 and 144 Hz in milliseconds instead of minutes.
+         *
+         * @param dt Seconds since the last call.
+         */
+        tick(dt: number): void;
+        /**
+         * Fires every beat the clock has now passed, in order, at most once each.
+         *
+         * A `while` rather than an `if` so a long frame that steps over two beats still fires both in
+         * order. At the rates this game runs at that cannot happen — the beats are 1.01 s apart and
+         * the closest pair is the GO sound and the green light at 0.0505052 s, which is three frames
+         * at 60 Hz — but a tab that was backgrounded mid-countdown hands back one enormous delta, and
+         * a countdown that silently skipped "2" would be a very hard bug to see.
+         */
+        private fireCountdownBeats;
+        /**
+         * Turns one beat into its effect.
+         *
+         * `noFallthroughCasesInSwitch` is the one strict flag this project has on, and a fallthrough
+         * in a race state machine is precisely what it is on for — every arm ends in a `break`.
+         */
+        private dispatchBeat;
+        /**
+         * `RACE_MANAGER.cs:193-215`. Ranks the field and writes each racer's `Position`.
+         *
+         * Sorted by `totalCheckpointVal` DESCENDING — whoever has passed the most checkpoints is
+         * ahead — tie-broken by `distanceToNextCheckpoint` ASCENDING, so between two racers on the
+         * same checkpoint the one closer to the next one leads. `Position` is one-based.
+         *
+         * **WITH ONE RACER THIS IS A ONE-ELEMENT SORT THAT ALWAYS YIELDS 1st, AND IT IS PORTED ANYWAY.**
+         * The alternative — hardcode "1st" and write the sort when opponents land — is how
+         * transcription errors get in: the comparator is four lines and re-deriving it later against a
+         * system that already has bugs of its own is strictly worse. The HUD contract says plainly
+         * that the value is constant until an opponent system exists (NG-1), rather than implying a
+         * race is being run.
+         *
+         * One divergence with no observable consequence, recorded because it is the kind of thing that
+         * gets "found" later: `List<T>.Sort` in C# is UNSTABLE and `Array.prototype.sort` in JS has
+         * been stable since ES2019. Two racers identical on both keys therefore keep insertion order
+         * here and take an arbitrary one in Unity. Identical on both keys means the same checkpoint
+         * and the same distance to the next, to a float — so it is a tie the game has no way to break
+         * meaningfully in either engine.
+         */
+        calculateRacerPosition(): void;
+        /** The last sort's ranking, first place first. A copy, so a caller cannot reorder the field. */
+        getSortedRacers(): any[];
+        /**
+         * Puts the manager back to its pre-countdown state.
+         *
+         * Not a port of anything — Unity reloads the scene. It exists because this port's clocks are
+         * instance fields rather than statics, so "start again" has to mean something concrete, and
+         * because a test that could not rewind would have to build a new component per assertion.
+         */
+        resetRace(): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Base for every volume component: reads its own declared properties in `awake()`, nothing else.
+     *
+     * Subclasses list their fields and call `readProperties` with the names. That is a deliberate
+     * eleven-fold saving over writing `this.x = this.getProperty("x", this.x)` a hundred times, and it
+     * cannot drift out of step with the field list the way the repeated form does.
+     */
+    abstract class KartVolume extends TOOLKIT.ScriptComponent {
+        /** Copies each named property off the component's serialized properties, keeping the default. */
+        protected readProperties(names: string[]): void;
+    }
+    /**
+     * `AntiGravity`. Turns the kart's anti-gravity mode ON and keeps it on (`Player.cs:1280-1287`).
+     * @class KartAntiGravityVolume
+     *
+     * The flag is a LATCH: leaving this volume does not clear it, only a `KartAntiGravityExitVolume`
+     * does. That is what lets a barrel be entered through a thin trigger at its mouth and then hold
+     * the kart to wall and ceiling for the whole section.
+     */
+    export class KartAntiGravityVolume extends KartVolume {
+        /**
+         * Whether the camera child takes the two angles below at all.
+         *
+         * Read by the KART, not by the camera (`StandardKartController.enterAntiGravityVolume`): with
+         * it off the kart simply reports a zero payload, so a volume that declines the lean and a
+         * volume with no lean to give are the same thing downstream.
+         */
+        rotateCam: boolean;
+        /** Extra PITCH for the camera child while inside, degrees (`Camerafollow.cs:101-111`). */
+        rotAmountX: number;
+        /**
+         * Extra ROLL for the camera child while inside, degrees.
+         *
+         * Leave at 0 for a symmetric tube. A non-zero value rolls the VIEW independently of the kart,
+         * which is right for a corkscrew and wrong for anything else.
+         */
+        rotAmountZ: number;
+        /** Whether an item may be fired inside this section. Carried for the item system; unused here. */
+        canUseBullet: boolean;
+        protected awake(): void;
+    }
+    /**
+     * `AntiGravityFalse`. Clears anti-gravity and realigns the kart to the world frame (`1288-1299`).
+     * @class KartAntiGravityExitVolume
+     *
+     * The per-axis booleans are the interesting part. A track usually wants to fix the PITCH and the
+     * ROLL — the kart may be leaving upside down — while leaving the YAW alone, because forcing a
+     * heading takes the corner away from the driver. So `rotateY` is normally `false`.
+     *
+     * The enabled axes approach `newRotation` at **1/s for X** and **3/s for Y and Z** (the kart's
+     * `antiGravityExitRateX` / `antiGravityExitRateYZ`). Pitch is deliberately the slow one: it carries
+     * most of the error coming off a barrel, and snapping it is what reads as the camera being yanked.
+     */
+    export class KartAntiGravityExitVolume extends KartVolume {
+        /** Steer the kart's PITCH toward `newRotation.x`. */
+        rotateX: boolean;
+        /** Steer the kart's YAW toward `newRotation.y`. Normally `false` — see the class note. */
+        rotateY: boolean;
+        /** Steer the kart's ROLL toward `newRotation.z`. */
+        rotateZ: boolean;
+        /** The world attitude to realign to, Euler degrees. Only the enabled axes are read. */
+        newRotation: BABYLON.Vector3;
+        protected awake(): void;
+    }
+    /**
+     * `GliderPanelFly`. Opens the glider on trigger **EXIT**, not entry (`Player.cs:1109-1214`).
+     * @class KartGliderVolume
+     *
+     * The exit trigger is not an accident of the port: the volume sits over the launch ramp and the
+     * glider is meant to open as the kart LEAVES it, at the lip, not while it is still on the boards.
+     */
+    export class KartGliderVolume extends KartVolume {
+        /** The rig's ROLL while gliding, degrees (`Camerafollow.cs:84`). */
+        glideAngle: number;
+        /** Pitch trim while gliding, degrees. Every pitch target is stated relative to this. */
+        glideAngleX: number;
+        protected awake(): void;
+    }
+    /**
+     * `GliderPanel`. A surface a gliding kart may still realign to, and a 2 s boost on the way out.
+     * @class KartGliderPanel
+     *
+     * No payload. It is a TAG with a component, and it earns its place twice: after 3 s of gliding the
+     * kart realigns to `GliderPanel` surfaces and nothing else (`Player.cs:2044-2050`), and leaving one
+     * grants a 2 s boost plus a decaying upward impulse (`1077`, `1095-1104`).
+     */
+    export class KartGliderPanel extends KartVolume {
+    }
+    /**
+     * `JumpPanel`. Launches the kart on a long arc and grants a 2 s boost (`Player.cs:954-980`).
+     * @class KartJumpPanel
+     *
+     * **BOTH DEFAULTS LOOK WRONG AND ARE RIGHT.** `upforce` is NEGATIVE because it is applied along the
+     * kart's local DOWN (`AddRelativeForce(down * upForce, ...)`), so a negative down-force is an
+     * upward push. And it decays: `upforce` lerps toward `downforce` at 2.5/s during the flight, which
+     * is the arc. Do not "fix" either sign.
+     */
+    export class KartJumpPanel extends KartVolume {
+        /** Launch force along local DOWN. Negative, so it pushes UP. `JumpPanel.cs`. */
+        upforce: number;
+        /** What `upforce` decays toward at 2.5/s during the flight. Positive: it pulls the arc down. */
+        downforce: number;
+        protected awake(): void;
+    }
+    /**
+     * `JumpPanelRotate`. Forces a yaw/roll on the kart over 0.6 s while it is in a jump-panel flight.
+     * @class KartJumpPanelRotate
+     *
+     * **THIS ONE DRIVES THE KART FROM THE VOLUME SIDE, and it is the only one that does.** `Player.cs`
+     * never reads it — the Unity component runs the rotation itself against whatever entered it
+     * (Analysis §E). Ported as a payload the kart consumes, because the alternative is a track
+     * component that reaches into the kart's transform, which is the one thing FR-0's split exists to
+     * prevent. The numbers and the 0.6 s are unchanged; only who applies them moved.
+     */
+    export class KartJumpPanelRotate extends KartVolume {
+        /** Yaw to force during the flight, degrees. */
+        rotateY: number;
+        /** Roll to force during the flight, degrees. */
+        rotateZ: number;
+        protected awake(): void;
+    }
+    /**
+     * `TrickCollider`. Arms the air trick. Without touching one, the trick input does nothing (`229`).
+     * @class KartTrickVolume
+     *
+     * No payload. It exists so a track author can say WHERE a trick is allowed — off this ramp, not off
+     * that kerb — rather than the kart deciding from its own state alone.
+     */
+    export class KartTrickVolume extends KartVolume {
+    }
+    /**
+     * `AirForce`. A steady push applied while the kart is inside (`Player.cs`'s `colliderInAir` path).
+     * @class KartAirForceVolume
+     *
+     * The wind tunnels and the finish-line funnels. The three `isFor*` flags are a gate on WHEN it
+     * applies, and they are not mutually exclusive — `isONLYforRaceEnd` is the strict one, and its
+     * shouted spelling is Unity's (see the file header on why it is not tidied).
+     */
+    export class KartAirForceVolume extends KartVolume {
+        /** Force magnitude. `colliderInAir.cs`. */
+        force: number;
+        /** Apply along the VOLUME's local axes rather than the world's. */
+        relativeForce: boolean;
+        /** Only apply while the kart is airborne. */
+        isForAir: boolean;
+        /** Also apply during the race-end sequence. */
+        isForRaceEnd: boolean;
+        /** Apply ONLY during the race-end sequence. Unity's spelling; not a typo to fix. */
+        isONLYforRaceEnd: boolean;
+        protected awake(): void;
+    }
+    /**
+     * `Boost`. A boost pad: contact grants `duration` seconds of boost (`Player.cs:507`).
+     * @class KartBoostPad
+     *
+     * Like every other boost source in the game it does exactly one thing — write `Boost_time`. There
+     * is no separate "pad boost"; the tiers, the jump panels and this all feed the same number.
+     */
+    export class KartBoostPad extends KartVolume {
+        /** Seconds of boost granted on contact. */
+        duration: number;
+        protected awake(): void;
+    }
+    /**
+     * `CancelDownForce`. Suppresses the kart's manual downforce and damps its fall (`982`/`1273-1278`).
+     * @class KartCancelDownForce
+     *
+     * No payload. Two effects, and it needs both to read as anything: without the 0.98-per-step
+     * vertical damping it merely stops pulling the kart down, which on its own is nearly invisible.
+     * Together they float it.
+     */
+    export class KartCancelDownForce extends KartVolume {
+    }
+    /**
+     * `Dirt`. The off-track surface: caps the kart at `maxSpeed` and clears `grounded` (`502-503`).
+     * @class KartDirtSurface
+     *
+     * **THE CAP IS INDIRECT AND THAT IS THE MECHANIC.** Unity writes `max_speed = 30` once, on contact,
+     * and never writes it back — what actually keeps the kart slow is `grounded = false`, which drops
+     * it into the airborne branch of the pace table. Reading this as "a 30 u/s speed limit" and
+     * implementing it as one produces dirt that slows you and still lets you steer, which is not what
+     * dirt does.
+     */
+    export class KartDirtSurface extends KartVolume {
+        /** The cap written on contact, u/s. `Player.cs:502`. */
+        maxSpeed: number;
+        protected awake(): void;
+    }
+    export {};
+}
+declare namespace PROJECT {
+    /**
+     * Which family a slot belongs to. One switch mutes a whole family.
+     *
+     * Groups exist so an integrator replacing, say, the entire item layer does not have to name
+     * eleven slots to silence ours first.
+     */
+    type KartAudioGroup = 
+    /** The engine and idle loops. */
+    "engine"
+    /** The drift steering loop and the charge tone. */
+     | "drift"
+    /** The payout voice rota. */
+     | "boost"
+    /** The hop blip. */
+     | "hop"
+    /** The jump-trick and glider-trick voices. */
+     | "trick"
+    /** The glider's start, flutter and close. */
+     | "glider"
+    /** Landings, the chassis thud and the ramp launch. */
+     | "impact"
+    /** The countdown rev and the start dash. */
+     | "start"
+    /** Coins, item hits, bullet bill, star power, the hurt lines. */
+     | "item"
+    /** The finish and the lap stingers the RACE owns. */
+     | "race"
+    /** Anti-gravity: hover zone, hover charge, finish hover. */
+     | "hover"
+    /** Results-screen stingers. */
+     | "results";
+    /**
+     * One entry in the default roster.
+     *
+     * `unity` is provenance rather than behaviour and is carried so a future reader can check a
+     * figure against the scene without re-deriving the `fileID` walk.
+     */
+    interface IKartVoiceSlot {
+        /** Stable id. The key for every override, every trigger and every getter. */
+        id: string;
+        /** Where it comes from — the array, the index and the clip file. Provenance only. */
+        unity: string;
+        /** Which family mutes it. */
+        group: KartAudioGroup;
+        /** Default child-node name an `AudioSource` is looked up under (tier 2). */
+        sourceName: string;
+        /** The scene's own `m_Volume` for this clip. Scales the master. */
+        volume: number;
+        /** The scene's own `Loop` flag. A loop is never aged — see `IKartAudioVoice.advance`. */
+        looping: boolean;
+        /** Synth waveform. A placeholder choice. */
+        waveform: string;
+        /** Synth frequency, Hz. A placeholder choice. */
+        frequency: number;
+        /** Synth peak gain. A placeholder choice. */
+        gain: number;
+        /** Synth attack, seconds. Also half the one-shot's retirement clock. */
+        attack: number;
+        /** Synth release, seconds. Also half the one-shot's retirement clock. */
+        release: number;
+    }
+    /**
+     * **THE DEFAULT SOUND SET FOR THE KART SYSTEM.** Forty-nine voices, none of them stubs.
+     *
+     * Ordered by Unity array so the table can be diffed against the scene. Ids are names rather than
+     * indices deliberately: Unity's own indices are undocumented, and one of them
+     * (`effectSounds[26]`, `Player.cs:1687`) is out of range in the shipped scene, which is not a
+     * numbering worth inheriting.
+     */
+    const KART_VOICE_SLOTS: IKartVoiceSlot[];
+    /**
+     * The rota slots — arrays in Unity, so they are generated rather than written out.
+     *
+     * Each entry becomes `<prefix>0`, `<prefix>1`, ... at build time. **THE COUNTS ARE UNITY'S OWN
+     * ARRAY LENGTHS**, read from the scene: six payout voices (not three, which is what this port
+     * shipped first and which made the rota wrap twice as often as Unity's), three trick voices,
+     * three star, three bullet, three hurt.
+     */
+    interface IKartVoiceRota {
+        /** Id prefix. Slot ids are `prefix + index`. */
+        prefix: string;
+        /** How many. Unity's array length. */
+        count: number;
+        unity: string;
+        group: KartAudioGroup;
+        sourceName: string;
+        volume: number;
+        waveform: string;
+        /** Base frequency; each voice is offset by `spread` per index so a rota sounds varied. */
+        frequency: number;
+        spread: number;
+        gain: number;
+        attack: number;
+        release: number;
+    }
+    /** The five rotas. See `IKartVoiceRota` for why the counts are not a taste choice. */
+    const KART_VOICE_ROTAS: IKartVoiceRota[];
+    /**
+     * Expands the rotas into flat slots and concatenates them with the fixed table.
+     *
+     * A function rather than a second constant so the two halves cannot fall out of step, and so a
+     * changed rota count is one number rather than N table rows.
+     */
+    function buildKartVoiceSlots(counts?: any): IKartVoiceSlot[];
+    /**
+     * One playable voice.
+     *
+     * FOUR METHODS AND NO MORE, deliberately: it is the intersection of what `TOOLKIT.AudioSource`
+     * offers and what a Web Audio oscillator can honestly implement. Anything richer would push the
+     * synth into pretending.
+     */
+    interface IKartAudioVoice {
+        /** Start from the beginning. Calling it while already playing is a restart. */
+        play(): void;
+        /** Start after a delay, seconds — Unity's `PlayDelayed`. */
+        playDelayed(delaySeconds: number): void;
+        /** Stop and reset the playhead. */
+        stop(): void;
+        /** Whether it is currently sounding (or scheduled to). */
+        isPlaying(): boolean;
+        /** Multiply the base pitch. `1` is unmodified. */
+        setPitch(value: number): void;
+        /** `[0..1]`. */
+        setVolume(value: number): void;
+        /**
+         * Ages the voice by one frame, so a one-shot can stop reporting itself as playing.
+         *
+         * **THIS EXISTS BECAUSE `isPlaying()` WAS A ONE-WAY LATCH, AND THAT WAS A REAL DEFECT.**
+         * `KartSynthVoice.playDelayed` set `playing = true` and nothing ever set it back except an
+         * explicit `stop()` — so a one-shot reported itself as sounding forever, in the browser as
+         * well as headlessly (the browser path schedules `oscillator.stop(...)` on the audio clock but
+         * never touches the flag).
+         *
+         * What that broke is `Check_if_playing()` (`PlayerSounds.cs:154-162`), which refuses a new
+         * payout while ANY payout voice is sounding. With a latched flag it refused **every** payout
+         * after the first, for the rest of the session: one boost voice per race, then silence. The
+         * existing rota test hid it in plain sight by calling `stop()` between grants and describing
+         * that as "the only thing that reopens the gate" — which was accurate about the code and is
+         * the reason the gap survived; nothing in the game calls it.
+         *
+         * A LOOP IS NEVER AGED. Unity's looping `AudioSource`s report `isPlaying` until stopped, and
+         * the drift charge tone's whole retrigger mechanic is built on that, so `advance` must not
+         * touch them. `KartSynthVoice` gives a loop an infinite remaining time rather than special-
+         * casing it at the call site.
+         *
+         * `KartClipVoice` implements this as a NO-OP on purpose: a real `TOOLKIT.AudioSource` tracks
+         * its own playhead and answers `isPlaying` correctly without help. The method is on the
+         * interface rather than on the synth alone so the component can age every voice without
+         * asking which kind it is.
+         */
+        advance(dt: number): void;
+        /** Release anything held. */
+        dispose(): void;
+        /** How many times `play`/`playDelayed` has been called. Telemetry, and the tests' oracle. */
+        getPlayCount(): number;
+        /** The delay the last start was scheduled with, seconds. */
+        getLastDelay(): number;
+    }
+    /**
+     * The synthesised voice — P-7's default.
+     *
+     * A single oscillator through a gain node with a short attack, which is all the retrigger needs.
+     * Everything is guarded on the context existing, so the whole class is a silent call-recorder in
+     * a headless process and that is a supported mode rather than a stub.
+     */
+    class KartSynthVoice implements IKartAudioVoice {
+        /** Shared across every voice — browsers cap how many contexts a page may hold. */
+        private static SharedContext;
+        /** `true` once the context has been attempted and refused, so it is not retried every frame. */
+        private static ContextUnavailable;
+        /** Seconds of audible life left in the current start. `Infinity` while looping. */
+        private remaining;
+        private readonly waveform;
+        private readonly frequency;
+        private readonly baseGain;
+        private readonly looping;
+        private readonly attack;
+        private readonly release;
+        private oscillator;
+        private gainNode;
+        private playing;
+        private pitch;
+        private volume;
+        private playCount;
+        private lastDelay;
+        /**
+         * @param waveform  oscillator type — `"sine"`, `"square"`, `"sawtooth"`, `"triangle"`
+         * @param frequency base frequency, Hz
+         * @param gain      base gain, `[0..1]`
+         * @param looping   `true` for the loops (steering, charge, engine); `false` for one-shots
+         * @param attack    attack time, seconds. **This is what makes a retrigger audible.**
+         * @param release   release time, seconds. Also the one-shot's whole duration.
+         */
+        constructor(waveform: string, frequency: number, gain: number, looping: boolean, attack?: number, release?: number);
+        /**
+         * The context, created on first demand.
+         *
+         * Lazy for the reason in the header: a context built before a user gesture is created
+         * `suspended` and never recovers on its own, which presents as "audio is broken" rather than
+         * as "the browser said no".
+         */
+        private static GetContext;
+        /** Drops the shared context. Called by tests and by a full scene teardown. */
+        static ResetContext(): void;
+        play(): void;
+        playDelayed(delaySeconds: number): void;
+        stop(): void;
+        isPlaying(): boolean;
+        /**
+         * Ages this start by `dt`, clearing `playing` when the one-shot has run out.
+         *
+         * See the interface's docblock for why this exists. The duration is `attack + release` plus
+         * whatever delay the start was scheduled with — the same figures `startNodes` hands the gain
+         * ramp, so the flag goes false at the moment the envelope reaches zero rather than at some
+         * separately-maintained guess.
+         *
+         * `dt <= 0` is a no-op: a paused frame must not retire a voice, and a negative delta (which a
+         * clock stepping backwards can produce) must never lengthen one.
+         */
+        advance(dt: number): void;
+        setPitch(value: number): void;
+        setVolume(value: number): void;
+        dispose(): void;
+        getPlayCount(): number;
+        getLastDelay(): number;
+        /** Builds and schedules the oscillator. A no-op without a context, which is the headless case. */
+        private startNodes;
+        /** Tears the nodes down. Safe to call when nothing is running. */
+        private stopNodes;
+    }
+    /**
+     * A voice backed by a real `TOOLKIT.AudioSource` — the path a kart with clips takes.
+     *
+     * Duck-typed to `any` for the same reason `StandardKartCamera` duck-types its camera: the source
+     * is whatever the scene handed over, and this file must not depend on which build of the toolkit
+     * declared it.
+     */
+    class KartClipVoice implements IKartAudioVoice {
+        private readonly source;
+        private readonly duration;
+        private remaining;
+        private playing;
+        private playCount;
+        private lastDelay;
+        /**
+         * @param source   a `TOOLKIT.AudioSource`
+         * @param duration how long one start sounds for, seconds. See `isPlaying` for why we need it.
+         */
+        constructor(source: any, duration?: number);
+        play(): void;
+        /**
+         * `AudioSource.play(time)` takes the delay in seconds — Unity's `PlayDelayed` exactly.
+         *
+         * The toolkit signature is `play(time?, offset?, length?): Promise<boolean>`; `time` becomes
+         * `waitTime` on the underlying `StaticSound`. The returned promise is deliberately not
+         * awaited — `play()` already queues through `onReadyObservable` when the clip has not
+         * decoded, so a start before load is safe and awaiting it here would make every trigger in
+         * the state machine async.
+         */
+        playDelayed(delaySeconds: number): void;
+        stop(): void;
+        /**
+         * **DOES NOT ASK THE `AudioSource`, AND THAT IS A DELIBERATE DIVERGENCE FROM THE OBVIOUS.**
+         *
+         * `TOOLKIT.AudioSource.isPlaying()` returns `_isAudioPlaying`, an internal boolean that is
+         * written in exactly five places — the constructor, the two `play` paths, `pause` and `stop`
+         * (`scenemanager.js:19332`, `:19422`, `:19433`, `:19443`, `:19458`). **It is never cleared
+         * when a clip ends naturally.** So it is the same one-way latch this file's own synth voice
+         * had, and delegating to it would put the bug back for exactly the karts that are properly
+         * rigged with real clips: `Check_if_playing()` would refuse every payout after the first.
+         *
+         * This is an upstream defect worth reporting rather than only working around. Until it is
+         * fixed, a locally-tracked flag aged by `advance` is strictly more correct than the engine's
+         * own answer, and the local `stop()` above keeps the two in step in the direction that does
+         * work.
+         */
+        isPlaying(): boolean;
+        /**
+         * Retires a one-shot after its duration, exactly as the synth voice does.
+         *
+         * The duration comes from the slot, and from `IUnityAudioClip.length` when the voice was
+         * built from a serialized clip — which is the only tier that knows its sound's real length,
+         * and so the only one where this is exact rather than an estimate from the synth envelope.
+         * A voice constructed with no duration at all ages never, which preserves the old behaviour
+         * for anything hand-built by a test.
+         */
+        advance(dt: number): void;
+        setPitch(value: number): void;
+        setVolume(value: number): void;
+        dispose(): void;
+        getPlayCount(): number;
+        getLastDelay(): number;
+    }
+    /**
+     * A voice backed by a NAMED one-shot in the scene's `SoundManager` — override tier 4.
+     *
+     * This is the shape `StandardCarController.burnoutLaunchChirpSound` uses
+     * (`project.js:3614-3627`): a serialized STRING rather than a component reference, played
+     * through `SceneManager.PlayOneShot`. It exists because it is the only tier that needs no node,
+     * no child GameObject and no clip descriptor — an integrator with an existing sound bank names
+     * the sound and is done.
+     *
+     * **WHAT IT CANNOT DO, STATED PLAINLY RATHER THAN FAKED.** The sound manager's surface is
+     * fire-and-forget: there is no per-instance handle, so `setPitch` and `setVolume` have nowhere to
+     * go and `stop()` cannot reach the one-shot it started. A LOOPING slot therefore must not use
+     * this tier — the resolver's table has no looping slot that would reach it in practice, and the
+     * limitation is recorded here rather than hidden behind a method that silently does nothing.
+     *
+     * `isPlaying()` is tracked locally and aged by `advance`, exactly as the other two voices are, so
+     * `Check_if_playing()` behaves the same whichever tier won.
+     */
+    class KartManagedVoice implements IKartAudioVoice {
+        private readonly soundName;
+        private readonly duration;
+        private playing;
+        private remaining;
+        private playCount;
+        private lastDelay;
+        constructor(soundName: string, duration?: number);
+        play(): void;
+        playDelayed(delaySeconds: number): void;
+        /** Cannot reach the one-shot it started — see the class docblock. Clears the local flag only. */
+        stop(): void;
+        isPlaying(): boolean;
+        /** No per-instance handle exists to pitch. Recorded as a limitation of this tier. */
+        setPitch(_value: number): void;
+        /** No per-instance handle exists to scale. Recorded as a limitation of this tier. */
+        setVolume(_value: number): void;
+        advance(dt: number): void;
+        dispose(): void;
+        getPlayCount(): number;
+        getLastDelay(): number;
+        /** The bank entry this voice names. */
+        getSoundName(): string;
+    }
+    /**
+     * The kart surface this component uses. Duck-typed, as everywhere else in this layer.
+     *
+     * Every non-optional member already exists on `StandardKartController`.
+     */
+    interface IKartAudioTarget {
+        /** `EKartDriftState` as a number: 0 none, 1 hop, 2 drift, 3 paying out. */
+        getDriftState(): number;
+        /** `Drift_time`, seconds. */
+        getDriftTime(): number;
+        /**
+         * The kart's three charge boundaries, seconds — ascending.
+         *
+         * **OPTIONAL, AND THE FALLBACK IS UNITY'S OWN 1.5/4/7.** The charge tone's retrigger is the
+         * player's only EAR-level warning that a payout tier armed — it is the audio half of the
+         * spark colour change — so it has to fire at the same times the payout pays. Those times are
+         * tunable on the controller, and a component holding its own copy would stutter at 4.000 s
+         * while the release paid tier 2 at 1.800. A stand-in that cannot report them keeps the
+         * source's constants, which is what every existing test in the suite relies on.
+         */
+        getDriftTierTimes?(): number[];
+        /** `-1` left, `+1` right, `0` none. The steering loop starts only once this is non-zero. */
+        getDriftDirection(): number;
+        /** `currentspeed` (`PlayerSounds.cs:54`). The engine and idle bands read this, NOT the real speed. */
+        getCurrentSpeed(): number;
+        /** `Boost` — drives the pitch ramp. */
+        isBoosting(): boolean;
+        /** `Boost_time` — seconds of boost left. */
+        getBoostTime(): number;
+        /**
+         * Monotonic count of boost sources fired. A CHANGE means "a source fired this frame".
+         *
+         * OPTIONAL, with the rise-in-`Boost_time` heuristic as the fallback for a hand-written
+         * stand-in. See `tickBoostAudio` for why the heuristic is not good enough on a real kart.
+         */
+        getBoostGrantCount?(): number;
+        /** Which source last fired — `EKartBoostSource` as a number. Optional, as above. */
+        getLastBoostSource?(): number;
+        /** `GLIDER_FLY` — the engine block is skipped entirely, which freezes the pitch (`67`/`133`). */
+        isGliding(): boolean;
+        /** `JUMP_PANEL` (`Player.cs:961`) — the ramp launch, and its landing. */
+        isJumpPanelling?(): boolean;
+        /** `trickTime >= 0` (`Player.cs:2725`) — a trick is being performed. THE "Yeppie" edge. */
+        isTricking?(): boolean;
+        /** `trickBoostPending` (`Player.cs:543`) — a performed trick is still waiting to land. */
+        isTrickPending?(): boolean;
+        /** `onGround`. Its RISING edge is every landing sound in this file. */
+        isGrounded?(): boolean;
+        /** Seconds the current glide has run (`Player.cs:1210`'s wait, as a clock). */
+        getGlidingTime?(): number;
+        /** `glideTrick` (`Player.cs:1165`) — the glider trick, which has its own voice. */
+        isGliderTrick?(): boolean;
+        /** `beforeStartAccelTime` (`Player.cs:399`) — throttle held into the countdown. */
+        getLaunchCharge?(): number;
+        /** `RACE_MANAGER.RACE_COMPLETED` (`Player.cs:1193`) — silences the glider trick voice. */
+        isRaceCompleted?(): boolean;
+    }
+    /**
+     * Babylon standard kart audio — the sound half of `PROJECT.StandardKartController`.
+     * @class StandardKartAudio
+     */
+    class StandardKartAudio extends TOOLKIT.ScriptComponent {
+        /** The kart, duck-typed. Resolved off this transform in `start()` when not set. */
+        kart: IKartAudioTarget;
+        /** Master switch. `false` stops every voice and runs no state machine. */
+        audioEnabled: boolean;
+        /**
+         * The integrator's escape hatch, named to match `StandardCarController.playVehicleSounds`.
+         *
+         * **EVERY AUDIO WRITE IN THIS FILE IS BEHIND IT.** An integrator who wants to drive their own
+         * voices off this component's public getters sets it false and gets a kart that computes all
+         * of its audio state — engine band, pitch, drift tier, boost source, every edge — and plays
+         * none of it. That is the seam `StandardCarController` documents by example, and it is a
+         * different thing from `audioEnabled`, which is a runtime mute.
+         */
+        playKartSounds: boolean;
+        /** The drift steering loop and the charge tone (`effectSounds[0]`/`[1]`). */
+        driftAudioEnabled: boolean;
+        /** The engine and idle loops (`PlayerSounds.kart_sounds`). */
+        engineAudioEnabled: boolean;
+        /** The payout voice (`Mario_Boost_Sounds`). */
+        boostAudioEnabled: boolean;
+        /** The hop blip (`effectSounds[6]`). Separate from `driftAudioEnabled` — see `tickHopAudio`. */
+        hopAudioEnabled: boolean;
+        /** The trick voice and the glider trick voice (`MarioJumpTrickSounds`, `Mario_Glider`). */
+        trickAudioEnabled: boolean;
+        /** The glider start, flutter and close (`effectSounds[2]`/`[3]`/`[5]`). */
+        gliderAudioEnabled: boolean;
+        /** Landings and the ramp launch (`effectSounds[4]`/`[7]`/`[8]`). */
+        impactAudioEnabled: boolean;
+        /** The countdown rev loop and the start dash (`effectSounds[11]`/`[13]`). */
+        startAudioEnabled: boolean;
+        /** Scales every voice's volume. The bench mute. */
+        masterVolume: number;
+        /**
+         * How many payout voices round-robin (`PlayerSounds.Mario_Boost_Sounds`).
+         *
+         * Unity's `Check_if_playing()` refuses a new one while ANY is still sounding, and `sound_count`
+         * advances through the array so consecutive payouts do not repeat the same line.
+         *
+         * **SIX, WHICH IS UNITY'S OWN ARRAY LENGTH — AND IT USED TO BE THREE.** The earlier figure
+         * was reasoned rather than read: "three is enough for the rotation to read as varied without
+         * a real voice pack". That is a fine argument about a synth and the wrong default for a
+         * system a Unity developer rigs, because it made the rota wrap after three payouts where the
+         * source wraps after six, so the fourth boost of a race repeated the first line. Read out of
+         * `Mario Circuit.unity` — `BOOSTSOUND1-6.wav`. Still settable, for a kart with fewer lines.
+         */
+        boostVoiceCount: number;
+        /**
+         * Step the charge tone's pitch per tier. **Placeholder-only — see the header's constraint 3.**
+         *
+         * Unity restarts one identical clip and does not transpose. This is forced to `false` for any
+         * voice bound to a real `TOOLKIT.AudioSource`, so a kart with clips gets Unity's behaviour
+         * exactly and only the synth gets the legibility aid.
+         */
+        tierTonePitchStep: boolean;
+        /**
+         * How many trick voices round-robin (`PlayerSounds.MarioJumpTrickSounds`).
+         *
+         * **THREE IS UNITY'S OWN ARRAY LENGTH, NOT A TASTE CHOICE**, and the rota that walks it has a
+         * quirk this port keeps — see `tickTrickAudio`.
+         */
+        trickVoiceCount: number;
+        /** `PlayerSounds.effectSounds[0]` — the drift steering loop. */
+        driftSteerSourceName: string;
+        /** `PlayerSounds.effectSounds[1]` — the charge tone. THE mechanic in this file. */
+        driftChargeSourceName: string;
+        /** `PlayerSounds.kartSound`. */
+        engineSourceName: string;
+        /** `PlayerSounds.kartIdle`. */
+        idleSourceName: string;
+        /** `PlayerSounds.Mario_Boost_Sounds`, suffixed `0..n`. */
+        boostSourceNamePrefix: string;
+        /** `effectSounds[6]` — `hop.wav`. */
+        hopSourceName: string;
+        /** `effectSounds[4]` — `SE_KT_LAND_SKID_1.wav`. */
+        landSkidSourceName: string;
+        /** `effectSounds[7]` — `ChassisCrash.wav`. */
+        chassisSourceName: string;
+        /** `effectSounds[8]` — `JumpBoard.wav`. */
+        jumpPanelSourceName: string;
+        /** `effectSounds[2]` — `SE_KT_GLIDER_START.wav`. */
+        gliderStartSourceName: string;
+        /** `effectSounds[3]` — `SE_KT_GLIDER_FLUTTER_LOW.wav`. */
+        gliderFlutterSourceName: string;
+        /** `effectSounds[5]` — `SE_KT_GLIDER_CLOSE.wav`. */
+        gliderCloseSourceName: string;
+        /** `effectSounds[11]` — `AccelBeforeStart.q.32.wav`. */
+        startRevSourceName: string;
+        /** `effectSounds[13]` — `SE_KT_START_DASH.wav`. */
+        startDashSourceName: string;
+        /** `PlayerSounds.Mario_Glider` — the glider trick voice. */
+        gliderVoiceSourceName: string;
+        /** `PlayerSounds.MarioJumpTrickSounds`, suffixed `0..n`. */
+        trickVoiceNamePrefix: string;
+        /** `effectSounds[0]`. */
+        protected driftSteerVoice: IKartAudioVoice;
+        /** `effectSounds[1]`. */
+        protected driftChargeVoice: IKartAudioVoice;
+        /** `kartSound`. */
+        protected engineVoice: IKartAudioVoice;
+        /** `kartIdle`. */
+        protected idleVoice: IKartAudioVoice;
+        /** `Mario_Boost_Sounds`. */
+        protected boostVoices: IKartAudioVoice[];
+        /** `effectSounds[6]` — the hop. */
+        protected hopVoice: IKartAudioVoice;
+        /** `effectSounds[4]` — the landing skid. */
+        protected landSkidVoice: IKartAudioVoice;
+        /** `effectSounds[7]` — the chassis thud. */
+        protected chassisVoice: IKartAudioVoice;
+        /** `effectSounds[8]` — the ramp launch. */
+        protected jumpPanelVoice: IKartAudioVoice;
+        /** `effectSounds[2]` — the glider opening. */
+        protected gliderStartVoice: IKartAudioVoice;
+        /** `effectSounds[3]` — the glide flutter loop. */
+        protected gliderFlutterVoice: IKartAudioVoice;
+        /** `effectSounds[5]` — the glider closing. */
+        protected gliderCloseVoice: IKartAudioVoice;
+        /** `effectSounds[11]` — the countdown rev loop. */
+        protected startRevVoice: IKartAudioVoice;
+        /** `effectSounds[13]` — the start dash. */
+        protected startDashVoice: IKartAudioVoice;
+        /** `Mario_Glider` — the glider trick voice. */
+        protected gliderTrickVoice: IKartAudioVoice;
+        /** `MarioJumpTrickSounds` — the "Yeppie" rota. */
+        protected trickVoices: IKartAudioVoice[];
+        /**
+         * Every voice, by slot id. **THE ONE PLACE A VOICE EXISTS**; the named fields above are
+         * aliases into this map, kept because the state machine reads them on a hot path and because
+         * they are the surface the tests already pin.
+         */
+        protected voices: Map<string, IKartAudioVoice>;
+        /** The resolved slot table, so a lookup can recover a slot's volume and group. */
+        protected slots: Map<string, IKartVoiceSlot>;
+        /** Slot ids explicitly muted through `setVoiceEnabled`. */
+        protected mutedVoices: Set<string>;
+        /** Groups explicitly muted through `setGroupEnabled`. */
+        protected mutedGroups: Set<string>;
+        /**
+         * **TIER 2** — `{ [slotId]: nodeName }`. Renames the child node an `AudioSource` is looked
+         * up under, for a rig whose GameObjects are not named the way this table expects.
+         */
+        voiceSourceNames: any;
+        /**
+         * **TIER 3** — `{ [slotId]: IUnityAudioClip }`. A Unity `AudioClip` field, which arrives as
+         * `{ type: "UnityEngine.AudioClip", name, filename, length, ... }`. Turned into a runtime
+         * `AudioSource` from `filename`, relative to `SceneManager.GetRootUrl(scene)`.
+         */
+        voiceClips: any;
+        /**
+         * **TIER 4** — `{ [slotId]: soundName }`. A one-shot in the scene's `SoundManager`, played
+         * through `SceneManager.PlayOneShot`. Same shape as
+         * `StandardCarController.burnoutLaunchChirpSound`.
+         */
+        voiceSoundNames: any;
+        /**
+         * **TIER 6, orthogonal** — `{ [slotId]: Partial<IKartVoiceSlot> }`. Retunes a slot's DEFAULT
+         * without supplying any asset, for an integrator who wants a different synth rather than a
+         * recording. Merged over the table entry before the voice is built.
+         */
+        voiceTunings: any;
+        /** `{ [slotId]: number }`. Replaces a slot's scene volume. `0` silences without muting. */
+        voiceVolumes: any;
+        /** `PlayerSounds.sound_count`, one per rota prefix. See `playRota`. */
+        protected rotaCursors: any;
+        /** `PlayerSounds.sound_count` (`PlayerSounds.cs:23`) — the round-robin cursor. */
+        protected soundCount: number;
+        /** Last frame's `Boost_time`, for the payout edge. */
+        protected lastBoostTime: number;
+        /** Last frame's `getBoostGrantCount()`. A CHANGE is a grant — see `tickBoostAudio`. */
+        protected lastBoostGrantCount: number;
+        /** Which tier the charge tone last retriggered for: 0 none, 2 at four seconds, 3 at seven. */
+        protected lastChargeTier: number;
+        /** `kartSound.time` — the band playhead (`PlayerSounds.cs:77`). Frequency, for a synth voice. */
+        protected engineTime: number;
+        /** `kartSound.pitch` (`PlayerSounds.cs:122`). */
+        protected enginePitch: number;
+        /** How many times the charge tone has been retriggered. Telemetry, and the tests' oracle. */
+        protected chargeRetriggerCount: number;
+        /** Last frame's `getDriftState()`. The hop fires on the edge out of `None`. */
+        protected lastDriftState: number;
+        /** Last frame's `isJumpPanelling()`. */
+        protected lastJumpPanel: boolean;
+        /** Last frame's `isTricking()`. */
+        protected lastTricking: boolean;
+        /** Last frame's `isGrounded()`. Seeded `true` — see above. */
+        protected lastGrounded: boolean;
+        /** Last frame's `isGliding()`. */
+        protected lastGliding: boolean;
+        /** Last frame's `isGliderTrick()`. */
+        protected lastGliderTrick: boolean;
+        /** `PlayerSounds.MarioJumpTrickSounds`' rota cursor — Unity's `trickAnimCounter`. */
+        protected trickAnimCounter: number;
+        /** How many hops have sounded. Telemetry, and the tests' oracle. */
+        protected hopCount: number;
+        /** How many trick voices have sounded. */
+        protected trickVoiceCountFired: number;
+        /** How many landings have sounded. */
+        protected landCount: number;
+        /**
+         * ESM-ONLY — DELETE WHEN PORTING BACK. Step 2 of the promotion recipe removes this member.
+         */
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        /** Reads the Inspector property bag. */
+        protected awakeAudioState(): void;
+        /** Resolves the kart and builds every voice. */
+        protected initAudioState(): void;
+        /**
+         * Seeds every `last*` from the kart's CURRENT state, so frame one has no spurious edges.
+         *
+         * See the ledger's own comment for why this is not optional. Each read is guarded because
+         * the whole event half of `IKartAudioTarget` is optional — an absent signal leaves its seed
+         * at the initialiser, which is the same thing its `tick*` will read next frame, so the edge
+         * is still absent rather than spurious.
+         */
+        protected seedEdgeLedger(): void;
+        /** Stops and releases every voice. */
+        protected destroyAudioState(): void;
+        /**
+         * Merges `voiceTunings[id]` and `voiceVolumes[id]` over a table entry — override tier 6.
+         *
+         * Returns a COPY, never the table row: `KART_VOICE_SLOTS` is a module-level constant shared
+         * by every instance in the scene, and an integrator retuning one kart must not retune the
+         * others. Two karts with different engine notes is a supported configuration.
+         */
+        /**
+         * How long one start of this slot sounds for — `0` meaning "never retires".
+         *
+         * **A LOOPING SLOT MUST RETURN 0, AND GETTING THAT WRONG IS NOT SUBTLE.** The first version
+         * of the registry handed every clip voice `attack + release`, loops included, so the drift
+         * charge tone — a loop whose entire mechanic is `if (!isPlaying) Play()` every frame
+         * (`Player.cs:1752`) — retired after 0.07 s and was restarted on the very next frame.
+         * Measured on the existing ledger test: **86 restarts across an 8-second drift instead of 7**,
+         * which is precisely the "continuous buzz" this file's own header warns the retrigger must
+         * never become. The test caught it; the code had the warning and did it anyway.
+         */
+        static SlotDuration(slot: IKartVoiceSlot): number;
+        protected tuneSlot(slot: IKartVoiceSlot): IKartVoiceSlot;
+        /**
+         * Builds one slot's voice, walking the override tiers highest-first.
+         *
+         * **THE ORDER IS THE CONTRACT** and it runs most-specific to least: an explicit voice beats a
+         * rigged `AudioSource`, which beats a serialized clip, which beats a sound-manager name, which
+         * beats the synthesiser. The synth is unreachable only when something better was supplied,
+         * which is what makes "press play and hear a kart" true with no assets at all.
+         *
+         * Tier 1 is not here — `setVoice` writes the map directly and is checked before this runs, so
+         * a voice an integrator supplied is never rebuilt by a re-init.
+         */
+        protected resolveSlot(slot: IKartVoiceSlot): IKartAudioVoice;
+        /**
+         * Tier 3's constructor — a runtime `TOOLKIT.AudioSource` from an `IUnityAudioClip`.
+         *
+         * The `AudioSource` needs no clip at construction: it reads `file` out of its own property
+         * bag in `awakeAudioSource()` and resolves it against `SceneManager.GetRootUrl(scene)`. It
+         * is attached with `validate: true` so it registers, so its `awake` actually runs, and so it
+         * becomes findable later through `FindScriptComponent` like any other.
+         *
+         * `playonawake` is forced FALSE regardless of anything: every voice in this component is
+         * started by the state machine, and a clip that plays itself on load would fire the hop the
+         * moment the scene finished loading.
+         *
+         * Wrapped in a try/catch because this runs inside `start()`. A malformed clip descriptor
+         * from a bad export must degrade to the synth — which is audible and correct — rather than
+         * throw into the scene's load path and take the whole kart with it.
+         */
+        protected buildClipSource(slot: IKartVoiceSlot, clip: any): IKartAudioVoice;
+        /**
+         * Loads a tier-3 clip into its `AudioSource`, one frame later, with the rejection owned.
+         *
+         * **DEFERRED TO THE FIRST RENDER ON PURPOSE.** `setAudioDataSource` reads `_loop`, `_volume`,
+         * `_pitch` and `_spatialblend` off the instance to build its `IStaticSoundOptions`
+         * (`scenemanager.js:19696`), and those are populated by `awakeAudioSource()` from the property
+         * bag — which has not run yet at the moment this component's `start()` builds the voice.
+         * Loading immediately would create the sound with the constructor's defaults instead of the
+         * slot's loop flag and volume. The `AudioSource` registers its own before-render callback at
+         * attach time, ahead of this one, so by the time this fires its `awake` has been through the
+         * bag.
+         *
+         * The `.catch` is the point of the whole detour: a filename that does not resolve leaves the
+         * voice bound to a silent source and logs nothing, which is a far better failure than an
+         * unhandled rejection out of the scene's render loop. The voice still exists, still counts
+         * its plays and still gates correctly — it simply makes no sound, exactly like a rigged
+         * `AudioSource` whose clip is missing.
+         */
+        protected loadClipSource(source: any, filename: string): void;
+        /**
+         * Re-points the hot-path aliases at whatever the map currently holds.
+         *
+         * Called after the initial build and again after any `setVoice`, so the two surfaces can
+         * never disagree. A named field that still pointed at a replaced voice would make an
+         * override look like it had been ignored — and only for the sounds on the hot path, which is
+         * the worst possible subset to get wrong.
+         */
+        protected bindVoiceAliases(): void;
+        /** Every voice of one rota, in index order, stopping at the first gap. */
+        protected collectRota(prefix: string): IKartAudioVoice[];
+        /** Depth-first search for a descendant by exact name. */
+        protected findChildNode(name: string): BABYLON.TransformNode;
+        /**
+         * Runs a callback over every voice in the registry.
+         *
+         * ITERATES THE MAP RATHER THAN THE ALIASES, which is what makes ageing and muting reach the
+         * thirty-odd slots that have no named field — the coin, the hurt lines, the results
+         * stingers. The hand-written list this replaced covered fifteen, and every voice added after
+         * it would have been silently exempt from `audioEnabled` and from one-shot retirement.
+         */
+        protected forEachVoice(callback: (voice: IKartAudioVoice) => void): void;
+        /** One frame. Reads the kart; writes nothing but voices. */
+        protected updateAudioState(): void;
+        /**
+         * `Player.cs:1658` — `effectSounds[6]`, `hop.wav`.
+         *
+         * **THE EDGE IS DRIFT ENTRY, NOT THE HOP ANIMATION**, and the difference is a real one on the
+         * Arcade car. Unity plays this at `:1658`, four lines after the `GetKeyDown(V)` at `:1649`
+         * and in the same block — before and independent of `SetTrigger("Drift")`. So the blip sounds
+         * whenever a drift STARTS, including on a profile whose `hopEnabled` is false and which never
+         * leaves the ground. Keying it to the hop instead would make `hopEnabled = false` silent, and
+         * FR-5 requires that flag to touch nothing but the hop's own arc.
+         *
+         * Hence the edge out of `None` rather than the edge into `Hop`: those are the same frame on
+         * the Kart profile and different frames on anything that skips the hop.
+         *
+         * It has its own enable flag rather than living under `driftAudioEnabled`, because that flag
+         * means "the two `drift_control` loops" — a one-shot at entry is not one of them, and folding
+         * it in would make the bench's drift-audio toggle silence a sound it does not name.
+         */
+        protected tickHopAudio(): void;
+        /**
+         * `Player.cs:962` — `effectSounds[8]`, `JumpBoard.wav`. The ramp launch.
+         *
+         * `:962` sits in `OnTriggerEnter` for tag `JumpPanel`, guarded by `!JUMP_PANEL` so a ramp
+         * cannot re-fire while a flight is already running. The port's `isJumpPanelling()` IS that
+         * flag, so its rising edge carries the guard for free.
+         *
+         * `:1079` plays the same clip on the glider panel's `OnTriggerExit`, which the port grants as
+         * `EKartBoostSource.GliderExit`. That one is NOT fired here — it is a boost source, and
+         * `tickBoostAudio` already speaks for it through the payout rota (`SourceSpeaks`, `1091`).
+         * Firing it in both places is how a sound ends up doubled.
+         */
+        protected tickJumpPanelAudio(): void;
+        /**
+         * `Player.cs:2573`/`2582`/`2591` — `MarioJumpTrickSounds`. **THE "Yeppie".**
+         *
+         * `trickJump()` is a coroutine started when the trick is performed, and the port's edge is
+         * `isTricking()` going true — `Player.cs:2725`'s `trickTime = 0` in this port, which is the
+         * same instant.
+         *
+         * **THE ROTA IS SCRAMBLED IN UNITY AND THE SCRAMBLE IS TRANSCRIBED.** `trickAnimCounter`
+         * counts 0, 1, 2, 0, 1, 2 — but the three branches do not read it in order:
+         *
+         *     counter == 0  ->  SetTrigger("JumpTrick1")    MarioJumpTrickSounds[0]     :2573
+         *     counter == 2  ->  SetTrigger("GliderTrick")   MarioJumpTrickSounds[1]     :2582
+         *     counter == 1  ->  SetTrigger("JumpTrick2")    MarioJumpTrickSounds[2]     :2591
+         *
+         * so the voices actually sound in the order 0, 2, 1, 0, 2, 1. Whether that is intentional is
+         * unknowable from the source and does not matter: it is what a player hears, three tricks in
+         * a row are the same three lines in the same order every time, and "regularising" it to
+         * 0, 1, 2 would be a change of the thing rather than a tidy-up of the code. `VoiceForCounter`
+         * below is that table as a pure function so a test can pin the order without a kart.
+         *
+         * The `Check_if_playing()` gate is Unity's (`:2572`) and it is NOT self-referential: the
+         * method tests `Mario_Boost_Sounds`, never `MarioJumpTrickSounds` (`PlayerSounds.cs:156-159`).
+         * So a trick voice is suppressed by a payout voice but NOT by another trick voice, and this
+         * port keeps that asymmetry rather than "fixing" it into a general mutex.
+         */
+        protected tickTrickAudio(): void;
+        /**
+         * `Player.cs:2568-2592`'s counter-to-voice table, as a pure function.
+         *
+         * See `tickTrickAudio` for why it is 0, 2, 1 rather than 0, 1, 2. `modulo` keeps a
+         * `trickVoiceCount` other than three from indexing off the end — Unity has no such case, so
+         * the wrap is the port's, and it is a guard rather than a behaviour.
+         */
+        static VoiceForCounter(counter: number, length: number): number;
+        /**
+         * `Player.cs:530-556` — every landing sound, and there are three distinct landings.
+         *
+         * All three hang off ONE edge, `onGround` going true, and differ only in what else was true
+         * at the moment of contact:
+         *
+         *     ending a ramp flight    `532`  `[7]` ChassisCrash + `533` `[4]` LandSkid + `534` `[5]`
+         *     landing a trick         `545`  `[4]` LandSkid     + `546` `[7]` ChassisCrash
+         *     landing from a glide    `554`  `[4]` LandSkid     + `555` `[5]` GliderClose
+         *
+         * **`534` PLAYS THE GLIDER-CLOSE CLIP ON A LANDING WITH NO GLIDER IN IT.** That is not a
+         * misreading — `effectSounds[5]` resolves to `SE_KT_GLIDER_CLOSE.wav`, and `:534` fires it
+         * inside the `if (JUMP_PANEL)` block. It is almost certainly an authoring slip in the Unity
+         * project, and it is transcribed anyway, because this port's job is to sound like that
+         * project and a slip a player has heard a thousand times is part of how the game sounds.
+         * Recorded here so the next reader finds a decision rather than a bug.
+         *
+         * **WHY `lastJumpPanel || current` RATHER THAN `current` ALONE**, and it is P-15's rule about
+         * observation points: `endJumpPanel()` and `landTrick()` are driven from the collision
+         * observables, which fire inside the PHYSICS step — so by the time this `update()` runs on the
+         * landing frame, both flags may already be cleared. The previous frame's sample is the one
+         * taken while the kart was still in the air, and a ballistic flight always spans at least one
+         * rendered frame, so the disjunction is exact rather than defensive.
+         */
+        protected tickImpactAudio(): void;
+        /**
+         * `Player.cs:1127`/`1169`/`1195`/`1211` and `:565` — the glider's four sounds.
+         *
+         *     `1127`  `[2]` SE_KT_GLIDER_START   entering a glide
+         *     `1169`  `[2]` again                a glider TRICK, which re-fires the same clip
+         *     `1195`  Mario_Glider               the glider trick VOICE, gated three ways
+         *     `1211`  `[3]` SE_KT_GLIDER_FLUTTER one second in, and re-tested (see the constant)
+         *     `565`   `[3]`.Stop()               leaving the glide
+         *
+         * The flutter is the only LOOP among the event voices, and it is driven as a level rather
+         * than an edge for exactly the reason `GLIDER_FLUTTER_DELAY`'s docblock gives: Unity's
+         * `WaitForSeconds(1f)` followed by a re-test of `GLIDER_FLY` is a "still gliding a second
+         * later?" question, and asking it every frame answers it identically without a timer that
+         * could outlive its glide.
+         *
+         * The trick voice's third gate is `!RACE_MANAGER.RACE_COMPLETED` (`:1193`) — a driver who has
+         * already crossed the line does not whoop. That flag only became readable here when the race
+         * lifecycle landed; before it, this sound could not have been ported faithfully at all.
+         */
+        protected tickGliderAudio(): void;
+        /**
+         * `Player.cs:399-401`, `:409`, `:269` and `:275` — the two start-line sounds.
+         *
+         *     `401`  `[11]` AccelBeforeStart   a LOOP, while the throttle is held into the countdown
+         *     `409`  `[11]`.Stop()             the frame the throttle is released
+         *     `269`  `[11]`.Stop()             the green light, unconditionally
+         *     `275`  `[13]` SE_KT_START_DASH   the green light, only if the window was hit
+         *
+         * **THE PORT NEEDS NO SEPARATE `269`**, and that is worth stating rather than leaving as an
+         * apparent omission: `releaseLaunch()` zeroes `beforeStartAccelTime`, so the charge this
+         * method reads goes to 0 on exactly that frame and the loop stops through the `409` branch.
+         * One stop, in one place, firing at both of Unity's moments.
+         *
+         * The dash is NOT fired here. It is `EKartBoostSource.RocketStart`, so `tickBoostAudio` sees
+         * it as a grant — and this method plays `[13]` alongside the payout voice `:278` plays, which
+         * is Unity's own pairing at `:275`-`:278`.
+         */
+        protected tickStartAudio(): void;
+        /**
+         * `Player.cs:1678-1706`, `1752`, `1755-1758`, `1772`, `1776-1779`, `1792`, `1808-1813`.
+         *
+         * TWO SOUNDS AND THEY START AT DIFFERENT TIMES, which is not obvious from the source and is
+         * the entire structure of the drift's audio:
+         *
+         *   `effectSounds[0]`  the STEERING loop. Starts the frame a direction latches — so, at drift
+         *                      entry — with a 0.25 s delay, and runs unchanged for the whole drift.
+         *                      It says "you are sideways".
+         *   `effectSounds[1]`  the CHARGE tone. Starts at 1.5 s, and RETRIGGERS at 4.0 and 7.0.
+         *                      It says "a payout is armed, and it just got bigger".
+         *
+         * Both stop on release (`1812-1813`). The steering loop's delay is Unity's and is worth
+         * keeping: it lets the hop land before the slide is announced.
+         */
+        protected tickDriftAudio(): void;
+        /**
+         * `Player.cs:1828-1832` and `PlayerSounds.cs:154-163` — the payout voice.
+         *
+         * `Check_if_playing()` returns false while ANY boost voice is still sounding, so a chained
+         * payout does not stack two lines on top of each other; `sound_count` then advances so
+         * consecutive payouts do not repeat. Both are ported, because a boost chain is exactly where
+         * a naive one-shot turns into a mess.
+         *
+         * **WHICH SOURCES SPEAK IS NOT THE SAME SET AS WHICH SOURCES BURST**, and that is why this
+         * cannot be inferred from `Boost_time`. Of Unity's seven grants, five play a voice and five
+         * fire a burst — but they are different fives. The BOOST PAD speaks (`514`) and does not
+         * burst; the GLIDER TRICK bursts (`1188`) and is silent; the TRICK LANDING does neither, and
+         * plays `effectSounds[4]`/`[7]` instead (`545-546`). A rise in one float cannot distinguish
+         * them, so the kart reports the source and the policy lives in `SourceSpeaks` below.
+         */
+        protected tickBoostAudio(): void;
+        /**
+         * Whether a boost source plays a `Mario_Boost_Sounds` line.
+         *
+         * FIVE OF THE SEVEN DO, and they are NOT the same five that burst — compare
+         * `StandardKartEffects.SourceBursts`:
+         *
+         *   speaks, no burst    `BoostPad`      `514` voice, no `BoostBurstPS` anywhere near `507`
+         *   bursts, no voice    `GliderTrick`   `1188` burst, and `1178` grants in silence
+         *   neither             `TrickLanding`  `541` floors the clock; `545`/`546` play
+         *                                       `effectSounds[4]`/`[7]`, which are not this rota
+         *
+         * `RocketStart` is a half-exception worth naming: `278` plays `Mario_Boost_Sounds[3]` — a
+         * FIXED index, not `sound_count` — so it does not advance the rotation in Unity. The port
+         * rotates it like the others, which is a one-line divergence in which voice you hear at the
+         * start line and is recorded here rather than silently reproduced or silently dropped.
+         */
+        static SourceSpeaks(source: number): boolean;
+        /** `PlayerSounds.cs:154-163`. False while any payout voice is still sounding. */
+        protected checkIfPlaying(): boolean;
+        /**
+         * `PlayerSounds.cs:52-136` — the engine, the idle, and the crossover between them.
+         *
+         * UNITY'S ENGINE IS A GEARBOX MADE OUT OF A PLAYHEAD. There is one looping clip, and the band
+         * table lerps `kartSound.time` to 1, 2, 3, 4, 5, 6 or 7 seconds depending on speed — so the
+         * "gear" is which second of the clip you are sitting in. A synth voice cannot scrub a clip, so
+         * the same band number drives FREQUENCY instead, which is a substitution and is labelled one.
+         * A bound `TOOLKIT.AudioSource` gets the pitch, not the scrub, for the same reason — the
+         * toolkit's surface has `setPitch` and no seek.
+         *
+         * A UNITY QUIRK, TRANSCRIBED — AND IT HAPPENS TWICE, WHICH IS THE PART THAT WAS MISSED.
+         *
+         * The ENGINE is started at `currentspeed >= 5` (`67`) and then unconditionally stopped again
+         * at `currentspeed < 10` (`134-136`). The 5-to-10 band therefore never sounds, despite having its
+         * own approach rate.
+         *
+         * The IDLE does the same thing for the same reason, and an earlier version of this port
+         * dropped it. `kartIdle.Stop()` sits inside EVERY band body, including the 5-to-10 one at
+         * `78` — while `54` restarts the idle on the very next frame, because `currentspeed < 10` is
+         * still true. So through 5-to-10 the idle is stopped and replayed every single frame: a
+         * near-silent machine-gun stutter, not a steady idle. Porting the engine's copy of the quirk
+         * while quietly fixing the idle's would have been a divergence dressed as a transcription,
+         * which is exactly the failure mode this file's citations exist to prevent.
+         *
+         * Note the boundary: the bands start at `> 5`, not `>= 5`, so at EXACTLY speed 5 no band body
+         * runs and the idle is not stopped at all.
+         */
+        protected tickEngineAudio(dt: number): void;
+        /**
+         * `PlayerSounds.cs:75-116` — the band table, verbatim.
+         *
+         * One second of clip per ten units of speed. The bands are inclusive-low and exclusive-high
+         * except the first two, which Unity writes as `> 5 && <= 10` and `> 10 && <= 20` — so 10 and
+         * 20 belong to the band BELOW them while 30, 40, 50 and 60 belong to the band above. That
+         * asymmetry is Unity's and is transcribed rather than regularised.
+         *
+         * **`current` is not a convenience parameter.** Unity's table is a chain of `if`s writing
+         * `kartSound.time`, so when NO band matches — below 5, and above 70 — the playhead simply is
+         * not written and holds whatever it had. A pure `speed -> band` function cannot express that,
+         * and an earlier version of this one papered over it by returning `7` above the table and `1`
+         * below it. The `7` was harmless; the `1` was not, because it pulled `engineTime` DOWN toward
+         * band 1 at speeds under 5 where Unity holds. Taking the current value makes both ends of the
+         * table say the same, correct thing: no band, no change.
+         *
+         * @param speed   `currentspeed`
+         * @param current the live `kartSound.time`, returned unchanged when no band matches
+         */
+        static EngineBandTime(speed: number, current: number): number;
+        /** `effectSounds[0]`. */
+        getDriftSteerVoice(): IKartAudioVoice;
+        /** `effectSounds[1]` — the one that matters. */
+        getDriftChargeVoice(): IKartAudioVoice;
+        /** `kartSound`. */
+        getEngineVoice(): IKartAudioVoice;
+        /** `kartIdle`. */
+        getIdleVoice(): IKartAudioVoice;
+        /** `Mario_Boost_Sounds`. */
+        getBoostVoices(): IKartAudioVoice[];
+        /** How many times the charge tone has stepped a tier since this component started. */
+        getChargeRetriggerCount(): number;
+        /** `PlayerSounds.sound_count`. */
+        getSoundCount(): number;
+        /** `kartSound.time` — which band the engine is sitting in. */
+        getEngineTime(): number;
+        /** `kartSound.pitch`. */
+        getEnginePitch(): number;
+        /** `effectSounds[6]` — the hop. */
+        getHopVoice(): IKartAudioVoice;
+        /** `effectSounds[4]` — the landing skid. */
+        getLandSkidVoice(): IKartAudioVoice;
+        /** `effectSounds[7]` — the chassis thud. */
+        getChassisVoice(): IKartAudioVoice;
+        /** `effectSounds[8]` — the ramp launch. */
+        getJumpPanelVoice(): IKartAudioVoice;
+        /** `effectSounds[2]` — the glider opening. */
+        getGliderStartVoice(): IKartAudioVoice;
+        /** `effectSounds[3]` — the glide flutter loop. */
+        getGliderFlutterVoice(): IKartAudioVoice;
+        /** `effectSounds[5]` — the glider closing. */
+        getGliderCloseVoice(): IKartAudioVoice;
+        /** `effectSounds[11]` — the countdown rev loop. */
+        getStartRevVoice(): IKartAudioVoice;
+        /** `effectSounds[13]` — the start dash. */
+        getStartDashVoice(): IKartAudioVoice;
+        /** `Mario_Glider` — the glider trick voice. */
+        getGliderTrickVoice(): IKartAudioVoice;
+        /** `MarioJumpTrickSounds` — the "Yeppie" rota. */
+        getTrickVoices(): IKartAudioVoice[];
+        /** Unity's `trickAnimCounter`. See `VoiceForCounter` for why it is not the voice index. */
+        getTrickAnimCounter(): number;
+        /** How many hops have sounded since this component started. */
+        getHopCount(): number;
+        /** How many trick voices — jump and glider together — have sounded. */
+        getTrickVoiceFiredCount(): number;
+        /** How many landings have sounded. */
+        getLandCount(): number;
+        /** Every slot id in the roster, in table order. What this kart system can say. */
+        getVoiceIds(): string[];
+        /** One voice by slot id, or `null` if the id is not in the roster. */
+        getVoice(id: string): IKartAudioVoice;
+        /** One slot's resolved table entry — its Unity provenance, group, volume and tuning. */
+        getVoiceSlot(id: string): IKartVoiceSlot;
+        /**
+         * **OVERRIDE TIER 1** — replaces one voice outright.
+         *
+         * Disposes whatever was there, which is the behaviour that keeps a replaced synth from
+         * holding an oscillator open for the rest of the session. Pass `null` to drop a voice
+         * entirely and make that slot permanently silent — a legitimate way to remove one sound
+         * without muting its whole group.
+         *
+         * Re-binds the hot-path aliases, so a replaced engine or hop takes effect on the next frame
+         * rather than on the next re-init.
+         */
+        setVoice(id: string, voice: IKartAudioVoice): void;
+        /**
+         * Binds one slot to an existing `TOOLKIT.AudioSource` — override tier 2, from code.
+         *
+         * The same thing rigging a named child GameObject does, for an integrator who already holds
+         * the component and would rather not depend on a node name.
+         *
+         * @param duration how long the clip sounds for, seconds. Supply it whenever you know it:
+         *                 `isPlaying()` cannot be read back off the engine (see `KartClipVoice`), so
+         *                 a voice with no duration never retires and will hold `Check_if_playing()`
+         *                 shut if it is one of the payout or trick voices.
+         */
+        setVoiceSource(id: string, source: any, duration?: number): void;
+        /** Mutes or unmutes one slot. Distinct from `setVoice(id, null)`, which is permanent. */
+        setVoiceEnabled(id: string, enabled: boolean): void;
+        /** Whether one slot is currently allowed to sound. */
+        isVoiceEnabled(id: string): boolean;
+        /**
+         * Mutes or unmutes a whole family.
+         *
+         * The reason groups exist: an integrator replacing the entire item layer silences ours with
+         * one call rather than naming eleven slots, and cannot miss one.
+         */
+        setGroupEnabled(group: KartAudioGroup, enabled: boolean): void;
+        /** Whether a family is currently allowed to sound. */
+        isGroupEnabled(group: KartAudioGroup): boolean;
+        /**
+         * Fires one slot by id. The single entry point every sound in this file goes through.
+         *
+         * Honours, in order: the master gate, the runtime mute, the slot mute, the group mute. A
+         * `false` from any of them is silence rather than an error, because a trigger called from
+         * game code during a mute is an ordinary thing rather than a mistake.
+         *
+         * @param volumeScale multiplies the slot volume and the master, for a caller that wants this
+         *                    one hit quieter — a distant collision, a chained pickup.
+         * @returns whether it actually sounded, so a caller can tell a mute from a bad id
+         */
+        playVoice(id: string, volumeScale?: number): boolean;
+        /** Stops one slot by id. Safe for an id that is not in the roster. */
+        stopVoice(id: string): void;
+        /** Whether one slot is currently sounding. */
+        isVoicePlaying(id: string): boolean;
+        /**
+         * Fires the next voice of a rota, advancing its cursor — `PlayerSounds.sound_count`'s shape.
+         *
+         * Used by the star, bullet and hurt rotas, and available to an integrator adding their own.
+         * The cursor is per-prefix so two rotas cannot walk each other.
+         */
+        playRota(prefix: string, volumeScale?: number): boolean;
+        /** `effectSounds[9]`, `Player.cs:994`. Call it when your item system collects a coin. */
+        playCoin(volumeScale?: number): boolean;
+        /** `effectSounds[10]`, `Player.cs:616`. A kart-to-kart or kart-to-wall bump. */
+        playBump(volumeScale?: number): boolean;
+        /** `effectSounds[18]`. Struck by an item. */
+        playItemHit(volumeScale?: number): boolean;
+        /** `effectSounds[19]`, `Player.cs:750`. Struck by a track obstacle. */
+        playObstacleHit(volumeScale?: number): boolean;
+        /** `hurtSounds[0..2]`, `PlayerSounds.cs:165`. The driver's pain rota. */
+        playHurt(volumeScale?: number): boolean;
+        /** `MarioStarSounds[0..2]`. Star power, as a rota. */
+        playStar(volumeScale?: number): boolean;
+        /** `BulletSounds[0..2]` — `0` fly, `1` on, `2` off. Indexed rather than rotated: they are phases. */
+        playBullet(phase: number, volumeScale?: number): boolean;
+        /** `effectSounds[23]`. Entering an anti-gravity zone. */
+        playHoverEnter(volumeScale?: number): boolean;
+        /** `effectSounds[25]`, `Player.cs:628`. The anti-gravity spin. */
+        playHoverCharge(volumeScale?: number): boolean;
+        /** `effectSounds[24]`. Leaving an anti-gravity zone. */
+        playHoverFinish(volumeScale?: number): boolean;
+        /** `effectSounds[14]`, `RACE_MANAGER.cs:219`. The chequered flag. */
+        playFinish(volumeScale?: number): boolean;
+        /**
+         * A results stinger by placing. `RACE_MANAGER.cs:235-275`.
+         *
+         * The mapping is Unity's: first place plays the voice AND the fanfare, a podium finish plays
+         * the runner-up sting, anything else plays the losing pair. An integrator with their own
+         * results screen mutes the `"results"` group and ignores this entirely.
+         */
+        playResults(position: number): void;
+        /**
+         * The alternate-surface drift loop — `effectSounds[26]`, `Player.cs:1687`.
+         *
+         * Unity layers this under the ordinary drift loop on a rainbow-road track. It is a level
+         * rather than a one-shot, so it takes a boolean instead of firing.
+         *
+         * **UNITY'S OWN COPY OF THIS IS BROKEN IN TWO WAYS AND NEITHER IS REPRODUCED.** `:1687`
+         * indexes `effectSounds[26]` when the shipped scene's array ends at `[25]`, which would throw
+         * if the branch were ever reached on Mario Circuit; and `:1816` stops `effectSounds[25]` —
+         * `SE_KT_HOVER_CHARGE` — while commenting it as "drift on rainbow road", so on a track where
+         * the branch DOES run the loop is never stopped and the hover charge is cut instead. Ours
+         * starts and stops the slot it names.
+         */
+        setSurfaceDrift(active: boolean): void;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * The kart surface this camera actually uses.
+     *
+     * DUCK-TYPED ON PURPOSE. `StandardKartCamera` must not import `StandardKartController` — FR-0
+     * requires each to be one self-contained module, and the UMD promotion combines them into the
+     * same namespace where a cross-import would be circular. Declaring the five methods it needs as an
+     * interface documents the contract without creating the dependency, and lets a race manager, an
+     * AI-driven opponent or a test drive the camera with a stand-in.
+     */
+    interface IKartCameraTarget {
+        /** `Camerafollow.cs:44`. The camera skips its ENTIRE update while this is true. */
+        isPlayerBeingMoved(): boolean;
+        /** Anti-gravity is active — the camera rides the kart's own up. */
+        isAntiGravity(): boolean;
+        /**
+         * The active anti-gravity volume's `rotAmountX`, degrees, or 0 when there is none (T18).
+         *
+         * OPTIONAL ON PURPOSE. A stand-in target in a test, or a race manager driving this rig with
+         * something that is not a kart, should not have to implement a volume payload it has no
+         * concept of — so the camera falls back to its OWN `rotAmountX` when the method is absent.
+         */
+        getAntiGravityRotAmountX?(): number;
+        /** The active anti-gravity volume's `rotAmountZ`, degrees. Optional, as above. */
+        getAntiGravityRotAmountZ?(): number;
+        /**
+         * The active anti-gravity volume asked the camera to rotate — Unity's `rotateCamAntiGravity`
+         * (`Camerafollow.cs:21`, set at `Player.cs:1043`, cleared at `:1056`).
+         *
+         * NARROWER THAN `isAntiGravity()`. A volume authored `rotateCam: false` is anti-gravity and is
+         * NOT camera-rotate, and Unity frames it exactly like flat ground. Optional, like the two
+         * getters above; absent, the camera falls back to its own settable `rotateCamAntiGravity`.
+         */
+        isAntiGravityCamRotate?(): boolean;
+        /** The glider is open. */
+        isGliding(): boolean;
+        /**
+         * The active glider volume's `glideAngleX`, degrees — the rig's PITCH trim while gliding.
+         *
+         * **T49. Unity relays this from the volume to the camera explicitly**, at
+         * `Player.cs:1114-1115`: entering a `GliderPanelFly` trigger writes `Cam.glideAngleZ` and
+         * `Cam.glideAngleX` from the `GetGlideAngle` component on the volume, alongside the kart's own
+         * copies. This port read the payload into the CONTROLLER and stopped there, so
+         * `Camerafollow.cs:84`'s target was permanently `Euler(0, yaw, 0)` and a volume authoring a
+         * trim was framed level because the number never arrived.
+         *
+         * OPTIONAL, exactly as `getAntiGravityRotAmountX` is and for the same reason: a stand-in
+         * target, or a race manager driving this rig with something that is not a kart, should not
+         * have to model a volume payload. **The fallback is this component's own `glideAngleX`**,
+         * which is a behaviour CHOICE and not a no-op: a target without the getter keeps reading the
+         * settable field that defaults to 0, so for every such caller the bridge is exactly additive.
+         * (Contrast `isAntiGravityCamRotate`, whose fallback is deliberately NOT additive; the
+         * difference is that a missing lean flag has no sensible neutral, and a missing trim does.)
+         *
+         * **IT IS NOT ADDITIVE FOR A REAL KART, AND SAYING SO IS THE POINT OF THE FIX.** A live
+         * `StandardKartController` answers both getters, so a volume's trim now ARRIVES where it
+         * previously did not — including the bench's own `kartLabGliderFly`, which authors
+         * `{ glideAngleX: 4, glideAngle: 0 }`. Its roll half resolves to 0 either way and every
+         * existing roll measurement is untouched; its 4-degree PITCH trim genuinely moves the rig,
+         * from level to 4 degrees nose-down over a glide. Nothing in the suite measured that, which is
+         * why no figure moved when the bridge landed; `tests/KartCamera.test.ts` section 16.3 pins it
+         * in both halves so the change is recorded rather than merely unobserved.
+         */
+        getGlideAngleX?(): number;
+        /** The active glider volume's `glideAngle` — the rig's ROLL trim while gliding. As above. */
+        getGlideAngleZ?(): number;
+        /** A boost of any kind is running — the camera dollies back. */
+        isBoosting(): boolean;
+        /** On a jump-panel flight — the camera deliberately lags at 0.4/s. */
+        isJumpPanelling(): boolean;
+        /**
+         * `Player.cs:233`/`:543`. A trick has been performed this flight and its landing still owes
+         * the 0.9 s boost floor — Unity's `trickBoostPending`.
+         *
+         * OPTIONAL, for the same reason `getAntiGravityRotAmountX` is: a stand-in target in a test, or
+         * a race manager driving this rig with something that is not a kart, should not have to model
+         * tricks. Absent, the camera behaves exactly as it did before T33.
+         *
+         * **THE NAME IS THE CONTROLLER'S, NOT UNITY'S.** `StandardKartController` already exposes this
+         * as `isTrickPending()`, so matching that name is what lets T33 land with zero changes to a
+         * 5100-line file. Unity's field name is recorded here instead of borrowed.
+         */
+        isTrickPending?(): boolean;
+    }
+    /**
+     * Babylon standard kart camera — the chase rig for `PROJECT.StandardKartController`.
+     * @class StandardKartCamera
+     *
+     * A direct port of `3DMarioKart/Assets/Scripts/Camerafollow.cs`. Two nodes, and the split matters:
+     *
+     *   RIG    this component's own transform. Its POSITION tracks the kart and its ROTATION slerps
+     *          onto the kart's at 3/s. This is where the lean lives.
+     *   CHILD  one node under it, carrying the extra pitch/roll a volume asks for and the dolly the
+     *          boost pulls. The camera itself is placed at the child's world transform.
+     *
+     * Splitting them is what lets the boost dolly back along the rig's own nose while the rig is still
+     * catching up with the kart's roll, without the two fighting.
+     */
+    class StandardKartCamera extends TOOLKIT.ScriptComponent {
+        /** The kart's chassis root: the node this rig follows. */
+        player: BABYLON.TransformNode;
+        /** Scene-graph name of the chassis root, for a glTF-loaded kart that cannot pass a reference. */
+        playerNodeName: string;
+        /**
+         * The kart controller, duck-typed (see `IKartCameraTarget`).
+         *
+         * Optional. With no kart the camera is a plain 3/s chase rig — which is still the correct
+         * behaviour for every state the kart cannot report.
+         */
+        kart: IKartCameraTarget;
+        /**
+         * The Babylon camera to drive, duck-typed to `{ position, rotation?, rotationQuaternion? }`.
+         *
+         * The VIEWER owns camera creation in this framework, so this component never makes one — it
+         * writes a transform onto whatever it is handed. That also means it works with a `FreeCamera`,
+         * a `UniversalCamera` or a bare `TransformNode` without caring which.
+         */
+        camera: any;
+        /**
+         * The race manager, duck-typed. `null` on the bench and in every test that has no race.
+         *
+         * Read for two booleans and nothing else: `RACE_STARTED` and `RACE_COMPLETED`.
+         */
+        race: any;
+        /**
+         * Fallback for `RACE_STARTED` when no race is attached. **Defaults `true`** — see the block
+         * above. Public and settable so a scene or a test can drive the branch without a race manager.
+         */
+        raceStarted: boolean;
+        /**
+         * Fallback for `RACE_COMPLETED` when no race is attached. Defaults `false`, which is both
+         * Unity's initialiser and the additive choice — every existing camera trace is unchanged.
+         */
+        raceCompleted: boolean;
+        /**
+         * `Camerafollow.cs:150` — the field of view to adopt once the race is completed, DEGREES.
+         *
+         * **GUARDED ON `> 1`, AND THAT GUARD IS THE WHOLE POINT OF THE FIELD.** `:149` is
+         * `if(raceEndFOV > 1)`, so **0 means "leave the FOV alone"** and not "set the FOV to zero".
+         * Read from the scene YAML per D-9/P-10 rather than from the script, because
+         * `Camerafollow.cs:14` declares it bare: **65 on Mario Circuit and Water Park, 0 on the other
+         * three shipped tracks**. Three of five tracks therefore ship the do-nothing value.
+         *
+         * **THIS PORT'S TRACK HAS NO UNITY COUNTERPART, SO 65 HERE IS A PORT INVENTION** — declared as
+         * one, chosen as the value the two tracks that DO use the branch ship, rather than measured.
+         *
+         * Babylon's `Camera.fov` is RADIANS and Unity's `fieldOfView` is DEGREES; the conversion is at
+         * the write, and the field keeps Unity's units so a glTF-authored value arrives meaning what
+         * it meant in the Inspector.
+         */
+        raceEndFOV: number;
+        /**
+         * Rate the rig's rotation slerps onto the kart's, per second (`Camerafollow.cs:74`).
+         *
+         * **3/s, and it is a requirement — but read the header for WHAT it is a requirement for.**
+         *
+         * It is not the roll. The visible roll on a banked corner is the rig adopting the surface's
+         * bank (`getHorizonTilt()`, about 18 degrees on the bench sweeper) and it is unchanged from
+         * 1/s to 240/s. What this number buys is **LAG**: how far the view trails the heading through
+         * a corner — 18.6 degrees of yaw at 3/s against 7.2 at 7.5/s and 0.02 at 240/s. A camera
+         * welded to the kart's nose reads as rigid and makes a drift unreadable, which is the actual
+         * cost of "tidying" this to 7.5.
+         */
+        followRate: number;
+        /**
+         * Rate of the SEPARATE jump-panel slerp, per second (`Camerafollow.cs:97`).
+         *
+         * =========================================================================================
+         * A TERM, NOT A SUBSTITUTE. THE DIVERGENCE THAT USED TO LIVE HERE IS CLOSED (T43).
+         * =========================================================================================
+         *
+         * Two earlier readings of this number were wrong, and the history is kept because each was
+         * believed. The first called 0.4/s "deliberately, extravagantly laggy … the one place in the
+         * file where the lag is the point". The second (T33) found that `:95-98` is not the else-branch
+         * of `:72` but a **separate, unconditional `if`** running after the whole rotation block —
+         * so Unity applies the `:74` follow at 3/s and then this one at 0.4/s toward the same target,
+         * composing to exactly **3.4/s** — and recorded the divergence without repairing it, because
+         * T33's acceptance required a purely additive change.
+         *
+         * **T43 repaired it.** `updateRigRotation` now issues the second slerp as its own statement, so
+         * on an ordinary jump panel the rig converges at 3 + 0.4 = 3.4/s and Unity's panel camera is
+         * what it always was in the source: slightly FASTER than its normal follow, not eight and a
+         * half times slower. The number here is unchanged and is still `:97`'s own; what changed is
+         * that it is added rather than swapped in.
+         *
+         * Because it is a separate slerp and not a rate, it composes to a single 3.4/s ONLY where the
+         * first slerp aims at the same place. While gliding or levelling out for a trick it is a second
+         * pull toward the kart's own attitude, which is exactly what the source does.
+         */
+        jumpPanelRate: number;
+        /**
+         * Rate while gliding, per second (`Camerafollow.cs:84`).
+         *
+         * 1/s, slower again than the normal 3/s, because a glider's heading changes slowly and a
+         * camera that tracked it tightly would make the pitch input feel like nothing is happening.
+         */
+        glideRate: number;
+        /**
+         * Rate the rig levels out while a trick boost is pending, per second (`Camerafollow.cs:88`).
+         *
+         * **3/s, and it is its own property rather than a reuse of `followRate` on purpose.** Both are
+         * a bare literal `3` in the source — `:74` for the normal follow and `:88` for the level-out —
+         * and two literals that happen to agree are not one value. Folding them together would mean a
+         * later tune of the chase lag silently moved the trick camera with it, which is exactly the
+         * class of coupling the header's rate banner exists to prevent.
+         */
+        trickLevelRate: number;
+        /** Rate the child node's own rotation approaches its target, per second (`Camerafollow.cs:101-115`). */
+        childRate: number;
+        /** Rate the child dollies between `orig_pos` and `boost_pos`, per second (`Camerafollow.cs:121-133`). */
+        boostDollyRate: number;
+        /**
+         * `Camerafollow.cs:138` — the child's return to `orig_pos` once the race is completed, per second.
+         *
+         * **A NAMED FIELD OF ITS OWN, NOT A REUSE OF `childRate`, WHICH ALSO HAPPENS TO BE 3.** This
+         * file's header is explicit that two literals which happen to agree are not one value, and
+         * these two are a worked example: `childRate` (`:105`) drives the child's ROTATION, this one
+         * (`:138`) drives its POSITION, they sit in different statements in the source, and Unity is
+         * free to change either without the other. Folding them together would make a later divergence
+         * in the donor unrepresentable here.
+         *
+         * It is also **not** `boostDollyRate`, which is 4 and drives the ordinary positional return at
+         * `:129`. So the child has two positional return rates, 4 during the race and 3 after it, and
+         * the difference is a deliberate slowing of the shot as the race ends.
+         */
+        raceEndReturnRate: number;
+        /** `Camerafollow.offset` — how far up the kart's own up axis the rig sits. Unity: 1.8. */
+        heightOffset: number;
+        /** `Camerafollow.orig_pos` — the child's resting local pose. Unity: (0, 0.7, -6.75). */
+        orig_pos: BABYLON.Vector3;
+        /** `Camerafollow.boost_pos` — the child's boosting local pose. Unity: (0, 1, -8). */
+        boost_pos: BABYLON.Vector3;
+        /** Default child pitch, degrees — Unity's `(2, y, 0)` (`Camerafollow.cs:109`). */
+        defaultChildPitch: number;
+        /**
+         * The child's local **y** inside a camera-rotating anti-gravity volume (`Camerafollow.cs:124`
+         * and `:133`). Unity: **0.4**.
+         *
+         * =========================================================================================
+         * THE VALUE IS MEASURED FROM THE SCENES, NOT FROM THE SCRIPT. THIS IS THE `offset` LESSON.
+         * =========================================================================================
+         *
+         * `Camerafollow.cs:13` declares `public float antiGravityPosY;` with NO initialiser — it is
+         * Inspector-serialized, so reading the .cs file tells you nothing and inventing a number here
+         * is exactly how this port previously came to ship guesses for `offset` and `orig_pos`. Read
+         * from `Assets/Scenes/*.unity` -> MonoBehaviour guid `3c037e6c29b4e8b4c9046696c6f28719`, it is
+         * **0.4** in Mario Circuit, Rainbow Road, Toad Harbor and Water Park, and 0 in MooMooMeadows —
+         * the one track with no rotating anti-gravity section for it to apply to. 0.4 is the shipped
+         * value; MooMooMeadows' 0 is an unset field, not a second opinion.
+         *
+         * **IT IS LOWER THAN BOTH RESTING POSES, AND THAT IS THE POINT.** `orig_pos.y` is 0.7 and
+         * `boost_pos.y` is 1.0, so entering a leaning barrel drops the camera roughly 0.3 units toward
+         * the deck and keeps it there whether or not a boost is running. Riding closer to the surface
+         * is what makes the wall the kart is driving on fill the frame — which is the whole visual
+         * argument for anti-gravity, and it is missing from a rig that only rides the kart's up.
+         *
+         * Only the **y** is replaced. `x` and `z` still come from whichever pose is in play, so the
+         * boost dolly still pulls back the full 1.25 units inside a barrel.
+         */
+        antiGravityPosY: number;
+        /**
+         * Seconds the camera keeps riding the kart's own up after anti-gravity ends.
+         *
+         * **The 3 s tail is what stops the camera snapping on exit.** Leaving a barrel flips the
+         * reference frame from the kart's up back to the world's, and doing that on the frame the
+         * volume ends would rotate the whole view instantly. The tail lets the rig's own 3/s slerp
+         * carry the change instead.
+         */
+        antiGravityTailSeconds: number;
+        /** Anti-gravity volume's `rotAmountX`, degrees. The extra pitch it asks the camera child for. */
+        rotAmountX: number;
+        /** Anti-gravity volume's `rotAmountZ`, degrees. */
+        rotAmountZ: number;
+        /**
+         * Fallback for `rotateCamAntiGravity` when the target does not carry the getter, and the value
+         * a scene can hand-set.
+         *
+         * **DEFAULTS TRUE, WHICH IS NOT UNITY'S INITIALISER, AND THE DIFFERENCE IS DELIBERATE.**
+         * `Camerafollow.cs:21` declares it `false`, and — correcting an earlier version of this comment
+         * — that initialiser is **load-bearing in shipped scenes**, not a first-frame artifact. The
+         * claim that Unity writes the field "on every volume entry and exit" is wrong: `Player.cs:1043`
+         * sits inside `if (rotateCam)`, so a `rotateCam: false` volume never writes it at all. A kart
+         * that reaches a plain anti-gravity stretch before any leaning one runs on the `false`
+         * initialiser — and Toad Harbor ships exactly that content.
+         *
+         * **So this default is NOT a port of that field**, and it is not a no-op either way: true
+         * preserves the pitch/roll channel for duck-typed targets, and also hands them an
+         * `antiGravityPosY` dolly they never had before T34. That cost is real and it is measured —
+         * section 13 of `KartCamera.test.ts` pins it as the only quantity on which the live camera
+         * diverges from the pre-T33 reference model.
+         *
+         * It is the answer for a target that **cannot answer** — a stand-in in a test, or a race
+         * manager driving this rig with something that is not a kart — and it is chosen so that such a
+         * target keeps the channel it could previously see: the child's PITCH and ROLL, taken from
+         * whatever `rotAmountX`/`rotAmountZ` it supplies.
+         *
+         * Defaulting FALSE was tried first and broke four existing tests whose targets report
+         * anti-gravity and non-zero `rotAmountX`/`rotAmountZ` and have no opinion about cam-rotate.
+         * They were right to break: silently dropping the lean for every duck-typed target that had not
+         * heard of T34 is a behaviour change smuggled in under a feature.
+         *
+         * **NEITHER DEFAULT IS A NO-OP, AND SAYING OTHERWISE WOULD BE THE MISLEADING PART.** True keeps
+         * the pitch/roll channel and hands those same targets the `antiGravityPosY` dolly they did not
+         * have before; false keeps the dolly and drops the lean. The trade was made toward the channel
+         * a caller had actually authored a value for — a target supplying `rotAmountX` has asked for a
+         * lean — and the cost is recorded and measured rather than hidden: `KartCamera.test.ts` section
+         * 13 pins the pre-change reference model diverging on the dolly's y, and only on the dolly's y,
+         * for exactly the frames such a target reports anti-gravity.
+         *
+         * A real `StandardKartController` implements `isAntiGravityCamRotate()`, so its answer wins and
+         * this value is never consulted on the live path. With no kart at all `antiGravity` is false
+         * too, so a lean cannot happen regardless of what this says.
+         */
+        rotateCamAntiGravity: boolean;
+        /** Glider volume's `glideAngleX` — the rig's pitch while gliding, degrees (`Camerafollow.cs:84`). */
+        glideAngleX: number;
+        /** Glider volume's `glideAngle` — the rig's roll while gliding, degrees. */
+        glideAngleZ: number;
+        /** The child node. Built in `start()` if the rig does not already carry one. */
+        protected child: BABYLON.TransformNode;
+        /** Seconds left on the anti-gravity tail. */
+        protected antiGravityTail: number;
+        /** Reused rotation target, so a frame allocates nothing. */
+        private readonly targetRotation;
+        /** Reused child rotation target. */
+        private readonly childTarget;
+        /** Reused rig position scratch. */
+        private readonly rigPosition;
+        /** Reused child position target. */
+        private readonly childPosition;
+        protected awake(): void;
+        protected start(): void;
+        /**
+         * `Camerafollow.cs:44` runs in **`LateUpdate`**, and that placement is load-bearing rather
+         * than incidental: the camera must read the chassis orientation the kart settled on THIS
+         * frame. Reading it from `update()` would show the previous frame's, adding a frame of lag on
+         * top of the 3/s the design already asks for and making the lean read as latency.
+         */
+        protected late(): void;
+        protected destroy(): void;
+        /** Reads the serialized property bag. Nothing that touches the scene belongs here. */
+        protected awakeCameraState(): void;
+        /** Resolves the player and the child node, building the latter if the rig did not ship one. */
+        protected initCameraState(): void;
+        /**
+         * `Camerafollow.cs:44-133` — the whole camera, in the source's own order.
+         *
+         * Position first, then the rig's rotation, then the child's rotation, then the child's dolly.
+         * The order matters only in that the camera is written from the child's world transform at the
+         * end, so everything upstream of that has to be settled first.
+         */
+        protected lateCameraState(): void;
+        /**
+         * `Camerafollow.cs:146-153`. On completion: reset the rig's scale, and adopt `raceEndFOV`.
+         *
+         * Two unrelated things Unity does in one block, and both are transcribed rather than tidied.
+         *
+         * **THE SCALE RESET LOOKS LIKE A NO-OP AND IS KEPT ANYWAY.** Nothing in this port ever scales
+         * the rig, so `(1,1,1)` is what it already is. In Unity something evidently does — a scale
+         * reset that was never scaled is not a line anyone writes — and whatever that is has not been
+         * found in the source. Transcribing a line whose purpose is unknown is cheaper than deciding
+         * it is unnecessary and being wrong; it costs one assignment on the frames after the finish.
+         *
+         * **THE FOV IS GUARDED ON `raceEndFOV > 1`, AND THE GUARD IS THE FEATURE.** `:149` is
+         * `if(raceEndFOV > 1)`, so **0 means "leave the FOV alone"** — which is what three of Unity's
+         * five shipped tracks author. A port that read the field and wrote it unconditionally would set
+         * the field of view to zero on those tracks and black the screen.
+         *
+         * Written in RADIANS. Babylon's `Camera.fov` is radians; Unity's `fieldOfView` is degrees; the
+         * field carries Unity's units so a glTF-authored value means what the Inspector showed. Guarded
+         * on the property existing, because `camera` is duck-typed `any` and may be a bare
+         * `TransformNode` with no `fov` at all.
+         */
+        protected applyRaceEndFraming(raceCompleted: boolean): void;
+        /** Releases the references. Nothing here owns an observer or a timer. */
+        protected destroyCameraState(): void;
+        /**
+         * `Camerafollow.cs:48-70`. Where the rig sits: on the kart, offset along an up axis.
+         *
+         * WHICH up is the entire content of this method. Under anti-gravity — or within
+         * `antiGravityTailSeconds` of it, or while gliding — it is the KART's up, so the rig stays
+         * outboard of a kart running along the inside of a barrel. Otherwise it is the world's, so the
+         * rig sits directly above the kart on ordinary ground however the chassis is banked.
+         *
+         * **THIS BRANCH IS ABOUT POSITION ONLY, and it does not affect the tilt.** The only thing
+         * written here is `transform.position`; the rig's ORIENTATION is `updateRigRotation`'s, and it
+         * slerps onto the full chassis quaternion — roll included — in every state. So the camera
+         * does roll with the chassis on an ordinary banked corner, and that is exactly where the
+         * visible tilt comes from (measured: `getHorizonTilt()` = 18.4 degrees on the bench's
+         * 18-degree sweeper, with anti-gravity nowhere in sight). An earlier version of this comment
+         * claimed the opposite; the file's own `getHorizonTilt()` disproves it in one line.
+         *
+         * **THE GLIDE ASYMMETRY IS UNITY'S OWN, AND T49 CHECKED RATHER THAN TIDIED IT.** While gliding
+         * this method DOES ride the kart's rolled `up`, and `updateRigRotation` does NOT — it goes to
+         * the volume's trim instead. That looks like an inconsistency and it is a transcription:
+         * `Camerafollow.cs:49` gates the position branch on `antiGravity || antiGravityTimeAgo < 3 ||
+         * GLIDER_FLY` and takes `player.up`, while `:84` targets
+         * `Euler(glideAngleX, player.eulerAngles.y, glideAngleZ)` — the trim, with no term from the
+         * kart's roll at all. So the rig is carried around the kart's roll while being held level in
+         * it, which is exactly why a glide reads as the kart banking IN FRAME where a banked corner
+         * reads as the horizon tipping. It is not obviously wrong, it is not this port's invention,
+         * and it is deliberately left alone.
+         */
+        protected updateRigPosition(antiGravity: boolean, gliding: boolean, raceCompleted: boolean): void;
+        /** The kart's yaw, radians — the one component every rotation target here keeps. */
+        protected playerYaw(): number;
+        /**
+         * Whether a trick boost is pending on the target (`Camerafollow.cs`'s `trickBoostPending`).
+         *
+         * False for any target that does not carry the optional getter, which is what makes T33 a
+         * purely additive change: with no trick signal every branch below reduces to what it was.
+         */
+        protected isTrickPending(): boolean;
+        /**
+         * `Camerafollow.cs:72-98`. The rig's rotation, and the four rates it runs at.
+         *
+         * Normally it slerps onto the kart's own orientation at **3/s** — see the file header. While
+         * gliding it goes instead to the glider's own attitude (`glideAngleX` pitch, the kart's yaw,
+         * `glideAngle` roll) at 1/s, so the camera flies the glider rather than the kart. On a jump
+         * panel it drops to 0.4/s and simply falls behind.
+         *
+         * **AND WHILE A TRICK BOOST IS PENDING IT LEVELS OUT.** `:72` gates the normal follow off with
+         * `!trickBoostPending`, and `:86-89` sends the rig to `Euler(0, playerYaw, 0)` instead — the
+         * kart's heading with **pitch and roll zeroed**. The kart is tumbling through a trick; the
+         * camera holds the horizon flat and lets it tumble in frame. Without this a trick reads as the
+         * whole world rolling over, which is both unreadable and, on a bare red box, nauseating.
+         *
+         * THE ANTI-GRAVITY CASE IS A FREEZE, NOT A FALLBACK. `:86` carries `&& !antiGravity`, and `:72`
+         * is already false, so with a trick pending AND anti-gravity active **neither branch assigns a
+         * rotation at all** and the rig simply holds last frame's. That is transcribed rather than
+         * tidied into "fall back to the normal follow": the source's behaviour is a hold, and inventing
+         * a slerp here would put motion on screen that Unity does not have.
+         *
+         * Precisely: the hold is what `:72` and `:86` do, and it is now a FLAG rather than an early
+         * `return`. In the one sub-state where a trick, anti-gravity and a jump panel are all live at
+         * once, Unity's unconditional `:95` still slerps at 0.4/s — a `return` here swallowed it, and
+         * that was the last corner of the jump-panel modelling gap. T43 closed it: the hold suppresses
+         * only the rotation block's own write, and `:95`'s statement runs after it either way. With no
+         * panel the freeze is absolute exactly as before.
+         *
+         * ---------------------------------------------------------------------------------------------
+         * THE JUMP-PANEL DIVERGENCE FOUND WHILE WRITING THIS — NOW CLOSED (T43).
+         *
+         * Unity's jump-panel slerp at `:95-98` is a **separate, unconditional `if`** that runs AFTER the
+         * block below — not the else-branch this port used to model it as. So on a jump panel Unity
+         * applies BOTH the `:74` follow at 3/s and the `:97` one at 0.4/s toward the same target,
+         * composing to exactly 3.4/s; the port replaced 3 with 0.4 instead, roughly eight and a half
+         * times slower and in the opposite direction from the source.
+         *
+         * T33 recorded it rather than repairing it, because that task's acceptance required a purely
+         * additive change and this moves every driven jump-panel trajectory. T43 is the task that took
+         * those measurements and made the change. See `jumpPanelRate` and the block at the end of this
+         * method.
+         * ---------------------------------------------------------------------------------------------
+         */
+        protected updateRigRotation(dt: number, gliding: boolean, jumpPanel: boolean, trickPending: boolean, antiGravity: boolean, raceStarted: boolean): void;
+        /** The kart's own orientation, from whichever of the two rotation channels the node is using. */
+        protected copyPlayerRotationTo(out: BABYLON.Quaternion): void;
+        /**
+         * The pitch the current anti-gravity volume asks the child for, degrees.
+         *
+         * The kart's answer wins when it has one, because the kart is the thing that knows which
+         * volume it is standing in; this component's own `rotAmountX` is the fallback for a target
+         * that does not carry the getter, and for a scene that wants to set the lean by hand.
+         */
+        protected volumeRotAmountX(): number;
+        /**
+         * `RACE_MANAGER.RACE_STARTED`, or the fallback when no race is attached.
+         *
+         * The same optional-getter shape as `volumeRotAmountX` and for the same reason: the race
+         * manager is the thing that knows, so its answer wins where it has one, and this component's
+         * own `raceStarted` is the fallback — both for a scene with no race and for a test that wants
+         * to drive the branch by hand.
+         *
+         * **THE FALLBACK IS `true` AND THAT IS A BEHAVIOUR CHOICE.** See the block beside `race`.
+         * `typeof`-guarded on the field rather than on a method, because a race manager exposes these
+         * as public FIELDS (Unity's are statics), so there is no getter to probe for.
+         */
+        protected isRaceStarted(): boolean;
+        /** `RACE_MANAGER.RACE_COMPLETED`, or the fallback. As above; the fallback is `false`. */
+        protected isRaceCompleted(): boolean;
+        /** The roll the current anti-gravity volume asks the child for, degrees. As above. */
+        protected volumeRotAmountZ(): number;
+        /**
+         * The PITCH trim the current glider volume asks the rig for, degrees (T49).
+         *
+         * The same shape as `volumeRotAmountX` and for the same reason: the kart is the thing that
+         * knows which volume it is inside, so its answer wins where it has one, and this component's
+         * own `glideAngleX` is the fallback — both for a target that does not carry the getter and for
+         * a scene that wants to set the trim by hand.
+         *
+         * **Unity has this bridge and this port did not**, which is the whole of T49:
+         * `Player.cs:1114-1115` writes `Cam.glideAngleX` / `Cam.glideAngleZ` on entering a
+         * `GliderPanelFly` volume. It is not a hypothetical payload either — read from the scene YAML
+         * per D-9, **Mario Circuit ships twelve `GetGlideAngle` volumes stepping `glideAngle` from
+         * -50 to 0 in fives**, and Rainbow Road and Water Park ship `glideAngleX` of -35, -20 and -10.
+         * Every one of those was being dropped.
+         */
+        protected volumeGlideAngleX(): number;
+        /** The ROLL trim the current glider volume asks the rig for, degrees. As above. */
+        protected volumeGlideAngleZ(): number;
+        /**
+         * Whether the current anti-gravity volume asked the camera to rotate (`rotateCamAntiGravity`).
+         *
+         * The kart's answer wins where it has one, because the kart knows which volume it is inside;
+         * the component's own flag is the fallback and the hand-set value.
+         */
+        protected isAntiGravityCamRotate(): boolean;
+        /**
+         * `Camerafollow.cs:101-115`. The child's own rotation, at 3/s.
+         *
+         * Inside a **camera-rotating** anti-gravity volume it takes the VOLUME's `rotAmountX`/
+         * `rotAmountZ` — which is how a track author rolls the view through a corkscrew without
+         * touching the kart. Otherwise it settles on Unity's `(2, y, 0)`: two degrees of downward
+         * pitch, so the kart sits slightly below centre and the road ahead gets the rest of the frame.
+         *
+         * =========================================================================================
+         * T34 FIXED A LIVE DEFECT HERE. THE CONDITION IS TWO FLAGS, NOT ONE.
+         * =========================================================================================
+         *
+         * This used to branch on `antiGravity` alone. Unity branches on `antiGravity` at `:101` and
+         * then on `rotateCamAntiGravity` at `:103` — and `:107`'s inner `else` and `:112`'s outer
+         * `else` are the SAME pose, `Euler(2, y, 0)`. So the source's rule is "volume amounts only when
+         * BOTH are set; the ordinary two-degree pitch in every other case".
+         *
+         * Branching on one flag meant an anti-gravity volume authored `rotateCam: false` got
+         * `Euler(0, y, 0)` — because the controller zeroed the amounts — where Unity gives it
+         * `Euler(2, y, 0)`. Two degrees of pitch, silently dropped, on exactly the volumes a track
+         * author marked as not wanting a camera lean. `Player.cs:1054-1055` reasserting `(2, 0)` on
+         * exit is the same rule stated a second way.
+         */
+        protected updateChildRotation(dt: number, leaning: boolean): void;
+        /**
+         * One dolly step toward a local pose, at an already-computed blend factor.
+         *
+         * `leaning` swaps the target's **y** for `antiGravityPosY` and leaves x and z alone —
+         * `Camerafollow.cs:124` and `:133` build `new Vector3(pose.x, antiGravityPosY, pose.z)` at
+         * both call sites, so the substitution belongs here rather than at either branch.
+         */
+        protected lerpChildTo(target: BABYLON.Vector3, k: number, leaning: boolean): void;
+        /**
+         * `Camerafollow.cs:118-135`. The boost dolly: the child slides back to `boost_pos` at 4/s.
+         *
+         * A single unit of travel, and it is entirely responsible for a boost reading as speed rather
+         * than as a bigger number in the HUD. It runs on the CHILD, along the rig's own nose, so a
+         * boost taken mid-corner pulls back along where the kart is pointing rather than along the
+         * world.
+         *
+         * =========================================================================================
+         * TWO `if`S, NOT AN `if`/`else`, AND THAT IS THE WHOLE REASON THIS METHOD IS SHAPED LIKE THIS.
+         * =========================================================================================
+         *
+         * `:118` pulls back when `(Boost || trickBoostPending)`. `:127` returns when `(!Boost &&
+         * !isBullet)`. They are independent statements, so with a trick pending and no boost yet
+         * granted — which is the entire airborne half of every trick — **both run in the same frame**:
+         * the child lerps toward `boost_pos`, and then lerps from that result back toward `orig_pos`.
+         *
+         * The composition is not a no-op and it is not the full dolly. Its fixed point is
+         *
+         *     p = [(1 - k) * boost_pos + orig_pos] / (2 - k),    k = 1 - exp(-boostDollyRate * dt)
+         *
+         * which at any sane frame time is essentially the **midpoint of the two poses** (z = -7.35 at
+         * 60 Hz against -7.33 at 30, so the frame-rate sensitivity is 0.02 units and beneath notice).
+         * A trick therefore pulls the camera back HALF a dolly while the kart is in the air, and the
+         * landing's 0.9 s boost completes it — which is why the trick reads as a wind-up followed by a
+         * release rather than as a single shove.
+         *
+         * Written as two sequential lerps because that is what the source does. Collapsing it to
+         * "target the midpoint" would be arithmetically close and would quietly lose the reason.
+         *
+         * `isBullet` at `:127` is always false in this port (P-9: no item system), so the condition
+         * reduces to `!Boost`. Named here rather than left as a phantom term in a comment.
+         */
+        protected updateChildPosition(dt: number, boosting: boolean, trickPending: boolean, leaning: boolean, raceCompleted: boolean): void;
+        /**
+         * Copies the child's world transform onto the camera.
+         *
+         * The camera is duck-typed because the viewer, not this component, owns camera creation in
+         * this framework. `rotationQuaternion` is preferred where the camera has one — writing Euler
+         * angles onto a camera that is already quaternion-driven silently does nothing.
+         */
+        protected writeCamera(): void;
+        /** The child node the camera is placed at. */
+        getChild(): BABYLON.TransformNode;
+        /** Seconds left on the anti-gravity tail — non-zero for 3 s after a barrel. */
+        getAntiGravityTail(): number;
+        /**
+         * The local y the child dolly actually settles on right now.
+         *
+         * =========================================================================================
+         * IT TAKES `trickPending` BECAUSE THE FIRST VERSION DID NOT, AND WAS THEREFORE WRONG.
+         * =========================================================================================
+         *
+         * With a trick pending and no boost, `updateChildPosition` runs BOTH lerps (see its banner) and
+         * the child settles on the composite fixed point `[(1-k)*boost_pos.y + orig_pos.y] / (2-k)` —
+         * 0.845 at 60 Hz — not on `orig_pos.y`. The original signature omitted the flag and confidently
+         * answered 0.7 for a child sitting at 0.845.
+         *
+         * That is not a cosmetic slip. This method's own docblock invoked SPEC.md's convention that **an
+         * effect which reports itself running is not an effect that works**, and then broke it in the
+         * same breath: a readout that answers a different question from the code it reports on is
+         * exactly how the presentation layer's three invisible emitter bugs survived a green suite.
+         *
+         * `dt` only matters for that composite — the fixed point drifts 0.02 units between 30 and 60 Hz
+         * — so it defaults to a 60 Hz frame and is a parameter rather than a hidden assumption.
+         */
+        getChildTargetY(boosting: boolean, trickPending?: boolean, dt?: number, raceCompleted?: boolean): number;
+        /**
+         * Whether the camera is currently framing a leaning anti-gravity volume.
+         *
+         * **THE SINGLE DEFINITION OF THAT STATE.** `lateCameraState` and `getChildTargetY` both call
+         * this rather than re-deriving `antiGravity && camRotate` — an earlier T34 draft wrote the
+         * condition out three times, and a readout that can drift out of step with the code it reports
+         * on is exactly the failure shape SPEC.md records for the presentation layer's three invisible
+         * emitter bugs: the component said it was working and it was not.
+         */
+        isLeaning(): boolean;
+        /** Whether the rig is currently riding the kart's own up rather than the world's. */
+        isUsingLocalUp(): boolean;
+        /**
+         * The angle between the rig's up and the kart's up, degrees — **a diagnostic, not the lean**.
+         *
+         * Read the header before drawing a conclusion from this number. It is exactly zero on flat
+         * ground at any rate, and it grows with BOTH the surface bank and the camera's yaw lag —
+         * `cos(lean) = cos^2(bank) + sin^2(bank) * cos(dYaw)`. It is therefore a good single-number
+         * check that the rig is lagging the chassis the way it should, and a bad proxy for what the
+         * player sees: with the chassis roll frozen it still reproduces 95 percent of its own range,
+         * so it is measuring yaw lag on a tilted axis rather than any roll gap.
+         *
+         * For the tilt on screen, use `getHorizonTilt()`.
+         */
+        getLeanAngle(): number;
+        /**
+         * How far the horizon is rolled in frame, degrees — **the tilt a player actually sees**.
+         *
+         * The angle between the camera child's up and world up. On a banked corner this is
+         * essentially the bank angle: the rig adopts the chassis's roll, so the world tips instead of
+         * the kart, and the red box sits upright in frame while the horizon leans. Measured on the
+         * bench's 18-degree sweeper it reads about 17.5 degrees at every camera rate from 1/s upward
+         * — which is the honest answer to "does the acceptance's visible roll exist" (it does, and it
+         * is large) and to "is it the 7.5/3 rate gap that produces it" (it is not).
+         */
+        getHorizonTilt(): number;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * Unity's fixed timestep, seconds (`ProjectSettings/TimeManager.asset` → `Fixed Timestep: 0.02`).
+     *
+     * **This is a unit conversion constant and never the live physics step.** It appears wherever
+     * FINDING 1 applies — turning a Unity `AddForce(x * dt, Acceleration)` into a real acceleration
+     * of `x * UNITY_FIXED_STEP` u/s², and turning a dt-less `Lerp(a, b, k)` into a rate of
+     * `k / UNITY_FIXED_STEP` per second. Reading the live step here instead would make the port
+     * drift with frame rate in exactly the way FINDING 1 exists to prevent.
+     */
+    const UNITY_FIXED_STEP: number;
+    /**
+     * Unity's `Mathf.Lerp(current, target, k * Time.deltaTime)`, ported frame-rate independently.
+     *
+     * Unity's form is a first-order approach whose per-step fraction happens to be `k · dt`. Ported
+     * literally it is frame-rate dependent — at 144 Hz the kart accelerates measurably faster than at
+     * 50 Hz. The closed form `target + (current - target)·e^(-k·dt)` is the SAME CURVE at 50 Hz and
+     * the same curve everywhere else, which is what FINDING 1's "must be frame-rate independent"
+     * actually requires.
+     *
+     * Exported because it, and everything built on it, is the part of this component that can be
+     * tested without a scene.
+     */
+    function approachRate(current: number, target: number, ratePerSecond: number, dt: number): number;
+    /**
+     * Unity's dt-LESS `Mathf.Lerp(current, target, k)` — the second idiom in FINDING 1's table.
+     *
+     * A constant fraction per fixed step is a rate of `k / 0.02` per second, and 0.02 is Unity's
+     * timestep as a literal, never the live one.
+     */
+    function approachPerStep(current: number, target: number, fractionPerStep: number, dt: number): number;
+    /**
+     * Unity's per-fixed-step multiply `v *= f`, ported frame-rate independently.
+     *
+     * Applied once per step at 50 Hz, so at any other rate the exponent is `dt / 0.02`. Used by the
+     * `CancelDownForce` volume's 0.98 (`1273-1278`) and by the glider's vertical damping
+     * (`1349-1356`, 0.75 / 0.45) — **but by the glider only on the frames where the vertical
+     * PERSISTED**.
+     *
+     * THAT CAVEAT IS THE WHOLE SUBTLETY OF THIS FUNCTION. Raising a per-step multiplier to `dt/0.02`
+     * is correct for a value that compounds across steps and wrong for one that is REBUILT each step:
+     * as `dt` shrinks the exponent goes to zero, the multiplier goes to 1, and the damping vanishes
+     * entirely. A rebuilt quantity takes the FLAT factor instead — the same number Unity applies at
+     * its own 50 Hz. Both readings coincide at `dt = 0.02`, which is why the wrong one survived until
+     * the glider was driven at 144 Hz. See `move()`'s branch and `addLocalVerticalPush`'s note.
+     */
+    function dampPerStep(value: number, factorPerStep: number, dt: number): number;
+    /**
+     * The drift's outward slide, units/second (`Player.cs:1567`/`1584`).
+     *
+     * `AddForce(∓transform.right · 50000 · dt, Acceleration)` is 1000 u/s² through FINDING 1, and a
+     * horizontal force on an assigned velocity is a per-step velocity offset rather than an
+     * acceleration (see `addStepVelocity`) — so `50000 · 0.02 · 0.02` = **20 u/s**, which is the
+     * number FR-4's 14° of slip is `atan(20 / 80)` of.
+     *
+     * Exported because it is the one figure in the drift a reader will want to check by hand.
+     */
+    const DRIFT_LATERAL_SLIP: number;
+    /** `Player.cs:1441`. Rate `upForce` approaches `downForce` at during a jump-panel flight, per second. */
+    const JUMP_PANEL_DECAY_RATE: number;
+    /**
+     * `Player.cs:1444`. Forward thrust during a jump-panel flight, as a Unity force figure.
+     *
+     * `60000` here becomes **1200 u/s²** through FINDING 1 (`60000 × 0.02`), which is the same thing as
+     * Δv = 24 u/s per 50 Hz step. Analysis §E.3 records both readings and that they are one number; a
+     * port that "corrects" either has changed how far a panel throws the kart.
+     */
+    const JUMP_PANEL_THRUST: number;
+    /**
+     * How long a `RotatePlayerJumpPanel` volume keeps turning the kart, seconds.
+     *
+     * `RotatePlayerJumpPanel.cs` runs `for (i = 0; i < 60; i++) { ...; yield WaitForSeconds(0.01f); }`
+     * — sixty steps of a nominal 0.01 s, so 0.6 s is what the source literally writes.
+     *
+     * **Unity's REALISED duration is frame-rate dependent and this port does not reproduce that.**
+     * `WaitForSeconds(0.01f)` cannot resume sooner than the next frame, so the loop actually takes
+     * ~2.0 s at 30 fps, ~1.0 s at 60 and ~0.83 s at 144. Reproducing that would mean reproducing a
+     * frame-rate bug, which D-6 exists to say this port does not do: the nominal figure is taken and
+     * the approach below is made rate-independent.
+     */
+    const JUMP_PANEL_ROTATE_SECONDS: number;
+    /**
+     * Rate the kart is turned towards the volume's attitude, per second.
+     *
+     * `RotatePlayerJumpPanel.cs` — `Quaternion.Lerp(rotation, target, 1 * Time.deltaTime)`. A dt-scaled
+     * lerp is an exponential approach, so this is a rate and not a fraction, and it is deliberately
+     * slow: over the 0.6 s window it closes `1 - e^-0.6` = **45 %** of the way to the target. The
+     * volume nudges the kart's heading, it does not snap it.
+     */
+    const JUMP_PANEL_ROTATE_RATE: number;
+    /** `Player.cs:229`. Minimum `REALCURRENTSPEED` a trick needs — the ACTUAL nose-local speed. */
+    const TRICK_MIN_SPEED: number;
+    /** How long the trick's upward push lasts, seconds. */
+    const TRICK_SECONDS: number;
+    /** The push's Unity force figure at the start of the curve. */
+    const TRICK_FORCE_START: number;
+    /** How much the push drops every `TRICK_DECAY_STEP`. */
+    const TRICK_FORCE_DECAY: number;
+    /** The interval the decay is quoted over, seconds — Unity spends it as a coroutine wait. */
+    const TRICK_DECAY_STEP: number;
+    /**
+     * The floor the push decays to and then holds.
+     *
+     * Reached at `(6500 − 300) / 300 × 0.01` = 0.207 s, so the last third of the trick is a gentle
+     * sustain rather than the force running negative and hauling the kart back down.
+     */
+    const TRICK_FORCE_FLOOR: number;
+    /** `Player.cs:539-541`. Seconds of boost a landed trick FLOORS `Boost_time` at. Never assigns. */
+    const TRICK_LANDING_BOOST: number;
+    /** `Player.cs:1109-1214`. Above this `REALCURRENTSPEED` a glider deploy plays the trick variant. */
+    const GLIDER_TRICK_SPEED: number;
+    /** The trick variant's pause before the canopy opens, seconds. */
+    const GLIDER_TRICK_OPEN_DELAY: number;
+    /** The trick variant's pause after the canopy opens, before the payout. */
+    const GLIDER_TRICK_PAYOUT_DELAY: number;
+    /** `Player.cs:1178`. The trick variant's payout, seconds of boost. */
+    const GLIDER_TRICK_BOOST: number;
+    /**
+     * `Player.cs:2144`. `rotate_strength` while gliding — pinned at three fifths of the ground figure.
+     *
+     * Reached from INSIDE `Move()` (`1437`), which is why this port writes it in `move()` and not in
+     * `tickGlider()`; see the T48 note at that write for the whole argument. Unity's guard is a
+     * zero-length raycast that never hits, so the pin is unconditional while the canopy is open.
+     */
+    const GLIDER_ROTATE_STRENGTH: number;
+    /**
+     * Rate the drift model settles back to square while coasting, per second (`Player.cs:1399`).
+     *
+     * Unity writes `Quaternion.Lerp(current, Euler(0,0,0), 0.4f)` once per frame, which is a flat
+     * per-FRAME factor and therefore frame-rate dependent — D-6's rule. **30.6495 is not a chosen
+     * figure**: it is the `r` for which `1 - exp(-r/60) = 0.4`, so the settle reproduces Unity's own
+     * 60 Hz curve exactly and stays identical at 30 and 144 where Unity's would not.
+     */
+    const COAST_MODEL_SETTLE_RATE: number;
+    /** `Player.cs:1374` — the source's accelerate rate, per second. Also its rate while boosting. */
+    const UNITY_ACCEL_RATE: number;
+    /**
+     * Rate `currentspeed` approaches the cap **while a boost is running**, per second.
+     *
+     * **THE DIVERGENCE.** Unity uses `UNITY_ACCEL_RATE` here as everywhere else; 1.5 is a threefold
+     * increase and it is what turns the payout into a shove. It applies ONLY while `Boost` is true,
+     * so the kart's ordinary acceleration — the number the whole feel of the vehicle rests on — is
+     * untouched and the divergence cannot leak anywhere else.
+     *
+     * **1.5 AND NOT 3.0, AND THE REASON IS THE WHOLE POINT OF THE MECHANIC.** 3.0 was tried first
+     * and measured, and it is too much: every tier saturates the 120 cap inside its own window, so
+     * the three payouts peak at 115.9, 119.6 and 120.0 and a seven-second drift buys nothing a
+     * one-second drift did not. That deletes the thing a mini-turbo IS — hold it longer, get more.
+     *
+     * At 1.5 the tiers separate cleanly, because each one's window covers a different fraction of
+     * the gap — `1 - exp(-1.5 t)` for t = 0.75, 1.5, 2.5 is 68 %, 89 % and 98 %:
+     *
+     *     tier 1   0.75 s   ~107 peak   (+28 over the release speed)
+     *     tier 2   1.50 s   ~116 peak   (+37)
+     *     tier 3   2.50 s   ~119 peak   (+40)
+     *
+     * All three are far past the 90 cruise cap, so all three are unmistakable, and each is visibly
+     * bigger than the last. Set `boostAccelRate = UNITY_ACCEL_RATE` to restore the source exactly.
+     */
+    const KART_BOOST_ACCEL_RATE: number;
+    /** `Player.cs:1732`/`1755`/`1776` — the source's charge boundaries, seconds. */
+    const KART_DRIFT_TIERS_UNITY: number[];
+    /**
+     * Charge boundaries for the three payout tiers, seconds — the RECOMMENDED tuning.
+     *
+     * **THE SECOND DIVERGENCE**, and the one that decides whether a player ever SEES tier 2 or 3.
+     * Unity's 4 and 7 second thresholds cannot be met in a corner; 1.8 and 3.0 can. Tier 1 drops to
+     * 0.8 s so a short flick still pays something, which is much closer to how the mechanic reads in
+     * the game this is modelled on.
+     *
+     * **EVERY TIER CUE READS THESE, NOT ITS OWN COPY.** The spark colour change and the charge
+     * tone's retrigger are the player's only warning that a tier armed, and they live in two other
+     * components that each carried their own 1.5/4/7. Changing the payout alone would have desynced
+     * them — sparks saying "tier 1" while the release paid tier 2 — so both now read this array off
+     * the kart through their duck-typed interfaces and fall back to `KART_DRIFT_TIERS_UNITY` only
+     * when the target cannot report it.
+     */
+    const KART_DRIFT_TIERS_TUNED: number[];
+    /** Pitch target magnitude either side of the volume's trim, degrees (`1157-1176`). */
+    const GLIDER_PITCH_RANGE: number;
+    /** How far nose-up the ATTITUDE may actually get, degrees. Tighter than the target on purpose. */
+    const GLIDER_PITCH_CLAMP: number;
+    /** Rate the glider's pitch approaches its target, per second. */
+    const GLIDER_PITCH_RATE: number;
+    /** Extra downforce while diving, u/s². */
+    const GLIDER_DIVE_FORCE: number;
+    /** Lift while climbing, u/s² — and only for the first `GLIDER_LIFT_SECONDS`. */
+    const GLIDER_LIFT_FORCE: number;
+    /** How long the climb's lift lasts after the canopy opens, seconds. */
+    const GLIDER_LIFT_SECONDS: number;
+    /** Roll magnitude at full stick, degrees, added to the volume's `glideAngle` (`1180-1190`). */
+    const GLIDER_ROLL_RANGE: number;
+    /** Rate the glider's roll approaches its target, per second. */
+    const GLIDER_ROLL_RATE: number;
+    /** Rate the steer input is smoothed at before it becomes a roll target, per second. */
+    const GLIDER_ROLL_SMOOTH_RATE: number;
+    /**
+     * `Player.cs:550-574`. Minimum seconds the glider must be open before contact can close it.
+     *
+     * A launch clears the lip with the kart still within a unit or two of the boards, so without this
+     * the first graze folds the canopy before the player has left the ramp.
+     */
+    const GLIDER_CLOSE_CONFIRM: number;
+    /** `Player.cs:569-574`. How long the probe stays at 6 after a glider landing before dropping to 1. */
+    const GLIDER_LANDING_SECONDS: number;
+    /** `Player.cs:1077`. Seconds of boost for leaving a `GliderPanel`. */
+    const GLIDER_PANEL_BOOST: number;
+    /** `Player.cs:1095-1104`. How long the `GliderPanel` exit impulse decays over, seconds. */
+    const GLIDER_IMPULSE_SECONDS: number;
+    /** The exit impulse's Unity force at the start of the ramp. With mass 50 this is Δv = 8 u/s a step. */
+    const GLIDER_IMPULSE_START: number;
+    /** The exit impulse's force at the end of the ramp. Δv = 0.8 u/s a step. */
+    const GLIDER_IMPULSE_END: number;
+    /**
+     * ARCADE. The shallowest descent angle a glide may be flown at, degrees, before the pitch tilts it.
+     *
+     * A FLOOR ON THE VOLUME'S `glideAngleX`, not a replacement for it: a volume that asks for a steeper
+     * slope gets what it asked for, and one that asks for level flight — or says nothing, which is the
+     * same thing and is the case the hover came from — gets this instead. 4 degrees because that is
+     * what both shipped glider volumes already author, so the default arcade glide IS the slope those
+     * tracks were tuned around.
+     */
+    const GLIDER_ARCADE_SLOPE_MIN: number;
+    /**
+     * ARCADE. The hard floor on the descent angle, degrees. **THE INVARIANT, NOT A TUNING VALUE.**
+     *
+     * The glide slope is the kart's own ATTITUDE, and a nose-up attitude is 20 degrees the wrong side
+     * of level — so this floor is what the climb control actually delivers, and it is the single line
+     * that makes "a glider always comes down" true. 2 degrees is half the 4 the shipped volumes
+     * author, so holding the nose up halves the descent rather than stopping it, which is the trade
+     * Mario Kart offers.
+     *
+     * Separate from `GLIDER_ARCADE_SLOPE_MIN` because they answer different questions: the MIN is the
+     * slope a shallow VOLUME is promoted to, this is the slope a nose-up PLAYER cannot get past.
+     */
+    const GLIDER_ARCADE_SLOPE_FLOOR: number;
+    /**
+     * ARCADE. Fraction of `sin(angle) · speed` the glide actually descends at.
+     *
+     * **NOT A FUDGE — IT IS THE SOURCE'S OWN NUMBER.** `move()`'s glider damp holds a nose-down
+     * vertical at `× 0.75` of the value the attitude rebuilds each step, so three quarters of
+     * `sin(angle) · speed` is precisely what the Unity model settles at on a trimmed volume. Carrying
+     * it here is what makes the arcade model's neutral descent equal to the source's rather than 1.33
+     * times it, and a track authored against one fly the same under the other.
+     */
+    const GLIDER_ARCADE_SLOPE_SCALE: number;
+    /**
+     * ARCADE. Rate the vertical approaches its slope's descent, per second.
+     *
+     * **THIS IS THE SOURCE'S OWN DAMP, CONVERTED — NOT A NUMBER CHOSEN TO MAKE A TRACK WORK.**
+     * `move()`'s glider damp multiplies the vertical by 0.75 every 0.02 s, which by D-6 is a decay
+     * rate of `-ln(0.75) / 0.02` = 14.384/s, and that is how fast the Unity canopy arrests a fall:
+     * measured, 52.67 u/s down to 6.23 in 0.15 s. Using the same figure here means the two models
+     * ARREST identically and differ only in what they arrest TO — the source to whatever its nose
+     * happens to be pointing at, this to a floored glide slope.
+     *
+     * IT WAS A FITTED NUMBER FIRST, AND THE FITTING IS WHAT FOUND THE DERIVATION. 3/s was picked to
+     * "preserve the launch arc" and dropped the race kart 30 units into its own gap; 12/s was then
+     * picked by eye to match the measured arrest and still missed the apron. Asking WHY the source
+     * arrests as fast as it does — rather than what number happens to match it — gave 14.384, which
+     * lands the kart on the deck and is the only one of the three with a reason behind it.
+     *
+     * It also sets how much of the scene's -2 gravity leaks past the approach, which is `g / rate` =
+     * 0.139 u/s on top of every target, and how much authority an updraught has over the slope. Both
+     * are measured in `tests/KartGliderArcade.test.ts`.
+     */
+    const GLIDER_ARCADE_SINK_RATE: number;
+    /** `Player.cs:1932-1971`. Front wheel and steering-wheel swing at full lock, degrees. */
+    const WHEEL_STEER_ANGLE: number;
+    /** Rate the steer visual approaches its target, per second. */
+    const WHEEL_STEER_RATE: number;
+    /**
+     * Seconds anti-gravity is held after the last contact with an `AntiGravity`-tagged surface.
+     *
+     * THE PORT'S OWN NUMBER — Unity has no equivalent, because Unity's flag is latched by triggers and
+     * never needs to survive a gap. Surface-driven anti-gravity does: a kart crossing a seam, cresting
+     * a rib or taking one frame of air inside a tube would otherwise drop the mode and fall off a wall
+     * it is still touching.
+     *
+     * Sized against the bench's measured worst case rather than guessed. The ground probe's longest
+     * continuous miss while on the barrel wall is **0.567 s** under full lock — the harshest input
+     * available — so a tail shorter than that would drop a kart that is legitimately mid-traverse.
+     * 0.75 clears it with room and is still short enough that driving off the end of an anti-gravity
+     * surface reads as immediate.
+     */
+    const ANTIGRAVITY_SURFACE_TAIL: number;
+    /** Rate it is centred and held at under anti-gravity, per second (`1965`). */
+    const WHEEL_STEER_FREEZE_RATE: number;
+    /**
+     * `Player.cs:1986-1993`. Speed below which the wheel spin follows `REALCURRENTSPEED`.
+     *
+     * Above it the spin follows `currentspeed / 4` instead. The switch is what stops a kart that has
+     * been shunted sideways from spinning its wheels as though it were driving.
+     */
+    const WHEEL_SPIN_SPEED_SWITCH: number;
+    /** `Player.cs:2659-2665`. Rate the anti-gravity wheel pose is approached at, per second. */
+    const WHEEL_ANTIGRAVITY_RATE: number;
+    /** How far the wheels swing about `z` under anti-gravity, degrees. */
+    const WHEEL_ANTIGRAVITY_ANGLE: number;
+    /** How far out the wheels translate under anti-gravity, as a multiple of their rest offset. */
+    const WHEEL_ANTIGRAVITY_SPREAD: number;
+    /**
+     * Which way each wheel swings under anti-gravity, front-left, front-right, rear-left, rear-right.
+     *
+     * `Player.cs:2659-2665` targets `(0,0,90)`, `(0,180,-90)`, `(0,0,-90)`, `(0,180,90)`. Reduced to
+     * each wheel's own rest frame — which cancels the right-hand pair's 180 exactly — that is
+     * **+90, -90, -90, +90**: the swing alternates by DIAGONAL, not by side.
+     */
+    const WHEEL_POSE_SIGN: number[];
+    /** The axle a wheel rolls about, in its own frame. */
+    const WHEEL_SPIN_AXIS: BABYLON.Vector3;
+    /** The axis a front wheel steers about. */
+    const WHEEL_STEER_AXIS: BABYLON.Vector3;
+    /** The axis the anti-gravity pose swings about. */
+    const WHEEL_POSE_AXIS: BABYLON.Vector3;
+    /**
+     * `Player.cs:2659`. What the driver's arms scale to under anti-gravity, in node order.
+     *
+     * Two numbers for two arms, applied in the order a rig supplies its arm nodes. A rig with no
+     * driver — the bench's red box — supplies none and nothing here runs.
+     */
+    const ARM_ANTIGRAVITY_SCALE: number[];
+    /**
+     * The animator trigger a rigged kart declares to take the wheels over from the procedural channel.
+     *
+     * **PORT-INTRODUCED.** Unity has no wheel trigger: there, the wheels are moved by
+     * `movingCarParts()` in code and never by a clip, so there was no name to copy. It is deliberately
+     * NOT `AntiGravity` — that string is already the chassis-lift trigger (T14) and reusing it made an
+     * animator that lifted the body silently stop the wheels.
+     */
+    const WHEEL_ANIMATOR_TRIGGER: string;
+    /** Radians per degree. Every ported Unity angle is authored in degrees; the maths runs in radians. */
+    const DEG_TO_RAD: number;
+    /**
+     * How close an axis must get before an `AntiGravityExitRotate` payload retires, radians.
+     *
+     * A tenth of a degree. The approach is exponential and therefore never actually arrives, so
+     * something has to call it done — and if nothing does, the payload keeps writing the kart's
+     * orientation for the rest of the session and silently fights every later alignment.
+     */
+    const EXIT_ROTATE_EPSILON: number;
+    /**
+     * Wraps a radian angle into (-pi, pi].
+     *
+     * THE POINT IS THE SHORT WAY ROUND. A kart at 179 degrees approaching -179 must turn two degrees,
+     * not 358. Interpolating raw angle differences is the single most common way an otherwise correct
+     * rotation port produces a kart that spins the wrong way once per lap, and it is the same trap
+     * `StandardKartCamera`'s header records for `Utilities.SmoothDampAngle`.
+     */
+    function wrapAngle(radians: number): number;
+    /** One first-order step of an ANGLE toward a target, the short way round. `fraction` is 0-1. */
+    function approachAngle(current: number, target: number, fraction: number): number;
+    /** One key of a parsed Unity animation curve: a time, in seconds, and the value at it. */
+    interface IKartKeyframe {
+        /** Seconds from the start of the clip. */
+        time: number;
+        /** The value at that time. */
+        value: number;
+    }
+    /**
+     * Samples a keyframe track, linearly, clamped at both ends.
+     *
+     * Unity's curves are Hermite with per-key tangents and this is straight-line interpolation. That
+     * is a deliberate simplification and the reason it is acceptable is the scale: the largest of
+     * these curves is a **0.62-unit** hop on a kart that is 3.2 units long and travelling at 90, and
+     * the difference between a Hermite and a linear reading of five keys over a third of a second is
+     * a few millimetres for a few frames. What matters — the peak VALUE and the TIME it lands, which
+     * are what FR-11's acceptance names — is a keyframe in both readings and therefore exact in both.
+     *
+     * Exported because the tracks are the whole of FR-11 and a test should read them the same way the
+     * component does.
+     */
+    function sampleTrack(track: IKartKeyframe[], time: number): number;
+    /**
+     * `KartDriftHop.anim` — the drift hop, on the model child's local `y`.
+     *
+     * **NOT A JUMP.** The chassis does not leave the ground and no impulse is applied anywhere
+     * (FINDING 0, and the drift machine's own header). This curve is the entire hop: the kart's body
+     * lifts 0.62 units off its own suspension, lands at 0.217 s, squashes 0.06 below rest at 0.300 s
+     * and settles at 0.333 s. Played only when `hopEnabled` — which is the ONLY thing that switch
+     * touches (FR-5).
+     */
+    const KART_HOP_TRACK: IKartKeyframe[];
+    /**
+     * `KartBodyShake.anim` — the settle after the hop lands, on the model child's local `y`.
+     *
+     * The six measured values run from 0.217 s (the hop's touchdown, so the shake starts exactly as
+     * the body arrives) to 0.55 s, evenly spaced.
+     *
+     * **ONE KEY IS ADDED AND IT IS NOT IN THE CLIP**: the final `0 @ 0.6 s`. The measured clip ends at
+     * -0.02, because in Unity it is blended out by the animator rather than run to rest. A procedural
+     * one-shot has no animator to blend it, so ending at -0.02 would leave the body permanently two
+     * centimetres low. The settle is added, and is called out here rather than hidden, because it is
+     * the one value in this file that was not measured.
+     */
+    const KART_SHAKE_TRACK: IKartKeyframe[];
+    /** `EnterAntiGravity.anim` — the body rising as the wheels turn out, on the model child's local `y`. */
+    const KART_ANTIGRAVITY_TRACK: IKartKeyframe[];
+    /** `ChassisIdle.anim` — the body settling onto its springs when the kart comes to rest. */
+    const KART_IDLE_TRACK: IKartKeyframe[];
+    /**
+     * `UnderwaterDriftLeft/Right.anim` (`Player.cs:1569`/`1586`) — the exaggerated underwater drift.
+     *
+     * Unlike every other clip here this one is HELD rather than played out: it reaches its pose over
+     * 0.5 s and stays there for as long as the kart is drifting underwater, and unwinds when either
+     * condition drops. Roll, outward offset and lift, in that order.
+     *
+     * **A LIMIT OF THE PORT AS IT STANDS, and it is the flag's fault rather than this pose's.**
+     * "Submerged" is read off `FellInWater`, which `OutOfBounds.cs` sets on entering a `Water` volume
+     * and clears on the NEXT `Ground`/`Dirt` contact — so today it is really "falling into water and
+     * about to be respawned", not "driving through the shallows". A kart drifting on a submerged
+     * surface therefore clears the flag every step it touches the ground and never reaches the 0.5 s
+     * blend. Nothing here is wrong; the underwater section of a track that would exercise it does not
+     * exist on the bench, and when one lands (T19's volume set) the gate wants its own `submerged`
+     * flag rather than the recovery one.
+     */
+    const KART_UNDERWATER_ROLL_DEGREES: number;
+    /** The underwater drift's outward body offset, units. Outward is the same direction the drift slides. */
+    const KART_UNDERWATER_OFFSET: number;
+    /** The underwater drift's body lift, units. */
+    const KART_UNDERWATER_LIFT: number;
+    /** Seconds the underwater drift pose takes to reach, and to unwind. */
+    const KART_UNDERWATER_BLEND: number;
+    /**
+     * Every animator trigger Unity's kart declares, verbatim.
+     *
+     * Carried as names rather than as an enum so a kart rigged in Unity needs no mapping table: the
+     * exported `TOOLKIT.AnimationState` sees the same strings its Mecanim controller was authored
+     * with. Four of them have events in the port today — `Drift` and `Shake` on drift entry,
+     * `AntiGravity` on the edge into a barrel, `StartBoostTilt` when a boost is granted. The other
+     * six belong to systems that land later (`Glide1`/`Glide2` with the glider, the four hit triggers
+     * with the item system, which is out of scope for this port) and are declared here so the
+     * contract is complete and a rigged kart's controller can be wired against it now.
+     */
+    const KART_ANIMATOR_TRIGGERS: string[];
+    /** Everything `selectMaxSpeed` needs, and nothing else — so it can be tested as a table. */
+    interface IKartSpeedCapState {
+        /** `Player.cs:28`. The sticky collision flag. */
+        grounded: boolean;
+        /** A boost of any kind is running. */
+        boost: boolean;
+        /** Star power-up. */
+        star: boolean;
+        /** Top speed on the ground. */
+        desiredMaxSpeed: number;
+        /** Top speed while boosting. */
+        boostSpeed: number;
+    }
+    /**
+     * The speed cap for a state (`Player.cs:1403-1432`).
+     *
+     * Unity writes five SEQUENTIAL `if`s, not an if/else chain, so the last one that matches wins and
+     * the star case — written last — beats everything. Ported as the same precedence rather than as
+     * the same five statements, because a reader can check a precedence order and cannot check five
+     * statements whose meaning is their order.
+     *
+     * The drift cap (`desiredMaxSpeed - 10`, `1562`/`1580`) and the `Dirt` cap (30, `502`) are NOT
+     * here: Unity applies them later in the step, from `Steer()` and from the collision handler, and
+     * folding them in would change which one wins.
+     */
+    function selectMaxSpeed(state: IKartSpeedCapState): number;
+    /**
+     * The vertical clamp on the assigned velocity (`Player.cs:1332-1339`).
+     *
+     * `velocity = forward · currentspeed`, and **if the nose's `y` is HIGHER than the body's, the
+     * body's is kept**. That one asymmetric line is what stops a kart pointing up a ramp from
+     * levitating: the heading may take speed away from the vertical but it may never add any. Under
+     * anti-gravity the test is skipped entirely and the nose value is taken whole, which is the third
+     * of FR-7's three conditionals.
+     *
+     * A **jump-panel flight** skips it for the same reason and by a separate flag (`1439-1448`). The
+     * panel's whole mechanism is a heading that points up and a force that pushes along it, and a
+     * clamp that refuses to let the heading add vertical speed would delete the first half. Two flags
+     * rather than one "skip" argument, because they are separate mechanics that happen to need the
+     * same line switched off — and a track may legitimately put a jump panel inside a barrel.
+     *
+     * @param noseY   `y` of `forward · currentspeed`.
+     * @param bodyY   `y` of the body's current velocity.
+     */
+    function clampAssignedVerticalVelocity(noseY: number, bodyY: number, antiGravity: boolean, jumpPanel?: boolean): number;
+    /** Everything `selectSpeedRotateRate` needs. Kept flat so the table can be tested as a table. */
+    interface IKartSteerState {
+        /** `Player.cs:18`. Nose-local `z` of the ACTUAL velocity — the band table reads THIS. */
+        realCurrentSpeed: number;
+        /** In a drift (either hand). */
+        drifting: boolean;
+        /** Throttle held. Only the reverse band cares. */
+        throttleHeld: boolean;
+    }
+    /**
+     * `speed_rotate_rate` — Unity's steering band table (`Player.cs:1596-1613`).
+     *
+     * **It is a LOCAL, re-initialised to 0 on every call** (`1596`: `float speed_rotate_rate = 0;`).
+     * That was worth checking, because if it were a persistent field it would retain the previous
+     * band's value while decelerating through the dead band and the dead band would not be a dead
+     * band at all. It is local, so `0 ≤ v ≤ 3` genuinely produces no turn whatsoever — a kart at
+     * walking pace cannot be steered, and that is deliberate.
+     *
+     * Written as sequential `if`s in Unity, so later matches win; the order below preserves that.
+     */
+    function selectSpeedRotateRate(state: IKartSteerState): number;
+    /**
+     * Yaw applied per SECOND, degrees (`Player.cs:1620`).
+     *
+     * Unity writes `transform.Rotate(0, rotate_strength · direction · speed_rotate_rate · 0.025, 0)`
+     * once per fixed step, and 0.025 degrees per 0.02 s step is **1.25 degrees per second per unit**.
+     * Expressed as a rate here so it can be integrated at any frame rate.
+     *
+     * With `rotate_strength = 25` this reproduces the spec's measured table exactly:
+     * 54.7 grip ≥40 · 40.6 grip 10-40 · 15.6 grip 3-10 · 78.8 drift-into · 18.8 drift-against,
+     * plus 75.0 in reverse (`rotate_strength = 120`) and 32.8 gliding (`rotate_strength = 15`).
+     */
+    function computeYawRate(rotateStrength: number, direction: number, speedRotateRate: number): number;
+    /**
+     * The drift state machine's four states (`Player.cs:1639-1890`).
+     *
+     * `Hop` is PURELY VISUAL — the kart does not leave the ground and no impulse is applied — so the
+     * machine may pass straight through it into `Drift` on the very next frame the hold condition
+     * holds. It exists as a state only so the hop animation has something to key off.
+     */
+    /**
+     * Which of Unity's seven boost sources last wrote `Boost_time`.
+     *
+     * WHY THE SOURCE IS RECORDED AT ALL, since the simulation does not care: **the presentation layer
+     * cannot infer it, and it needs it.** Every source funnels through `grantBoost`/`floorBoost` and
+     * writes one number, so from outside they are indistinguishable — but Unity fires a DIFFERENT
+     * subset of effects at each one, and the subsets do not line up:
+     *
+     *   source          Boost_time           BoostBurstPS      Mario_Boost_Sounds
+     *   rocket start    `274`  = 1           `281`  yes        `278`  yes (a fixed index, not the rota)
+     *   boost pad       `507`  = 2           --     NO         `514`  yes
+     *   trick landing   `541`  floor 0.9     --     NO         --     NO  (`544` groundLandParticles)
+     *   jump panel      `960`  = 2           `967`  yes        `974`  yes
+     *   glider exit     `1077` = 2           `1084` yes        `1091` yes
+     *   glider trick    `1178` = 0.5         `1188` yes        --     NO  (`1184` trickParticles)
+     *   drift payout    `1827`/`1842`/`1856` `1835`/`1850`/`1864` yes   `1830`/`1845`/`1859` yes
+     *
+     * The port's first attempt inferred a grant from `Boost_time` RISING, which is wrong in both
+     * directions: it burst on the boost pad, where Unity does not, and it MISSED a grant whenever a
+     * shorter one replaced a longer one — a 0.75 s tier-1 payout landing on a running 2 s panel boost
+     * is a FALL, not a rise, and `grantBoost` is an assignment precisely because Unity's is.
+     *
+     * So the kart says what happened instead of the effects guessing. This enum plus
+     * `getBoostGrantCount()` is the whole signal; the POLICY — which sources burst, which speak —
+     * stays in the presentation components, where the table above belongs.
+     */
+    enum EKartBoostSource {
+        /** No boost has been granted yet. */
+        None = 0,
+        /** `Player.cs:274`. The 1-2 s pre-race throttle hold. */
+        RocketStart = 1,
+        /** `Player.cs:507`. A `Boost` pad on the track. Grants, but does NOT burst. */
+        BoostPad = 2,
+        /** `Player.cs:541`. The trick landing, and the only FLOOR. Neither bursts nor speaks. */
+        TrickLanding = 3,
+        /** `Player.cs:960`. */
+        JumpPanel = 4,
+        /** `Player.cs:1077`. Leaving a `GliderPanel`. */
+        GliderExit = 5,
+        /** `Player.cs:1178`. The mid-glide trick. Bursts, but is silent. */
+        GliderTrick = 6,
+        /** `Player.cs:1827`/`1842`/`1856`. The drift payout, by tier. */
+        DriftPayout = 7
+    }
+    enum EKartDriftState {
+        /** Not drifting. */
+        None = 0,
+        /** Drift entered this frame; the visual hop is playing. */
+        Hop = 1,
+        /** Drifting and charging `Drift_time`. */
+        Drift = 2,
+        /** Released; the tier payout is running as a boost. */
+        Boost = 3
+    }
+    /**
+     * The five FR-5 vehicle profile switches, as a property set.
+     *
+     * The complete list of what a profile is allowed to change. Anything else about how the kart
+     * drives — the pace table, the yaw table, the drift machine, the tier boundaries, the boost
+     * economy, the lean — is identical in every profile, which is what makes a profile a *capability*
+     * set rather than a handling tune.
+     */
+    interface IKartVehicleProfile {
+        /** Play the `KartDriftHop` lift on drift entry. `false` makes the drift a handbrake turn. */
+        hopEnabled: boolean;
+        /** React to glider volumes. `false` ignores them and the kart flies gaps ballistically. */
+        gliderEnabled: boolean;
+        /** React to anti-gravity volumes. */
+        antiGravityEnabled: boolean;
+        /** Allow the air trick and its landing boost. */
+        tricksEnabled: boolean;
+        /** React to jump-panel volumes. */
+        jumpPanelsEnabled: boolean;
+    }
+    /** The named presets `StandardKartController.VEHICLE_PROFILES` can be selected by. */
+    type KartVehicleProfileName = "kart" | "arcadeCar";
+    /**
+     * Babylon standard kart controller — Mario Kart style karting on a sphere.
+     * @class StandardKartController
+     *
+     * A direct port of `3DMarioKart/Assets/Scripts/Player.cs` (2764 lines). Every constant below
+     * cites the line it came from and the value measured there; a constant without a citation is a
+     * constant nobody can check, and this component is nothing but constants.
+     *
+     * WHAT IT OWNS: the kart's speed scalar, its heading, its orientation on the ground normal, the
+     * drift state machine, the boost economy, and the procedural motion of ONE model child.
+     *
+     * WHAT IT DELEGATES: the physics body and the raycasts to `TOOLKIT.RigidbodyPhysics`; the camera
+     * to `PROJECT.StandardKartCamera`; the track's behaviour to the `PROJECT.Kart*` volume
+     * components; real animation, where a rigged kart ships clips, to `TOOLKIT.AnimationState`.
+     */
+    class StandardKartController extends TOOLKIT.ScriptComponent {
+        /**
+         * Havok collision-filter membership bit given to the chassis sphere: **bit 2**.
+         *
+         * Havok has no layer names, so Unity's layer indices are ported as raw bits — and bit 2 is
+         * Unity's `Ignore Raycast` layer, which is precisely the bit that `mask: 298803` leaves
+         * clear. Putting the chassis there means the ground probe excludes the kart for exactly the
+         * reason Unity's does: the mask says so. No special case, no `ignoreBody` argument.
+         *
+         * Measured on the bench, Havok already declines to report a hit for a ray whose origin lies
+         * inside a convex shape — `raycastPos` sits at local y = -0.38, well inside the 1.64-unit
+         * sphere, and an unfiltered probe from there returns the pad, not the kart. So the mask is a
+         * GUARD rather than the thing that makes the probe work today; it starts mattering the
+         * moment a second kart is in the scene.
+         */
+        static readonly CHASSIS_MEMBERSHIP_MASK: number;
+        /**
+         * The ground probe's `collideWith` mask — Unity's `mask: 298803`, bit for bit.
+         *
+         * Derived from `rayIncludeLayers` in `awakeKartState` rather than written as the literal, so
+         * that changing the readable list changes the mask and the two can never disagree.
+         */
+        protected rayCollideMask: number;
+        /**
+         * Top speed on the ground, units/second (`Player.cs:13`, serialized per track).
+         *
+         * Unity ships 75 as the class default and overrides it per track — 85 on Toad Harbor. This
+         * port declares 90, the figure the spec's derived tables and the bench rings are built
+         * around. Per-track handling is a PROPERTY, never a literal (D-3, Analysis §E.8).
+         */
+        desiredMaxSpeed: number;
+        /**
+         * Top speed while any boost is running, units/second (`Player.cs:11`, serialized per track).
+         *
+         * Unity ships 90 as the class default; the tracks override it to 110 (MooMoo Meadows) and
+         * 115 (Toad Harbor). 120 here, again as a property (D-3).
+         */
+        boost_speed: number;
+        /**
+         * Rate `currentspeed` approaches the cap while a boost runs, per second.
+         *
+         * **DEFAULTS TO THE SOURCE.** Assign `KART_BOOST_ACCEL_RATE` for the recommended feel —
+         * `MarioKartRaceMode` does exactly that. See that constant for the measurements.
+         */
+        boostAccelRate: number;
+        /**
+         * Charge boundaries for the three payout tiers, seconds — ascending.
+         *
+         * **DEFAULTS TO THE SOURCE.** Assign `KART_DRIFT_TIERS_TUNED` for the recommended feel. The
+         * array is COPIED on assignment from the property bag so two karts cannot share one.
+         */
+        driftTierTimes: number[];
+        /**
+         * The steering authority a settled drift ramps up to (`Player.cs:22`, serialized).
+         *
+         * **A SERIALIZED FIELD, never a literal** (Analysis §E.8). `Player.cs:22` declares it with no
+         * initializer, so its value comes entirely from the Inspector — and it is 25 on all five
+         * shipped tracks, which is why hardcoding 25 looks correct and is not. The drift ramp at
+         * `1674` (`Lerp(rotate_strength, desired_rotate_strength, 3·dt)`) and the accel reset at
+         * `1376` both read the field. The one genuine literal `rotate_strength = 25` lives at `2154`
+         * and belongs to a different branch entirely — and T48 established that it is also **dead
+         * code**: it is the `else` of a `Physics.Raycast(..., 0, mask)` at `2142` whose max distance
+         * is zero and which therefore never hits, so the glider's `2144` pin always wins.
+         *
+         * Yaw per second is `rotate_strength · direction · speed_rotate_rate · 1.25` degrees, so this
+         * number scales the whole steering model.
+         */
+        desired_rotate_strength: number;
+        /** Sphere collider radius, units. Read off the `Player` GameObject: `m_Radius: 1.6427898`. */
+        sphereRadius: number;
+        /** Sphere collider centre in the chassis's local frame: `m_Center: {0, 0.40988, -0.39423}`. */
+        sphereCenter: BABYLON.Vector3;
+        /** Rigidbody mass, kilograms. `m_Mass: 50`, with `m_Drag: 0` and `m_AngularDrag: 2000`. */
+        chassisMass: number;
+        /**
+         * Contact friction on the chassis sphere. **Ships at 0, which is a deliberate divergence.**
+         *
+         * Unity's sphere carries `m_Material: {fileID: 0}` — no physic material — and
+         * `DynamicsManager.asset` sets `m_DefaultMaterial: {fileID: 0}` too, so PhysX falls back to
+         * its BUILT-IN default of 0.6 dynamic / 0.6 static friction and 0 bounciness. It is
+         * therefore not literally true that the Unity kart slides on a frictionless ball, and this
+         * port does not pretend otherwise.
+         *
+         * It ships at 0 anyway, for two reasons. First, every gameplay figure the spec derives — the
+         * pace curve, the yaw table, the drift radii — comes from the assigned-velocity model
+         * (FINDING 0), in which friction can only ever subtract from what was decreed, between the
+         * assignment and the read-back. Second, Havok's friction solver and PhysX's are not
+         * interchangeable, so transcribing "0.6" would import a number whose meaning does not carry.
+         *
+         * Set it to 0.6 to run the Unity contact model and compare; it is a property precisely so
+         * that comparison stays one line away.
+         */
+        chassisFriction: number;
+        /**
+         * Name of the ONE model child every FR-11 motion channel writes.
+         *
+         * A property rather than a literal because it is the seam T26 swaps: the bench rig builds a
+         * node called `KartModel` by hand, and a Unity-exported kart arrives with whatever its
+         * artist named the chassis mesh. Nothing else about the component changes between the two.
+         */
+        modelNodeName: string;
+        /**
+         * Scene-graph names of the wheel nodes, front-left, front-right, rear-left, rear-right (T26).
+         *
+         * **THE AUTHORING CONTRACT FOR WHEELS.** `setWheelNodes` is a code path and a Unity-exported
+         * kart has no code — its property bag is all it can say. Without these names a loaded kart's
+         * wheels were resolved by nothing at all and simply never moved, which is the sort of gap that
+         * reads as "the wheels are broken" rather than as "the contract has a hole in it".
+         *
+         * Resolved under the kart's OWN root, not globally: a scene with a track, an opponent and a
+         * red-box fallback all present has more than one node called `WheelFL`.
+         */
+        wheelNodeNames: string[];
+        /** Scene-graph name of the steering wheel, or empty for none. */
+        steeringWheelNodeName: string;
+        /** Scene-graph names of the driver's arm nodes, in the order `ARM_ANTIGRAVITY_SCALE` applies. */
+        armNodeNames: string[];
+        /**
+         * Local offset of the ground probe origin (`Player.cs:25`, the `raycastPos` child).
+         *
+         * Measured on the prefab at `(-0.01, -0.38, +0.27)` — just below and slightly ahead of the
+         * chassis origin, so the ray leaves from under the nose rather than from the sphere centre.
+         */
+        raycastOffset: BABYLON.Vector3;
+        /**
+         * Length of the ground probe, units (`Player.cs:168`, set per state at 247-259 and 569-574).
+         *
+         * State-dependent at runtime and only ever three cases: **3** while gliding, **2**
+         * otherwise, and **6 for 0.6 s then 1** after a glider landing. The 247-259 branch reads as
+         * a state table but both of its arms assign 2, so it is a no-op (Analysis §E.6). This field
+         * is the "otherwise" value and the runtime writes over it.
+         */
+        groundRayDist: number;
+        /**
+         * Rate at which the chassis slerps its orientation onto the ground normal, per second
+         * (`Player.cs:2037`).
+         *
+         * **7.5 is a requirement, not a tuning value**, together with the camera's 3/s and the model
+         * child's 8/s. What the three of them set is how far the VIEW LAGS the heading through a
+         * corner, not the roll — the visible roll is the camera adopting the track's banking and is
+         * rate-independent above about 1/s. See `StandardKartCamera.ts`'s header for the measurements
+         * that establish that, including the control which reproduces the effect with the chassis
+         * roll frozen. (This comment used to say the gap "IS the visible chassis lean" and that
+         * closing it removes the lean entirely; T15 measured both claims and neither holds.)
+         *
+         * This rate is separately load-bearing for a much more basic reason: it is the ONLY thing
+         * that orients the kart at all (FINDING 0). The `if(antiGravity)` alignment at `1 · dt` on
+         * line 2034 is dead code — it sits inside the `if(!antiGravity)` block and can never run
+         * (Analysis §E.5), so 7.5/s is the only alignment rate in the game, anti-gravity included
+         * (2062-2064 uses it too).
+         */
+        groundAlignRate: number;
+        /** Rate at which the model child's drift yaw approaches its target, per second (`1561`/`1579`/`1626`). */
+        modelYawRate: number;
+        /** Model child yaw while drifting, degrees. `+20` drifting right, `−20` drifting left (`1558-1592`). */
+        driftYawAngle: number;
+        /**
+         * Delay between drift entry and the outward lateral force starting, seconds (**P-1**).
+         *
+         * 0.283 s — the `is_drifting` animation event at t = 0.28333 s on `KartDriftHop.anim`,
+         * handled in `UtilityFunctions.cs:109`. Shipped as a timer rather than an animation event so
+         * that `hopEnabled = false` changes nothing but the hop's visual lift (FR-5). Set to 0 to
+         * make the drift bite the instant it is entered.
+         */
+        driftLatchDelay: number;
+        /**
+         * Minimum steer magnitude, 0-1, that will latch a drift direction on entry (**D-4**).
+         *
+         * Unity's `1625` has no zero case, so a neutral hop latches "left" by falling through. This
+         * port requires a HELD steer input above this threshold instead. 0.15 sits above a resting
+         * gamepad stick and below any deliberate input.
+         */
+        driftLatchThreshold: number;
+        /**
+         * Name of the preset to apply in `awake()`, or `null` to use the individual switches as they
+         * stand.
+         *
+         * The Unity-authoring entry point: a prefab exported with `vehicleProfile: "arcadeCar"` gets
+         * the whole property set without listing five booleans. Applied BEFORE the individual switch
+         * properties are read, so an explicit `hopEnabled` on the same prefab still wins — a preset
+         * is a starting point, not a lock.
+         */
+        vehicleProfile: KartVehicleProfileName | null;
+        /** Play the `KartDriftHop` lift on drift entry. `false` turns the drift into a handbrake turn. */
+        hopEnabled: boolean;
+        /** React to glider volumes. `false` ignores them entirely and the kart flies gaps ballistically. */
+        gliderEnabled: boolean;
+        /**
+         * Fly the ARCADE glider — Mario Kart's rules — rather than the Unity project's. **Default on.**
+         *
+         * NOT A CAPABILITY SWITCH AND DELIBERATELY NOT PART OF `IKartVehicleProfile`. The profile is a
+         * list of what a vehicle CAN do (`gliderEnabled` belongs there and is the switch that decides
+         * whether this kart has a glider at all); this is which physics the glider it has obeys. A
+         * profile stays a capability set, as its own docblock promises.
+         *
+         * `true` — the vertical approaches a pitch-chosen sink rate and the kart always comes down.
+         * `false` — the source's damp-and-lift model, which can be flown level indefinitely.
+         *
+         * See the ARCADE GLIDER block above the constants for the whole argument.
+         */
+        enableGliderPhysics: boolean;
+        /**
+         * ARCADE. Shallowest descent angle a glide may be flown at, degrees.
+         *
+         * The volume's own `glideAngleX` wins when it is STEEPER than this; this is the floor a level
+         * or unstated trim is promoted to. Ignored when `enableGliderPhysics` is false.
+         */
+        gliderSlopeMin: number;
+        /**
+         * ARCADE. Hard floor on the descent angle, degrees — what the nose-up control delivers.
+         *
+         * Raising it makes a held climb come down faster; dropping it to 0 restores the hover and
+         * defeats the point of the flag.
+         */
+        gliderSlopeFloor: number;
+        /** ARCADE. Rate the vertical approaches its slope's descent, per second. */
+        gliderSinkRate: number;
+        /** React to anti-gravity volumes. */
+        antiGravityEnabled: boolean;
+        /** Allow the air trick and its landing boost. */
+        tricksEnabled: boolean;
+        /** React to jump-panel volumes. */
+        jumpPanelsEnabled: boolean;
+        /**
+         * Extra roll added to the model child while cornering, degrees (**D-5**).
+         *
+         * **Ships at 0 and should stay there.** There is no roll term in the Unity project — no clip
+         * fires on land — and the port needs none: the visible roll is the CAMERA adopting the
+         * track's banking, so the horizon tips by the bank angle while the kart sits upright in
+         * frame. Measured on the bench's 18-degree sweeper: horizon 18.4 degrees, kart 0.4 degrees
+         * off vertical in frame.
+         *
+         * If the tilt reads as too weak, work this checklist before touching this number:
+         *   1. **Is the surface actually banked?** On flat ground the mechanism produces exactly
+         *      zero roll — asserted at `< 1e-9` — so a flat bench cannot show any.
+         *   2. **Is the camera slerping to the chassis's FULL orientation, roll included?** A rig
+         *      that tracked only the kart's yaw would leave the horizon level and delete the effect
+         *      entirely. This is the one that actually breaks it.
+         *   3. **Is the chassis alignment running at all?** It is the only thing that rolls the kart
+         *      onto the banking in the first place (FINDING 0).
+         *
+         * Raising this number hides whichever of those three is broken, and makes the kart lean on
+         * flat ground, which is wrong in a way that is hard to un-see.
+         *
+         * *(The second item used to read "has the camera rate been tidied from 3/s toward 7.5/s" —
+         * T15 measured that and it costs about 60 percent of a diagnostic that is not the on-screen
+         * tilt, while leaving the visible roll essentially unchanged. It is the wrong thing to
+         * check first.)*
+         */
+        bodyLeanAngle: number;
+        /**
+         * Rate the exit payload realigns the kart's PITCH at, per second (`Player.cs:1289`).
+         *
+         * Deliberately 2.5x slower than the other two axes. Coming off a barrel the pitch is the axis
+         * carrying most of the error — the kart can be pointing at the sky — and snapping it back is
+         * what reads as the camera being yanked. Yaw and roll are usually close to right already, so
+         * they are allowed to settle quickly while the pitch takes its time.
+         */
+        antiGravityExitRateX: number;
+        /** Rate the exit payload realigns YAW and ROLL at, per second (`Player.cs:1293`/`1297`). */
+        antiGravityExitRateYZ: number;
+        /**
+         * Any non-zero steer input turns the kart, not just the literal arrow keys (`Player.cs:1619`).
+         *
+         * Unity gates the turn on `Input.GetKey(LeftArrow) || Input.GetKey(RightArrow)` while reading
+         * the magnitude from the axis, so an analogue stick moves the axis but never opens the gate.
+         */
+        correctArrowKeyGate: boolean;
+        /**
+         * Neutral steer yields `direction = 0` (`Player.cs:1625`).
+         *
+         * Unity's if/else has no zero case, so releasing the stick leaves `direction` at its last
+         * value and the kart keeps turning.
+         */
+        correctNeutralSteer: boolean;
+        /** Tier 1 spark colour, blue. Arms with the first payout band. */
+        sparkTier1Color: string;
+        /** Tier 2 spark colour, orange. Arms at `Drift_time` 4.0 s (`Player.cs:1755`). */
+        sparkTier2Color: string;
+        /** Tier 3 spark colour, magenta. Arms at `Drift_time` 7.0 s (`Player.cs:1776`). */
+        sparkTier3Color: string;
+        /**
+         * The layers the ground probe is allowed to hit, as an explicit INCLUDE list.
+         *
+         * Unity ships the probe with `LayerMask mask` serialized to **298803**, whose set bits are
+         * 0, 1, 4, 5, 8, 9, 10, 11, 15 and 18. Read against `ProjectSettings/TagManager.asset` those
+         * are exactly the ten names below. Shipping the list rather than the integer is deliberate:
+         * a bare 298803 is unreadable, unreviewable, and silently wrong the moment a track is
+         * authored with a different layer order.
+         *
+         * What it EXCLUDES matters as much as what it includes — `Path`, `Checkpoints`,
+         * `PanelsAndTriggers`, `Opponent` and every item layer are absent, which is why the kart
+         * never mistakes a trigger volume or another kart for ground.
+         */
+        rayIncludeLayers: string[];
+        /**
+         * The project's layer table, in index order, from `ProjectSettings/TagManager.asset`.
+         *
+         * Havok filters on raw bits, so this is what turns `rayIncludeLayers` back into a number.
+         * The empty strings are Unity's reserved-but-unnamed slots at 3, 6 and 7 and must stay: they
+         * are what keeps every index after them correct.
+         */
+        static readonly UNITY_LAYERS: string[];
+        /** **Kart** — everything on. The Mario Kart profile, and the component's own defaults. */
+        static readonly KART_PROFILE: Readonly<IKartVehicleProfile>;
+        /**
+         * **Arcade car** — a full-size car that still drifts like a kart.
+         *
+         * `hopEnabled: false` turns the drift into a handbrake turn purely by not playing an
+         * animation: the latch, `rotate_strength = 5`, the one-third-second ramp, the 20 degree model
+         * yaw, the outward lateral push (still at `driftLatchDelay`, **P-1**), the tiers and the
+         * boost payout are all untouched. `gliderEnabled` and `tricksEnabled` go off because a car
+         * has no glider and does not somersault.
+         *
+         * **Anti-gravity and jump panels stay ON.** A Crazy Taxi style track may still want a ramp
+         * and a wall-ride, and neither mechanism assumes a kart.
+         */
+        static readonly ARCADE_CAR_PROFILE: Readonly<IKartVehicleProfile>;
+        /** The named presets, by name. Lets a bench or a race manager select one from a string. */
+        static readonly VEHICLE_PROFILES: Readonly<Record<KartVehicleProfileName, Readonly<IKartVehicleProfile>>>;
+        /**
+         * Which trigger-volume tags each profile switch is allowed to suppress.
+         *
+         * This table IS the "exactly its own mechanism and nothing else" rule, written down once and
+         * consulted by `onVolumeEnter`/`onVolumeExit`, rather than five scattered `if` statements that
+         * can each drift. A tag absent from every list is never gated by a profile — `Ground`,
+         * `Dirt`, `Water`, `OutOfBounds`, `Boost` and `CancelDownForce` are surface and recovery
+         * behaviour, not vehicle capability, and a car ignores none of them.
+         */
+        private static readonly PROFILE_GATED_TAGS;
+        /** `Player.cs:16`. The decreed scalar speed, before it becomes a velocity. */
+        protected currentspeed: number;
+        /** `Player.cs:18`. Nose-local `z` of the ACTUAL body velocity — every gameplay threshold reads this. */
+        protected REALCURRENTSPEED: number;
+        /** `Player.cs:23`. Current steering authority; ramps 5 → `desired_rotate_strength` on drift entry. */
+        protected rotate_strength: number;
+        /** `Player.cs:37`. Charge accumulated in the current drift, seconds. */
+        protected Drift_time: number;
+        /** `Player.cs:39`. Remaining boost, seconds. Every boost source simply writes this. */
+        protected Boost_time: number;
+        /** Which way the current drift is latched: `-1` left, `+1` right, `0` none (`Player.cs:31`). */
+        protected drift_direction: number;
+        /** `Player.cs:33`. Drifting right. */
+        protected drift_right: boolean;
+        /** `Player.cs:34`. Drifting left. */
+        protected drift_left: boolean;
+        /**
+         * The `drifting` sub-flag that gates the outward lateral force (**P-1**).
+         *
+         * **Never assigned anywhere in `Player.cs`.** It is set by an animation event named
+         * `is_drifting` at t = 0.28333 s on `KartDriftHop.anim`, handled in
+         * `UtilityFunctions.cs:109`. Since the 20 u/s push at `1567`/`1584` is gated on it, that
+         * delay is load-bearing feel and not a detail — a drift does not bite the instant it is
+         * entered, it bites a third of a second later, and that gap is what the hop animation is
+         * covering.
+         *
+         * Here it is a TIMER (`driftLatchTimer` against `driftLatchDelay`) rather than an animation
+         * event, so that `hopEnabled = false` changes nothing but the hop's visual lift and FR-5's
+         * "identical trace" acceptance can hold. This is the one place the port deliberately re-homes
+         * a mechanism instead of transcribing it.
+         */
+        protected drifting: boolean;
+        /**
+         * `Player.cs:30`. The steering term, and it carries MAGNITUDE, not just a sign.
+         *
+         * ±1.0 gripping, **±2.1** with the stick into a drift, **±0.5** countering one. That
+         * asymmetry — a 4.2× ratio — is the whole controllability story of the drift, and it is why
+         * `direction` is a float here and not an enum.
+         */
+        protected direction: number;
+        /** The drift state machine's current state. */
+        protected driftState: EKartDriftState;
+        /** `Player.cs:28`. A COLLISION flag, not the raycast — set on `Ground`/`AntiGravity` contact. */
+        protected grounded: boolean;
+        /** `Player.cs:170`. Anti-gravity is active. */
+        protected antiGravity: boolean;
+        /** Entry volumes the kart is currently inside. Non-empty re-asserts the flag every step. */
+        protected antiGravityVolumes: BABYLON.TransformNode[];
+        /** The active volume's `rotAmountX`, degrees — read by the camera, never applied to the kart. */
+        protected antiGravityRotAmountX: number;
+        /** The active volume's `rotAmountZ`, degrees. */
+        protected antiGravityRotAmountZ: number;
+        /**
+         * The active volume asked the camera to rotate — Unity's `Camerafollow.rotateCamAntiGravity`.
+         *
+         * **A SECOND, NARROWER SIGNAL THAN `antiGravity`, AND THE DIFFERENCE IS REAL.** `antiGravity`
+         * means the kart is inverted. This means the kart is inside a volume whose
+         * `CameraRotateAntigravity.rotateCam` is set (`Player.cs:1038`/`:1043`, cleared at `:1056`).
+         * A track can author an anti-gravity stretch that does NOT want the camera leaned, and Unity
+         * gives that stretch the ordinary flat-ground framing.
+         *
+         * Read by `StandardKartCamera` through the duck-typed target interface, never applied to the
+         * kart. Like `antiGravityRotAmountX`, this is pure telemetry: it changes the VIEW.
+         */
+        protected antiGravityRotateCam: boolean;
+        /** An `AntiGravityExitRotate` payload is running (`Player.cs:1288-1298`). */
+        protected exitRotateActive: boolean;
+        /** Which Euler axes the exit payload steers. Unity's `rotateX`/`rotateY`/`rotateZ` booleans. */
+        protected exitRotateX: boolean;
+        protected exitRotateY: boolean;
+        protected exitRotateZ: boolean;
+        /** The exit payload's `newRotation`, Euler degrees. Only the enabled axes are read. */
+        protected exitRotateTarget: BABYLON.Vector3;
+        /** Scratch for the exit realignment, so a per-frame slerp allocates nothing. */
+        private exitEuler;
+        private exitQuaternion;
+        /** Scratch for the jump-panel forced rotation, so a per-frame compose allocates nothing. */
+        private jumpRotation;
+        /** Scratch for the glider's live yaw read, so a per-frame decompose allocates nothing. */
+        private gliderEuler;
+        /** `Player.cs` `GLIDER_FLY`. The glider is open. */
+        protected GLIDER_FLY: boolean;
+        /** Latest accepted ground normal, world space. Identity-up until the first probe lands. */
+        protected groundNormal: BABYLON.Vector3;
+        /** Yaw applied this frame, degrees/second. Reported to the bench HUD. */
+        protected yawRate: number;
+        /** Angle between the velocity and the nose, degrees. The drift's outward slip. */
+        protected slipAngle: number;
+        /** Throttle, -1 (reverse) to +1 (accelerate). */
+        protected inputThrottle: number;
+        /** Steering, -1 (left) to +1 (right). */
+        protected inputSteering: number;
+        /** Drift button held. */
+        protected inputDrifting: boolean;
+        /** Trick button pressed this frame. */
+        protected inputTrick: boolean;
+        /** Seconds into the trick's upward push, or `-1` when no trick is running. */
+        protected trickTime: number;
+        /** A `TrickCollider` has been touched, so a trick is allowed. Cleared on landing. */
+        protected trickArmed: boolean;
+        /** A trick was performed this flight and its landing still owes the 0.9 s boost floor. */
+        protected trickPerformed: boolean;
+        /** Edge-detect for the trick button: a trick fires on the PRESS, not on the hold. */
+        protected trickPressed: boolean;
+        /** Set each step by `move()`: does a vertical push survive into the next step? See its note there. */
+        protected verticalAccumulates: boolean;
+        /**
+         * Glider pitch: `+1` nose up, `-1` nose down, 0 neutral. Unity's `UpArrow` / `DownArrow`.
+         *
+         * A CHANNEL OF ITS OWN, and deliberately not folded into the throttle. In `Player.cs` the
+         * arrows are independent of `Space`/`S`: `2115-2126` pitch the glider with them while
+         * `1349-1356` picks the vertical damping from the same channel. Reading reverse as "dive"
+         * would make holding `S` mid-glide fall faster, which is not a control the game has.
+         *
+         * CORRECTED AT T22: this used to say the 0.45 damp goes with `DownArrow`, i.e. with the DIVE.
+         * It goes with the CLIMB — `× 0.45` keeps forty-five per cent of the vertical and `× 0.75`
+         * keeps seventy-five, so 0.45 is the harder damp, and it is the climb that has to be paid for.
+         * See the branch in `move()`.
+         */
+        protected inputPitch: number;
+        /** The chassis body, cached in `initKartState`. Null until then, and null in a headless test. */
+        protected chassisBody: BABYLON.PhysicsBody;
+        /** The `raycastPos` child the ground probe fires from. Falls back to the chassis origin. */
+        protected raycastNode: BABYLON.TransformNode;
+        /** `Player.cs:1439`. On a jump-panel flight — suppresses ground alignment entirely. */
+        protected JUMP_PANEL: boolean;
+        /**
+         * The live launch force, lerping from the panel's `upforce` toward its `downforce` at 2.5/s.
+         *
+         * **NEGATIVE IS UP.** It is applied along the kart's LOCAL DOWN (`AddRelativeForce(down *
+         * upForce * dt, Acceleration)`), so the panel's -250000 default is an upward shove and the
+         * +200000 it decays toward is a downward pull. Neither sign is a mistake to fix.
+         *
+         * By FINDING 1 the effective acceleration is `-upForce * 0.02` u/s2 along local UP: 5000 u/s2
+         * at launch, crossing zero at about 0.36 s and settling at 4000 u/s2 downward. Those look
+         * enormous next to the 100 u/s2 of ordinary gravity, and they are — but the velocity is
+         * REASSIGNED every step (FINDING 0), so a step's force contributes `a * dt` and is then thrown
+         * away rather than accumulating. The kart leaves at about 100 u/s vertically, not at 700.
+         */
+        protected upForce: number;
+        /** What `upForce` decays toward, from the panel's `downforce`. Positive: it pulls the arc down. */
+        protected downForce: number;
+        /** Seconds left on a `RotatePlayerJumpPanel` volume's forced rotation. */
+        protected jumpPanelRotateTime: number;
+        /**
+         * The ABSOLUTE attitude the volume is turning the kart towards.
+         *
+         * **This used to be a pair of RATES, and that was the port's largest behavioural divergence.**
+         * `RotatePlayerJumpPanel.cs` lerps the kart towards
+         * `Quaternion.Euler(volume.eulerAngles.x, rotateY, rotateZ)` — a fixed WORLD attitude. The port
+         * read `rotateY` as "degrees of yaw to add", so a volume authored `rotateY: 90` aimed the kart
+         * at world-yaw 90 in Unity and merely added 90 to its current heading here. The two agree only
+         * when the kart happens to enter at yaw 0, which on a real track is never.
+         */
+        protected jumpPanelRotateTarget: BABYLON.Quaternion;
+        /** `Player.cs` `glidingTime`. Seconds since the glider opened; the 3 s mark changes the probe. */
+        protected glidingTime: number;
+        /** The volume's `glideAngleX` — pitch trim; every pitch target is stated relative to it. */
+        protected glideAngleX: number;
+        /** The volume's `glideAngle` — the roll the glider settles on with the stick centred. */
+        protected glideAngleZ: number;
+        /** Seconds until the canopy opens on the trick variant, or `-1`. */
+        protected gliderOpenDelay: number;
+        /** This deploy is the trick variant (entered above `GLIDER_TRICK_SPEED`). */
+        protected gliderTrick: boolean;
+        /** Seconds until the trick variant's 0.5 s boost, or `-1`. Armed when the canopy opens. */
+        protected gliderTrickPayout: number;
+        /** The glider's current pitch, degrees. Nose-down positive, as Unity has it. */
+        protected gliderPitch: number;
+        /**
+         * ARCADE. The glide SLOPE the kart is descending on, degrees. Nose-down positive.
+         *
+         * A SECOND ANGLE, AND IT IS NOT A DUPLICATE OF `gliderPitch`. The two share a target and a
+         * rate but not a floor: the attitude may point level or up, because that is what the player
+         * asked for and what the model on screen must show, while the slope may not, because a glider
+         * that stops descending is the defect this whole flag exists to remove. Reading the ATTITUDE
+         * and flooring it — which is what this field replaced — floors it during the 1.5/s ramp-in
+         * too, and on a 19:1 glide the unit of height that costs is 19 units of range. It put the
+         * bench's slow crossing 17 units short of an apron it had been clearing.
+         *
+         * So the floor goes on the TARGET and this eases toward it at the attitude's own rate, from
+         * the same 0 the attitude starts at. Where the floor does not bind the two angles are equal to
+         * the last decimal and the arcade descent IS the source's; where it binds they part company,
+         * which is exactly and only the held nose-up case.
+         */
+        protected gliderSlope: number;
+        /**
+         * The scene's vertical gravity, u/s². Read once at `awake`, defaulted to Unity's own -2.
+         *
+         * ONLY THE ARCADE GLIDER USES IT, and only to cancel the leak an approach lets gravity make
+         * through it — see `gliderVerticalFor`. Every other vertical term in this component either
+         * accumulates gravity deliberately or is assigned over the top of it, so none of them needs to
+         * know the figure and none of them reads this.
+         *
+         * DEFAULTED RATHER THAN REQUIRED. -2 is `ProjectSettings/DynamicsManager.asset` in the Unity
+         * project every constant in this file came from, so a scene that has not started its physics
+         * engine when this component wakes gets the number the rest of the port already assumes rather
+         * than a zero that would quietly reinstate the leak.
+         */
+        protected sceneGravityY: number;
+        /** The glider's current roll, degrees. */
+        protected gliderRoll: number;
+        /** The smoothed steer input the roll target is built from — the first of the two lags. */
+        protected gliderRollVelocity: number;
+        /** Seconds left on a `GliderPanel` exit impulse, or 0. */
+        protected gliderImpulseTime: number;
+        /** Did the ground probe land this step? The honest airborne test — see `grounded`'s note. */
+        protected probeGrounded: boolean;
+        /** Did the separate length-1 drift-entry probe land? `Player.cs:1645`. */
+        protected driftEntryGrounded: boolean;
+        /** Distance from `raycastPos` to the accepted ground hit, units. `-1` when the probe missed. */
+        protected groundDistance: number;
+        /** The live value of the state-dependent probe length. `groundRayDist` is only its default. */
+        protected activeGroundRayDist: number;
+        /** Seconds left on the glider-landing probe override (`6` for 0.6 s, then `1`). */
+        protected gliderLandingTimer: number;
+        /** Set once a glider landing has run, so the probe stays at 1 rather than reverting to 2. */
+        protected gliderLanded: boolean;
+        /** `Player.cs:14`. The live speed cap, rewritten several times per step by Unity's order. */
+        protected max_speed: number;
+        /** `Player.cs:8`. A boost of any kind is running. */
+        protected Boost: boolean;
+        /** Star power-up. Out of scope for this port; kept because five speed-cap branches read it. */
+        protected StarPowerUp: boolean;
+        /** `Player.cs:982`, `1273-1278`. Inside a `CancelDownForce` volume. */
+        protected cancelAddforceDown: boolean;
+        /** The `AirForce` volume the kart is currently inside, or `null`. */
+        protected airForceVolume: BABYLON.TransformNode;
+        /** Scratch for the air force direction, so a per-frame push allocates nothing. */
+        private airForceDirection;
+        /** The wheels this component poses, front-left, front-right, rear-left, rear-right. */
+        protected wheelNodes: BABYLON.TransformNode[];
+        /** Their rest positions, captured once so the anti-gravity spread cannot compound. */
+        protected wheelRestPositions: BABYLON.Vector3[];
+        /** Their rest ROTATIONS, captured once so the pose composes onto them instead of erasing them. */
+        protected wheelRestRotations: BABYLON.Quaternion[];
+        /**
+         * `Player.cs:184` — `public Vector3[] antiGravityTirePositions = new Vector3[4]`.
+         *
+         * **THE ART DECISION THE PORT USED TO SYNTHESISE.** Unity does not compute where an
+         * anti-gravity wheel goes; the table says, per model, and the four entries in Mario Circuit are
+         * `(-0.58, -0.06, 0.715138)`, `(-0.651, 0.075, -0.37)`, `(0.58, -0.065, 0.72)`,
+         * `(0.65, 0.07, -0.37)`. This port scaled each wheel's own rest offset by
+         * `WHEEL_ANTIGRAVITY_SPREAD` instead — the same motion for any rig, at the cost of only ever
+         * moving a wheel SIDEWAYS and of the distance following track width rather than the artist.
+         * Note the real table moves wheels in y and z as well, which a sideways scale cannot express.
+         *
+         * Empty means "no table authored", and the synthesised spread stands — which is what the bench's
+         * red box and every rig without this array will use. Populated, it wins.
+         */
+        protected antiGravityTirePositions: BABYLON.Vector3[];
+        /**
+         * `antiGravityTirePositions` re-ordered into THIS component's wheel order, or empty.
+         *
+         * **MATCHED BY GEOMETRY, NOT BY INDEX, AND THAT IS DELIBERATE.** This component orders wheels
+         * front-left, front-right, rear-left, rear-right; Unity's array is ordered by whatever its
+         * `tires` Transform array happened to be, and in Mario Circuit that is front-left, REAR-left,
+         * front-right, rear-right — indices 1 and 2 swapped relative to ours. Trusting the index would
+         * put the rear-left target on the front-right wheel on that track, and would break differently
+         * on the next one. Signs of x and z are unambiguous and survive any authoring order.
+         */
+        protected antiGravityTireTargets: BABYLON.Vector3[];
+        /**
+         * `Player.cs:176` — `public Color antiGravityTireColor`. Mario Circuit: `#469CFA`.
+         *
+         * Read and exposed, not yet applied: nothing in this port tints a wheel material today. It is
+         * carried so that an exported kart's authored value is not silently dropped on the floor, and
+         * so the VFX work has it waiting rather than having to go back to the scene files for it.
+         */
+        antiGravityTireColor: string;
+        /** The steering wheel's rest rotation, for the same reason. */
+        protected steeringWheelRest: BABYLON.Quaternion;
+        /** The driver's arms, which scale under anti-gravity. Empty on any rig without a driver. */
+        protected armNodes: BABYLON.TransformNode[];
+        /** Their rest scales, captured once. */
+        protected armRestScales: BABYLON.Vector3[];
+        /** The steering wheel, or `null`. */
+        protected steeringWheelNode: BABYLON.TransformNode;
+        /** Current front-wheel steer angle, degrees. */
+        protected wheelSteer: number;
+        /** Accumulated wheel roll, radians. */
+        protected wheelSpin: number;
+        /** How far into the anti-gravity wheel pose, 0 to 1. */
+        protected wheelAntiGravity: number;
+        /** Scratch for the wheel pose composition, so a per-frame write allocates nothing. */
+        private wheelSpinRotation;
+        private wheelSteerRotation;
+        private wheelPoseRotation;
+        private wheelCompose;
+        /** `Player.cs:1503`/`1513`. Spun out by a banana or a shell. */
+        protected spunOut: boolean;
+        /**
+         * On a `Dirt` surface (`Player.cs:502`). **Telemetry only** — the cap it implies is produced
+         * by `grounded = false`, not by this flag. See the note in `move()`.
+         */
+        protected onDirt: boolean;
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected step(): void;
+        protected fixed(): void;
+        protected destroy(): void;
+        /** Reads the serialized property bag. Nothing that touches the scene belongs here. */
+        protected awakeKartState(): void;
+        /**
+         * Configures the chassis to Unity's exact rigidbody spec (FINDING 0).
+         *
+         * Runs in `start()`, one frame after `awake()`, so a `TOOLKIT.RigidbodyPhysics` sitting at
+         * execution order -1 has already had its own `awake()` and `transform.physicsBody` is there
+         * to configure. On a bench rig there is no exported collider metadata at all, so the body is
+         * built here from the measured numbers — which is also what makes the component asset-
+         * agnostic (T26): a Unity-exported kart arrives with the body already built and this method
+         * only tightens it.
+         */
+        protected initKartState(): void;
+        /**
+         * Wires `grounded` — which is a COLLISION flag and not the raycast (`Player.cs:487-504`).
+         *
+         * ---------------------------------------------------------------------------------------
+         * A NINTH CORRECTION, FOUND WHILE PORTING THIS: `grounded` IS STICKY IN UNITY.
+         *
+         * It is assigned in exactly three places — `491` true on `Ground`/`AntiGravity`, `503` false
+         * on `Dirt`, `508` true on `Boost` — all inside `OnCollisionStay`. **There is no
+         * `OnCollisionExit` and nothing clears it when the kart leaves the ground.** The same is true
+         * of `ComputerDriver.cs:1002-1012`, so it is the game's model rather than an oversight in one
+         * file. Consequences, and they are not small:
+         *
+         *   * The "airborne" speed cap of 30 at `1403` is really the ON-DIRT cap. In the air,
+         *     `grounded` is still true and the grounded cap applies.
+         *   * A drift is NOT ended by leaving the ground, because the hold test at `1672` reads this
+         *     same sticky flag.
+         *
+         * Ported bug-for-bug, because the numbers the spec measured were measured against this
+         * behaviour and "fixing" it would silently change every one of them. `probeGrounded` — the
+         * raycast — is the honest airborne test and is what the bench HUD and `isAirborne()` read.
+         * ---------------------------------------------------------------------------------------
+         */
+        private attachCollisionEvents;
+        /**
+         * Entering a tagged trigger volume. The `PROJECT.Kart*` components arrive here in T19.
+         *
+         * The profile gate runs FIRST and unconditionally, so every mechanism added by a later phase
+         * inherits FR-5 by construction rather than by remembering to ask. A gated-off volume is not
+         * merely ignored on the way in — it never reaches any handler, so it cannot leave a flag set.
+         */
+        protected onVolumeEnter(other: BABYLON.TransformNode): void;
+        /** Leaving a tagged trigger volume. Gated by the same profile table as the way in. */
+        protected onVolumeExit(other: BABYLON.TransformNode): void;
+        /**
+         * Is this volume tag's mechanism enabled by the current profile? (FR-5)
+         *
+         * Everything not named in `PROFILE_GATED_TAGS` is enabled — a profile suppresses vehicle
+         * CAPABILITIES, never surface or recovery behaviour, so `Ground`, `Dirt`, `Water`,
+         * `OutOfBounds`, `Boost` and `CancelDownForce` are always live. Public because the bench and
+         * the tests assert the gate directly rather than inferring it from a trajectory.
+         */
+        isVolumeEnabled(tag: string): boolean;
+        /**
+         * Writes one of the two named profiles, or an explicit property set, onto the LIVE component.
+         *
+         * Only the five switches are touched — never a speed, a rate or a state — so calling this
+         * mid-run changes what the kart is CAPABLE of and nothing about what it is currently doing.
+         * That is what lets the bench A/B a profile on a run already in progress, and what lets FR-5's
+         * "identical trace" acceptance be a real assertion instead of two separate runs compared by
+         * eye. A partial property set leaves the unnamed switches alone.
+         */
+        applyVehicleProfile(profile: KartVehicleProfileName | Partial<IKartVehicleProfile>): void;
+        /** The five switches as they stand right now. A fresh object, so a caller cannot alias the kart. */
+        getVehicleProfile(): IKartVehicleProfile;
+        /**
+         * The name of the preset the switches currently match, or `null` for a custom set.
+         *
+         * `null` is a real and expected answer: the bench toggles are free to produce a combination
+         * neither preset names, and reporting the nearest preset instead would be a lie the HUD then
+         * draws as a selected radio button.
+         */
+        getVehicleProfileName(): KartVehicleProfileName | null;
+        /**
+         * `Player.cs:1280-1287`. An `AntiGravity` volume turns the flag on and keeps it on.
+         *
+         * The camera payload rides along: `rotAmountX`/`rotAmountZ` are the VOLUME's, not the kart's,
+         * and they are read straight back out by `StandardKartCamera` through the duck-typed target
+         * interface. The kart itself never applies them to anything — they tilt the VIEW, which is how
+         * a track author leans the camera into a barrel without touching how the kart drives.
+         */
+        protected enterAntiGravityVolume(volume: BABYLON.TransformNode): void;
+        /**
+         * `Player.cs:1288-1299`. An `AntiGravityFalse` volume clears the flag and arms the realignment.
+         *
+         * **The realignment is the difference between an exit and a crash.** Clearing the flag alone
+         * hands a kart that may be pointing at the ceiling back to a ground probe that now rejects any
+         * normal below 0.5, so nothing realigns it and it falls in whatever attitude it had. The
+         * payload's job is to steer it back to a stated world orientation over the second or so the
+         * exit ramp lasts — per axis, because a track usually wants to fix the pitch and the roll while
+         * leaving the kart's yaw alone so the driver keeps the heading they chose.
+         */
+        protected exitAntiGravity(volume: BABYLON.TransformNode): void;
+        /**
+         * Per step: re-assert the flag while inside an entry volume, then run any exit realignment.
+         *
+         * Runs AFTER `alignToGroundNormal` in `stepKartState`, and that order is deliberate. The two
+         * write the same quaternion, and on the way out of a barrel the ground probe is usually
+         * rejecting its hit anyway — the flag is off, so the `normal.y > 0.5` filter is back and the
+         * wall's normal is sideways — but where they do overlap, on the exit ramp itself, the payload
+         * must be the one that wins. It is the thing that knows where the kart is supposed to end up.
+         */
+        protected tickAntiGravity(dt: number): void;
+        /**
+         * `Player.cs:1288-1298`. Approaches the enabled Euler axes toward the payload's target.
+         *
+         * PER AXIS, AND AT TWO DIFFERENT RATES — 1/s for pitch, 3/s for yaw and roll. Unity writes
+         * three separate `Quaternion.Lerp` calls against three separate single-axis targets; composing
+         * them as one Euler triple with a per-axis rate is the same motion and does not cost three
+         * quaternion products a step.
+         *
+         * The angles are wrapped into (-pi, pi] before the approach so a kart at 179 degrees heading
+         * for -179 turns two degrees the short way rather than 358 the long way. That is the same
+         * degree-space trap `StandardKartCamera`'s header records for `Utilities.SmoothDampAngle`,
+         * surfacing in a second place: it applies to anything that interpolates an angle.
+         */
+        protected applyAntiGravityExitRotation(dt: number): void;
+        /** The value of `field` on the first script component of `volume` that carries one. */
+        private readVolumeField;
+        /**
+         * Does this volume carry a `RotatePlayerJumpPanel` payload?
+         *
+         * **Duck-typed on the FIELD TYPES, and that is load-bearing rather than lazy.** Two different
+         * Unity components spell fields `rotateY` / `rotateZ`:
+         *
+         *   * `RotatePlayerJumpPanel` — `public float rotateY; public float rotateZ;`
+         *   * `AntiGravityExitRotate` — `public bool rotateX; rotateY; rotateZ;`
+         *
+         * A name-only test would fire the jump-panel rotation on every anti-gravity EXIT volume, which
+         * is a corkscrew the track never asked for at the exact moment the kart is being realigned.
+         * Requiring `number` separates them with no tag and no class reference — which keeps this
+         * component free of any dependency on the volume classes, per FR-0's split.
+         */
+        private hasJumpPanelRotatePayload;
+        /**
+         * Reads a serialized `Vector3[]` — Unity writes them as plain `{x, y, z}` objects.
+         *
+         * Returns an empty array for anything missing or malformed rather than throwing or padding,
+         * because "no table authored" is the normal case for every rig that is not the Unity kart and
+         * the caller treats empty as "use the synthesised pose".
+         */
+        private readVectorArray;
+        /**
+         * Puts `antiGravityTirePositions` into this component's wheel order, by GEOMETRY.
+         *
+         * Each authored position is claimed by the wheel whose REST offset shares its sign in x (left
+         * or right) and z (front or rear). That is order-independent, which the index is not: Mario
+         * Circuit authors front-left, rear-left, front-right, rear-right while this component orders
+         * front-left, front-right, rear-left, rear-right, so a straight index copy puts the rear-left
+         * target on the front-right wheel.
+         *
+         * Anything ambiguous — a wheel with no rest, two candidates, none — abandons the whole table
+         * and leaves the synthesised spread in charge. A HALF-applied table is the one outcome worse
+         * than not applying it, because three wheels would swing to art positions and the fourth would
+         * scale sideways, and nothing would look obviously broken enough to investigate.
+         */
+        private buildAntiGravityTireTargets;
+        /**
+         * Reads a colour that Unity serialized, under Unity's OWN field name, falling back to this
+         * port's Babylon-side name and finally to a hardcoded default.
+         *
+         * **A Unity `Color` exports as `{r, g, b, a}` with each channel a float in 0..1**, while this
+         * component stores spark colours as CSS hex strings so they can go straight into a particle
+         * material or a HUD swatch. So this is a converter, not an alias: `{r: 0, g: 0.8235294, b: 1}`
+         * has to become `#00D2FF`, which is exactly the value it is (0.8235294 * 255 = 210 = 0xD2).
+         *
+         * Both spellings are accepted because a track exported from Unity carries `drift1` while this
+         * repo's own bench and tests author `sparkTier1Color`. Unity's name is tried FIRST — on a real
+         * export it is the authored value and the Babylon name will not be present at all.
+         */
+        private readUnityColor;
+        /** A numeric payload field, or `fallback` if the volume does not carry one. */
+        private readVolumeNumber;
+        /** A boolean payload field, or `fallback`. */
+        private readVolumeFlag;
+        /** A `Vector3` payload field, or `null`. Accepts a plain `{x,y,z}` so bench metadata works. */
+        private readVolumeVector;
+        /**
+         * `Player.cs:954-980`. A `JumpPanel` volume launches the kart and grants a 2 s boost.
+         *
+         * The boost is granted here rather than on landing, which matters: the kart is already at
+         * `boost_speed` when it leaves the panel, so the arc is long. Granting it on touchdown would
+         * make the panel a jump that happens to end in a boost, which is a different mechanic.
+         */
+        protected enterJumpPanel(volume: BABYLON.TransformNode): void;
+        /**
+         * `JumpPanelRotate`. Forces a yaw and a roll on the kart over 0.6 s of the flight.
+         *
+         * **THE ONLY VOLUME THAT DRIVES THE KART RATHER THAN INFORMING IT**, and only because Unity's
+         * component does the rotating itself against whatever entered it — `Player.cs` never reads it
+         * (Analysis §E). Ported as a payload the kart consumes, because the alternative is a track
+         * component reaching into the kart's transform, which is the thing FR-0's split exists to
+         * prevent. The angles and the 0.6 s are unchanged; only who applies them moved.
+         *
+         * **CORRECTED AGAINST THE SOURCE.** This used to store RATES, on the reasoning that "the source
+         * spreads a fixed angle over a fixed time rather than approaching an attitude". Reading
+         * `RotatePlayerJumpPanel.cs` shows the opposite: it approaches an attitude, and the attitude is
+         * absolute. The old reading also implied a kart being yawed by its own steering "must end up
+         * with both" — but Unity ASSIGNS `other.transform.rotation`, so for these 0.6 s the volume wins
+         * and the steering does not accumulate on top. See `jumpPanelRotateTarget`.
+         */
+        protected enterJumpPanelRotate(volume: BABYLON.TransformNode): void;
+        /**
+         * `Player.cs:1439-1448`. One step of a jump-panel flight.
+         *
+         * Runs from inside `move()`, AFTER the velocity assignment, for the reason every force in this
+         * component runs after it: the assignment would otherwise throw the whole thing away
+         * (FINDING 0). Three things happen, and the order between them does not matter because they
+         * land in the same accumulator:
+         *
+         *   1. `upForce` approaches `downForce` at 2.5/s. This IS the arc — there is no separate apex
+         *      test and no "falling" state, just one number crossing zero at about 0.36 s.
+         *   2. That force is applied along local DOWN, so its negative launch value pushes UP.
+         *   3. A forward thrust of **1200 u/s2** (`1444`: `60000 x 0.02`, i.e. Delta-v = 24 u/s per
+         *      50 Hz step — §E.3 says both readings are the same number, so do not "correct" either).
+         *      It is what turns a launch into a long arc rather than a pop.
+         */
+        protected tickJumpPanel(dt: number): void;
+        /**
+         * A per-step VELOCITY offset in the kart's OWN frame, u/s.
+         *
+         * `addStepVelocity` in local coordinates, and it exists for the jump panel: a panel pushes along
+         * the kart's local down and its local nose, and both of those have to be rotated into the world
+         * before they can be added to the assigned velocity. Splitting it out rather than inlining the
+         * transform keeps the one place that decides "acceleration or step velocity?" readable at both
+         * call sites.
+         */
+        protected addLocalStepVelocity(x: number, y: number, z: number): void;
+        /**
+         * A vertical push along the kart's own up, in u/s², delivered the way THIS FRAME requires.
+         *
+         * =========================================================================================
+         * THE PLACE THIS DECISION IS MADE FOR ANY NEW VERTICAL FORCE. READ IT BEFORE ADDING ONE.
+         * =========================================================================================
+         *
+         * IT IS NOT THE ONLY PLACE, AND SAYING SO WOULD BE THE SAME KIND OF OVER-CLAIM THIS NOTE
+         * EXISTS TO WARN ABOUT. Two vertical pushes deliberately do NOT route through here:
+         *   * `move()`'s manual downforce and the `FellInWater` sink — they take the same two deliveries
+         *     as everything else, but they are written out at their own call sites rather than routed
+         *     through here, because only they need the flat half applied AFTER the assignment (a step
+         *     velocity added where the downforce sits is overwritten three lines later). See `move()`.
+         *   * anti-gravity's two terms — `verticalAccumulates` is structurally false there, so routing
+         *     them would emit exactly what they already emit.
+         * A non-force case, the glider's damping MULTIPLIER, asks the same question in `move()`.
+         *
+         * =========================================================================================
+         * TEN INSTANCES, AND T27 CLOSED THE LAST OF THEM. This block used to end "it is not fixed here
+         * because the fix is COORDINATED, not local" — that was true when it was written and is no
+         * longer. What made the coordinated fix safe was finding the SECOND half of the rule
+         * (`canRunGrounded`, above): the plan feared branching gravity would trade a known small error
+         * for an unknown large one, and it would have — a ramp apex spread of 1.26 % became 6.28 % on
+         * the bare flag — but the grounded guard removes all of it. The residual price across the whole
+         * port is three ballistic arcs moving under 5.3 % at 144 Hz alone; nothing at 30, 50 or 60 Hz
+         * moved anywhere in 844 tests, and no outcome flipped.
+         * =========================================================================================
+         *
+         * This port produced the same defect **ten times**, in ten different features, and every
+         * instance was one line choosing the wrong one of these two deliveries:
+         *
+         *   1. the jump panel's launch and thrust (T20) — 21.9 units of height at 30 Hz, 6.0 at 144
+         *   2. anti-gravity's manual downforce (T18, found at T20) — 4.8x harder pull at 30 Hz
+         *   3. the drift's planting downforce inside a barrel (T12, found at T21) — 4.8x again
+         *   4. the trick's pop (T21) — 3.87x higher at 144 Hz than at 30
+         *   5. the `GliderPanel` exit impulse (T22) — 2.9x the altitude at 144 Hz
+         *   6. the glider's dive force (T22)
+         *   7. the glider's vertical damping (T22, and see `move()` — a scale, not a force, but the
+         *      same mistake: a per-step multiplier applied to a quantity that is rebuilt each frame)
+         *   8. `applyAirForce`'s HORIZONTAL (T23) — branched on this flag, which is a question about the
+         *      vertical only, so a funnel pushed 10.0 / 5.0 / 2.08 u/s per step at 30/60/144
+         *   9. the `CancelDownForce` damp (T23) — the same multiplier mistake as 7
+         *  10. `move()`'s own manual downforce and the `FellInWater` sink (T23, closed at T27) — inside
+         *      a `ColliderInAir` updraught the non-accumulating case is the STEADY state, not a
+         *      transient, so a kart held up by one climbed 2.10x as far in two seconds at 144 Hz as at
+         *      30. Now 1.03x.
+         *
+         * THE RULE, and it is not "is it vertical?". `move()` ASSIGNS the velocity every step, so a
+         * force is a genuine ACCELERATION only if the component it pushes on SURVIVES that assignment —
+         * which for the vertical means only when the clamp returned the BODY's `y`. `verticalAccumulates`
+         * is that question, asked per frame at the line that decides it. When the answer is yes the push
+         * integrates and `a` is an acceleration; when it is no the push is thrown away and re-made every
+         * step, and what the kart actually feels is a constant velocity of `a · 0.02` — Unity's own
+         * 50 Hz figure, and the same at every rate.
+         *
+         * WHY IT KEPT SURVIVING REVIEW: at Unity's 50 Hz step the two deliveries are the same
+         * arithmetic. `a · dt` and `a · 0.02` are the same number, so neither a test at 50 Hz nor a
+         * reader checking against the donor can tell them apart, and a wrong answer still looks like a
+         * working feature. **A one-rate test of a per-step quantity cannot distinguish a velocity from
+         * an acceleration, ever.** Sweep 30/60/144.
+         *
+         * @param accel Upward acceleration in u/s², already through FINDING 1's first conversion.
+         */
+        protected addLocalVerticalPush(accel: number, canRunGrounded?: boolean): void;
+        /**
+         * One step of a `JumpPanelRotate` volume's forced rotation, if one is running.
+         *
+         * Applied to the chassis quaternion directly rather than through the steering, because it is
+         * not steering — the kart is in the air, the driver has no authority, and the track is putting
+         * the kart where the next section needs it to be pointing. Runs only while airborne on a
+         * panel: landing ends the flight and the rotation with it.
+         */
+        protected tickJumpPanelRotate(dt: number): void;
+        /** Ends a jump-panel flight. `Player.cs:494`/`529` — contact with `Ground` or `Dirt`. */
+        protected endJumpPanel(): void;
+        /**
+         * `Player.cs:229`. Starts a trick if all three gates pass, otherwise does nothing at all.
+         *
+         * Returns whether one started, because "the trick did nothing" is a thing the bench and the
+         * tests need to be able to assert positively rather than infer from an unchanged trajectory.
+         */
+        protected tryTrick(): boolean;
+        /**
+         * One step of the trick's upward push.
+         *
+         * **6500 decaying by 300 every 0.01 s, floored at 300, for 0.3 s.** Unity spends that as a
+         * coroutine of thirty 0.01 s waits; here it is a timer read at whatever rate the browser runs,
+         * which is the same curve sampled differently. The floor is what makes the last third of the
+         * trick a gentle hold rather than the force going negative and hauling the kart down.
+         *
+         * HOW IT IS DELIVERED DEPENDS ON THE FRAME, not on the mode — see the branch in the body and
+         * `verticalAccumulates`. This doc used to say "a STEP VELOCITY, not an acceleration, because the
+         * clamp never lets the heading ADD vertical speed, so an upward force cannot accumulate in ANY
+         * state". That is true of the HEADING and false of the PUSH: a step velocity is added AFTER the
+         * clamp, so it lands in the body, and the clamp then preserves the body's `y` on every frame
+         * where the nose is pitched above it — which is every frame of a ramp jump. The claim was wrong,
+         * and the code that followed from it made a trick 3.87x higher at 144 Hz than at 30 Hz.
+         */
+        protected tickTrick(dt: number): void;
+        /**
+         * `Player.cs:539-541`. Landing after a trick floors the boost at 0.9 s.
+         *
+         * **A FLOOR, NEVER AN ASSIGNMENT** (§E.4). Landing a trick in the middle of a 2.5 s drift
+         * payout must not cut it to 0.9, which is what an assignment would do and what would make
+         * tricking mid-boost a punishment. `floorBoost` owns that distinction; this method owns only
+         * when it is called.
+         */
+        protected landTrick(): void;
+        /**
+         * `Player.cs:1109-1214`. Leaving a `GliderPanelFly` volume deploys the glider.
+         *
+         * **ABOVE SPEED 60 IT PLAYS THE TRICK VARIANT** — 0.45 s of nothing, then the glider opens, then
+         * 0.35 s more, then a 0.5 s boost (`1178`). Below 60 it just opens. That threshold is the only
+         * reason to arrive at a glide ramp fast, and the 0.5 s is small enough that it is a flourish
+         * rather than a shortcut.
+         *
+         * Entering a glider section also ENDS A DRIFT (`1132-1153`), and the source resets the drift
+         * fields inline rather than calling `stopDrift()` — so no tier is paid. Ported through
+         * `stopDrift(false)`, which is the same thing said once.
+         */
+        protected enterGliderSection(volume: BABYLON.TransformNode): void;
+        /** Opens the glider and starts its clock. Split out because two paths reach it. */
+        protected openGlider(): void;
+        /**
+         * One step of the glider, run from `stepKartState` while it is open or opening.
+         *
+         * The two trick timers are ticked even when the glider is not yet open, which is the entire
+         * point of the 0.45 s stage: the kart is in the air, unpowered and unguided, and then the canopy
+         * snaps out. Running them from the same place as the flight keeps the sequence in one method
+         * instead of scattered across three flags.
+         */
+        protected tickGlider(dt: number): void;
+        /**
+         * The glider's pitch and roll, and the lift and dive forces that go with them.
+         *
+         * PITCH (`1157-1176`), all relative to the volume's `glideAngleX` trim, approached at **1.5/s**:
+         *
+         *   dive     target `+25 + trim`, plus **40 u/s²** of extra downforce — the nose-down input is
+         *            the only way to lose height deliberately, and the force is what makes it decisive
+         *            rather than a slow sag.
+         *   climb    target `−25 + trim`, but the attitude is CLAMPED at `−20 + trim`, plus **30 u/s²**
+         *            of lift while `glidingTime < 6`. The clamp and the six-second budget together
+         *            bound how far a glider may CLIMB — the nose stops going up before the target does,
+         *            and the lift expires.
+         *   neutral  target `0 + trim`.
+         *
+         * **THIS PARAGRAPH USED TO CLAIM THOSE TWO ARE "WHY A GLIDER CANNOT BE FLOWN UPWARD FOREVER",
+         * AND THEY ARE NOT.** They end the climb; they do not begin a descent, and in the source model
+         * nothing else does either — past six seconds a nose-up kart sinks at 0.055 u/s and flies level
+         * indefinitely. The claim was true of the six seconds it was looking at and false of the minute
+         * after, which is the kind of error a docblock can hold for a long time: it describes a real
+         * mechanism accurately and then draws a conclusion the mechanism does not support. The whole
+         * chain is in the ARCADE GLIDER block above the constants, and `enableGliderPhysics` is the
+         * answer to it.
+         *
+         * ROLL (`1180-1190`): `glideAngleZ + 40 · smoothed(−steer)`, the smoothing a `SmoothDamp` at
+         * 5/s and the attitude then approached at 3/s. Two lags in series on the same input, which is
+         * what gives a glider its heavy, banking feel instead of a kart's instant response. **The
+         * negation is Unity's**: a right stick banks the glider right, and right roll about the nose is
+         * negative in a left-handed +Z-forward frame (FINDING 1b — no conversion, the sign is the
+         * source's).
+         */
+        /**
+         * ARCADE. The descent the current slope and airspeed ask for, u/s, as a POSITIVE magnitude.
+         *
+         * `0.75 · sin(angle) · speed`, the glide-ratio form — see the ARCADE GLIDER block above the
+         * constants for why it is a slope rather than three flat sink rates, and what breaks when it
+         * is not.
+         *
+         * The angle is `gliderSlope`, which `applyGliderAttitude` maintains beside the attitude and
+         * which already carries all of it — the volume's trim, the player's input, the 20 degree climb
+         * clamp, the `gliderSlopeMin` promotion, the `gliderSlopeFloor` floor and the 1.5/s ease-in.
+         * All this method does is turn an angle and an airspeed into a descent.
+         *
+         * ONE FRAME OF LAG, AND IT IS THE RIGHT FRAME (P-15). `move()` runs before `tickGlider`, so
+         * the slope read here is the one the kart was flying when the step began rather than the one
+         * it will be flying when the step ends. That is the same slot the SOURCE reads its own attitude
+         * from — `move()`'s assignment uses `transform.forward`, which is last step's matrix — so
+         * taking the fresher value would put the arcade model a frame AHEAD of the model it is meant
+         * to agree with.
+         *
+         * Positive by convention so the tuning fields read as slopes and sinks rather than as negative
+         * numbers in an inspector; `move()` negates once, at the use.
+         */
+        protected gliderSinkTarget(): number;
+        /**
+         * ARCADE. The vertical velocity to fly this step, given the body's current one.
+         *
+         * `approachRate` toward the slope's descent — plus ONE correction, which is the subject of this
+         * docblock because it is the only part that is not obvious.
+         *
+         * **GRAVITY LEAKS THROUGH AN APPROACH, AND THE SOURCE'S ASSIGNMENT DOES NOT LEAK.** The solver
+         * applies the scene's gravity between steps, so the value read back has already been pulled
+         * down by `g · dt` before the approach sees it, and the fixed point of
+         * `v = T + (v + g·dt - T)·k` is not `T` but `T + g·dt·k/(1-k)`, which tends to `T + g/rate`.
+         * The SOURCE has no such term: its steady state is `min(nose, body) × 0.75` with the nose
+         * shallower, so the assignment takes the nose whole and whatever gravity did to the body that
+         * step is discarded. The two models therefore disagree by a constant `g/rate` — 0.139 u/s at
+         * this rate and this scene's -2 — for as long as the glide lasts.
+         *
+         * THAT SOUNDS NEGLIGIBLE AND IS NOT, because a glide multiplies altitude into range. At 19:1
+         * the 1.1 units it costs over an eight-second crossing is **21 units of range**, and the
+         * bench's slow line clears its apron by less than that. It was the last thing between the
+         * arcade model and the shipped benches, and it is an artefact of writing the model as an
+         * approach rather than a property of the model — so it is cancelled here rather than tuned
+         * around, and `KartGliderArcade.test.ts` sweeps 30/60/144 Hz to prove the cancellation holds
+         * at every rate rather than at the one it was derived on.
+         */
+        protected gliderVerticalFor(bodyY: number, dt: number): number;
+        protected applyGliderAttitude(dt: number): void;
+        /**
+         * `Player.cs:550-574`. Closes the glider on a ground contact — but not straight away.
+         *
+         * **THE 1 s `glider_close_confirm` GUARD IS THE WHOLE POINT.** A glide launch clears the lip with
+         * the kart still within a couple of units of the boards, and without the guard the very first
+         * graze folds the canopy before the player has left the ramp. The guard is a minimum time OPEN,
+         * not a delay on the close: once a second has passed, contact closes it on the frame it happens.
+         *
+         * The landing then holds the ground probe at **6** for 0.6 s before dropping it to **1**
+         * (`569-574`) — a deliberately long reach so a kart that lands nose-high still finds the ground.
+         * That machinery is `updateGroundRayDistance`'s and predates this task; all that happens here is
+         * arming its timer.
+         */
+        protected closeGlider(): void;
+        /**
+         * **T39.** Folds the canopy with no regard for the 1 s minimum-open guard.
+         *
+         * The guard in `closeGlider` is a GAMEPLAY rule — it stops a graze on the take-off ramp folding
+         * the canopy before the player has left it — and it belongs on the contact path only. A caller
+         * asking for a known starting state is not a contact, and honouring the guard there would mean
+         * `clearTransientState()` silently did nothing to a kart that deployed a quarter of a second ago.
+         * Everything else is `closeGlider`'s own teardown, including arming the landing reach, because
+         * a kart put back on the ground still wants the probe that lets it find it.
+         */
+        protected closeGliderImmediate(): void;
+        /**
+         * `Player.cs:1077`/`1095-1104`. Leaving a `GliderPanel` pays 2 s of boost and a decaying shove.
+         *
+         * The shove is a **`ForceMode.Impulse`**, which is the only one in the port: with mass 50 and the
+         * source's `force * dt`, each step is `Δv = force · 0.02 / 50` — so the ramp from 20000 to 2000
+         * is **8 u/s down to 0.8 u/s** per step over 0.6 s. It is what lifts a kart back onto the next
+         * panel rather than letting it sink between them, and it is why a glider corridor made of panels
+         * flies as one continuous line instead of a series of dips.
+         */
+        protected exitGliderPanel(): void;
+        /** One step of the `GliderPanel` exit impulse, if one is running. */
+        protected tickGliderImpulse(dt: number): void;
+        /**
+         * `Player.cs:507`. A `Boost` pad grants its `duration` seconds.
+         *
+         * Through the same `grantBoost` every other source uses, so the pad has no special boost of its
+         * own. Note that `grantBoost` ASSIGNS: a 2 s pad taken during a 2.5 s tier-3 payout leaves 2 s,
+         * i.e. it SHORTENS it. That is Unity's behaviour and every other source shares it; `floorBoost`
+         * is the one that takes whichever is longer, and only the trick landing uses it (§E.4).
+         */
+        protected onBoostPad(volume: BABYLON.TransformNode): void;
+        /**
+         * `Player.cs:982`/`1273-1278`. A `CancelDownForce` volume floats the kart.
+         *
+         * TWO EFFECTS AND IT NEEDS BOTH. Suppressing the manual downforce alone merely stops pulling the
+         * kart down, which against a 90 u/s cruise is nearly invisible; the 0.98-per-step vertical damp
+         * alone would slow a fall the downforce is still driving. Together they hold it up. Both live in
+         * `move()` already and read this one flag, which is set on entry and cleared on exit — genuine
+         * overlap semantics, because unlike anti-gravity there is nothing here to latch.
+         */
+        protected setCancelDownForce(active: boolean): void;
+        /**
+         * `colliderInAir.cs`. A steady push while the kart is inside — the wind tunnels and finish funnels.
+         *
+         * The payload's three `isFor*` flags are a gate on WHEN, and they are not mutually exclusive:
+         * `isForAir` restricts it to an airborne kart, `isForRaceEnd` also allows it during the race-end
+         * sequence, and `isONLYforRaceEnd` restricts it to that sequence alone. The race-end sequence is
+         * out of scope for this port, so the two race-end flags are read and honoured — a volume marked
+         * `isONLYforRaceEnd` correctly does nothing here — rather than being dropped as unreachable.
+         *
+         * The direction is the VOLUME's own local FORWARD (+Z) when `relativeForce`, and world UP
+         * otherwise — which is how one component serves both a funnel that pushes along a corridor and
+         * an updraught that pushes along the world.
+         */
+        protected applyAirForce(dt: number): void;
+        /**
+         * `Player.cs:1932-1993`. One step of the wheels, the steering wheel and the anti-gravity pose.
+         *
+         * Runs from `updateKartState` — Unity's `Update`, not `FixedUpdate` — because it is presentation
+         * and should run at the display rate rather than the physics rate. That is also why it takes no
+         * part in the frame-rate arguments the rest of this file is full of: nothing here integrates.
+         */
+        protected updateWheels(dt: number): void;
+        /**
+         * Writes the three channels onto the wheel nodes. The ONLY place this component touches them.
+         *
+         * The wheels are ordered front-left, front-right, rear-left, rear-right, and only the front pair
+         * steers. Their anti-gravity swing alternates by **DIAGONAL** — see `WHEEL_POSE_SIGN`, where the
+         * derivation from `2659-2665`'s four target Eulers is written out. This paragraph used to say
+         * "by side", which is what the code did and what the code was wrong about.
+         */
+        protected applyWheelPose(): void;
+        /**
+         * Hands the component the nodes it should drive, and records their REST TRANSFORM.
+         *
+         * Called by the bench rig and, on a real asset, by whatever resolves the exported hierarchy
+         * (T26).
+         *
+         * **BOTH HALVES OF THE REST ARE CAPTURED, AND FOR THE SAME REASON.** The spread writes
+         * `position` and the pose writes `rotationQuaternion`, both absolutely, every frame — so a
+         * position read live would compound against itself, and a rotation not captured would be
+         * ERASED. The first version captured only the position, and that was a real hole: T25's own
+         * deviation is that the component carries the +/-25 and leaves Unity's 180-degree wheel rest to
+         * the MODEL, which is only honest if the model's rest actually survives. It did not. A wheel
+         * node arriving with `Ry(180)` — exactly the rest `2659-2665`'s `(0,180,+/-90)` targets encode —
+         * was identity by the end of frame one.
+         *
+         * The bench never noticed because it put its axis correction on a CHILD mesh, where this method
+         * cannot reach it. A Unity-exported kart puts it on the wheel transform itself, which is the
+         * case T26 has to work for.
+         */
+        setWheelNodes(wheels: BABYLON.TransformNode[], steeringWheel?: BABYLON.TransformNode): void;
+        /**
+         * Hands the component the driver's arm nodes, which scale under anti-gravity (`Player.cs:2659`).
+         *
+         * Optional, and absent on any rig without a driver — the bench's red box has none. Kept separate
+         * from `setWheelNodes` because a kart can have wheels and no arms but never the reverse.
+         */
+        setArmNodes(arms: BABYLON.TransformNode[]): void;
+        /**
+         * Finds a node by name ANYWHERE under this kart, at any depth — but never outside it.
+         *
+         * **`getChildNode` DEFAULTS TO DIRECT CHILDREN ONLY, AND THAT DEFAULT SHIPPED THIS BROKEN.**
+         * `SceneManager.FindChildTransformNode`'s `directDecendantsOnly` is `true` unless told
+         * otherwise, so a kart shaped `TestKart > KartModel > WheelFL` — which is how this project's own
+         * bench rig is built, and it explains why ("a wheel that stayed level while the body hopped and
+         * leaned would read as detached"), so a Unity kart is almost certainly rigged the same —
+         * resolved **zero** wheels, no steering wheel and zero arms, silently. The bench escaped only
+         * because it hands its nodes over in code. The toolkit's own `StandardVehicleController` passes
+         * `false` here for exactly this reason.
+         *
+         * Still ROOT-SCOPED, which is the other half of the contract: a scene holding a track, an
+         * opponent and the red-box fallback has more than one node called `WheelFL`, and each kart must
+         * get its own.
+         */
+        protected findRigNode(name: string): BABYLON.TransformNode;
+        /** One contact against one tagged surface. Split out so enter and stay share it exactly. */
+        protected onSurfaceContact(other: BABYLON.TransformNode): void;
+        /**
+         * Builds the chassis body from the measured Unity spec if nothing has built one already.
+         *
+         * A Unity-exported kart carries its collider in `extras.metadata.components` and the toolkit
+         * builds the body during parsing, so this is a no-op there. A bench rig has no such metadata,
+         * so the same metadata shape is written by hand and handed to the same toolkit entry point —
+         * `RigidbodyPhysics.SetupPhysicsComponent` — rather than assembling a `PhysicsBody` directly.
+         * Going through the toolkit is what guarantees the two paths produce the same body.
+         */
+        private ensureChassisBody;
+        /** Per-frame input sampling and visual channels. */
+        protected updateKartState(): void;
+        /** Reusable probe result. Allocating one of these per step would allocate 60 a second. */
+        private readonly rayResult;
+        /**
+         * Whether the ground probe's RAW hit this step was an `AntiGravity`-tagged surface.
+         *
+         * Written once per step in `probeGround`, read once per step in `tickAntiGravity`. Raw, not
+         * accepted: see the note in `probeGround` for why deriving it from the accepted hit would be
+         * circular.
+         */
+        protected overAntiGravitySurface: boolean;
+        /**
+         * Whether the ground probe's RAW hit this step was a surface that is NOT anti-gravity.
+         *
+         * The positive evidence that the kart has driven off an anti-gravity mesh onto ordinary road.
+         * Distinct from `!overAntiGravitySurface`, which is also true in mid-air and must not end the
+         * mode — see the note in `tickAntiGravity`.
+         */
+        protected overOrdinarySurface: boolean;
+        /**
+         * Drive anti-gravity from the SURFACE under the probe rather than only from entry/exit triggers.
+         *
+         * **On by default, because Mario Kart's anti-gravity is a property of the road.** The mode comes
+         * on the moment the kart is over an `AntiGravity`-tagged mesh and ends when it is demonstrably
+         * on ordinary road, which is what a driver expects and what a trigger model cannot deliver
+         * without hand-placed boxes in exactly the right places.
+         *
+         * **THIS DEFAULT USED TO BE `false`, AND THE REASON WAS NOT WHAT THIS NOTE SAID IT WAS.** It
+         * recorded a measured cost — the bench barrel's roll reaching 129.2 degrees against the trigger
+         * model's 144, and a probe ceiling normal of -0.666 rather than past -0.7 — and attributed it to
+         * the tube sitting 0.06 above ordinary ground, so that a probe which should read the tube reads
+         * the pad and ends the mode mid-roll. **That attribution was measured and is false:** driven at
+         * 30 Hz the probe read the anti-gravity surface on 123 frames and ordinary ground on 1, and the
+         * flag never dropped once.
+         *
+         * The real cause was where each model turned the flag ON. The bench's barrel opened with a
+         * taper, so its entry trigger had been deferred 140 units into the tube to a station where the
+         * profile had closed; the surface path had no such deferral. The two models were not driving
+         * the same manoeuvre — one started its helix 140 units later than the other, with less tube
+         * ahead of it. T48 deleted the taper (the Unity project has no such concept and authors
+         * anti-gravity sections as constant-profile pipes), the threshold went back on the mouth where
+         * Unity's `AntiGravityEnter` sits, and the difference went with it: `tests/KartAntiGravity.test
+         * .ts`'s whole T38 regression block — roll, riding band, probe continuity, frame-rate spread —
+         * passes unchanged with this flag either way.
+         *
+         * What still differs, and legitimately, is which thing CLEARS the flag: under the surface model
+         * leaving the mesh does, so the exit-volume contract from `Player.cs:1280-1299` is characterised
+         * with this set to `false`. That is a different question from how a kart traverses a tube.
+         */
+        surfaceAntiGravity: boolean;
+        /**
+         * Whether the anti-gravity currently in effect was set by the SURFACE rather than by a volume.
+         *
+         * The surface may only clear what the surface set. Without this the road took the mode away
+         * from karts that a volume, a respawn or an authored property had put into it.
+         */
+        protected antiGravityFromSurface: boolean;
+        /** Seconds of anti-gravity remaining since the last anti-gravity surface contact. */
+        protected antiGravitySurfaceTail: number;
+        /** Reusable result for the separate length-1 drift-entry probe. */
+        private readonly driftRayResult;
+        /** Reusable ray endpoint. */
+        private readonly rayEnd;
+        /** Reusable world-space down vector (`-transform.up`), unit length. */
+        private readonly rayDirection;
+        /** Reusable scaled ray vector. `Vector3.scale` allocates; `scaleToRef` into this does not. */
+        private readonly rayExtent;
+        /** Reusable alignment quaternion. */
+        private readonly alignRotation;
+        /** Reusable alignment target. */
+        private readonly alignTarget;
+        /** The probe query, built once in `awakeKartState` from the layer include-list. */
+        private rayQuery;
+        /** Accelerations gathered during this step, world space, u/s². Unity's PhysX force buffer. */
+        private readonly pendingAcceleration;
+        /** The velocity this step decreed, before the pending accelerations are added. */
+        private readonly assignedVelocity;
+        /** Scratch for reading the body's current velocity without allocating. */
+        private readonly bodyVelocity;
+        /** Scratch for converting a local acceleration into world space. */
+        private readonly localAccel;
+        /** Reused argument for `selectMaxSpeed`. A fresh literal per step is still 60 objects a second. */
+        private readonly speedCapState;
+        /** `rb.AddForce(v, ForceMode.Acceleration)` — world space, u/s². */
+        protected addWorldAcceleration(x: number, y: number, z: number): void;
+        /** `rb.AddRelativeForce(v, ForceMode.Acceleration)` — the kart's local frame, u/s². */
+        protected addLocalAcceleration(x: number, y: number, z: number): void;
+        /**
+         * A per-step VELOCITY offset, world space, u/s — and the one place FINDING 1's conversion is
+         * not the whole story.
+         *
+         * ---------------------------------------------------------------------------------------
+         * WHY A FORCE IN THE HORIZONTAL PLANE IS NOT AN ACCELERATION HERE, AND WHY THE VERTICAL ONES
+         * STILL ARE.
+         *
+         * `Move()` ASSIGNS the velocity every step (FINDING 0), so what a force does to the kart
+         * depends entirely on whether the component it pushes on survives that assignment:
+         *
+         *   * VERTICAL. The assignment's clamp keeps the BODY's `y` whenever the nose's is higher
+         *     (`1332-1339`), so a downward force is not erased — it accumulates step over step, the
+         *     kart falls faster and faster, and it is a genuine acceleration. Gravity and the drift
+         *     downforce go through `addWorldAcceleration` / `addLocalAcceleration` for exactly that
+         *     reason.
+         *
+         *     **THE TWO CLAMP-SKIPPING STATES ARE THE EXCEPTIONS, AND BOTH USED TO BE LISTED HERE AS
+         *     EXAMPLES.** A jump-panel flight (`1439-1448`) and anti-gravity (`1335`) each switch that
+         *     clamp OFF, so the assignment takes the nose's vertical whole, the body's accumulated
+         *     motion is discarded every step, and a force routed through `addLocalAcceleration`
+         *     delivers `a · dt` and no more. Measured: the panel threw the kart 21.9 units up at 30 Hz,
+         *     12.3 at 60 and 6.0 at 144, and the anti-gravity downforce read a flat −112 · dt, pinning
+         *     a kart to a barrel 4.8× harder at 30 Hz than at 144. Both now go through
+         *     `addLocalStepVelocity`.
+         *
+         *     The lesson generalises, and it is the one to carry into every later phase: the question
+         *     is never "is it vertical?", it is **"does this component survive the assignment IN THIS
+         *     STATE?"** The anti-gravity case was missed for two whole tasks because every test ran at
+         *     60 Hz, where a wrong answer still looks like a working barrel.
+         *   * HORIZONTAL. `x` and `z` are overwritten WHOLE every step. A lateral force therefore
+         *     never accumulates: each step it contributes `a · dt` and each step that contribution is
+         *     thrown away and re-made. What the player feels is not an acceleration at all — it is a
+         *     constant sideways velocity of `a · dt` riding on top of the heading.
+         *
+         * At Unity's 50 Hz the drift's 1000 u/s² lateral force therefore reads as a steady **20 u/s**
+         * of outward slide, which is where FR-4's 14° figure comes from (`atan(20/80)`). Ported as a
+         * literal acceleration into `pendingAcceleration`, the same line would give 16.7 u/s at 60 Hz
+         * and 6.9 u/s at 144 Hz — the drift's whole character would change with the monitor. So the
+         * conversion for a horizontal force is `x · 0.02 · 0.02` u/s of velocity, not `x · 0.02` of
+         * acceleration, and it is added HERE, to the assigned velocity, where it belongs.
+         *
+         * ONE CONSEQUENCE, AND IT IS UNITY'S TOO. "Horizontal" above means "in the kart's own plane",
+         * not "in the world's". On banked surfaces `transform.right` tilts with the bank, so the
+         * drift's 20 u/s push carries a world-VERTICAL component — about 6 u/s at the bench sweeper's
+         * 18° — and because this runs AFTER `clampAssignedVerticalVelocity`, that component is not
+         * clamped. A drift on the banking is therefore partly lofted by its own lateral force and
+         * climbs the bank. That is exactly what Unity does: `AddForce` lands after the velocity
+         * assignment there as well, and the force is a full 3-vector along `transform.right` in both.
+         * Clamping it here would be a change to the game, not a fix.
+         * ---------------------------------------------------------------------------------------
+         */
+        protected addStepVelocity(x: number, y: number, z: number): void;
+        /**
+         * `Player.cs:1317-1432` — everything that decides how fast the kart is going.
+         *
+         * Read alongside the source: the statement order below is the statement order there, because
+         * several of these assignments overwrite each other and the order is the specification.
+         */
+        private move;
+        /**
+         * `Player.cs:1393-1400`. Coasting clears the drift DIRECTION — and nothing else.
+         *
+         * =========================================================================================
+         * THIS USED TO CALL `stopDrift(false)`, AND THAT DESTROYED THE MINI-TURBO.
+         * =========================================================================================
+         *
+         * The coast branch runs on EVERY step the throttle is off, and `stopDrift(false)` takes the
+         * `1799` path: it zeroes `Drift_time`, clears `drifting`, resets `driftLatchTimer` and puts
+         * `driftState` back to `None`. So lifting off for a single frame did not merely neutralise
+         * the drift, it **deleted the charge**.
+         *
+         * What that costs is the whole mechanic, because lifting off is exactly what a player does
+         * entering a corner. Measured on the bench before the fix: a drift held for three seconds
+         * with the throttle released never accumulated a single frame of charge — `Drift_time` read
+         * **0.00 at 69, 61, 53 and 47 u/s**, all comfortably above the 40 the hold requires — so the
+         * release paid nothing and there was no burst. The player's report was "coming out of a drift
+         * does not give a speed burst", and this was why.
+         *
+         * **UNITY'S LINES ARE FOUR ASSIGNMENTS AND A LERP, AND NONE OF THEM TOUCHES THE CHARGE:**
+         *
+         *     if (!Input.GetKey(KeyCode.Space)) {
+         *         currentspeed = Mathf.Lerp(currentspeed, 0, 0.01f);
+         *         drift_right = false;  drift_left = false;  drift_direction = 0;
+         *         transform.GetChild(0).localRotation = Lerp(..., Quaternion.Euler(0,0,0), 0.4f);
+         *     }
+         *
+         * `Drift_time` keeps accumulating, because the hold test at `1672` has **no throttle term** —
+         * it is `GetKey(V) && grounded && currentspeed > 40 && GetAxis("Horizontal") != 0` and no
+         * more. So in Unity you can lift off mid-drift, keep charging, and still collect the payout.
+         * The earlier docblock's argument for routing through `stopDrift` was about keeping
+         * `drift_left`/`drift_right` consistent with `drift_direction` — a real concern, and one this
+         * version answers by clearing all three together rather than by ending the drift.
+         *
+         * **THE DIRECTION IS NOT RESTORED AFTERWARDS, AND THAT IS FAITHFUL RATHER THAN AN OVERSIGHT.**
+         * `drift_direction` is written only at entry (`1659-1666`); the held branch never re-derives
+         * it. So a coast mid-drift permanently neutralises the outward push and the spark side for
+         * that drift while the charge keeps building — quirky, and exactly what the source does.
+         *
+         * @param dt the step, for the model settle below
+         */
+        protected endDriftOnCoast(dt: number): void;
+        /** Reused local yaw axis. */
+        private readonly yawAxis;
+        /** Reused yaw quaternion. */
+        private readonly yawRotation;
+        /** Reused argument for `selectSpeedRotateRate`. */
+        private readonly steerState;
+        /**
+         * `Player.cs:1548-1638` — `Steer()`, in Unity's own statement order.
+         *
+         * It runs AFTER `Move()` has already written the velocity, which is what lets the drift's
+         * outward push at `1567`/`1584` survive the assignment (T12).
+         */
+        protected steer(dt: number): void;
+        /**
+         * `Player.cs:1561`/`1579`. The model child's ±20° drift yaw, approached at 8/s.
+         *
+         * Split from the lateral force rather than folded in with it, because Unity interleaves them
+         * around the `max_speed` write and the call order is the specification.
+         *
+         * **8/s is the third of FINDING 3's three rates**, against the chassis's 7.5 and the camera's
+         * 3. It is the fastest of the three, which is why the model reaches its drift pose while the
+         * chassis is still rolling onto the surface and the camera is still catching up — and that
+         * lag between the three is the visible lean (D-5). Do not tidy it.
+         *
+         * @param hand `+1` drifting right (yaw `+20°`), `-1` drifting left (yaw `-20°`).
+         */
+        protected applyDriftModelYaw(hand: number, dt: number): void;
+        /**
+         * `Player.cs:1567`/`1584` — the outward lateral push, and the thing that makes a drift a drift.
+         *
+         * Unity writes `rb.AddForce(∓transform.right · 50000 · Time.deltaTime, ForceMode.Acceleration)`.
+         * Through FINDING 1 that is 1000 u/s², and through the horizontal-force argument in
+         * `addStepVelocity` it lands as a steady **20 u/s** of outward slide. At the drift's own
+         * 80 u/s cap the kart therefore travels `atan(20 / 80)` = **14°** wide of where it is
+         * pointing — real slip, not a rotated model.
+         *
+         * IT ONLY SURVIVES BECAUSE OF THE CALL ORDER. `Steer()` runs AFTER `Move()` has assigned the
+         * velocity (`Player.cs:294-295`), so this lands on top of the assignment rather than under
+         * it. Reordering the two would delete the drift entirely while every constant stayed correct.
+         *
+         * **The sign pairing is §E.2's, not the source's branch labels** — those are swapped in the
+         * spec's citation list. Drifting RIGHT pushes along `-transform.right`; drifting LEFT pushes
+         * along `+transform.right`. Both push OUTWARD, away from the corner being turned into, which
+         * is the only reading under which the kart slides wide instead of tucking in.
+         *
+         * @param hand `+1` drifting right (pushes along `-transform.right`), `-1` drifting left.
+         */
+        protected applyDriftLateralForce(hand: number): void;
+        /**
+         * `Player.cs:2251` — the drift downforce: **200 u/s² along the kart's own local down**.
+         *
+         * `AddForce(-transform.up · 10000 · dt, Acceleration)` = 10000 × 0.02, so twice the manual
+         * gravity of `move()` and a hundred times the engine's own -2. Vertical, therefore a genuine
+         * acceleration (see `addStepVelocity`).
+         *
+         * This is what keeps a drift PLANTED. A kart carrying 20 u/s of outward slide over the crest
+         * of a banked corner leaves the surface without it, and a kart in the air is a kart whose
+         * ground probe misses and whose alignment stops — so the loss compounds. Gated off while
+         * gliding, where the glider owns the vertical entirely.
+         *
+         * Called from the step between `steer()` and the alignment, which is where `2251` sits
+         * relative to `Steer()` at `295` and `GroundNormalRotation()` at `302`.
+         */
+        protected applyDriftDownforce(): void;
+        /** `Player.cs:1626`. Model yaw returns to 0 at 8/s when not drifting. */
+        protected releaseDriftModelYaw(dt: number): void;
+        /** Seconds left in the post-finish model unwind, or 0. See `raceStopDriftRot`. */
+        protected raceStopDriftRotTimer: number;
+        /**
+         * `LapCounter.cs:115-123` — `stopDriftRot()`, the post-finish unwind of the model child.
+         *
+         * Unity runs it as a coroutine on the LAP COUNTER: 120 iterations of `WaitForSeconds(0.01f)`
+         * lerping `transform.GetChild(0).localRotation` toward identity at `8f * Time.deltaTime`.
+         *
+         * **IT LIVES HERE, ON THE CONTROLLER, AND THE FIRST ATTEMPT PUT IT ON THE LAP COUNTER AND WAS
+         * DEAD CODE.** That is worth the paragraph, because the failure was invisible to a green test.
+         * In Unity the model child's `localRotation` is a genuine accumulator — `Player.cs:1561`,
+         * `:1579` and `:1626` all read-modify-write it — so an outside component lerping the same
+         * field composes with them. **This port does not have that accumulator.** It keeps a scalar
+         * `driftYaw` and rebuilds the quaternion from scratch every frame in `updateModelMotion`
+         * (`copyFrom(this.modelRotation)`), which runs unconditionally from `updateKartState`. So a
+         * write to `modelNode.rotationQuaternion` from any other component survives exactly zero
+         * frames: measured, an externally-applied 40 degrees read back as 0 after ONE rendered frame,
+         * against a decay that predicted 35.007. The mechanism was tested — and only ever tested with
+         * the render loop taken out of the picture, which is the one arrangement that hides it.
+         *
+         * The rule it produced: **a channel is unwound by the component that composes it, or not at
+         * all.** So this decays `driftYaw` itself, and `updateModelMotion` composes the result.
+         *
+         * **WHY IT IS NOT MERELY REDUNDANT WITH `releaseDriftModelYaw`, WHICH IT LOOKS LIKE.** That
+         * method decays the same field at the same 8/s — but it is called from `steer()`, and in UNITY
+         * `Steer()` does not run after the finish at all: `Player.cs:264` gates the locomotion on
+         * `!RACE_COMPLETED` and `:419-423` hands the kart to the AI path system instead. That is
+         * precisely WHY Unity needs a separate coroutine. This port deliberately keeps the player
+         * driving after the line (FR-6.6, no AI path system), so `steer()` DOES keep running and the
+         * yaw would unwind anyway — today, by coincidence of that divergence, and not by design.
+         * Depending on it would be depending on one unported branch to cover for another. This runs in
+         * the frame phase regardless of what the fixed phase did, which is where Unity reaches it from.
+         *
+         * **SO IN THE SHIPPED CONFIGURATION THE TWO COMPOSE AND THE REALISED RATE IS 16/s, NOT 8/s.**
+         * They are simultaneous, not alternatives, and an earlier version of this note framed them as
+         * alternatives. Both decay `driftYaw` every frame at 8/s, and two exponentials multiply:
+         * measured on the bench with the race finished, `RACE_STARTED` true gives an implied
+         * 16.000000000000 per second against 8.000000000000 with the locomotion gate shut. Unity
+         * realises 8, because `Steer()` stops at the finish.
+         *
+         * Recorded rather than corrected, for two reasons. The visible difference is nil — from 20
+         * degrees over the 1.2 s window, 8/s leaves **0.0013546** degrees and 16/s leaves
+         * **9.1744e-8**, and both are identity to any eye or any camera. (An earlier version of this
+         * line said 16/s leaves `0.0000023`. That is `20 · e^-16` — the ONE-SECOND figure — presented
+         * as the 1.2-second one, wrong by a factor of 25. Corrected rather than quietly dropped,
+         * because a docblock is the donor for the next person who writes this up, and this one had
+         * already been copied into SPEC.md once before it was checked.) And it is rate-independent
+         * either way, because
+         * both terms are exponential in wall-clock time, so the doubling does not reintroduce the D-6
+         * problem. **The consequence to know is the counter-intuitive one:** if the locomotion gate
+         * ever regains Unity's `!RACE_COMPLETED`, this unwind does not become redundant — it becomes
+         * the ONLY one, and the realised rate HALVES to Unity's own 8/s rather than staying put.
+         *
+         * Rate-independent through `approachRate`, the file's own D-6 decay helper — `driftYaw`
+         * PERSISTS between steps (nothing rebuilds the scalar; only the quaternion is rebuilt from
+         * it), so it is a decay and takes the exponential form rather than a flat per-step factor.
+         *
+         * @param seconds How long to keep unwinding. The caller supplies Unity's nominal `120 x 0.01`.
+         */
+        raceStopDriftRot(seconds: number): void;
+        /** Whether the post-finish unwind is still running. */
+        isRaceStopDriftRotRunning(): boolean;
+        /**
+         * One frame of the post-finish unwind. Runs in the FRAME phase, beside the other model channels.
+         *
+         * Deliberately independent of `steer()` — see `raceStopDriftRot` for why leaning on that call
+         * would be leaning on one unported Unity branch to cover for another.
+         */
+        protected tickRaceStopDriftRot(dt: number): void;
+        /**
+         * `Player.cs:272`. Throttle held before the start, seconds — the rocket-start charge.
+         *
+         * Owned by a race manager through `chargeLaunch`/`releaseLaunch` rather than read from a
+         * countdown here, because the component has no idea when a race starts and should not.
+         */
+        protected beforeStartAccelTime: number;
+        /**
+         * `Player.cs:326-343` — the countdown, and the shove on the way out.
+         *
+         * Runs LAST in the step (`stepKartState`), which is not cosmetic: `Steer()` writes an
+         * unconditional `max_speed = desiredMaxSpeed` at `1627` whenever the kart is not drifting, so
+         * a boost whose cap was applied any earlier would be overwritten every single step and would
+         * do nothing at all.
+         */
+        protected tickBoost(dt: number): void;
+        /**
+         * Every boost source in the game, in one line (`960`, `1077`, `507`, `1178`, `274`, `1824-1866`).
+         *
+         * An ASSIGNMENT, exactly as Unity writes it — a new source replaces whatever was running
+         * rather than adding to it.
+         *
+         * @param seconds How long the boost runs.
+         */
+        /** Monotonic count of boost sources fired. Telemetry only — nothing in the sim reads it. */
+        protected boostGrantCount: number;
+        /** Which source last fired. Telemetry only. */
+        protected lastBoostSource: EKartBoostSource;
+        /** Records that a source fired. The presentation layer's entire view of the boost economy. */
+        protected recordBoostGrant(source: EKartBoostSource): void;
+        grantBoost(seconds: number, source?: EKartBoostSource): void;
+        /**
+         * `Player.cs:539-541` — the trick landing, and the one source that is a FLOOR.
+         *
+         * `if (Boost_time < 0.9f) Boost_time = 0.9f;`. Written as a floor so that landing a trick in
+         * the middle of a 2.5 s drift payout cannot cut it to 0.9 — which an assignment would, and
+         * which would make tricking mid-boost a punishment.
+         *
+         * @param seconds The minimum the boost must be running for.
+         */
+        floorBoost(seconds: number, source?: EKartBoostSource): void;
+        /**
+         * `Player.cs:1824-1866`. The drift payout, by tier.
+         *
+         * 0.75 / 1.5 / 2.5 seconds at charge boundaries of 1.5 / 4 / 7 s — so the first tier costs
+         * 1.5 s of charge and returns half of it, the second costs 4 and returns 1.5, and only the
+         * third pays back a meaningful fraction of what it cost. The curve is deliberately bad value
+         * at the top: the reason to hold a drift to 7 s is the 2.5 s of `boost_speed`, not the ratio.
+         *
+         * @param tier 1, 2 or 3. Tier 0 never reaches here — `stopDrift` does not pay it.
+         */
+        protected payDriftBoost(tier: number): void;
+        /**
+         * `Player.cs:272-274`, `403` — the rocket start's charge.
+         *
+         * Call once per frame while the pre-race countdown is running. The window is **1 to 2 seconds
+         * of held throttle**: under a second is too eager, over two is a burnout, and both grant
+         * nothing. Releasing the throttle resets the clock (`403`), so there is no way to bank the
+         * charge and no way to hold it safely — which is the whole tension of the start line.
+         *
+         * @param dt Seconds since the last call.
+         */
+        chargeLaunch(dt: number): void;
+        /**
+         * `Player.cs:272-278`. The green light. Grants 1 s of boost if the charge landed in the window.
+         *
+         * **THE COMPARISON IS INCLUSIVE HERE AND STRICT IN UNITY, AND THAT IS A DIVERGENCE THAT WAS
+         * BEING DESCRIBED AS FIDELITY.** `Player.cs:272` is
+         * `if(beforeStartAccelTime > 1 && beforeStartAccelTime < 2)` — **strict at both ends**. This
+         * line is `>= 1 && <= 2`. Until this was read against the source, `tests/KartBoost.test.ts`
+         * asserted in prose that `>= 1 && <= 2` was "the comparison the source actually writes", which
+         * is exactly D-8's signature: the port checked against its own description of the donor rather
+         * than against the donor.
+         *
+         * **The behaviour is left as it is, deliberately, and the reason is in that same test.**
+         * Frame-driven accumulation cannot land on either boundary: 60 frames of `1/60` sum to
+         * 0.9999999999999999, one ulp under 1, and 60 frames of `1/30` sum to 2.0000000000000027, a
+         * few ulps over 2. So both endpoints are unreachable by the only route a player has, and the
+         * two comparisons agree on every charge anyone can actually produce. Changing it would move a
+         * shipped, pinned edge to buy agreement on a pair of values no accumulator can hit.
+         *
+         * What it costs is that a SYNTHETIC charge — one `chargeLaunch(1)` call, which is how the edge
+         * is probed — is granted here and refused in Unity. Recorded rather than hidden, because the
+         * one thing that must not happen again is the port's own convenience being written down as the
+         * source's behaviour.
+         *
+         * @returns Whether the rocket start was granted, so a race manager can play the effect.
+         */
+        releaseLaunch(): boolean;
+        /** Last frame's drift button, so entry can fire on the PRESS rather than on the hold. */
+        protected previousDrifting: boolean;
+        /**
+         * **T37.** A press that could not be spent yet, still waiting for `canEnterDrift()`.
+         *
+         * `Player.cs:1639-1830` is TWO INDEPENDENT BLOCKS and this port had collapsed them into one:
+         *
+         *   * `1649` — `GetKeyDown(V) && !GLIDER_FLY && !JUMP_PANEL && onGround`. The hop. It does not
+         *     look at the steering at all.
+         *   * `1672` — `GetKey(V) && grounded && currentspeed > 40 && Horizontal != 0 && ...`. The
+         *     drift. `GetKey`, not `GetKeyDown`: re-evaluated EVERY frame the button is held, so it
+         *     starts the moment the steering arrives, however long after the press that is.
+         *
+         * Collapsing them made the press the only moment the machine would ever look, and D-4's steer
+         * requirement — which is right, and stays — was attached to that single moment. The cost was
+         * the canonical gesture: **press drift, then steer into the apex, and nothing ever happened.**
+         * Measured on the running bench at 65 u/s, drift held 2.5 s: steering 250 ms after the press
+         * gave `Drift_time 0.000`, and 700 ms after gave `Drift_time 0.000`. Steering strictly BEFORE
+         * the button drifted normally, by a margin as small as one 17 ms frame.
+         *
+         * **AND WHAT IT IS NOT, because the first draft of this docblock got it wrong and the test file
+         * added in the same change said so.** It claimed the SAME-frame case was broken too, and
+         * therefore that `drive(1, -1, true)` — the docblock below calls that the kart's only input
+         * surface — meant no AI, race manager or replay could ever start a drift. **That is false.**
+         * With steering and the button genuinely arriving together, `pressed` and `canEnterDrift()`
+         * are both true on that one frame and the OLD code entered fine; the same-frame tests below
+         * are green against the pre-fix implementation and are regression guards, not evidence. A
+         * bench row labelled "same frame" did measure `0.000`, but two synchronous DOM dispatches are
+         * not a proof of same-frame DELIVERY, and the headless path is the decisive measurement here.
+         * The real cost is the one thing measured cleanly at both ends: a press that arrives BEFORE
+         * its steer — every human corner, and any caller that presses drift while still straightening.
+         *
+         * **No expiry, and none should be invented.** Unity's latch is literally "the button is still
+         * down", and `canEnterDrift()` already refuses while gliding, on a jump panel, spun out or off
+         * the ground. The latch is CONSUMED on entry, which is what keeps
+         * `tests/KartDriftMachine.test.ts:390` honest — a press whose entry aborts on `canHoldDrift`
+         * must not re-fire on each of the next 839 frames.
+         *
+         * **TWO DIVERGENCES STAY, DELIBERATELY, AND ARE RECORDED RATHER THAN TAKEN ON:**
+         *
+         *   1. Unity slams `rotate_strength = 5` on the PRESS (`1667`, inside the hop block); this
+         *      port does it inside `enterDrift()`, so a deferred entry defers the slam with it. A
+         *      neutral press therefore keeps full steering authority for the frames where Unity would
+         *      have cut it to a fifth.
+         *   2. Because `1672` is re-evaluated every frame, Unity RESUMES a drift whose hold conditions
+         *      failed while the button is still down. This port does not — the latch was consumed at
+         *      the first entry — which is the behaviour `KartDriftMachine.test.ts:760` pins.
+         *
+         * And the direction is now better than either side. Unity's `1625` is
+         * `direction = Horizontal > 0 ? 1 : -1` with no zero case, so its neutral press latches
+         * `drift_direction = -1` and the kart drifts LEFT whichever way the player then turns — D-4's
+         * bug exactly. The port refused the wrong direction by refusing the drift. This takes the
+         * direction from the steering that actually arrived.
+         */
+        protected driftPressLatched: boolean;
+        /**
+         * Seconds since the current drift was entered.
+         *
+         * Its only consumer is T12's `drifting` latch (**P-1**): the outward lateral force starts
+         * `driftLatchDelay` = 0.283 s after entry, which in Unity is an animation event on
+         * `KartDriftHop.anim` and here is this timer. Counted from the ENTRY, not from the moment the
+         * machine reaches `Drift`, because the animation event is on the hop.
+         */
+        protected driftLatchTimer: number;
+        /**
+         * `Player.cs:238`, `1639-1890` — `Drift()`, run from `Update` and not from `FixedUpdate`.
+         *
+         * That placement is Unity's and is kept: the entry is a BUTTON EDGE, and sampling an edge on
+         * the physics step would drop presses whenever the frame rate ran ahead of the solver.
+         */
+        protected drift(dt: number): void;
+        /**
+         * `Player.cs:1649` — may a drift be ENTERED this frame?
+         *
+         * The ground test is the SEPARATE length-1 probe (§E.7), not the alignment ray: a kart may be
+         * within `groundRayDist` = 2 of the deck and still be too far off it to start a drift.
+         *
+         * The steer requirement is **D-4**: Unity's `1625` has no zero case, so a neutral hop falls
+         * through to "left" and latches a drift the player never asked for. Requiring a held steer
+         * above `driftLatchThreshold` removes that without changing anything about a drift the player
+         * did ask for.
+         */
+        protected canEnterDrift(): boolean;
+        /**
+         * `Player.cs:1672` — may the drift be HELD this frame?
+         *
+         * `currentspeed` and not `REALCURRENTSPEED`: the 40 here is Unity's, and it reads the decreed
+         * speed. Using the measured one would make a kart sliding wide at the drift's own 14° of slip
+         * (T12) fail the test it currently passes, and would lose the charge on the very corners the
+         * mechanic exists for.
+         */
+        protected canHoldDrift(): boolean;
+        /**
+         * `Player.cs:1649-1667`. Enters the drift.
+         *
+         * No impulse, no vertical anything: the four assignments below plus the visual triggers ARE
+         * the entry.
+         */
+        protected enterDrift(): void;
+        /**
+         * Ends the drift.
+         *
+         * @param payout `true` only for the button-up branch at `1808`. Everything else is `1799`,
+         *               which zeroes the charge and pays nothing.
+         */
+        protected stopDrift(payout: boolean): void;
+        /**
+         * Drift-entry visual triggers — the hop, the shake, and the `Drift` animator trigger.
+         *
+         * The hop is gated on `hopEnabled`; the shake is NOT (FR-5: `hopEnabled = false` removes the
+         * lift and leaves everything else exactly as it was).
+         */
+        protected onDriftEntry(): void;
+        /**
+         * Drift-exit visual triggers.
+         *
+         * Nothing one-shot fires here: the model yaw unwinds through `releaseDriftModelYaw`, which
+         * `steer()` already calls every step the kart is not drifting.
+         */
+        protected onDriftExit(): void;
+        /**
+         * The node every channel in this section writes. Resolved in `start()`, `null` on a rig
+         * without one — in which case the whole section is inert rather than throwing.
+         */
+        protected modelNode: BABYLON.TransformNode;
+        /**
+         * The model child's authored local offset, captured once in `start()`.
+         *
+         * Every channel here is an offset FROM the rest pose, not an absolute position. On the bench
+         * rig that distinction is invisible — `KartModel` sits at the origin — but a Unity-exported
+         * kart may well have its chassis mesh authored a little forward or a little down, and writing
+         * `position.set(...)` absolutely would snap it to the parent origin on the very first frame
+         * (T26).
+         */
+        private readonly modelRestPosition;
+        /**
+         * `TOOLKIT.AnimationState` on the kart, if a rigged asset supplied one.
+         *
+         * The seam between the procedural curves and real clips (T26). Not a fallback in the usual
+         * sense: it is checked PER TRIGGER, so a kart whose animator has a drift clip but no shake
+         * gets the real drift and the procedural shake.
+         */
+        protected animator: any;
+        /**
+         * Whether a real `Drift` clip owns the model's drift POSE, not just its entry event.
+         *
+         * The hop and the shake are one-shots and stand down by simply not being started
+         * (`fireTrigger` returning true is enough). The ±20° drift yaw is not a one-shot — it is
+         * composed onto the model every single frame — so it needs its own gate, or a rigged kart
+         * whose drift clip already yaws the body would get the yaw twice.
+         *
+         * Read live rather than cached at `start()`, because an animator can arrive late: a kart
+         * assembled from a loaded glTF may not have its `AnimationState` attached until the container
+         * is instantiated, and a cached `false` would leave the procedural yaw fighting the clip for
+         * the rest of the session.
+         */
+        protected animatorOwnsDriftPose(): boolean;
+        /**
+         * Does a `TOOLKIT.AnimationState` own the wheel nodes? (T26)
+         *
+         * The wheel equivalent of `animatorOwnsDriftPose`, and it exists for the same reason: T25's
+         * `applyWheelPose` rewrites `position` and `rotationQuaternion` every frame, **including at pose
+         * zero**, so on a rigged kart shipping real wheel clips the two would fight for the same nodes
+         * every frame and the animator would lose half of them.
+         *
+         * **THE TRIGGER NAME IS PORT-INTRODUCED, AND IT HAD TO BE.** The first version asked about
+         * `"AntiGravity"`, which is already the CHASSIS-LIFT trigger this component fires on the model
+         * child (T14, `EnterAntiGravity.anim`). That collision broke it both ways: a Unity animator
+         * declaring `AntiGravity` for the body lift lost all wheel motion — steer, spin, swing and arm
+         * scale — even with no wheel clips at all; and a kart with real wheel clips but no `AntiGravity`
+         * parameter had its wheels driven twice, which is the exact fight this gate exists to prevent.
+         *
+         * Unity's animator declares no wheel trigger of its own, because in Unity the wheels are moved
+         * by `movingCarParts()` in code and never by a clip. So `KartWheels` is a name this port adds,
+         * and an animator that wants the wheels announces itself with it.
+         */
+        protected animatorOwnsWheels(): boolean;
+        /** Current model yaw, degrees. `+20` drifting right, `-20` left, 0 otherwise (`1561`/`1579`/`1626`). */
+        protected driftYaw: number;
+        /** Playhead for `KART_HOP_TRACK`, seconds. Negative when the channel is idle. */
+        protected hopTime: number;
+        /** Playhead for `KART_SHAKE_TRACK`. */
+        protected shakeTime: number;
+        /** Playhead for `KART_ANTIGRAVITY_TRACK`. */
+        protected antiGravityLiftTime: number;
+        /** Playhead for `KART_IDLE_TRACK`. */
+        protected idleTime: number;
+        /** How far into the held underwater drift pose the body is, 0 to 1. */
+        protected underwaterBlend: number;
+        /** Which way the underwater pose leans: the drift hand at the moment it armed. */
+        protected underwaterHand: number;
+        /** Was the kart at rest last frame? The idle settle fires on the edge, not on the state. */
+        protected wasAtRest: boolean;
+        /** Was anti-gravity on last frame? Same reason. */
+        protected wasAntiGravity: boolean;
+        /** Reused model rotation, so composing three channels a frame allocates nothing. */
+        private readonly modelRotation;
+        /**
+         * Hands a Unity trigger name to `TOOLKIT.AnimationState`, if there is one.
+         *
+         * The full set is the one Unity's animator declares — `Drift`, `Shake`, `AntiGravity`,
+         * `StartBoostTilt`, `HitLeft`, `HitRight`, `BananaHit`, `ShellHit`, `Glide1`, `Glide2` — and
+         * the names are carried verbatim so a kart rigged in Unity needs no mapping table.
+         *
+         * @returns `true` if an animator took it, in which case the procedural channel for that
+         *          trigger stands down and the clip owns the motion.
+         */
+        protected fireTrigger(name: string): boolean;
+        /**
+         * Advances every procedural channel and composes them onto the model child.
+         *
+         * Runs from `update()` — these are frame-rate visuals with no bearing on the solver, and
+         * running them on the physics step would make them stutter on a machine whose frame rate and
+         * step rate differ.
+         */
+        protected updateModelMotion(dt: number): void;
+        /**
+         * Advances the one-shot playheads and fires the ones that are edge-triggered.
+         *
+         * Split from the composition so that a rig with no model child still runs its triggers — the
+         * animator seam has to work whether or not the procedural channels have anywhere to write.
+         */
+        private tickModelTriggers;
+        /** Current model yaw, degrees — `+20` drifting right, `-20` left, 0 otherwise. */
+        getDriftYaw(): number;
+        /** The model child's local `y` this frame, units. The sum of every one-shot curve plus the pose. */
+        getModelLift(): number;
+        /** The node every FR-11 channel writes, or `null` on a rig without one. */
+        getModelNode(): BABYLON.TransformNode;
+        /** `OutOfBounds.cs:8`. In a `Water` volume; drives the extra local downforce while sinking. */
+        protected FellInWater: boolean;
+        /** `OutOfBounds.cs:10`. In an `OutOfBounds` volume. */
+        protected outOfBounds: boolean;
+        /** `OutOfBounds.cs:13`. **The camera skips its whole update while this is set.** */
+        PlayerBeingMoved: boolean;
+        /**
+         * `RACE_MANAGER.cs:34` — the green light. Written one way by the race manager.
+         *
+         * While `false` the kart runs `GroundNormalRotation()` and nothing else: the probe still
+         * fires, the chassis still settles onto the contact normal, the launch charge still accrues
+         * through `chargeLaunch`, and `move()`/`steer()`/`drift()` do not run. **Defaults to `true`**
+         * — see the block comment above.
+         */
+        RACE_STARTED: boolean;
+        /**
+         * `RACE_MANAGER.cs:35` — the finish. Written one way by the race manager.
+         *
+         * Gates the DRIFT only (`Player.cs:237`), never the locomotion. See the block comment above
+         * for why the locomotion half of Unity's gate is deliberately not transcribed (FR-6.6).
+         */
+        RACE_COMPLETED: boolean;
+        /**
+         * `Player.cs:2409`, called from `LapCounter.cs:58` when the race is won.
+         *
+         * **A PUBLIC ENTRY POINT, AND IT IS NOT `stopDrift(false)`.** The protected `stopDrift`
+         * early-returns on `EKartDriftState.Boost` — deliberately, so `endDriftOnCoast` cannot erase a
+         * payout the instant the player lifts off the throttle — so a bare `stopDrift(false)` is a
+         * **no-op for the whole 0.75-2.5 s payout window**, which is exactly the window a kart is in
+         * when it crosses the line on a charged final corner. Widening the modifier alone would have
+         * shipped a race-end drift stop that silently did nothing on the most likely crossing.
+         *
+         * **AND IT IS NOT `clearTransientState()` EITHER (D-12).** That method's docblock says it is
+         * "a separate method precisely so the race path cannot drift into it", and the difference bites
+         * here: it calls `grantBoost(0)`, which would delete the payout the player just earned. Unity's
+         * `stopDrift()` clears the drift machine and never touches `Boost_time` (`2409-2440`), so this
+         * does the same: it clears the machine unconditionally and leaves the boost economy alone.
+         *
+         * **WHAT THAT ADDS UP TO IS A DIVERGENCE, NOT FIDELITY, AND AN EARLIER VERSION OF THIS
+         * DOCBLOCK CLAIMED THE OPPOSITE.** It said a boost surviving the line is "what Unity does".
+         * It is not. `stopDrift()` alone does not kill the boost, but Unity never relies on it to:
+         * `Player.cs:419-429` — the whole `RACE_COMPLETED` branch — sets `Boost_time = 0`, `Boost =
+         * false` and stops the boost emitters **every frame** after the line, while `steerOnPath()`
+         * and `moveOnPath()` drive the kart home. So in Unity a payout does NOT survive the finish;
+         * it is killed by the branch that also takes the car away from the player.
+         *
+         * That whole branch is unported, because the port has no AI path system (FR-6.6), and the boost
+         * kill goes with it deliberately rather than by omission: the player is still DRIVING after the
+         * line here, and confiscating a boost they earned on the final corner from a kart they are
+         * still steering would be a worse answer than either of Unity's. Recorded as a divergence so
+         * that whoever lands the AI path system finds a decision here and not an oversight — if the
+         * kart ever stops being the player's at the line, `Boost_time = 0` comes back with it.
+         *
+         * The press latch goes too: the player is very likely still holding the button as they cross,
+         * and D-11's latch has no expiry by design, so leaving it set would re-enter a drift on the
+         * next frame the gate allowed one.
+         */
+        raceStopDrift(): void;
+        /** Seconds until the next stage of the recovery. */
+        private respawnTimer;
+        /** 0 idle, 1 waiting to teleport (water only), 2 waiting to restore dynamics. */
+        private respawnStage;
+        /** Where the recovery puts the kart. Supplied by a checkpoint, or by the bench. */
+        private readonly respawnPosition;
+        /** The rotation the recovery restores. Unity teleports position AND rotation. */
+        private readonly respawnRotation;
+        /**
+         * Starts a recovery to a checkpoint (`OutOfBounds.cs:47-48`, `146-147`).
+         *
+         * Checkpoint TRACKING is out of scope for this port — a race manager owns that — so this is
+         * the seam: hand it a place and the kart takes itself there.
+         *
+         * @param immediate `true` for the `OutOfBounds` path (teleport now), `false` for `Water`
+         *                  (sink for 0.5 s first).
+         */
+        respawnTo(position: BABYLON.Vector3, rotation: BABYLON.Quaternion, immediate?: boolean): void;
+        /** Whether a recovery is running. */
+        isRespawning(): boolean;
+        /**
+         * Seconds the ground probe may find nothing before the kart rights itself. **0 disables it.**
+         *
+         * Zero by default ON PURPOSE. Nothing in `Player.cs` does this, so a kart left at the default
+         * is a numerically exact port and every trajectory this project has measured is unchanged;
+         * turning it on is a deliberate act by whoever owns the scene. Same shape as `hopEnabled` —
+         * a capability expressed as a property rather than as a fork of the component.
+         */
+        stuckRecoveryDelay: number;
+        /** How far above its own position the recovery lifts the kart before setting it down. */
+        stuckRecoveryLift: number;
+        /** Seconds the probe has been missing while no state legitimately explains it. */
+        protected stuckTimer: number;
+        /** Reusable target for the recovery, so a stuck kart does not allocate every step. */
+        private readonly stuckRecoveryPosition;
+        /** Reusable rotation for the recovery. */
+        private readonly stuckRecoveryRotation;
+        /**
+         * Whether the kart is in a state that legitimately has no ground under it.
+         *
+         * **ANTI-GRAVITY IS DELIBERATELY NOT ON THIS LIST, and that took a wrong first attempt to see.**
+         * It looks like the most obvious member — a kart on a barrel wall is the picture of "upside
+         * down on purpose" — and putting it here disabled the safety net in precisely the failure it
+         * was written for. Anti-gravity is a LATCH that only an `AntiGravityFalse` volume clears, so a
+         * kart that has fallen out of a barrel without crossing one still carries the flag; excusing
+         * the flag means excusing exactly the kart that is stuck. Driven on the bench with it excused,
+         * a kart thrown clear of the tube sailed to y = 190 with the probe reading `miss`, the flag
+         * still set, and the recovery sitting on its hands.
+         *
+         * It costs nothing to leave it out, because a kart genuinely ON a barrel is not groundless: the
+         * probe lands every single step of a roll — T38 measured a full traverse at 30, 60 and 240 Hz
+         * and found **zero** probe misses. Two seconds of continuous nothing while flagged anti-gravity
+         * does not describe a kart on a wall; it describes a kart that is no longer on anything.
+         *
+         * The other three stay because each is SELF-LIMITING — a trick, a panel flight and a glide all
+         * end on their own — whereas anti-gravity ends only when a volume says so, which is the whole
+         * difference.
+         */
+        protected hasGroundlessExcuse(): boolean;
+        /** Advances the stuck timer and rights the kart when it expires. Inert while the delay is 0. */
+        protected tickStuckRecovery(dt: number): void;
+        /**
+         * Rights the kart IN PLACE, keeping the heading it had.
+         *
+         * Through `respawnTo`, which already teleports safely — kinematic, velocities zeroed, the
+         * camera gated by `PlayerBeingMoved`, dynamics restored half a second later — so this adds no
+         * new teleport path and inherits every test that one has. In place rather than to a checkpoint
+         * because a kart that got stuck may have done nothing wrong, and yanking it across the level
+         * for a small mistake is a worse experience than setting it back on its wheels.
+         *
+         * The heading is taken from the kart's own forward, FLATTENED — and this is DEFENSIVE, not
+         * corrective, which an adversarial pass had to establish because the first version of this
+         * paragraph claimed otherwise. It said reading the yaw straight off an inverted quaternion is
+         * "off by 180 degrees as often as not". Measured across the same six inverted attitudes —
+         * roll 180 and 170, pitch 180 and 170, pitch 120 with roll 150, pitch 100 with roll 20 — but
+         * swept across 361 headings at T44, the two decompositions agree to within 2.33e-6 degrees,
+         * not the 5e-7 this used to claim. Equivalent on everything reachable here either way.
+         *
+         * The flattening stays anyway, because it is well defined for ANY attitude by construction and
+         * because "the direction the nose points along the ground" is the property actually wanted.
+         * T44: `transform.forward` is CACHED, so fired on a MOVING kart this keeps the heading from
+         * BEFORE that step's steer — bounded at one step (2.625 deg at 30 Hz) only because the write
+         * is ONE-SHOT. Make it repeat every frame and it is T41. See `KartTransformReads.test.ts`.
+         */
+        protected recoverFromStuck(): void;
+        /** Hook for a bench, a HUD or a race manager. Does nothing here. */
+        protected onStuckRecovery(): void;
+        /** Seconds the probe has been missing with no state to explain it. */
+        getStuckTime(): number;
+        /**
+         * **T39.** Clears the state a VOLUME would normally have cleared, for a caller that has to
+         * produce a known starting point without one.
+         *
+         * `respawnTo` deliberately does NOT do this and must not start: it is a port of
+         * `OutOfBounds.cs`, which clears `FellInWater`, `outOfBounds` and the velocity and touches no
+         * mode flag — and in a race that is correct, because a checkpoint inside an anti-gravity
+         * section has to hand the kart back still in anti-gravity. This is the other caller: a bench
+         * reset, a track editor, a test fixture. It is a separate method precisely so the race path
+         * cannot drift into it.
+         *
+         * **The DRIFT MACHINE is in here, and it was not until an adversarial pass drove it.** Pressing
+         * the bench's reset on a charged drift used to leave `driftState = Drift` and `Drift_time` at
+         * 2.983 s straight through the teleport, and then **pay the boost out at the spawn point** —
+         * `getBoostGrantCount()` 0 to 1, source `DriftPayout`. A method whose contract is "a known
+         * state" cannot leave a boost in flight. It ends through `stopDrift(false)`, the
+         * conditions-failed branch, so the charge is discarded and NOTHING is paid: a reset is not a
+         * corner the player finished.
+         *
+         * **`previousDrifting` is set to the CURRENT input rather than to false**, and the difference is
+         * the whole point. Zeroing it manufactures a rising edge on the very next frame for a player
+         * who simply never let go of the button, which re-latches the press this method just cleared —
+         * measured, the kart re-entered its drift on the same frame either way, so clearing the latch
+         * did precisely nothing. Copying the live input instead means a held button stays held: no
+         * edge, no latch, and the player has to actually press again. `driftPressLatched` is cleared
+         * for the same reason it exists (T37) — a press that had not found its steer yet must not
+         * survive into a fresh run.
+         */
+        clearTransientState(): void;
+        /** Whether the camera should hold still (`Camerafollow.cs:44`). */
+        isPlayerBeingMoved(): boolean;
+        /** The teleport itself: kinematic, velocity zeroed, position AND rotation written. */
+        private performRespawnTeleport;
+        /**
+         * Advances the recovery timers. Called from `updateKartState`, which is Unity's `Update`.
+         *
+         * The `FellInWater` downforce that `OutOfBounds.cs:22-26` also runs in `Update` is NOT here —
+         * it lives in `move()`. Unity can add a force from `Update` because `AddForce` buffers until
+         * the next physics step; this port's accumulator is zeroed at the START of each step, so
+         * anything added outside a step is silently discarded before it can be committed. Adding it
+         * inside the step is the same thing PhysX ends up doing, and it is the only place it works.
+         */
+        private tickRespawn;
+        /** `OutOfBounds.cs:30`/`105`. Entering a recovery volume. Called from the trigger handler. */
+        protected onRecoveryVolume(tag: string): void;
+        /**
+         * Sets the place a recovery returns to. A race manager calls this from its checkpoint logic;
+         * the bench calls it once with `KartLabGround`'s fixed spawn.
+         */
+        setRespawnPoint(position: BABYLON.Vector3, rotation: BABYLON.Quaternion): void;
+        /**
+         * The single point at which this component writes the body's velocity.
+         *
+         * One write per step, at the end, of `assignedVelocity + pendingAcceleration · dt` — the
+         * exact composition PhysX performs when it drains Unity's force buffer after `FixedUpdate`.
+         * Keeping it to one place is what makes the assigned-velocity model (FINDING 0) checkable:
+         * if the kart is moving in a way no line above decreed, it is not this component doing it.
+         */
+        private commitVelocity;
+        /**
+         * Ports Unity's state table for the probe length (`Player.cs:247-259`, `569-574`).
+         *
+         * The 247-259 branch READS as a state table and is not one — the `JUMP_PANEL || antiGravity`
+         * arm and the `else` arm both assign **2** (Analysis §E.6). So there are only ever three real
+         * cases, and they are the three below.
+         */
+        private updateGroundRayDistance;
+        /**
+         * One ray per step, from `raycastPos` along `-transform.up` (`Player.cs:2028-2031`).
+         *
+         * The acceptance test is `normal.y > 0.5f || antiGravity` (`2031`) — a 60 degree limit on how
+         * steep a surface may be and still count as ground, lifted entirely under anti-gravity, which
+         * is one of the three conditionals FR-7 turns out to be.
+         */
+        private probeGround;
+        /**
+         * The SEPARATE, shorter drift-entry probe (`Player.cs:1642-1645`).
+         *
+         * Length **1**, not `groundRayDist` (Analysis §E.7) — a genuinely different ray, and porting
+         * it as the same one would let a drift be entered from further off the ground than Unity
+         * allows. Same filter, same normal test.
+         */
+        private probeDriftEntryGround;
+        /**
+         * Slerps the chassis onto the contact normal at **7.5 per second** (`Player.cs:2037`).
+         *
+         * THREE THINGS ABOUT THIS ONE LINE:
+         *
+         * 1. **7.5 is the only alignment rate in the game.** The `if(antiGravity)` branch at 2034
+         *    that aligns at `1 · dt` sits inside an `if(!antiGravity)` block and can never execute
+         *    (Analysis §E.5); the real anti-gravity path at 2062-2064 also uses 7.5. Anyone porting
+         *    from a line-anchored read will find the 1 and ship a kart that will not follow a ramp.
+         * 2. **It is the ONLY thing that orients the kart.** The body cannot rotate itself (FINDING
+         *    0), so commenting this call out leaves the kart flat on a ramp — which is the A/B that
+         *    proves the mechanism, and the reason the file says so out loud.
+         * 3. **The rate gap it opens is the view's LAG, not the lean.** 7.5 here against the camera's 3
+         *    and the model child's 8. All three are a requirement rather than tuning values — but this
+         *    line used to claim the gap IS the visible chassis lean, and T15 measured that and it is
+         *    false. The roll is the camera adopting the track's banking and is rate-independent above
+         *    about 1/s; equalising the rates shortens the lag and leaves the tilt. See D-5.
+         *
+         * Unity writes `Quaternion.Lerp(current, FromToRotation(up, normal) * current, 7.5f * dt)`.
+         * Two deliberate differences: the `t` is `1 - exp(-7.5·dt)` rather than `7.5·dt`, which is
+         * the same curve at 50 Hz and the same curve at every other rate; and the interpolation is a
+         * true slerp rather than Unity's normalised lerp, which for a per-frame `t` around 0.12
+         * differ by well under a tenth of a degree.
+         */
+        private alignToGroundNormal;
+        /** Before the physics step: the ground probe, the pace table, the heading and the velocity. */
+        protected stepKartState(): void;
+        /** After the physics step: reads back what the solver actually did. */
+        protected fixedKartState(): void;
+        /** Releases observers and timers. */
+        protected destroyKartState(): void;
+        /**
+         * The kart's ONLY input surface.
+         *
+         * Everything that can drive this kart — the bench HUD, a race manager, an AI, a replay, a
+         * unit test — calls this and nothing else. The component deliberately does not read
+         * `InputController` itself: a component that samples the keyboard cannot be driven by an
+         * opponent AI, and a component that cannot be driven by an AI cannot ship in a race.
+         *
+         * @param throttle  -1 (reverse) to +1 (accelerate).
+         * @param steering  -1 (left) to +1 (right). Magnitude is meaningful, not just the sign.
+         * @param drifting  Drift button held.
+         * @param trick     Trick button pressed this frame.
+         * @param pitch     Glider pitch, +1 nose up / -1 nose down. Independent of the throttle.
+         */
+        drive(throttle: number, steering: number, drifting: boolean, trick?: boolean, pitch?: number): void;
+        /** The decreed scalar speed, units/second (`Player.cs:16`). */
+        getCurrentSpeed(): number;
+        /** Nose-local `z` of the ACTUAL body velocity, units/second (`Player.cs:1319`). */
+        getRealCurrentSpeed(): number;
+        /** The drift state machine's current state. */
+        getDriftState(): EKartDriftState;
+        /** Charge accumulated in the current drift, seconds. */
+        getDriftTime(): number;
+        /** Payout tier the current charge has reached: 0 none, 1 at 1.5 s, 2 at 4 s, 3 at 7 s. */
+        getDriftTier(): number;
+        /**
+         * The three charge boundaries this kart is using, seconds.
+         *
+         * **THE SINGLE SOURCE OF TRUTH FOR EVERY TIER CUE.** `StandardKartEffects` recolours the
+         * sparks at these times and `StandardKartAudio` retriggers the charge tone at them; both read
+         * this rather than carrying their own copy, because the sparks and the tone are the player's
+         * only warning that a tier armed and a cue that fires at a different time than the payout is
+         * worse than no cue at all. Returns a copy so a consumer cannot retune the kart by writing
+         * through it.
+         */
+        getDriftTierTimes(): number[];
+        /** Current steering authority (`Player.cs:23`). */
+        getRotateStrength(): number;
+        /** Seconds of boost left (`Player.cs:39`). Every boost source in the game writes this one number. */
+        getBoostTime(): number;
+        /** Whether a boost of any kind is running (`Player.cs:8`), and therefore whether the cap is `boost_speed`. */
+        isBoosting(): boolean;
+        /** The live speed cap, units/second (`Player.cs:14`). */
+        getMaxSpeed(): number;
+        /** Seconds of throttle held before the start (`Player.cs:272`). The rocket-start window is 1-2 s. */
+        getLaunchCharge(): number;
+        /**
+         * The spark colour the current charge has armed, or `null` below the first tier.
+         *
+         * Particles are out of scope for this port, but the colours are not cosmetic: they are the
+         * player's ONLY cue that a tier has armed, so a HUD or a particle system needs to be able to
+         * ask. The 4.0 s and 7.0 s arming points (`1755`, `1776`) coincide with the second and third
+         * payout boundaries; the first spark arms with the first payout band at 1.5 s.
+         */
+        getSparkColor(): string | null;
+        /** Yaw applied this frame, degrees/second. */
+        getYawRate(): number;
+        /** Angle between the velocity and the nose, degrees. */
+        getSlipAngle(): number;
+        /** Latest accepted ground normal, world space. */
+        getGroundNormal(): BABYLON.Vector3;
+        /**
+         * The COLLISION flag (`Player.cs:28`), not the raycast — **and it is sticky**, see
+         * `attachCollisionEvents`. Every Unity gameplay branch reads this one; use `isAirborne()` if
+         * what you want is "is the kart actually off the ground".
+         */
+        isGrounded(): boolean;
+        /** Whether the ground PROBE missed this step. The honest airborne test. */
+        isAirborne(): boolean;
+        /** Whether the ground probe landed this step. */
+        isProbeGrounded(): boolean;
+        /** Distance from `raycastPos` to the accepted ground hit, units. `-1` when the probe missed. */
+        getGroundDistance(): number;
+        /** The live, state-dependent probe length, units. */
+        getGroundRayDistance(): number;
+        /** In any drift state other than `None` — which includes the post-release payout. */
+        isDrifting(): boolean;
+        /**
+         * Which way the current drift is latched: `-1` left, `+1` right, `0` none (`Player.cs:31`).
+         *
+         * Distinct from the steering INPUT, and deliberately so: a drift latched right stays latched
+         * right while the player counter-steers left, which is the whole of FR-4's 4.2x radius range.
+         */
+        getDriftDirection(): number;
+        /** Seconds since the current drift was entered. The `drifting` latch reads this (**P-1**). */
+        getDriftLatchTime(): number;
+        /**
+         * Whether the drift's 20 u/s outward push is live — the `drifting` sub-flag (**P-1**).
+         *
+         * Distinct from `isDrifting()`, and the distinction is the feel: a drift is entered
+         * immediately and BITES `driftLatchDelay` = 0.283 s later. Between the two the kart is in a
+         * drift that is not yet sliding.
+         */
+        isDriftLatched(): boolean;
+        /** The glider is open. */
+        isGliding(): boolean;
+        /** Seconds since the canopy opened. The 3 s and 6 s marks both change how the glider flies. */
+        getGlidingTime(): number;
+        /** The trick variant is running — entered above `GLIDER_TRICK_SPEED`. */
+        isGliderTrick(): boolean;
+        /** Seconds until the canopy opens on the trick variant, or `-1`. */
+        getGliderOpenDelay(): number;
+        /** The glider's pitch, degrees. Nose-DOWN is positive, as Unity has it. */
+        getGliderPitch(): number;
+        /** The glider's roll, degrees. */
+        getGliderRoll(): number;
+        /** Flying the ARCADE glider rather than the Unity project's. */
+        isArcadeGlider(): boolean;
+        /**
+         * ARCADE. The glide SLOPE the kart is descending on, degrees. 0 when the source model is on.
+         *
+         * Separate from `getGliderPitch()` on purpose — see `gliderSlope`. The attitude is what the
+         * kart looks like; this is what it is doing, and the two differ exactly when the floor binds.
+         */
+        getGliderSlope(): number;
+        /**
+         * ARCADE. The sink rate the pitch input is currently asking for, u/s, positive downward.
+         *
+         * Reports the TARGET, not the kart's actual descent, which is the approach's business and
+         * which an updraught or a panel impulse may legitimately have far away from this figure.
+         * Returns 0 when the source model is selected, where no such target exists.
+         */
+        getGliderSinkTarget(): number;
+        /**
+         * The volume's pitch trim and roll, as the glider is flying them.
+         *
+         * The PAIR form, kept for callers that want both at once. The camera reaches them one axis at
+         * a time through `getGlideAngleX()` / `getGlideAngleZ()` below, because that is the shape
+         * `IKartCameraTarget` uses for every duck-typed volume payload — see the note there.
+         */
+        getGlideAngles(): {
+            x: number;
+            z: number;
+        };
+        /**
+         * The active glider volume's `glideAngleX` — the camera rig's PITCH trim while gliding.
+         *
+         * **`IKartCameraTarget.getGlideAngleX`, and T49's whole fix is that this exists.** Unity
+         * relays the payload to the camera itself at `Player.cs:1114-1115` — entering a
+         * `GliderPanelFly` trigger writes `Cam.glideAngleX` and `Cam.glideAngleZ` from the volume's
+         * `GetGlideAngle` component, right beside the kart's own copies at `1111-1112`. This port
+         * read the payload into the two protected fields above and had no route onward, so
+         * `Camerafollow.cs:84`'s target was permanently `Euler(0, yaw, 0)` and a volume authoring a
+         * trim was framed level because the number never arrived. It is the same D-8/D-9 family
+         * defect as `Camerafollow.offset`: nothing looked broken, because the default stands.
+         */
+        getGlideAngleX(): number;
+        /** The active glider volume's `glideAngle` — the rig's ROLL trim while gliding. As above. */
+        getGlideAngleZ(): number;
+        /** Seconds left on a `GliderPanel` exit impulse, or 0. */
+        getGliderImpulseTime(): number;
+        /** Anti-gravity is active. */
+        isAntiGravity(): boolean;
+        /**
+         * The active anti-gravity volume's `rotAmountX`, degrees — **for the CAMERA, not the kart**.
+         *
+         * A track author leans the view into a barrel with these two numbers; the kart's own handling
+         * is untouched by them. Exposed here rather than pushed at the camera because the dependency
+         * only runs one way (FR-0): `StandardKartCamera` duck-types the kart, and the kart knows
+         * nothing about any camera.
+         */
+        getAntiGravityRotAmountX(): number;
+        /** The active anti-gravity volume's `rotAmountZ`, degrees. For the camera. */
+        getAntiGravityRotAmountZ(): number;
+        /**
+         * The active anti-gravity volume asked the camera to rotate (`Player.cs:1043`). For the camera.
+         *
+         * Narrower than `isAntiGravity()` — see `antiGravityRotateCam`. False outside anti-gravity,
+         * false inside a volume authored `rotateCam: false`, and false again after the exit volume.
+         */
+        isAntiGravityCamRotate(): boolean;
+        /** An `AntiGravityExitRotate` payload is still steering the kart back to the world frame. */
+        isAntiGravityExiting(): boolean;
+        /** How many anti-gravity entry volumes the kart is inside. Telemetry for the bench readout. */
+        getAntiGravityVolumeCount(): number;
+        /**
+         * `Player.cs:1439`. On a jump-panel flight.
+         *
+         * Public because the camera reads it: a launched kart's rig drops to 0.4/s and deliberately
+         * falls behind (`Camerafollow.cs:97`). It is also what suppresses ground alignment for the
+         * whole flight.
+         */
+        isJumpPanelling(): boolean;
+        /**
+         * The live launch force during a jump-panel flight. NEGATIVE IS UP — see `upForce`.
+         *
+         * Exposed because it is the only readable thing that distinguishes the two halves of a flight:
+         * the arc has no apex event, just this number crossing zero.
+         */
+        getJumpPanelForce(): number;
+        /** Seconds left on a `JumpPanelRotate` volume's forced rotation, or 0. */
+        getJumpPanelRotateTime(): number;
+        /** A trick's upward push is running. */
+        isTricking(): boolean;
+        /** Seconds into the trick push, or `-1`. */
+        getTrickTime(): number;
+        /** A `TrickCollider` has been touched, so a trick is allowed until the next landing. */
+        isTrickArmed(): boolean;
+        /** A trick was performed this flight and its landing still owes the 0.9 s boost floor. */
+        isTrickPending(): boolean;
+        /** Front-wheel steer angle, degrees. Presentation only — see `updateWheels`. */
+        getWheelSteer(): number;
+        /** Accumulated wheel roll, radians. */
+        getWheelSpin(): number;
+        /** How far into the anti-gravity wheel pose, 0 to 1. */
+        getWheelAntiGravity(): number;
+        /**
+         * On a `Dirt` surface (`Player.cs:502`).
+         *
+         * Exposed because dirt is the one surface that produces its cap INDIRECTLY — by clearing
+         * `grounded` rather than by writing a speed — so without this a bench readout shows
+         * `grounded` going dark with no labelled cause and the state has to be inferred. See the
+         * note on `onDirt` for why the flag itself is telemetry and not the mechanism.
+         */
+        isOnDirt(): boolean;
+        /**
+         * How many times a boost source has fired since this component started.
+         *
+         * MONOTONIC, AND THE ONLY HONEST WAY TO SEE A GRANT FROM OUTSIDE. See `EKartBoostSource` for
+         * the full argument; the short version is that `Boost_time` is an assignment, so a shorter
+         * grant landing on a longer running boost lowers it, and any "did it rise?" detector both
+         * misses that and invents grants that Unity does not fire effects for.
+         *
+         * Read it with `getLastBoostSource()`: a change in this number means "a source fired THIS
+         * frame", and the source says which one.
+         */
+        getBoostGrantCount(): number;
+        /** Which source last wrote `Boost_time`. Meaningful only alongside `getBoostGrantCount()`. */
+        getLastBoostSource(): EKartBoostSource;
+        /**
+         * `IN_WATER` (`OutOfBounds.cs:8`, read at `Player.cs:1710`).
+         *
+         * Exposed for the presentation layer, which is the only thing that reads it: the drift-entry
+         * dust is suppressed underwater. The flag's real limitation is documented on
+         * `KART_UNDERWATER_ROLL_DEGREES` — today it means "fell in and is about to be respawned"
+         * rather than "driving through the shallows" — and that limitation is inherited by anything
+         * gating on this, so read that note before treating a `false` here as "dry".
+         */
+        isFellInWater(): boolean;
+        /**
+         * `RACE_MANAGER.RACE_COMPLETED`, as a method.
+         *
+         * The field is already public and the race mode writes it every frame, so this adds no state
+         * — it exists so the presentation layer can read the flag through a DUCK-TYPED interface
+         * instead of reaching for a field by name. `StandardKartAudio.IKartAudioTarget` declares it
+         * `isRaceCompleted?()` and uses it for one thing: `Player.cs:1193` refuses the glider trick
+         * voice once the race is over.
+         */
+        isRaceCompleted(): boolean;
+    }
+}
+declare namespace PROJECT {
+    /**
+     * The kart surface this component actually uses.
+     *
+     * DUCK-TYPED ON PURPOSE, exactly as `StandardKartCamera`'s `IKartCameraTarget` is: FR-0 requires
+     * each of these be one self-contained module, and the UMD promotion combines them into the same
+     * namespace where a cross-import would be circular. Declaring the surface as an interface
+     * documents the contract without creating the dependency — and lets a test drive the whole
+     * presentation layer from a plain object, which is most of why the state machine below is
+     * testable at all.
+     *
+     * Every non-optional member already exists on `StandardKartController`.
+     */
+    interface IKartEffectsTarget {
+        /** `EKartDriftState` as a number: 0 none, 1 hop, 2 drift, 3 paying out. */
+        getDriftState(): number;
+        /** `Drift_time` — the charge, seconds. Every tier boundary reads this and only this. */
+        getDriftTime(): number;
+        /**
+         * The kart's three charge boundaries, seconds — ascending.
+         *
+         * **OPTIONAL, AND THE FALLBACK IS UNITY'S OWN 1.5/4/7.** The spark recolour is the player's
+         * only visual warning that a payout tier armed, so it MUST fire at the same times the payout
+         * pays. Those times are tunable on the controller, and a component carrying its own copy
+         * would recolour at 1.5 s while the release paid at 0.8 — a cue that lies. A stand-in target
+         * that cannot report them keeps the source's constants, which is the honest default.
+         */
+        getDriftTierTimes?(): number[];
+        /** The `drifting` sub-flag: true only after P-1's 0.283 s latch (`Player.cs:1710` gates on it). */
+        isDriftLatched(): boolean;
+        /** `-1` drifting left, `+1` drifting right, `0` none (`Player.cs:1678`/`1694`). */
+        getDriftDirection(): number;
+        /** `Boost_time` — seconds of boost left. */
+        getBoostTime(): number;
+        /**
+         * Monotonic count of boost sources fired. A CHANGE means "a source fired this frame".
+         *
+         * OPTIONAL, and the fallback when it is absent is deliberately the WORSE behaviour rather than
+         * no behaviour: a stand-in target in a test can drive the burst with `getBoostTime()` alone,
+         * and gets the rise heuristic that the real kart no longer needs. See `tickBoostEffects`.
+         */
+        getBoostGrantCount?(): number;
+        /** Which source last fired — `EKartBoostSource` as a number. Optional, as above. */
+        getLastBoostSource?(): number;
+        /** Whether a boost is running (`Player.cs:1913`). Drives the exhaust flames as a level. */
+        isBoosting(): boolean;
+        /** Anti-gravity is active — stands in for the animator's `SpinLeft`/`SpinRight` (see below). */
+        isAntiGravity(): boolean;
+        /** A trick is in the air (`Player.cs:1184`). */
+        isTricking(): boolean;
+        /** Grounded. Its rising edge is the landing puff. */
+        isGrounded(): boolean;
+        /** Spark colour for tier 1, `#RRGGBB`. Optional — the component carries Unity's own default. */
+        sparkTier1Color?: string;
+        /** Spark colour for tier 2, `#RRGGBB`. */
+        sparkTier2Color?: string;
+        /** Spark colour for tier 3, `#RRGGBB`. */
+        sparkTier3Color?: string;
+        /**
+         * `IN_WATER` (`Player.cs:1710`) — suppresses the drift dust.
+         *
+         * OPTIONAL. A stand-in target in a test, or a race manager driving this with something that is
+         * not a kart, should not have to model a water volume it has no concept of.
+         */
+        isFellInWater?(): boolean;
+    }
+    /**
+     * One named emitter group — Unity's `DriftPS`, `BoostBurstPS` and friends, each a node whose
+     * CHILDREN are the actual particle systems.
+     *
+     * The group is the unit the port plays and stops, because that is the unit `Player.cs` plays and
+     * stops: every call site loops the children and calls `Play()` or `Stop()` on all of them.
+     */
+    interface IKartEmitterGroup {
+        /** Unity's node name — the thing `resolveGroup` looks for on an exported kart. */
+        name: string;
+        /** The node the systems hang from, or `null` when neither found nor built. */
+        mount: BABYLON.TransformNode | null;
+        /** The toolkit particle components this group drives. Empty is legal and means "no render". */
+        systems: TOOLKIT.ShurikenParticles[];
+        /** Whether the PORT has asked this group to run. The state machine's own truth. */
+        playing: boolean;
+        /** True when this group was built here rather than found on an exported kart. */
+        placeholder: boolean;
+        /** Unity's `moveWithTransform` for this group: 0 Local, 1 World. See `applySimulationSpace`. */
+        simulationSpace: number;
+        /**
+         * Whether `isLocal` has been pushed onto this group's systems yet.
+         *
+         * IT CANNOT BE DONE AT REGISTRATION, which is the whole reason this flag exists. A
+         * `ShurikenParticles` built here has not run its own `awake()` when `registerGroup` returns —
+         * `SceneManager.AttachScriptComponent` only enrols it in the lifecycle — so
+         * `getParticleSystem()` is still null and a write there silently does nothing. The first
+         * version of this did exactly that and reported success while changing not one system.
+         */
+        simulationSpaceApplied: boolean;
+    }
+    /**
+     * Babylon standard kart effects — the particle driver for `PROJECT.StandardKartController`.
+     * @class StandardKartEffects
+     *
+     * THE ONE THING TO UNDERSTAND ABOUT THE DRIFT'S FEEDBACK, because it is not what it looks like:
+     * the dust and the sparks **deliberately do not overlap**. The dust runs for the first second
+     * only (`1710`) and the sparks arm at 1.5 s (`1732`), so there is a half-second of nothing in
+     * between. The dust is the *entry* tell — "you are in a drift" — and the sparks are the *charge*
+     * tell — "a payout is armed, and this colour is which one". Merging them, or starting the sparks
+     * at entry because it looks better, destroys the only channel that tells a player when to
+     * release. That is the whole mechanic, and it is why every boundary below is transcribed rather
+     * than tuned.
+     */
+    class StandardKartEffects extends TOOLKIT.ScriptComponent {
+        /**
+         * The kart, duck-typed (see `IKartEffectsTarget`).
+         *
+         * Left null, `initEffectsState` resolves `PROJECT.StandardKartController` off this component's
+         * own transform — which is where an exported kart puts it.
+         */
+        kart: IKartEffectsTarget;
+        /** The node placeholder emitters hang from. Defaults to the kart's model child, then the root. */
+        mountNode: BABYLON.TransformNode;
+        /** Scene-graph name of the model child, for a glTF-loaded kart that cannot pass a reference. */
+        modelNodeName: string;
+        /** Master switch. `false` stops every group and runs no state machine. */
+        effectsEnabled: boolean;
+        /** The tiered drift sparks (`Player.cs:1732-1793`). */
+        sparksEnabled: boolean;
+        /** The drift-entry dust (`Player.cs:1709-1729`). */
+        driftDustEnabled: boolean;
+        /** The one-shot burst on any boost grant (`Player.cs:1835`/`1850`/`1864`). */
+        boostBurstEnabled: boolean;
+        /** The exhaust flames while a boost runs (`Player.cs:1910-1931`). */
+        boostFlamesEnabled: boolean;
+        /** The anti-gravity spin trails (`Player.cs:1526-1546`). */
+        antiGravSpinEnabled: boolean;
+        /** The trick particles (`Player.cs:1184`). */
+        trickParticlesEnabled: boolean;
+        /** The landing puff (`Player.cs:173`, `groundLandParticles`). */
+        groundLandEnabled: boolean;
+        /**
+         * Build placeholder emitters when a group's node is absent or carries no particle systems.
+         *
+         * `true` on the bench, which is the whole reason a red box can show a tier change today.
+         * Set `false` and the state machine still runs in full and drives nothing — which is both the
+         * headless test configuration and the correct behaviour on a kart whose art is not loaded yet.
+         */
+        createPlaceholderEmitters: boolean;
+        /** `Player.cs:206` — the drift spark root; child 0 is the RIGHT wheel, child 1 the LEFT. */
+        driftPSNodeName: string;
+        /** `Player.cs:206`. */
+        rightWheelDriftNodeName: string;
+        /** `Player.cs:207`. */
+        leftWheelDriftNodeName: string;
+        /** `Player.cs:1714`. */
+        driftDustLeftNodeName: string;
+        /** `Player.cs:1719`. */
+        driftDustRightNodeName: string;
+        /** `Player.cs:281`. */
+        boostBurstNodeName: string;
+        /** `Player.cs:45`. */
+        boostPSNodeName: string;
+        /** `Player.cs:177`. */
+        antiGravSpinNodeName: string;
+        /** `Player.cs:1184`. */
+        trickParticlesNodeName: string;
+        /** `Player.cs:173`. */
+        groundLandNodeName: string;
+        /** Tier 1 spark colour. Unity `drift1`. */
+        sparkTier1Color: string;
+        /** Tier 2 spark colour. Unity `drift2`. */
+        sparkTier2Color: string;
+        /** Tier 3 spark colour. Unity `drift3`. */
+        sparkTier3Color: string;
+        /** Every group, by Unity name, so the HUD and the tests can enumerate rather than guess. */
+        protected readonly groups: Map<string, IKartEmitterGroup>;
+        /** The colour currently written onto the spark systems, or `null` when they are stopped. */
+        protected activeSparkColor: string;
+        /** Last frame's `Boost_time`. Only the fallback detector reads it. */
+        protected lastBoostTime: number;
+        /** Last frame's `getBoostGrantCount()`. A CHANGE is a grant — see `tickBoostEffects`. */
+        protected lastBoostGrantCount: number;
+        /** How many bursts have fired. Telemetry, and the cleanest thing for a test to count. */
+        protected boostBurstCount: number;
+        /** `particleSystemAntigravSpinTimer` (`Player.cs:178`). */
+        protected antiGravSpinTimer: number;
+        /** Whether the spin trail is armed — the stand-in for being in `SpinLeft`/`SpinRight`. */
+        protected antiGravSpinArmed: boolean;
+        /** Last frame's anti-gravity flag, for the rising edge that arms the spin. */
+        protected lastAntiGravity: boolean;
+        /** Last frame's trick flag, for the one-shot edge. */
+        protected lastTricking: boolean;
+        /** Last frame's grounded flag, for the landing puff's edge. */
+        protected lastGrounded: boolean;
+        /** Scratch, so the recolour allocates nothing per frame. */
+        private readonly scratchColor;
+        /**
+         * ESM-ONLY — DELETE WHEN PORTING BACK.
+         *
+         * The runtime build constructs components from metadata and has no per-class constructor;
+         * step 2 of the promotion recipe deletes this whole member.
+         */
+        protected awake(): void;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        /** Reads the Inspector property bag. Every knob above is settable from exported metadata. */
+        protected awakeEffectsState(): void;
+        /** Resolves the kart, the mount, and every emitter group. */
+        protected initEffectsState(): void;
+        /** Placeholder emitters are this component's; found ones belong to the asset and are left alone. */
+        protected destroyEffectsState(): void;
+        /** One frame of the presentation layer. Reads the kart; writes nothing but emitters. */
+        protected updateEffectsState(): void;
+        /**
+         * `Player.cs:1709-1793` and `1872-1888` — the dust, the sparks, and the tier recolour.
+         *
+         * TWO UNITY QUIRKS ARE TRANSCRIBED HERE RATHER THAN TIDIED, and both are load-bearing:
+         *
+         *   1. **`Play()` is called ONLY in the tier-1 branch** (`1745-1748`). Tiers 2 and 3 recolour a
+         *      system that is already running and never start one. In Unity a charge always passes
+         *      through [1.5, 4) on its way up, so this is invisible — but it means the sparks are
+         *      genuinely "started once at 1.5 s and recoloured twice", not "restarted per tier", and
+         *      a driver that restarted them would visibly stutter the emission at each boundary.
+         *   2. **The first spark tier is 1.5 s while the first PAYOUT tier is also 1.5 s, yet the
+         *      colour does not change until 4.0.** The port keeps that: `getDriftTier()` and the spark
+         *      colour agree at every boundary, and neither is "corrected" to the other.
+         *
+         * ONE DELIBERATE DIVERGENCE, called out rather than buried. Unity's stop branch is
+         * `if (!Input.GetKey(V))` — the BUTTON, not the state — so losing the charge below speed 40
+         * (`1799`) zeroes `Drift_time` while leaving the sparks emitting at their last colour until
+         * the player lets go. This port stops them when the drift STATE ends, because
+         * `StandardKartController.stopDrift(false)` genuinely leaves the drift on charge loss and
+         * sparks advertising a payout that no longer exists would be a lie to the player. The
+         * simulation is unaffected either way; this is a presentation choice and it is recorded here
+         * so it is not mistaken for a transcription error.
+         */
+        protected tickDriftEffects(): void;
+        /**
+         * `Player.cs:1910-1931` (flames) and the burst call sites.
+         *
+         * THE BURST IS SIGNALLED, NOT INFERRED — AND THE FIRST VERSION OF THIS METHOD GOT THAT WRONG.
+         *
+         * It detected a grant as a RISE in `Boost_time`, reasoning that all seven sources write that
+         * one number. They do, but the reasoning does not survive the table in `EKartBoostSource`,
+         * because Unity fires a DIFFERENT subset of effects at each source and the subsets do not
+         * line up:
+         *
+         *   - The BOOST PAD (`507`) grants and does NOT burst. The rise heuristic burst there anyway.
+         *   - `grantBoost` is an ASSIGNMENT, faithfully mirroring Unity, so a 0.75 s tier-1 payout
+         *     landing on a running 2 s panel boost LOWERS `Boost_time`. That is a real grant that
+         *     Unity bursts for, and the heuristic saw a fall and did nothing.
+         *   - The TRICK LANDING (`541`) is a floor that may raise nothing at all, and Unity does not
+         *     burst there — so even a perfect "did the clock change" detector would still be wrong.
+         *
+         * A single number cannot carry which of seven things wrote it. So the kart now reports the
+         * source, and the POLICY lives here as a set, where the `Player.cs` line behind every
+         * membership decision sits beside it.
+         *
+         * The rise heuristic survives only as the fallback for a target that does not implement the
+         * signal — a hand-written stand-in in a test. A degraded burst is more useful there than none,
+         * and it is labelled so that nobody mistakes it for the mechanism.
+         */
+        protected tickBoostEffects(): void;
+        /**
+         * `Player.cs:1526-1546` — the anti-gravity spin trails.
+         *
+         * TWO THINGS ABOUT THE ORIGINAL, both preserved:
+         *
+         *   1. **The 0.95 / 1.01 pair is not arbitrary.** Unity's own comment says why: "this timer
+         *      thing is limited to 0.95 seconds because when the animation returns to original state,
+         *      the trail gets weird". The trail is cut just before the spin clip settles. Round either
+         *      number and the artifact it exists to hide comes back.
+         *   2. **`A || B && C` in C# is `A || (B && C)`.** So `SpinLeft` alone plays the trail
+         *      regardless of the timer, and only `SpinRight` is timer-gated. That is almost certainly
+         *      a typo in the original and it is transcribed anyway — but it cannot be reproduced here
+         *      without the animator, so this port applies the timer to BOTH and says so.
+         *
+         * THE STAND-IN, and its limit. Unity reads `GetCurrentAnimatorStateInfo(2).IsName("SpinLeft")`
+         * on the model's animator. There is no rigged kart yet and no `TOOLKIT.AnimationState` to ask,
+         * so the trail is armed on the RISING EDGE of anti-gravity instead — which is when those clips
+         * fire — and runs on the same timer. When a rigged kart ships real `SpinLeft`/`SpinRight`
+         * states, this read moves to the animator and the timer stays exactly as it is.
+         */
+        protected tickAntiGravSpin(dt: number): void;
+        /** The trick puff (`1184`) and the landing puff, both pure edges. */
+        protected tickOneShots(): void;
+        /** Asks a group to run. Idempotent — Unity guards every `Play()` with an `isPlaying` check. */
+        protected playGroup(name: string): void;
+        /** Stops a group. Idempotent for the same reason. */
+        protected stopGroup(name: string): void;
+        /**
+         * Restarts a group from zero — the one-shot bursts.
+         *
+         * Unity calls a bare `Play()` on a NON-looping system, which restarts it. Here the group may
+         * already be marked playing from a previous burst that has not finished, so the stop is
+         * explicit rather than relying on the emitter's own retrigger semantics.
+         */
+        protected restartGroup(name: string): void;
+        /** Stops everything. The master switch, and `destroy`. */
+        protected stopAllGroups(): void;
+        /** Writes one colour onto every spark system in both wheel groups (`1742-1743`). */
+        protected applySparkColor(hex: string): void;
+        /**
+         * Sets a group's start colour through the toolkit component's own particle system.
+         *
+         * `ShurikenParticles.configureMainModule` writes `color1` and `color2` from
+         * `main.startColor.color` for a `mode: 0` gradient, so writing both here is the same
+         * assignment the export performs — not a bypass of the component.
+         */
+        protected writeGroupColor(name: string, hex: string): void;
+        /** Where placeholders hang: the model child if there is one, else this component's transform. */
+        protected resolveMountNode(): BABYLON.TransformNode;
+        /**
+         * Applies Unity's simulation space to a group's systems, because the toolkit does not.
+         *
+         * **THIS IS THE SINGLE BIGGEST VISUAL FIX IN THE FILE, and it was invisible until the bench
+         * was driven at speed.**
+         *
+         * Unity's `moveWithTransform: 0` is LOCAL simulation space: a particle, once born, keeps
+         * moving with the emitter. It is why Mario Kart's drift sparks sit glued to the wheels instead
+         * of smearing into a trail — and it is measured, not assumed. **Every** system in
+         * `WheelParticles.prefab` (12) and `ParticlesBoostBurst.prefab` (6) carries it.
+         *
+         * `ShurikenParticles.configureMainModule` reads `main.simulationSpace`, but only to decide
+         * what the EMITTER is:
+         *
+         *     if (main.simulationSpace === 1) ps.emitter = mesh.getAbsolutePosition().clone();
+         *     else                            ps.emitter = mesh;
+         *
+         * That makes the SPAWN POINT follow the kart. It never touches `ParticleSystem.isLocal`, which
+         * is Babylon's actual local-space simulation flag — the string does not appear anywhere in the
+         * component. So an authored "Local" system spawns at the right place and then simulates in
+         * world space, i.e. it behaves exactly like Unity's WORLD setting.
+         *
+         * At a standstill the difference is invisible. At 95 u/s with a 0.18 s lifetime the exhaust is
+         * left seventeen units behind the kart — behind and below a chase camera that sits nine units
+         * back — so the boost flames were reported alive, were genuinely being simulated, and could
+         * not be seen at all. That is how this was found, and it is why "the component says it is
+         * running" is not evidence that an effect works.
+         *
+         * COMPOSITION, NOT REPLACEMENT. This sets one documented Babylon property on the system the
+         * toolkit itself hands out through `getParticleSystem()` — the same accessor and the same kind
+         * of write as the tier recolour onto `color1`/`color2`. Nothing is reimplemented. **Delete
+         * this the moment `ShurikenParticles` maps `isLocal` itself**, and it is worth reporting
+         * upstream, because an exported kart hits the identical gap.
+         */
+        protected applySimulationSpace(group: IKartEmitterGroup): boolean;
+        /**
+         * Runs the deferred emitter fix-ups on any group whose systems have finished initialising.
+         *
+         * Two of them, both for the same reason — a `ShurikenParticles` is not configured until its
+         * own `awake()` runs, so neither can be done at registration.
+         */
+        protected ensureSimulationSpace(): void;
+        /**
+         * Undoes the toolkit's world-space application of Unity's SCREEN-space size clamp.
+         *
+         * THIS EXISTS FOR THE EXPORT PATH, and the placeholders' `RENDERER_MAX_PARTICLE_SIZE` is
+         * explicitly NOT enough to cover it. `configureRendererModule` ends with:
+         *
+         *     const maxSize = renderer.maxParticleSize ?? 0.5;
+         *     if (ps.maxSize > maxSize) ps.maxSize = maxSize;
+         *
+         * The placeholders here dodge it by authoring the field. **A Unity export cannot**: Unity
+         * serializes `m_MaxParticleSize` on every renderer, and its value is `0.5` on all twelve
+         * systems in `WheelParticles.prefab` and all six in `ParticlesBoostBurst.prefab` — because in
+         * Unity that field is a fraction of VIEWPORT HEIGHT, for which 0.5 is a perfectly ordinary
+         * setting. Applied as a world-space clamp it truncates the maximum alone, leaving
+         * `minSize > maxSize` on any emitter authored above half a unit.
+         *
+         * So the exported kart this port exists to run walks straight back into the bug the constant
+         * was added to escape, and it would look identical: emitters reporting alive, sizes reporting
+         * plausible, and the range quietly inverted.
+         *
+         * THE REPAIR IS DELIBERATELY THE NARROWEST ONE THAT IS DEFENSIBLE. It fires only when the
+         * range is actually inverted, and it restores the maximum to the minimum — which is where
+         * `configureMainModule` had both of them for a `mode: 0` start size before the clamp ran. It
+         * does not touch a genuine random range (`min < max`), and it does not second-guess an author
+         * who set a real world-space clamp, because such an author would not have produced an
+         * inversion in the first place.
+         *
+         * Delete this, and `applySimulationSpace`, when the toolkit stops converting a screen-space
+         * field into a world-space one. Both are worth the upstream report.
+         */
+        protected repairInvertedSizeRange(group: IKartEmitterGroup): void;
+        /**
+         * The Unity simulation space a group's systems were authored with.
+         *
+         * For a group this component BUILT, it is the recipe's own value. For a group FOUND on an
+         * exported kart the authored bag lives in the toolkit component's private
+         * `m_systemProperties`, which is read here defensively rather than not at all: an exported
+         * Local system hits the same gap, and silently leaving it in world space would reintroduce
+         * exactly the bug documented above on the very kart this port exists to run.
+         */
+        protected resolveSimulationSpace(group: IKartEmitterGroup, kind: string): number;
+        /** Depth-first search for a descendant by exact name. */
+        protected findChildNode(name: string): BABYLON.TransformNode;
+        /**
+         * Builds the whole group table.
+         *
+         * The five spark systems per wheel, the two dust systems per side and the two flames are
+         * Unity's own counts (`1735` loops five, `1714` plays two children, `1915` loops two).
+         */
+        protected buildGroups(): void;
+        /**
+         * Resolves one group: prefer the export's emitters, fall back to placeholders.
+         *
+         * @param key      the driver's own name for the group
+         * @param nodeName Unity's node name to look for
+         * @param parent   the node it sits under on an exported kart, when it is nested
+         * @param count    how many systems Unity's own loops expect
+         * @param offset   local mount offset for the placeholder, units
+         * @param kind     which placeholder recipe to build
+         */
+        protected registerGroup(key: string, nodeName: string, parent: BABYLON.TransformNode, count: number, offset: BABYLON.Vector3, kind: string): void;
+        /** Direct or nested child of a given node, by exact name. */
+        protected findNamedChildOf(parent: BABYLON.TransformNode, name: string): BABYLON.TransformNode;
+        /** Every `TOOLKIT.ShurikenParticles` hanging off a node, in scene-graph order. */
+        protected collectParticleComponents(node: BABYLON.TransformNode): TOOLKIT.ShurikenParticles[];
+        /** A placeholder mount at a local offset on the model child. */
+        protected createMountNode(name: string, offset: BABYLON.Vector3): BABYLON.TransformNode;
+        /**
+         * Builds `count` `TOOLKIT.ShurikenParticles` under a mount.
+         *
+         * ATTACHED WITH `_registerComponentAlias: false` and NOT pushed onto the node's component
+         * metadata, unlike the kart's own components in `KartLabRig`. That is deliberate: these are
+         * scaffolding, and writing metadata records for them would make a placeholder emitter
+         * indistinguishable from an exported one the next time `collectParticleComponents` runs.
+         */
+        protected createPlaceholderSystems(mount: BABYLON.TransformNode, nodeName: string, count: number, kind: string): TOOLKIT.ShurikenParticles[];
+        /**
+         * A Unity `MinMaxCurve` in constant mode, with ALL THREE scalars agreeing.
+         *
+         * **THIS IS DEFENCE IN DEPTH, NOT THE FIX FOR THE INVERTED SIZE RANGE — and an earlier version
+         * of this comment claimed otherwise, which is worth correcting in place rather than quietly.**
+         *
+         * The wrong story was: the merge leaves `constantMax: 1.0` from the defaults, so the maximum
+         * came from a leftover. It does leave it, but nothing reads it here.
+         * `ShurikenParticles.convertMinMaxCurve` consults `constantMin`/`constantMax` only in curve
+         * modes 2 and 3; mode 0 — every curve in every recipe below — returns `{min, max, value}` all
+         * from `constant`, and `configureMainModule`'s `case 0` sets `minSize` AND `maxSize` from that
+         * one value. Both ends left here at 0.75. The entire inversion was the renderer clamp knocking
+         * the maximum alone down to 0.5, which is what `RENDERER_MAX_PARTICLE_SIZE` addresses.
+         *
+         * So why keep this? Because it authors what a real Unity export authors — Unity serializes all
+         * three scalars for every curve — and because the moment any recipe here moves to a mode-2 or
+         * mode-3 curve, `constantMin`/`constantMax` become live and a bag carrying only `constant`
+         * would silently pick up `0.0` and `1.0`. It is cheap insurance against a future edit, and it
+         * is labelled as insurance rather than as a cure.
+         */
+        protected static Curve(value: number): any;
+        /** One placeholder system's Unity-shaped properties. */
+        protected static PlaceholderProperties(kind: string, index: number): any;
+        /**
+         * A drift spark.
+         *
+         * `simulationSpace: 0` is LOCAL, and it is measured (`moveWithTransform: 0` on every system in
+         * `WheelParticles.prefab`). It is also the surprising choice — local-space sparks stay pinned
+         * at the wheel instead of trailing behind an 80 u/s kart — so it is called out here to stop it
+         * being "fixed" to world on the reasonable-sounding grounds that a trail looks better.
+         */
+        protected static SparkProperties(index: number): any;
+        /** The drift-entry dust. Slower, larger, dimmer than a spark, and it fades. */
+        protected static DustProperties(): any;
+        /** The one-shot payout burst. Non-looping, so a bare `play()` is a complete gesture. */
+        protected static BurstProperties(): any;
+        /** The exhaust flames. A LEVEL — looping, and on for exactly the boost's duration. */
+        protected static FlameProperties(): any;
+        /** The anti-gravity spin trail. Long-lived and world-space so the spin actually draws an arc. */
+        protected static SpinProperties(): any;
+        /** Whether the port has this group running. The state machine's truth, not the emitter's. */
+        isGroupPlaying(name: string): boolean;
+        /** How many particle systems back a group. `0` means the channel is running and drawing nothing. */
+        getGroupSystemCount(name: string): number;
+        /** Whether a group's emitters were built here rather than found on an exported kart. */
+        isGroupPlaceholder(name: string): boolean;
+        /** Every group name, for a HUD that enumerates rather than hardcodes. */
+        getGroupNames(): string[];
+        /** The colour currently on the spark systems, or `null` when they are stopped. */
+        getActiveSparkColor(): string;
+        /** How many payout bursts have fired since the component started. */
+        getBoostBurstCount(): number;
+        /** `particleSystemAntigravSpinTimer` (`Player.cs:178`). */
+        getAntiGravSpinTimer(): number;
+        /**
+         * Whether a boost source fires `BoostBurstPS`.
+         *
+         * FIVE OF THE SEVEN DO. The two that do not are the ones a "every grant bursts" reading gets
+         * wrong, and each is a deliberate omission in the source rather than an oversight:
+         *
+         *   `BoostPad`      `507` grants and plays a VOICE (`514`) with no burst at all.
+         *   `TrickLanding`  `541` floors the clock and plays `groundLandParticles` (`544`) instead —
+         *                   the puff belongs to the landing, not to the boost it happens to grant.
+         *
+         * `None` does not burst either: an untagged grant is a source that forgot to name itself, and
+         * silently bursting for it would hide the omission.
+         */
+        static SourceBursts(source: number): boolean;
+        /** Hex `#RRGGBB` or `#RRGGBBAA` into a `Color4`, in place. Unknown input reads as opaque white. */
+        static HexToColor4(hex: string, result: BABYLON.Color4): BABYLON.Color4;
+    }
+}
+declare namespace PROJECT {
     /**
     * Babylon Script Component
     * @class CheckpointManager
@@ -4751,303 +10719,6 @@ declare namespace PROJECT {
         getFrontRightWheelContactNormal(): BABYLON.Vector3;
         getRearLeftWheelContactNormal(): BABYLON.Vector3;
         getRearRightWheelContactNormal(): BABYLON.Vector3;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon standard kart controller class — Mario Kart style drifting on a raycast vehicle.
-     * @class StandardKartController
-     *
-     * =========================================================================================
-     * WHAT THIS IS, AND HOW IT RELATES TO StandardCarController
-     * =========================================================================================
-     *
-     * The same stack, with exactly ONE layer swapped. Rig it in Unity the way you rig a car:
-     * a rigidbody chassis, four wheel colliders, four wheel meshes, exhaust points. Export the
-     * scene as interactive glTF and the parser attaches this component.
-     *
-     *   Havok rigidbody        gravity, RAMPS, AIR, walls, kart-vs-kart      << unchanged
-     *   TOOLKIT.RaycastVehicle suspension, wheel raycasts, ground normals    << unchanged
-     *   wheel meshes/spinners  visuals, skid, smoke                          << unchanged
-     *   ---------------------------------------------------------------------------------
-     *   ground-plane direction Bullet tyre friction + Ackermann steering     << REPLACED
-     *
-     * That last line is the whole component. Jumps, ramps and flight come from Havok exactly as
-     * they do for the car, because the chassis is still a Havok body being thrown off a lip.
-     *
-     * =========================================================================================
-     * WHY THE TYRE MODEL HAS TO GO, AND NOT JUST BE RETUNED
-     * =========================================================================================
-     *
-     * A Mario Kart drift is NOT a friction simulation, and no amount of tuning `frictionSlip`
-     * produces one. It is kinematic — a decreed offset between where the kart POINTS and where it
-     * GOES. Mario Kart Wii's shipped code, reimplemented function-for-function by vabold/Kinoko
-     * and validated frame-perfect against world-record ghost replays, is three lines:
-     *
-     *     // KartMove::calcDirs()
-     *     mat.setAxisRotation(DEG2RAD * m_outsideDriftAngle, m_smoothedUp);  // travel = R(angle) * nose
-     *     // KartMove::calcAcceleration()
-     *     EGG::Vector3f nextSpeed = m_speed * m_vel1Dir;                     // scalar x unit vector
-     *     // KartMove::controlOutsideDriftAngle()
-     *     m_outsideDriftAngle += 150.0f * driftManualTightness;              // ramped to a flat 45
-     *
-     * Velocity is a SCALAR along a UNIT VECTOR. There is no lateral velocity term anywhere in the
-     * kart module, and `grep -rni "friction|grip|slipangle|cornering"` over Kinoko's kart source
-     * returns nothing. The sideways look is produced by decree, not emerged from forces.
-     *
-     * So while a drift is live this component takes the ground plane: it drops `frictionSlip` to
-     * `driftFrictionSlip` (the same field the car's handbrake already uses, so nothing new is
-     * being invented) and writes the chassis' planar velocity direction itself. The VERTICAL
-     * component is never touched, which is what leaves gravity, the suspension and every ramp
-     * launch entirely to Havok.
-     *
-     * =========================================================================================
-     * WHAT IT DOES NOT TOUCH
-     * =========================================================================================
-     *
-     * The velocity write is planar only, decomposed against the wheels' averaged contact normal
-     * rather than world up — so a drift on a banked corner stays in the road's plane instead of
-     * trying to climb out of it. Airborne, it writes nothing at all: `RaycastVehicle`'s own
-     * flying impulse, rise damping and auto-level own the air, and the drift angle simply holds
-     * until the wheels touch down. You land still sideways and still drifting.
-     */
-    class StandardKartController extends TOOLKIT.ScriptComponent {
-        /** Extra yaw authority during the hop. MKW `calcRotation`: a bare 1.4 literal. */
-        static readonly HOP_TURN_BOOST: number;
-        /** Airtime past which the drift stops controlling its angle. MKW: 5 frames. */
-        static readonly AIRBORNE_ANGLE_HOLD: number;
-        /** Planar speed below which the travel direction is left alone. Normalisation guard. */
-        static readonly RESTING_SPEED: number;
-        chassisTransform: BABYLON.TransformNode;
-        exhaustLeftTransform: BABYLON.TransformNode;
-        exhaustRightTransform: BABYLON.TransformNode;
-        private frontLeftWheelTrans;
-        private frontRightWheelTrans;
-        private backLeftWheelTrans;
-        private backRightWheelTrans;
-        private frontLeftWheelCollider;
-        private frontRightWheelCollider;
-        private backLeftWheelCollider;
-        private backRightWheelCollider;
-        private frontLeftWheelMesh;
-        private frontRightWheelMesh;
-        private backLeftWheelMesh;
-        private backRightWheelMesh;
-        /** Top speed, metres per second. */
-        topSpeed: number;
-        /** Seconds from rest to top speed. */
-        accelerationTime: number;
-        /** Deceleration off throttle, m/s^2. */
-        coastDeceleration: number;
-        /** Braking deceleration, m/s^2. */
-        brakeDeceleration: number;
-        /** Gravity multiplier on the chassis body. Arcade karts want more than Earth. */
-        gravitationalForce: number;
-        /** Yaw rate at full lock while NOT drifting, radians per second. */
-        steeringYawRate: number;
-        /** Seconds for keyboard steering to ramp centre to full lock. */
-        steeringRamp: number;
-        /** Visual steering angle of the front wheels, degrees. Cosmetic. */
-        maxSteeringAngle: number;
-        driftEnabled: boolean;
-        /**
-         * Yaw rate with the stick held FULLY INTO the drift, radians per second.
-         *
-         * 1.658 = 95 deg/s, Mario Kart 8's measured full-lock stop. THE size of the drift: the
-         * traced radius is `speed / (driftYawRate * realTurn)` and nothing else in the model moves
-         * it — not the angle, not the slide, not the surface.
-         */
-        driftYawRate: number;
-        /**
-         * Stick and direction shares. `realTurn = stickShare * stick + baseShare * driftDirection`.
-         *
-         * MKW ships 0.4 / 0.6, which floors counter-steer at 0.2 of full lock so a held drift can
-         * NEVER be straightened. Accurate, and it makes a held drift a donut — measured at 1.97
-         * complete circles in eight seconds with five metres of net displacement. 0.5 / 0.5 puts
-         * the floor at zero: full counter-steer drives straight while still drifting. Worse model
-         * of Mario Kart Wii, better kart to drive. Set 0.4 / 0.6 for strict MKW.
-         */
-        driftStickShare: number;
-        driftBaseShare: number;
-        /** Body-vs-travel angle a drift settles at, degrees. MKW: 45, all 36 vehicles. */
-        driftTargetAngle: number;
-        /** Hard clamp on that angle, degrees. MKW's `startManualDrift` clamp. */
-        driftMaxAngle: number;
-        /** Rate the angle ramps on at, degrees per second. */
-        driftAngleRampRate: number;
-        /** Rate it bleeds off at after release. MKW: 0.8 deg/frame = 48 deg/s, four times slower. */
-        driftAngleUnwindRate: number;
-        /** Seconds the entry hop lasts. The line is frozen for all of it. */
-        hopDuration: number;
-        /** Upward impulse of the entry hop. */
-        hopImpulse: number;
-        /** Speed below which a drift cannot start or survive. MKW: 0.55 x top speed. */
-        minimumDriftSpeed: number;
-        /** Steering magnitude needed at touchdown to latch a direction. */
-        driftLatchThreshold: number;
-        /** Fraction of speed kept per second while drifting. 1 makes drifting free. */
-        driftSpeedRetention: number;
-        /**
-         * Wheel friction while the drift owns the ground plane.
-         *
-         * Near-zero, and it must be: the tyres and the decree cannot both be right about the same
-         * axis in the same step. Left at its normal value the friction hauls the velocity back
-         * toward the nose that the decree keeps pushing it away from, at over 100 m/s^2 — most of
-         * it pointing down the path, so it reads as the kart braking hard in every corner.
-         */
-        driftFrictionSlip: number;
-        miniTurboEnabled: boolean;
-        /** Seconds of drift for each of the three spark stages. */
-        miniTurboTime: number;
-        superMiniTurboTime: number;
-        ultraMiniTurboTime: number;
-        /** Boost speed multiplier and duration per stage. */
-        boostSpeedFactor: number;
-        boostDurationMini: number;
-        boostDurationSuper: number;
-        boostDurationUltra: number;
-        /** Planar pace, m/s. */
-        get currentSpeed(): number;
-        /** Nose minus travel, radians. THE number: how sideways the kart actually is. */
-        get slideAngle(): number;
-        /** 0 none, 1 hop, 2 drifting. */
-        get driftState(): number;
-        /** -1 left, +1 right, 0 unlatched. */
-        get driftDirection(): number;
-        /** 0 none, 1 mini, 2 super, 3 ultra. */
-        get driftStage(): number;
-        /** True while no wheel is in contact. */
-        get isAirborne(): boolean;
-        private _rigidbody;
-        private _raycastVehicle;
-        private _engineAudioSource;
-        private FRONT_LEFT;
-        private FRONT_RIGHT;
-        private BACK_LEFT;
-        private BACK_RIGHT;
-        private _defaultFriction;
-        private _steer;
-        private _throttle;
-        private _brake;
-        private _driftHeld;
-        private _driftWasHeld;
-        /** Last values handed in by `drive()`. Consumed by `readInput` each frame. */
-        private _steerRequest;
-        private _driftRequest;
-        private _externalBoost;
-        private _driftState;
-        private _driftDirection;
-        private _driftStage;
-        private _driftTime;
-        private _hopTime;
-        private _hopSteer;
-        private _hopPending;
-        /**
-         * Body-vs-travel angle, radians, signed in the world frame.
-         *
-         * NEGATIVE means travel lies to the LEFT of the nose, which is a RIGHT-hand drift: nose
-         * turned into the corner, tail hung out. Signed in the world rather than outward-positive
-         * because it is used to ROTATE a vector, and because it has to survive `_driftDirection`
-         * going to zero — the unwind runs for the best part of a second after the drift ends.
-         */
-        private _driftAngle;
-        private _yawRate;
-        private _planarSpeed;
-        private _groundedWheels;
-        private _airborneTime;
-        private _boostTimer;
-        private _boostFactor;
-        private readonly _groundNormal;
-        private readonly _groundForward;
-        private readonly _velocity;
-        private readonly _angular;
-        private readonly _travel;
-        private readonly _scratchA;
-        private readonly _scratchB;
-        private readonly _worldMatrix;
-        protected awake(): void;
-        protected start(): void;
-        protected update(): void;
-        protected step(): void;
-        protected destroy(): void;
-        /** Reads every inspector property. Mirrors StandardCarController's own awake. */
-        protected awakeKartState(): void;
-        /** Resolves the rig and takes hold of the raycast vehicle. */
-        protected initKartState(): void;
-        /** Maps the Unity wheel colliders onto raycast vehicle wheel indexes, and binds the meshes. */
-        private resolveWheelIndexes;
-        /** Remembers the rig's authored friction so the drift can hand it back exactly. */
-        private captureDefaultFriction;
-        protected destroyKartState(): void;
-        protected updateKartState(): void;
-        /**
-         * THE INPUT ENTRY POINT. Same contract as `StandardCarController.drive`.
-         *
-         * This component reads NO input of its own, deliberately: in this library the vehicle
-         * controller is a driver, and `VehicleInputController` is the thing that decides what the
-         * driver is being told to do — keyboard, gamepad, pedals, a network peer or an AI. One
-         * surface, any number of writers, and the AI needs no second code path.
-         *
-         * @param throttle  -1..1. Positive drives, negative brakes and then reverses.
-         * @param steering  -1..1. Ramped internally by `steeringRamp`; pass it raw.
-         * @param drifting  the drift control, HELD not tapped. Press opens the hop, release ends
-         *                  the drift and pays out whatever mini-turbo was charged.
-         * @param booster   0..1 external boost, from an item or a pad. Scales top speed.
-         */
-        drive(throttle: number, steering: number, drifting: boolean, booster?: number): void;
-        /** Consumes the last `drive()` call. Ramping happens here so it is frame-rate correct. */
-        private readInput;
-        /**
-         * Averages the wheels' contact normals and builds the ground-plane basis.
-         *
-         * From `RaycastVehicle`'s own raycasts, not a second cast of our own — the suspension has
-         * already paid for those and a separate probe could disagree with the wheels the kart is
-         * visibly standing on.
-         */
-        private readGroundFrame;
-        private advanceMachine;
-        private updateDriftStage;
-        private releaseDrift;
-        /**
-         * Integrates the drift angle. MKW `controlOutsideDriftAngle`, and it really is this short:
-         * a constant-rate ramp toward a constant, with no stick, no speed and no surface in it.
-         *
-         * That is the fact most imitations get wrong. Making the angle a function of steering means
-         * steering out of a drift flattens it, so the flattest drift is the one a player driving
-         * the racing line holds all the way round the corner.
-         */
-        private integrateDriftAngle;
-        /** True while this component, rather than the tyres, decides where the kart is going. */
-        private ownsGroundPlane;
-        /**
-         * Hands the tyres' lateral grip out of the way for exactly as long as the decree lasts.
-         *
-         * Both halves must agree or the model breaks in a way that is very hard to see: grip
-         * pulling the velocity back toward a nose the decree keeps pushing it away from, at over
-         * 100 m/s^2, most of it down the path — so it reads as mysterious braking, not as a fight.
-         */
-        private applyFrictionOwnership;
-        private updateBoost;
-        protected stepKartState(): void;
-        /** Pace is a scalar, start to finish. There is no lateral velocity term anywhere. */
-        private integratePace;
-        /**
-         * THE DECREE. Sets the ground-plane velocity to `speed * R(driftAngle) * nose`.
-         *
-         * Rodrigues about the ground normal for a vector already in that plane: `R(v) = v cos +
-         * (n x v) sin`. Decomposed against the CONTACT normal rather than world up, so a drift on
-         * a banked corner stays in the road's plane. The component along the normal is preserved
-         * untouched, which is what leaves gravity, the suspension and the hop entirely alone.
-         */
-        private applyTravelDirection;
-        /** Replaces only the yaw about the ground normal. Pitch and roll stay with the suspension. */
-        private applyYawRate;
-        /** Front wheels turn with the stick. Purely cosmetic — the yaw is decreed, not steered. */
-        private updateWheelVisuals;
-        private restoreFriction;
-        /** Hard reset. MKW's `clearDrift` — respawn and control locks, where the pose must vanish. */
-        clearDrift(): void;
-        private static MoveTowards;
     }
 }
 declare namespace PROJECT {
