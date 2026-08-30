@@ -16072,8 +16072,27 @@ declare namespace TOOLKIT {
         /** GPU cap on Texture2DArray layers: WebGPU device limit `maxTextureArrayLayers`, else WebGL2
          *  `MAX_ARRAY_TEXTURE_LAYERS`. Falls back to the spec-guaranteed floor (256) when it can't be read. */
         private static _maxArrayLayers;
-        /** Load every URL as an HTMLImageElement (cross-origin enabled for canvas readback). */
-        private static _loadImages;
+        /** Load every slice URL into a normalized descriptor { width, height, image, pixels }. Browser-decodable
+         *  images (png/jpg/webp) come back as an HTMLImageElement; GPU container formats (ktx2/ktx/dds/basis) —
+         *  which NO browser can decode through an <img> tag — are routed through Babylon's texture loader and
+         *  read back as RGBA8 pixels instead. */
+        private static _loadSlices;
+        /** True for GPU texture containers that an <img> element cannot decode (KTX2/KTX/DDS/Basis). These must
+         *  go through Babylon's transcoding texture loader — feeding one to an <img> fires onerror even though
+         *  the HTTP request itself succeeded (the network tab shows a clean 200). */
+        private static _isGpuContainerUrl;
+        /** Load a browser-decodable image (cross-origin enabled for canvas readback). */
+        private static _loadImage;
+        /** Decode a GPU container (KTX2/DDS/Basis) to RGBA8 CPU pixels via Babylon's texture loader.
+         *  The file is transcoded to a compressed GPU format (ASTC/BC/ETC) that cannot be read back directly,
+         *  so TextureTools.GetTextureDataAsync renders it through a pass shader into an RGBA8 target and reads
+         *  THAT — which also preserves row order (no Y flip) and the stored sRGB bytes (the loader leaves
+         *  _useSRGBBuffer off, so the shader's own toLinearSpace still applies exactly once). The temporary
+         *  texture is disposed as soon as the pixels are out; only the stacked array keeps VRAM. */
+        private static _loadGpuContainer;
+        /** Wrap a loaded slice as something ctx.drawImage() accepts — the image itself, or a scratch canvas
+         *  seeded from decoded pixels (only needed when a GPU-decoded slice must be flipped or resampled). */
+        private static _asDrawable;
         /** Dispose and drop every cached array (e.g. on scene teardown). Cached entries are promises, so we
          *  resolve each before disposing (handles arrays still finishing their async build). */
         static Clear(): void;
@@ -16577,6 +16596,7 @@ declare namespace TOOLKIT {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
+        getAbstractSkinnedMesh(): BABYLON.AbstractMesh;
         /** Configure every skinned part for the skin array and apply defaultIndex. Idempotent (runs once). */
         applySkins(): void;
         /**
