@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.22.2 - R1) */
+        /** Gets the toolkit framework version string (9.22.3 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -206,6 +206,10 @@ declare namespace TOOLKIT {
         /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
         static ForceHideLoadingScreen(): void;
         private static DoForceHideLoadingScreen;
+        /** Show the scene rendering canvas
+         * @param scene The scene instance.
+         */
+        static ShowRenderCanvas(scene: BABYLON.Scene): void;
         /** Focus the scene rendering canvas
          * @param scene The scene instance.
          */
@@ -449,8 +453,13 @@ declare namespace TOOLKIT {
         /** TODO: Support Instance Or Clones */
         /** Instantiate the specified prefab asset hierarchy from the specified scene. (Cloned Hierarchy) */
         static InstantiatePrefabFromScene(scene: BABYLON.Scene, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean): BABYLON.TransformNode;
-        /** Instantiate the specified prefab asset hierarchy from an asset container. (Cloned Hierarchy) */
-        static InstantiatePrefabFromContainer(container: BABYLON.AssetContainer, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean): BABYLON.TransformNode;
+        /** Instantiate the specified prefab asset hierarchy from an asset container. (Cloned Hierarchy)
+         * @param createInstancedMesh defines an option to override the per node metadata instance flag.
+         * When null (default) each mesh node uses its own metadata.toolkit.instance flag, normally set from
+         * the mesh details component. When true every mesh node is created as a hardware instanced mesh.
+         * When false every mesh node is created as a full geometry clone.
+         */
+        static InstantiatePrefabFromContainer(container: BABYLON.AssetContainer, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.TransformNode;
         /** Instantiate all the raw models from an asset container. (Cloned Hierarchy) */
         static InstantiateModelsFromContainer(container: BABYLON.AssetContainer, nameFunction?: (sourceName: string) => string, createInstances?: boolean, cloneMaterials?: boolean, rebuildBoundingInfo?: boolean, filterPredicate?: any): BABYLON.TransformNode[];
         /** Instantiate the specified prefab asset hierarchy from an asset container. (Instanced Hierarchy) */
@@ -1761,7 +1770,52 @@ declare namespace TOOLKIT {
      * Preload Assets Manager Classes (Note: No Progress Events For Textures)
      * @class PreloadAssetsManager - All rights reserved (c) 2024 Mackey Kinard
      */
+    /**
+     * Generic promise backed preloader task. Wraps work that is NOT a plain file download (a decoded GPU
+     * texture array, a warmed shader, a wasm module) so it can take part in the standard asset manager
+     * progress bar and, more importantly, so the splash screen stays up until that work is finished.
+     * @class PreloadPromiseTask - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class PreloadPromiseTask extends BABYLON.AbstractAssetTask {
+        /** The factory that produces the promise this task waits on. */
+        promiseFactory: () => Promise<any>;
+        /** Milliseconds before the task gives up waiting (0 disables). The underlying promise keeps running. */
+        timeoutMs: number;
+        /** Whatever the promise resolved to (null when it failed or timed out). */
+        result: any;
+        constructor(name: string, promiseFactory: () => Promise<any>, timeoutMs?: number);
+        runTask(scene: BABYLON.Scene, onSuccess: () => void, onError: (message?: string, exception?: any) => void): void;
+    }
     class PreloadAssetsManager extends BABYLON.AssetsManager {
+        /**
+         * Preload the GPU skin slice arrays (TOOLKIT.TextureAtlasSkin) declared by the prefabs inside every
+         * asset container loaded through addContainerTask. When ON, the slices are downloaded and uploaded
+         * while the loading screen is still up, so a prefab instantiated later is already wearing its skin on
+         * its first frame instead of popping it in a few seconds after the splash screen has gone.
+         *
+         * OFF by default, because it is eager: the arrays are large (a 20 skin 2048x2048 albedo set is ~335MB)
+         * and preloading claims that VRAM — plus the loading time — for EVERY container, including ones the
+         * project may never instantiate. Opt in per project, from a scene component CONSTRUCTOR:
+         *
+         *      constructor(transform, scene, properties, alias) {
+         *          super(transform, scene, properties, alias);
+         *          TOOLKIT.PreloadAssetsManager.PreloadContainerSkins = true;
+         *      }
+         *
+         * A constructor is early enough: scene components are constructed while the scene metadata is parsed,
+         * which happens BEFORE the preloader pass adds and runs its container tasks.
+         *
+         * Leaving it OFF changes nothing else — the arrays are still built lazily when a prefab is
+         * instantiated, still deduped to one upload per slice set, and TextureAtlasSkin.WhenAllSkinsReady /
+         * OnAllSkinsReadyObservable still fire for them (just later, after the loading screen is gone).
+         */
+        static PreloadContainerSkins: boolean;
+        /**
+         * Preload whatever a freshly loaded asset container declares but cannot queue for itself (its script
+         * components do not exist yet). NEVER rejects and is watchdogged by each preloader it calls, so a
+         * missing or stalled asset can never wedge the loading screen.
+         */
+        static PreloadContainerAssetsAsync(scene: BABYLON.Scene, container: BABYLON.AssetContainer, rootUrl?: string): Promise<void>;
         /**
          * Add a ContainerAssetTask to the list of active tasks
          * Note: Progress Tracking Supported
@@ -1806,6 +1860,20 @@ declare namespace TOOLKIT {
          * @returns a new ImageAssetTask object
          */
         addImageTask(taskName: string, url: string): BABYLON.ImageAssetTask;
+        /**
+         * Add a PreloadPromiseTask to the list of active tasks
+         * Note: No Progress Events (the work is not a plain file download)
+         *
+         * Lets non-file work — a decoded GPU texture array, a warmed shader — hold the splash screen until it
+         * is finished, exactly like a downloaded asset. The promise is produced by the factory when the task
+         * runs; pass a timeout so a stalled promise can never wedge the preloader.
+         *
+         * @param taskName defines the name of the new task
+         * @param promiseFactory produces the promise the task waits on
+         * @param timeoutMs milliseconds before the task gives up waiting and lets the load continue (0 = wait forever)
+         * @returns a new PreloadPromiseTask object
+         */
+        addPromiseTask(taskName: string, promiseFactory: () => Promise<any>, timeoutMs?: number): TOOLKIT.PreloadPromiseTask;
         /**
          * Handle Preloading Progress Events
          */
@@ -3212,16 +3280,26 @@ declare namespace TOOLKIT {
          * @param nameFunction defines an optional function used to get new names for clones
          * @param makeNewMaterials defines an optional boolean that defines if materials must be cloned as well (false by default)
          * @param cloneAnimations defines an option to clone any animation groups (true by default)
-         * @param disableInstance defines an option to disable the cloned instance (false by default)
+         * @param createInstancedMesh defines an option to override the per node metadata instance flag.
+         * When null (default) each mesh node uses its own metadata.toolkit.instance flag, normally set from
+         * the mesh details component. When true every mesh node is created as a hardware instanced mesh.
+         * When false every mesh node is created as a full geometry clone.
          * @returns the transform node that was duplicated
          */
-        static CloneAssetContainerItem(container: BABYLON.AssetContainer, assetName: string, nameFunction?: (sourceName: string) => string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, makeNewMaterials?: boolean, cloneAnimations?: boolean): BABYLON.TransformNode;
+        static CloneAssetContainerItem(container: BABYLON.AssetContainer, assetName: string, nameFunction?: (sourceName: string) => string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, makeNewMaterials?: boolean, cloneAnimations?: boolean, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.TransformNode;
         static AssignAnimationGroupsToInstance(root: BABYLON.TransformNode, groups: BABYLON.AnimationGroup[]): void;
         static AssignAnimationGroupsToNode(transform: BABYLON.TransformNode, groups: BABYLON.AnimationGroup[]): void;
         static UnitySlopeAngleToCosine(unitySlopeAngleDegrees: number): number;
-        static InstantiateHierarchy(node: BABYLON.TransformNode, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void): BABYLON.Nullable<BABYLON.TransformNode>;
-        static InstantiateNodeHierarchy(node: BABYLON.TransformNode, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void): BABYLON.Nullable<BABYLON.TransformNode>;
-        static InstantiateMeshHierarchy(mesh: BABYLON.Mesh, newParent: BABYLON.Nullable<BABYLON.TransformNode>, createInstance: boolean, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void): BABYLON.Nullable<BABYLON.TransformNode>;
+        /**
+         * Instantiates the specified node hierarchy. (Internal Use Only)
+         * @param createInstancedMesh defines an option to override the per node metadata instance flag.
+         * When null (default) each mesh node uses its own metadata.toolkit.instance flag, normally set
+         * from the mesh details component. When true every mesh node in the hierarchy is created as a
+         * hardware instanced mesh. When false every mesh node is created as a full geometry clone.
+         */
+        static InstantiateHierarchy(node: BABYLON.TransformNode, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.Nullable<BABYLON.TransformNode>;
+        static InstantiateNodeHierarchy(node: BABYLON.TransformNode, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.Nullable<BABYLON.TransformNode>;
+        static InstantiateMeshHierarchy(mesh: BABYLON.Mesh, newParent: BABYLON.Nullable<BABYLON.TransformNode>, createInstance: boolean, onNewNodeCreated?: (source: BABYLON.TransformNode, clone: BABYLON.TransformNode) => void, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.Nullable<BABYLON.TransformNode>;
         static PrepareSkeletonForRendering(skeleton: BABYLON.Skeleton, dontCheckFrameId?: boolean): void;
         static RetargetAnimationGroupSkeleton(animationGroup: BABYLON.AnimationGroup, targetSkeleton: BABYLON.Skeleton, targetArmatureNode?: BABYLON.TransformNode): void;
         static RetargetAnimationGroupBlendShapes(animationGroup: BABYLON.AnimationGroup, targetMesh: BABYLON.Mesh): void;
@@ -3511,6 +3589,17 @@ declare namespace TOOLKIT {
         /** VAT per-skin EMISSIVE switching — opt-in via enableVatSkinArrayEmissive() once a tkEmissiveArray is
          *  assigned. Overrides finalEmissive with toLinearSpace(slice); works with no base emissive. */
         private _vatSkinArrayEmissive;
+        /** Which packed layer SLOT of g_vatAnim1.w this material decodes its skin index from (setVatSkinSlot).
+         *  -1 = LEGACY whole-value decode — what every single-material VAT mesh keeps using, so nothing that
+         *  already ships changes. 0..2 select one of three INDEPENDENT per-instance layers, which is what lets
+         *  two TextureAtlasSkin components on the SAME mesh (horse body + mane) pick different skins. */
+        private _vatSkinSlot;
+        /** True when the skin layer comes from the tkVatSkinLayerUni UNIFORM instead of the packed
+         *  per-instance g_vatAnim1.w attribute. Required for a VAT material on a mesh with NO hardware
+         *  instances: instancedBuffers are only bound on an instanced draw, so the attribute reads 0 and the
+         *  mesh is stuck on layer 0 no matter what index is set. One mesh needs only one layer, so a shared
+         *  uniform is exactly right there. */
+        private _vatSkinLayerUniform;
         constructor(name: string, scene: BABYLON.Scene);
         awake(): void;
         update(): void;
@@ -3564,6 +3653,48 @@ declare namespace TOOLKIT {
         enableVatSkinArrayEmissive(): TOOLKIT.VertexAnimationMaterial;
         /** Disable VAT per-skin EMISSIVE switching. */
         disableVatSkinArrayEmissive(): void;
+        /**
+         * Select which packed layer SLOT of g_vatAnim1.w this material reads its skin index from.
+         *
+         * A VAT instance carries ONE per-instance float for the skin layer — there is no vertex-buffer budget
+         * for another attribute (see enableVatSkinArray) — so a mesh with several skinned SUB-MATERIALS used to
+         * force them all onto the same index: a horse's body and its mane could never wear different skins,
+         * because both are sub-materials of one Horse_Mesh and the layer lives on the MESH. The layer field is
+         * therefore packed base-64, carrying up to THREE independent slots per instance:
+         *
+         *     g_vatAnim1.w = loopBlendFlag + 2 * (slot0 + 64*slot1 + 4096*slot2)
+         *
+         * The slot is simply the material's position in the mesh's MultiMaterial, so components need no
+         * coordination: sub-material 0 -> slot 0, sub-material 1 -> slot 1, and so on. Set the value with
+         * VertexAnimationController.SetAtlasCellIndex(mesh, index, slot).
+         *
+         * @param slot 0..2 to decode that slot (skin index capped at 63 by the packing), or -1 for the LEGACY
+         *        single-slot decode (the whole packed value is the layer — unbounded index, and what a
+         *        single-material mesh keeps using so existing content is bit-for-bit unchanged).
+         */
+        setVatSkinSlot(slot: number): TOOLKIT.VertexAnimationMaterial;
+        /** The packed layer slot this material decodes (-1 = legacy whole-value decode). */
+        get vatSkinSlot(): number;
+        /**
+         * Take the skin layer from a shared material UNIFORM instead of the packed per-instance attribute.
+         *
+         * A VAT material on a mesh with NO hardware instances can never read g_vatAnim1: Babylon binds
+         * instancedBuffers only on an instanced draw call, so the attribute comes through as 0 and the mesh
+         * renders layer 0 whatever index was requested. A non-instanced mesh only ever needs ONE layer, so the
+         * uniform carries it. Call once, then push values with setVatSkinLayerUniform().
+         *
+         * NOTE: this is per-MATERIAL. Do not enable it on a material that is also used by instanced meshes —
+         * they would all collapse onto the single uniform value.
+         */
+        enableVatSkinLayerUniform(): TOOLKIT.VertexAnimationMaterial;
+        /** Set the layer for the uniform path. Cheap — no recompile, just the uniform value. */
+        setVatSkinLayerUniform(layer: number): TOOLKIT.VertexAnimationMaterial;
+        /** Go back to the packed per-instance attribute. Needed when a mesh GAINS hardware instances after
+         *  the material was first configured — instances must each read their own layer, which only the
+         *  attribute can give them. */
+        disableVatSkinLayerUniform(): TOOLKIT.VertexAnimationMaterial;
+        /** True when the layer is read from the uniform rather than the packed attribute. */
+        get vatSkinLayerUniform(): boolean;
         /** True when VAT per-skin Texture2DArray switching is enabled (see enableVatSkinArray). */
         get vatSkinArray(): boolean;
         /** True when VAT per-skin NORMAL Texture2DArray switching is enabled (see enableVatSkinArrayNormal). */
@@ -3679,14 +3810,37 @@ declare namespace TOOLKIT {
         static GetOrCreate(guid: string, scene: BABYLON.Scene, rootUrl?: string, lazyLoadTextures?: boolean): TOOLKIT.VertexAnimationController;
         /** Collect unique renderer targets from the flat VAT settings array emitted by C#. */
         static CollectRendererTargets(settings: TOOLKIT.IVertexAnimationSettings[]): TOOLKIT.IVertexAnimationRendererReference[];
-        /** Set a per-mesh skin layer index for VAT per-skin Texture2DArray switching. Stored on the mesh as
-         *  `atlasCellIndex` and packed into g_vatAnim1.w during _tick (alongside the loop-blend flag), so
-         *  each InstancedMesh under one VAT controller can display a different array layer with no extra
-         *  vertex buffer. Requires enableVatSkinArray() on the material. Unset / out-of-range values are
-         *  treated as 0 (the first array layer). */
-        static SetAtlasCellIndex(mesh: BABYLON.AbstractMesh, cellIndex: number): void;
-        /** Read a per-mesh atlas cell index. Returns 0 when the mesh has no value set. */
-        static GetAtlasCellIndex(mesh: BABYLON.AbstractMesh): number;
+        /** How many INDEPENDENT skin layers one VAT mesh instance can carry. The layers are packed base-64
+         *  into the single g_vatAnim1.w float (loop-blend flag in the low bit), so three slots of 0..63 stay
+         *  exactly representable in a float32 vertex attribute (max 524287, well under 2^24). */
+        static readonly MAX_ATLAS_CELL_SLOTS: number;
+        /** Highest skin index a packed slot can hold (base-64 packing). */
+        static readonly MAX_ATLAS_CELL_INDEX: number;
+        /**
+         * Set a per-mesh skin layer index for VAT per-skin Texture2DArray switching. Slot 0 is stored on the
+         * mesh as `atlasCellIndex`, slots 1+ in a lazily created `atlasCellIndexSlots` array; all of them are
+         * packed into g_vatAnim1.w during _tick (alongside the loop-blend flag), so each InstancedMesh under
+         * one VAT controller displays its own array layer with no extra vertex buffer.
+         *
+         * SLOTS are what let SEVERAL skinned sub-materials of one mesh switch independently (horse body vs.
+         * mane): the mesh has only one layer float, so without slots the last writer would win for both.
+         * The material must decode the matching slot — see VertexAnimationMaterial.setVatSkinSlot.
+         *
+         * Requires enableVatSkinArray() on the material. Unset / out-of-range values are treated as 0 (the
+         * first array layer). A mesh that only ever uses slot 0 packs — and renders — exactly as it always did.
+         */
+        static SetAtlasCellIndex(mesh: BABYLON.AbstractMesh, cellIndex: number, slot?: number): void;
+        /** Read a per-mesh atlas cell index for one slot. Returns 0 when the mesh has no value set. */
+        static GetAtlasCellIndex(mesh: BABYLON.AbstractMesh, slot?: number): number;
+        /**
+         * Pack a mesh's per-slot atlas cell indices into the single float carried by g_vatAnim1.w.
+         * Base-64, low slot first: slot0 + 64*slot1 + 4096*slot2.
+         *
+         * A mesh that only ever used slot 0 — every VAT mesh authored before multi-slot skins existed — has no
+         * `atlasCellIndexSlots` array and packs to EXACTLY its cell index, so both the attribute value and the
+         * legacy shader decode are unchanged.
+         */
+        static PackAtlasCells(mesh: BABYLON.AbstractMesh): number;
         /** Dispose every controller (optionally only those tied to a given scene). */
         static DisposeAll(scene?: BABYLON.Scene): void;
         readonly guid: string;
@@ -13326,6 +13480,7 @@ declare namespace TOOLKIT {
         protected m_vertexAnimationRenderers: BABYLON.Mesh[];
         protected m_vertexAnimationController: TOOLKIT.VertexAnimationController;
         protected m_vertexAnimationDefaultClip: string;
+        protected m_vertexAnimationSearchNodes: BABYLON.AbstractMesh[];
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
@@ -13393,6 +13548,21 @@ declare namespace TOOLKIT {
         private updateAnimationGroups;
         private setupSourceAnimationGroups;
         private awakeStateMachine;
+        /**
+         * Resolves the scene node for a serialized vertex animation renderer entry.
+         *
+         * Design time scene nodes keep their exported guid as the node id, so a plain
+         * scene.getNodeById(vertexguid) resolves them. Runtime prefab instances created with
+         * TOOLKIT.SceneManager.InstantiatePrefabFromContainer are cloned and given brand new
+         * node ids, so the serialized vertexguid never matches anything in the scene. Cloned
+         * nodes record their design time id on metadata.toolkit.sourceid, so search THIS
+         * animator hierarchy first. Searching locally also keeps multiple instances of the
+         * same prefab from stealing each other renderer meshes, because a global lookup
+         * always returns the first matching node in the scene.
+         */
+        private resolveVertexAnimationRenderer;
+        /** Builds the transform path of a node relative to this animator transform (Unity style, root excluded) */
+        private getRelativeTransformPath;
         private updateStateMachine;
         private destroyStateMachine;
         private updateAnimationState;
@@ -16066,6 +16236,26 @@ declare namespace TOOLKIT {
         }): Promise<BABYLON.RawTexture2DArray>;
         /** Upload a CPU-generated mip chain to every layer (works around the broken WebGPU array auto-mip-gen).
          *  Each level is a box-downsample of the previous, uploaded via engine.updateRawTexture2DArray(.., mipLevel). */
+        /**
+         * True when this exact slice set (same URLs, same GPU-result-affecting options) is already built or
+         * currently building. Lets callers avoid queueing the SAME array twice — e.g. dozens of meshes sharing
+         * one skin set add ONE preloader task between them, not one each.
+         */
+        static IsCached(scene: BABYLON.Scene, urls: string[], options?: {
+            samplingMode?: number;
+            aniso?: number;
+            invertY?: boolean;
+            mipmaps?: boolean;
+        }): boolean;
+        /** A Texture2DArray cannot hold more layers than the GPU's maxTextureArrayLayers (WebGPU device limit /
+         *  WebGL2 MAX_ARRAY_TEXTURE_LAYERS — typ. 2048 desktop, 256 floor). Exceeding it would make the
+         *  RawTexture2DArray allocation fail outright, so clamp + warn instead: skins past the cap are dropped
+         *  (their index will clamp-sample the last available layer) rather than killing the build. */
+        private static _clampLayers;
+        /** Key by the URL list PLUS the GPU-result-affecting options. The same image files can be requested as
+         *  a mipped colour array (albedo) and a NON-mipped linear array (normal) — those must NOT share one
+         *  cached GPU texture, so the mip/flip/sampling choices are part of the key. */
+        private static _cacheKey;
         private static _uploadMipChain;
         /** Box-average (2x2) downsample every layer of a stacked RGBA8 buffer to (dw x dh). Edge-clamped. */
         private static _downsampleLayers;
@@ -16569,11 +16759,23 @@ declare namespace TOOLKIT {
      *  - BABYLON.InstancedMesh     → shared material configured once; per-instance tkSkinLayer buffer.
      *  - VAT (VertexAnimationMaterial) → shared material configured once (enableVatSkinArray); the layer is
      *                                decoded in-shader from the cell index packed into g_vatAnim1.w, so each
-     *                                VAT instance under one controller can show a different slice.
+     *                                VAT instance under one controller can show a different slice. When the
+     *                                mesh carries a MultiMaterial, each skinned SUB-MATERIAL decodes its OWN
+     *                                packed slot (sub-material index → slot), so two TextureAtlasSkin
+     *                                components on one mesh — a horse's body and its mane — switch
+     *                                INDEPENDENTLY.
+     *
+     * Load gate (splash screen):
+     *  The slice arrays upload asynchronously AFTER start(), so the mesh renders with its native material for a
+     *  beat and each channel snaps in as it lands. To hold a splash screen until that is over, await the static
+     *  gate — it is bounded by a hard timeout and NEVER hangs the load:
+     *      TOOLKIT.TextureAtlasSkin.WhenAllSkinsReady(scene).then(() => hideSplashScreen());
+     *  or subscribe to TextureAtlasSkin.OnAllSkinsReadyObservable (per batch), or to a single mesh's
+     *  onSkinsReadyObservable / isSkinsReady().
      *
      * @class TextureAtlasSkin
      */
-    class TextureAtlasSkin extends TOOLKIT.ScriptComponent {
+    class TextureAtlasSkin extends TOOLKIT.ScriptComponent implements TOOLKIT.IAssetPreloader {
         private abtractMesh;
         private textureData;
         private defaultIndex;
@@ -16589,13 +16791,49 @@ declare namespace TOOLKIT {
         private _manifest;
         /** The mesh's current skin index (all skinned parts share it). */
         private _currentIndex;
-        /** Configured skin targets, with the delivery mechanism resolved per material. */
+        /** Skin index requested via setSkinIndex BEFORE the component finished wiring (start/applySkins).
+         *  Runtime prefab instances normally call setSkinIndex right after instantiation, which happens
+         *  before start(), so the request has to survive applySkins instead of being replaced by the
+         *  authored defaultIndex. Null when no early request was made. */
+        private _pendingIndex;
+        /** Configured skin targets, with the delivery mechanism — and, for VAT, the packed layer slot this
+         *  material decodes — resolved per material. */
         private _targets;
         /** Per-mesh cloned MultiMaterial (regular-mesh path) so submaterial swaps stay local to this mesh. */
         private _clonedMultiMaterial;
+        /** Fires ONCE when every channel array this mesh asked for has finished uploading (or failed) and the
+         *  current layer has been applied. Also fires on the give-up paths (no mesh / no parts / no slices) so
+         *  a listener can never wait forever on a mesh that was never going to load anything. */
+        onSkinsReadyObservable: BABYLON.Observable<TOOLKIT.TextureAtlasSkin>;
+        /** Channel-array builds this component still has in flight. */
+        private _outstandingBuilds;
+        /** True once this mesh's slices are on the GPU (or were abandoned) — see onSkinsReadyObservable. */
+        private _skinsReady;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected start(): void;
+        /** Pull the authored slice lists (and the manifest) off the component properties. Idempotent, and
+         *  called from awake(), addPreloaderTasks() AND skinCount() so nothing about the authored skin set ever
+         *  depends on the life-cycle having ticked first — a runtime prefab is normally configured right after
+         *  InstantiatePrefabFromContainer, which is BEFORE awake(), and a disabled transform never awakes at
+         *  all yet can still be asked for preloader tasks or a skin count. */
+        private readSliceProperties;
+        /**
+         * Preload every GPU skin slice array as part of the GLTF load (TOOLKIT.IAssetPreloader) — this is the
+         * REAL fix for skins popping in: the Texture2DArrays are decoded and uploaded while the splash screen
+         * is still up, so by the time the scene-ready / hide-loader step runs, start() finds them already
+         * built and the very first rendered frame is already wearing the right skin.
+         *
+         * ONE task per unique slice set, no matter how many meshes carry this component: SkinTextureArray
+         * caches the BUILD PROMISE by URL set, so the first component to ask queues the work and every other
+         * component awaits — and later shares — that same GPU array. No BABYLON.Texture is created per slice:
+         * the builder decodes the images straight into a single RawTexture2DArray.
+         *
+         * Every task is watchdogged (SKIN_PRELOAD_TIMEOUT_MS), so a stalled or missing slice can never wedge
+         * the preloader — the load continues and that skin simply arrives late.
+         */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        protected destroy(): void;
         getAbstractSkinnedMesh(): BABYLON.AbstractMesh;
         /** Configure every skinned part for the skin array and apply defaultIndex. Idempotent (runs once). */
         applySkins(): void;
@@ -16606,13 +16844,99 @@ declare namespace TOOLKIT {
         setSkinIndex(index: number): number;
         /** Clamp an index to [0, skinCount-1], warning (with the label) when it was out of range. */
         private clampIndex;
-        /** Number of skins: skins[] length, else manifest count, else the largest channel's slice count. */
+        /**
+         * Number of skins: skins[] length, else manifest count, else the largest channel's slice count.
+         *
+         * Safe to call IMMEDIATELY after instantiation — it reads the authored properties on demand rather
+         * than waiting for awake(), because the normal usage is to configure a prefab the moment
+         * InstantiatePrefabFromContainer returns, which is a frame BEFORE the component wakes. (It used to
+         * answer 0 until then, which silently broke callers that range-check against it.)
+         */
         skinCount(): number;
         /** Largest per-skin slice count across every supplied channel (albedo/normal/MR/occlusion/emissive) —
          *  so the skin count is correct even when albedo is absent (e.g. an emissive-only material). */
         private maxChannelSliceCount;
         /** The mesh's current skin index. */
         getSkinIndex(): number;
+        /**
+         * Fires (per scene) when every outstanding skin slice array has finished uploading and the shaders that
+         * use them have had a chance to recompile — i.e. the frame after this is safe to show without skins
+         * "horse jockeying" in. Re-arms for later batches (runtime prefabs spawned after the initial load fire
+         * it again). Notification is watchdogged, so a scene that never reports ready still fires it.
+         */
+        static OnAllSkinsReadyObservable: BABYLON.Observable<BABYLON.Scene>;
+        /** Hard ceiling for WhenAllSkinsReady — the ESCAPE HATCH. The splash screen is never held longer than
+         *  this no matter what happens to the slice downloads (404, stalled CDN, dead GPU upload). */
+        private static readonly SKIN_READY_TIMEOUT_MS;
+        /** Quiet period the pending count must hold at zero before the batch counts as finished. Covers meshes
+         *  whose start() lands a frame or two after the gate was opened (and runtime prefab instantiation). */
+        private static readonly SKIN_READY_SETTLE_MS;
+        /** Longest we wait on scene.executeWhenReady (shader recompiles) once the arrays themselves are up. */
+        private static readonly SKIN_SHADER_WAIT_MS;
+        /** Watchdog for a single preloader slice-array task — a stalled slice can never wedge the GLTF load. */
+        private static readonly SKIN_PRELOAD_TIMEOUT_MS;
+        /** How often the settle check runs. */
+        private static readonly SKIN_READY_POLL_MS;
+        /** Channel-array builds in flight across every TextureAtlasSkin in the app. */
+        private static _pendingBuilds;
+        /** Timestamp (ms) of the last build start/finish — the settle window is measured from this. */
+        private static _buildActivity;
+        /** A build has registered since the last OnAllSkinsReadyObservable notify (so it re-arms per batch). */
+        private static _buildsSinceNotify;
+        /** Poll handle for the observable's batch watcher (null when idle — no permanent background timer). */
+        private static _batchWatch;
+        /** Scene the outstanding builds belong to (passed to the observable). */
+        private static _batchScene;
+        /** Number of skin slice arrays still uploading across the whole app (0 = nothing in flight). */
+        static GetPendingSkinBuilds(): number;
+        /** True when no skin slice array is currently uploading. NOTE: also true BEFORE the first component
+         *  has started, so gate a splash screen with WhenAllSkinsReady (which has a settle window), not this. */
+        static AreAllSkinsReady(): boolean;
+        /**
+         * Splash-screen gate: resolves when every skin slice array in flight has uploaded and the shaders using
+         * them are ready — or when the timeout expires, WHICHEVER COMES FIRST.
+         *
+         * NEVER rejects and NEVER hangs. Resolves TRUE when the skins genuinely finished, FALSE when the escape
+         * hatch fired (a warning names how many builds were still outstanding); either way the caller can hide
+         * the splash screen and get on with the game.
+         *
+         *      TOOLKIT.TextureAtlasSkin.WhenAllSkinsReady(scene).then(() => { hideSplashScreen(); });
+         *
+         * @param scene the scene to wait on (shader-ready check). Null skips the shader wait.
+         * @param timeoutMs hard deadline in ms (default 15000). Values <= 0 fall back to the default.
+         * @param settleMs how long the pending count must stay at zero before the batch counts as done
+         *        (default 250) — this is what lets the gate be opened before the meshes have started.
+         */
+        static WhenAllSkinsReady(scene: BABYLON.Scene, timeoutMs?: number, settleMs?: number): Promise<boolean>;
+        /** Count one slice-array build into the GLOBAL load gate. Every path that can start a build goes
+         *  through here — component wiring (configureMaterial), the component preloader (addPreloaderTasks)
+         *  and the container preloader (PreloadContainerSkinsAsync) — so WhenAllSkinsReady and
+         *  OnAllSkinsReadyObservable always cover the work no matter who kicked it off. */
+        private static NoteBuildStarted;
+        /** Retire one build from the global gate. ALWAYS called — success or failure — so it can never stick. */
+        private static NoteBuildFinished;
+        /** Wrap a slice-array build so the global gate sees it, whoever started it. Passes the result (and any
+         *  rejection) straight through — purely bookkeeping. */
+        private static TrackSkinBuild;
+        /** Register one in-flight channel-array build (global gate + this component's own readiness). */
+        private beginSkinBuild;
+        /** Retire one in-flight build. ALWAYS called — success or failure — so the gate can never stick. */
+        private endSkinBuild;
+        /** True once this mesh's slices are uploaded (or were abandoned) — see onSkinsReadyObservable. */
+        isSkinsReady(): boolean;
+        /** Latch this component ready and notify its listeners once. */
+        private markSkinsReady;
+        /** Watch for the global pending count to settle at zero, then fire OnAllSkinsReadyObservable once for
+         *  the batch. Only runs while there is something to watch — it stops itself when the batch completes,
+         *  when nothing is pending, or when the scene goes away. */
+        private static startBatchWatch;
+        private static stopBatchWatch;
+        /** Run `done` once the scene reports ready — the shader recompiles forced by refreshMaterialDefines()
+         *  land here, so the first frame after this already samples the right slice. WATCHDOGGED: a scene that
+         *  never becomes ready (or has none) still calls back, at most SKIN_SHADER_WAIT_MS later. */
+        private static whenSceneReady;
+        /** Monotonic-ish millisecond clock (performance.now when available). */
+        private static nowMs;
         /** Build the albedo Texture2DArray (and, when normalSlices are present, an unmipped/linear normal
          *  Texture2DArray) from the slice images, assign them to the material, then enable per-skin array
          *  switching for the mesh type. Async (images load after start()): the layer index is applied again
@@ -16620,7 +16944,67 @@ declare namespace TOOLKIT {
          *   - regular   → shared layer uniform (setSkinLayer)
          *   - instanced → per-instance tkSkinLayer attribute buffer
          *   - vat       → layer decoded in-shader from the cell index packed in g_vatAnim1.w (enableVatSkinArray) */
+        /**
+         * Work out which packed layer slot a VAT sub-material decodes, and tell the material to decode it.
+         *
+         * Single-material meshes stay on the LEGACY whole-value decode (-1) so nothing already shipping
+         * changes. On a MultiMaterial the slot IS the sub-material index, which makes body/mane (or any other
+         * pair of skinned parts on one mesh) independent without the two components ever talking to each other.
+         * Returns the slot to write cell indices into (always >= 0).
+         */
+        private resolveVatSlot;
         private configureMaterial;
+        /**
+         * The channel builds this component needs: one entry per SUPPLIED channel, each with the slice URLs
+         * and the GPU options that array must be built with. Single source of truth shared by the preloader
+         * (addPreloaderTasks) and the runtime wiring (configureMaterial) — they MUST agree exactly, because
+         * SkinTextureArray caches on urls + options and a mismatch would build the same slices twice.
+         *
+         * Per-channel mip strategy: colour channels (albedo/MR/emissive) are MIPPED (roughness wants mip
+         * filtering, colour wants clean minification). NORMAL is UNMIPPED — a box-downsampled mip chain
+         * de-normalizes the vectors and grains the per-skin normal on glossy metal under WebGPU.
+         */
+        private skinChannels;
+        /** Resolve one channel's slice URLs by channel name (slice references first, manifest layers second). */
+        private channelUrlsFor;
+        /** The four wired channels: shader name, the authored property holding the slices, and the mip policy.
+         *  ONE table drives the runtime wiring, the component preloader AND the container preloader — they must
+         *  build with identical options or SkinTextureArray would cache the same slices twice. */
+        private static readonly CHANNEL_SPECS;
+        /** GPU build options for a channel. Colour channels are MIPPED; normals are NOT (a box-downsampled mip
+         *  chain de-normalizes the vectors and grains the per-skin normal on glossy metal under WebGPU). */
+        private static ChannelOptions;
+        /**
+         * Preload every GPU skin slice array declared by the PREFABS INSIDE AN ASSET CONTAINER — without
+         * instantiating anything.
+         *
+         * A container's script components are NOT created at load time (the toolkit scene loader skips
+         * component parsing for containers), so a TextureAtlasSkin inside a prefab has no instance to queue
+         * preloader tasks of its own. Its authored slice lists ARE in the container's node metadata though
+         * (metadata.toolkit.components[].properties.albedoSlices …), so this reads them straight off the loaded
+         * container and builds the arrays up front. When the prefab is later instantiated, its start() finds
+         * every array already cached and the very first frame is correct — no popping, and the download happens
+         * while the splash screen is still up.
+         *
+         * Shares SkinTextureArray's cache, so a slice set is downloaded, decoded and uploaded exactly ONCE no
+         * matter how many prefabs, meshes or instances use it.
+         *
+         * NEVER rejects. Resolves TRUE when every array was built, FALSE when the watchdog expired (the builds
+         * carry on in the background and the skins simply arrive later).
+         *
+         * @param scene the scene the container belongs to
+         * @param container the loaded asset container to scan
+         * @param rootUrl root for relative slice filenames (defaults to the scene root url)
+         * @param timeoutMs hard deadline (0 uses SKIN_PRELOAD_TIMEOUT_MS)
+         */
+        static PreloadContainerSkinsAsync(scene: BABYLON.Scene, container: BABYLON.AssetContainer, rootUrl?: string, timeoutMs?: number): Promise<boolean>;
+        /** Collect the UNIQUE channel builds declared by every TextureAtlasSkin component in a container's node
+         *  metadata. Deduped by url set, so N prefab meshes sharing one skin set yield ONE build. */
+        private static ScanContainerSkinChannels;
+        /** Slice URLs from a RAW authored property (serialized IUnityTexture references, not yet unpacked). */
+        private static SlicePropertyUrls;
+        /** Bind one built channel array to the material and gate the matching shader path on. */
+        private assignChannelArray;
         /** Resolve the albedo channel slice URLs. PREFERS the exported slice TEXTURE references (albedoSlices)
          *  — auto-parsed and resolved against the scene root — falling back to manifest.albedoLayers filenames. */
         private albedoChannelUrls;
@@ -16643,15 +17027,35 @@ declare namespace TOOLKIT {
         private sliceUrls;
         /** Resolve a manifest layer filename to a loadable URL (absolute passes through; else scene root). */
         private resolveLayerUrl;
+        /** Switch a VAT material between the shared-uniform layer and the packed per-instance attribute. */
+        private setVatUniformMode;
         /** Apply the current index to every target via its mesh-type-specific path (this mesh only). */
         private applyIndexToTargets;
         /** Select the per-skin array layer for one target:
-         *   - vat       → the per-mesh cell index packed into g_vatAnim1.w by the VAT controller
+         *   - vat       → the per-mesh cell index packed into g_vatAnim1.w by the VAT controller, written to
+         *                 THIS material's own packed slot so sibling sub-materials keep their own skins
          *   - instanced → a per-instance tkSkinLayer attribute buffer
          *   - regular   → a shared material uniform on the (cloned) regular-mesh material
          *  Safe to call before the array finishes loading — the value persists and takes effect once the
          *  shader is gated on. */
         private applyLayerToMaterial;
+        /**
+         * Force a genuine effect reset so the skin-array shader defines reach the compiled effect.
+         *
+         * Enabling a channel calls material.markAsDirty(), but Babylon propagates a material dirty flag by
+         * walking scene.meshes ONLY. A VAT / hardware-instanced prefab renders from a SOURCE mesh that lives
+         * in the AssetContainer and is never added to the scene (only its InstancedMesh instances are), so
+         * that source mesh's submesh defines are never marked dirty: the effect keeps rendering without
+         * VAT_SKIN_ARRAY / TOOLKIT_SKIN_ARRAY and the skin index has no visible effect. Marking defines dirty
+         * is also not enough on its own — PushMaterial early-returns while defines._renderId matches the
+         * current render id, and a CanvasTools-frozen material additionally short-circuits on
+         * drawWrapper._wasPreviouslyReady. So this resets the draw cache of every submesh in the render set
+         * (source + every hardware instance + this component's mesh), clears the mesh-level effect binding,
+         * temporarily unfreezes frozen materials (re-frozen after the next render), and finally runs the
+         * normal markAsDirty + plugin markAllDefinesAsDirty path for meshes that ARE in scene.meshes.
+         * Idempotent: calling it twice in one frame just empties already-empty caches.
+         */
+        private refreshMaterialDefines;
         /** True when this mesh must use the per-instance buffer: it is an InstancedMesh, OR a source Mesh
          *  that has hardware instances (instances share sourceMesh.material, so a private clone + uniform
          *  layer is impossible — every instance would read the same shared value). */
