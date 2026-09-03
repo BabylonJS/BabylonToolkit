@@ -11255,6 +11255,8 @@ declare namespace PROJECT {
         protected updateCameraSystemState(): void;
         protected cleanCameraSystemState(): void;
         protected destroyCameraSystemState(): void;
+        /** The DefaultRenderingPipeline already attached to the active camera (or any scene camera), if any. */
+        static FindExistingRenderingPipeline(scene: BABYLON.Scene): BABYLON.DefaultRenderingPipeline;
         /*********************************************/
         /** Follow Target Camera Controller Helpers  */
         /*********************************************/
@@ -14942,73 +14944,791 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
+    /** What the colour grading applier wrote for one camera (FR-19 .. FR-25), for read-backs and the drift check. */
+    interface IPostProcessColorGradingState {
+        camera: string;
+        configuration: BABYLON.ImageProcessingConfiguration;
+        expected: {
+            exposure?: number;
+            contrast?: number;
+            globalSaturation?: number;
+            globalHue?: number;
+            colorCurvesEnabled?: boolean;
+            toneMappingEnabled?: boolean;
+            toneMappingType?: number;
+            colorGradingEnabled?: boolean;
+        };
+        /** Scene-relative url of the loaded LUT strip (null when the identity LUT was skipped). */
+        lutUrl: string;
+        /** Linear colour filter handed to ColorFilterPlugin (null when white / not overridden). */
+        colorFilter: number[];
+    }
     /**
-     * Babylon Script Component
+     * Post-processing volume component (Unity PostProcessVolume / Volume). One instance is attached per
+     * exported volume; the FIRST instance to reach `ready` becomes the orchestrator for the scene: it blends
+     * every registered global volume (FR-12), chooses the cameras that render them from their metadata
+     * (FR-13), obtains exactly one DefaultRenderingPipeline per camera (FR-14) and applies the family appliers
+     * (FR-19 .. FR-36). `destroy` disposes everything this component created (FR-15).
      * @class PostProcessor
      */
     class PostProcessor extends TOOLKIT.ScriptComponent {
         private static GlobalInstance;
+        private static Registry;
+        private static Warned;
+        private static Scheduled;
+        /** The orchestrating instance (null once every volume is destroyed). */
         static get Instance(): PostProcessor;
-        private highDynamicRange;
-        private neutralToneMapping;
-        private toneMappingMode;
-        private defaultContrast;
-        private defaultExposure;
-        private defaultLookupTable;
-        private colorGradingSettings;
-        private bloomSettings;
-        private vignetteSettings;
-        private sharpenSettings;
-        private grainSettings;
-        private chromaticAberrationSettings;
-        private depthOfFieldSettings;
-        private motionBlurSettings;
-        private lensDistortionSettings;
-        private autoExposureSettings;
-        private colorFilterPP;
-        private coloredBloomPP;
-        private motionBlurPP;
-        private roundedVignettePP;
-        private lensDistortionPP;
+        /** Every live PostProcessor instance, in awake order. */
+        static get Volumes(): PostProcessor[];
+        /** Name prefix of the pipelines this component creates (used to recognise its own pipelines). */
+        static readonly PipelinePrefix: string;
+        /**
+         * invertY used when loading the baked LUT strip. Toolkit textures load with invertY = false by convention
+         * and the exporter writes PNG row 0 = green 0 (CVTools.cs LutFlipY); calibrated together in plan task T22.
+         */
+        static LutInvertY: boolean;
+        /**
+         * Sampling mode of the baked LUT strip. Unity samples its 2D LUT with a linear-clamp sampler (trilinear across
+         * the blue slices, which Babylon's colorGrading shader reproduces with its own two-slice mix), so BILINEAR keeps
+         * gradients smooth at N = 32; NEAREST would quantise every channel to 32 levels. Calibrated with LutInvertY in T22.
+         */
+        static LutSamplingMode: number;
+        /** Repack the loaded strip into a RawTexture3D when the engine supports 3D textures (see requestLutTexture). */
+        static LutUse3D: boolean;
+        /** FR-17: every unsupported effect or parameter warns exactly once per key (per page load, reset when the last volume is destroyed). */
+        static warnOnce(key: string, message: string): void;
+        /** Whether a warning key has already fired (tests / read-backs). */
+        static hasWarned(key: string): boolean;
+        private volumeProperties;
+        private volumeLayer;
+        private orchestrator;
+        private applied;
+        private readyCalled;
+        private stacks;
         private defaultRenderPipeline;
         private screenSpaceAOPipeline;
         private screenSpaceRPipeline;
+        private ownedPipelines;
+        private reusedPipelines;
+        private ownedRenderPipelines;
+        private ownedPostProcesses;
+        private ownedTextures;
+        private lutTextures;
+        /**
+         * Plugin post-processes (coloured bloom, rounded vignette, colour filter, lens distortion, ...) are attached
+         * to the camera only after every pipeline property of the stack has been written: each DefaultRenderingPipeline
+         * property change rebuilds and re-attaches its own passes, which would otherwise reorder them after the plugins.
+         * Deferring keeps the order deterministic: pipeline passes first, plugin passes after.
+         */
+        private pendingPlugins;
+        /** onBuildObservable subscriptions that keep the plugin passes after the pipeline passes across rebuilds. */
+        private buildObservers;
+        private reordering;
+        /** Owned plugin passes that belong at the HEAD of the camera chain (before tone mapping): the tinted bloom. */
+        private frontPostProcesses;
+        private coloredBloom;
+        private roundedVignettes;
+        private depthOfFields;
+        private motionBlurs;
+        private lensDistortions;
+        private antialiasings;
+        private ambientOcclusions;
+        private screenSpaceReflections;
+        private gradingStates;
+        private gradingReadBackScheduled;
+        /** The pipeline of the first rendered camera (legacy accessor). */
         GetDefaultRenderPipeline(): BABYLON.DefaultRenderingPipeline;
-        GetSSAORRenderPipeline(): BABYLON.SSAORenderingPipeline;
+        GetSSAORRenderPipeline(): BABYLON.SSAO2RenderingPipeline;
         GetSSRRenderPipeline(): BABYLON.SSRRenderingPipeline;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** The typed volume envelope captured in awake. */
+        GetVolumeProperties(): TOOLKIT.IPostProcessVolumeProperties;
+        /** Unity layer of the volume's GameObject (for the camera volume layer mask). */
+        GetVolumeLayer(): number;
+        /** True for the instance that applied the stack. */
+        IsOrchestrator(): boolean;
+        /** Per-camera blend results after `ready` (empty on non-orchestrators). */
+        GetCameraStacks(): {
+            camera: BABYLON.Camera;
+            stack: TOOLKIT.IPostProcessStack;
+            pipeline: BABYLON.DefaultRenderingPipeline;
+        }[];
+        protected awake(): void;
         protected ready(): void;
-        protected parseColorGradingSettings(settings: any): any;
-        protected applyColorGradingSettings(): void;
-        protected mapToneMapper(tonemapperParam: any): {
-            enabled: boolean;
-            type: number | null;
+        /**
+         * The toolkit may run `ready` before `awake` (edit mode / ScenePlaying false), so orchestration starts from
+         * whichever of the two happens LAST, deferred one frame so every volume of the same load has registered.
+         * The first registered volume of the scene then orchestrates once.
+         */
+        private tryOrchestrate;
+        protected destroy(): void;
+        /** Blends the registered volumes and applies them to every targeted camera. Idempotent per instance. */
+        applyVolumes(): void;
+        /**
+         * FR-14: exactly one DefaultRenderingPipeline per camera. An existing pipeline attached to the camera
+         * (for example PROJECT.DefaultCameraSystem's) is reused and overridden by the volume; otherwise one is created.
+         */
+        getOrCreatePipeline(camera: BABYLON.Camera, hdr: boolean): BABYLON.DefaultRenderingPipeline;
+        /**
+         * Every DefaultRenderingPipeline property change rebuilds the pipeline, which detaches and re-attaches its own
+         * passes at the END of the camera chain, i.e. after the plugin passes this component attached later (tinted
+         * bloom, rounded vignette, colour filter, motion blur, lens distortion). That silently moves the plugins in
+         * front of tone mapping and changes their result. The pipeline's onBuildObservable fires after each rebuild;
+         * this subscription re-appends the owned plugin passes so the documented order (pipeline first, plugins after)
+         * survives any later toggle.
+         */
+        protected watchPipelineBuilds(pipeline: BABYLON.DefaultRenderingPipeline): void;
+        /** Marks `passes` as head-of-chain passes (pre tone mapping) and moves them to the front of `camera`'s chain now. */
+        protected placeAtFront(camera: BABYLON.Camera, passes: BABYLON.PostProcess[]): void;
+        /**
+         * Passes of the SSAO2 / SSR pipelines rendering `camera`, in their current chain order. They consume the prepass
+         * (depth / normals / reflectivity) and the raw scene colour, so they belong at the very start of the chain, in
+         * linear HDR, before bloom, depth of field and tone mapping (T24 decision: Babylon attaches them wherever they
+         * were created, i.e. after the default pipeline on first build and before it after any rebuild).
+         */
+        protected screenSpacePasses(camera: BABYLON.Camera): BABYLON.PostProcess[];
+        /**
+         * Restores this component's pass order on every camera chain of `pipeline`: the SSAO2 / SSR passes first
+         * (screen-space effects in linear HDR), then the head plugin passes (tinted bloom, pre tone mapping), then
+         * whatever the pipeline and others attached, then the remaining owned plugin passes (vignette, colour filter,
+         * motion blur, lens distortion) at the tail, each group in its current relative order. Runs after the stack is
+         * applied and after every pipeline rebuild. Returns how many passes moved.
+         */
+        reorderPluginPasses(pipeline: BABYLON.DefaultRenderingPipeline): number;
+        /** The DefaultRenderingPipeline already attached to `camera`, if any (scans the pipeline manager). */
+        static FindDefaultPipeline(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.DefaultRenderingPipeline;
+        private applyStack;
+        /**
+         * FR-16: antialiasing from the camera metadata (the HDR flag was consumed when the pipeline was created). Without
+         * an `antialiasing` key (legacy export) nothing is written; otherwise `samples` follows `msaasamples` and FXAA / SMAA /
+         * TAA enable Babylon's FXAA (the single screen-space AA Babylon offers). `None` enables nothing.
+         */
+        protected applyAntialiasing(pipeline: BABYLON.DefaultRenderingPipeline, metadata: TOOLKIT.IPostProcessCameraMetadata): void;
+        /** Antialiasing flags written per pipeline (read-backs / tests). */
+        GetAntialiasings(): {
+            pipeline: BABYLON.DefaultRenderingPipeline;
+            mode: number;
+            fxaa: boolean;
+            samples: number;
+        }[];
+        /**
+         * FR-19 .. FR-25 / FR-9: colour grading. Only OVERRIDDEN fields are written, to the pipeline's shared image
+         * processing configuration (`scene.imageProcessingConfiguration`, which materials and the pipeline's
+         * ImageProcessingPostProcess both read): exposure (EV -> multiplier), contrast, saturation / hue through the
+         * colour curves, the single tone-mapper conversion, a ColorFilterPlugin pass for a non-white filter and the
+         * baked LUT strip when it is not the identity. HDRP exposure is owned by the scene-level path and skipped.
+         */
+        protected applyColorGrading(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /**
+         * The shared image processing configuration a DefaultRenderingPipeline writes to: the pipeline's
+         * ImageProcessingPostProcess configuration when it exists (it IS scene.imageProcessingConfiguration for an
+         * automatically built pipeline), else the scene's configuration.
+         */
+        static GetImageProcessing(scene: BABYLON.Scene, pipeline: BABYLON.DefaultRenderingPipeline): BABYLON.ImageProcessingConfiguration;
+        /** `[r,g,b,(a)]`, `{r,g,b,(a)}` or `{x,y,z,(w)}` -> number array (null when unreadable). */
+        static ToColorArray(value: any): number[];
+        /**
+         * Loads (once per url per instance) the baked LUT strip with the documented texture settings and hands the
+         * texture to `apply` once it is usable. Where the engine supports 3D textures (WebGL2, WebGPU) the strip is
+         * repacked into an N x N x N RawTexture3D: Babylon's WGSL image-processing shader (9.22) cannot sample the 2D
+         * strip layout (it calls textureSample(texture_2d, sampler, vec3, vec2), a WGSL parse error), and a volume
+         * gives the same hardware trilinear filtering Unity uses. The strip itself is bound only as the fallback.
+         */
+        protected requestLutTexture(lut: TOOLKIT.IPostProcessLutReference, apply: (texture: BABYLON.BaseTexture) => void): void;
+        /** Strip loaded: repack into a 3D volume when possible, then bind the final texture for every waiting camera. */
+        private finalizeLutTexture;
+        /**
+         * N*N x N strip (x = slice * N + red, y = green, slice = blue; row 0 = green 0) -> N x N x N volume
+         * (index = ((blue * N + green) * N + red) * 4). Returns null when the strip is not N*N x N.
+         */
+        static RepackLutStrip(pixels: Uint8Array, width: number, height: number): Uint8Array;
+        /** Scene-relative asset url -> url under the scene root (absolute, data and blob urls pass through). */
+        static ResolveSceneUrl(scene: BABYLON.Scene, url: string): string;
+        /**
+         * CanvasTools writes the scene-level `imageprocessing.contrast/exposure` before scripts run; the applier's writes
+         * must stay in place afterwards. The values are read back one frame later (or immediately without a render
+         * loop): a drift is re-asserted once and reported with a warning.
+         */
+        private scheduleGradingReadBack;
+        /** Compares every applied grading value with the live configuration; re-asserts drifted values when `reassert`. Returns the drifted keys. */
+        verifyColorGrading(reassert?: boolean): string[];
+        /** The grading values this instance applied per camera (read-backs / tests). */
+        GetColorGradingStates(): TOOLKIT.IPostProcessColorGradingState[];
+        /** FR-26: bloom -> DefaultRenderingPipeline bloom (native) or ColoredBloomPlugin when the tint is not white. */
+        protected applyBloom(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /** FR-27: vignette -> shared image processing vignette (Classic) or RoundedVignettePlugin (rounded). Masked mode is unsupported. */
+        protected applyVignette(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /** FR-28: chromatic aberration -> pipeline chromaticAberration (amount from intensity, fixed radial intensity). */
+        protected applyChromaticAberration(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
+        /** FR-29: grain -> pipeline grain (intensity scaled, URP FilmGrain.type multiplier, always animated). */
+        protected applyGrain(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
+        /** FR-35: sharpen -> pipeline sharpen edge amount. */
+        protected applySharpen(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
+        /** Model field value (Unity default when not overridden), undefined when the family has no such field. */
+        protected fieldValue(family: TOOLKIT.IPostProcessEffectModel, name: string): any;
+        protected fieldOverridden(family: TOOLKIT.IPostProcessEffectModel, name: string): boolean;
+        /** FR-17: one warning per OVERRIDDEN parameter Babylon cannot honour (an un-overridden one is the Unity default and changes nothing). */
+        protected warnUnsupportedFields(family: TOOLKIT.IPostProcessEffectModel, names: string[]): void;
+        /** `[x,y]` or `{x,y}` -> number array, else the fallback. */
+        static ToVector2Array(value: any, fallback: number[]): number[];
+        /** Coloured bloom chains created by this instance (read-backs / tests). */
+        GetColoredBloomChains(): {
+            camera: BABYLON.Camera;
+            chain: any;
+            color: number[];
+            weight: number;
+            threshold: number;
+            kernel: number;
+        }[];
+        /** Rounded vignette passes created by this instance (read-backs / tests). */
+        GetRoundedVignettes(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            center: number[];
+            intensity: number;
+            smoothness: number;
+            color: number[];
+        }[];
+        /**
+         * FR-30: depth of field -> pipeline depthOfField (bokeh). focusDistance metres -> mm, fStop = aperture, focalLength
+         * as authored, blur level from the PPv2 kernel size (never from fStop). URP `Off` disables nothing (family left
+         * untouched); URP `Gaussian` is approximated through dofFromGaussian with its warning. A backend without a depth
+         * renderer warns instead of throwing.
+         */
+        protected applyDepthOfField(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /**
+         * FR-31: motion blur -> one BABYLON.MotionBlurPostProcess per camera. An existing one on the camera (for example the
+         * racing VehicleCameraManager's "FastMotionBlur") is reused and re-tuned, never duplicated. Strength from the PPv2
+         * shutter angle or the URP intensity, samples from PPv2 sampleCount or the URP quality, camera-only blur for PPv2
+         * (which only blurs camera motion) and URP `CameraOnly`; URP `CameraAndObjects` keeps Babylon's object-based blur.
+         */
+        protected applyMotionBlur(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /** The MotionBlurPostProcess already attached to `camera`, if any (class check, with a duck-typed fallback for foreign builds). */
+        static FindMotionBlur(camera: BABYLON.Camera): BABYLON.MotionBlurPostProcess;
+        /**
+         * FR-32: lens distortion -> LensDistortionPlugin. PPv2 (-100..100) and URP (-1..1) intensities are normalised ONCE
+         * into -1..1 (lensDistortionNormalised) and converted with Unity's own tan / atan model expanded to second order
+         * (lensDistortionIntensity = r^2 coefficient, lensDistortionModelScale = centre zoom); `intensityX/Y` (URP xMultiplier /
+         * yMultiplier, renamed by the contract), `centerX/Y` (-1..1, URP uv centre already converted by the contract) and
+         * `scale` are passed only when overridden, else the plugin defaults apply. A zero intensity creates no pass.
+         */
+        protected applyLensDistortion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /** Depth of field settings written per pipeline (read-backs / tests). */
+        GetDepthOfFields(): {
+            pipeline: BABYLON.DefaultRenderingPipeline;
+            focusDistance: number;
+            fStop: number;
+            focalLength: number;
+            blurLevel: number;
+        }[];
+        /** Motion blur post-processes created or reused per camera (read-backs / tests). */
+        GetMotionBlurs(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.MotionBlurPostProcess;
+            reused: boolean;
+            motionStrength: number;
+            motionBlurSamples: number;
+            isObjectBased: boolean;
+        }[];
+        /** Lens distortion passes created per camera (read-backs / tests). */
+        GetLensDistortions(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            options: any;
+        }[];
+        /**
+         * FR-33: ambient occlusion -> one SSAO2RenderingPipeline per camera (intensity -> totalStrength, radius -> radius,
+         * PPv2 quality -> samples / expensiveBlur, HDRP stepCount -> samples). An SSAO2 pipeline already attached to the
+         * camera is reused and re-tuned; a legacy SSAORenderingPipeline (PROJECT.DefaultCameraSystem) is detached from the
+         * camera so only one occlusion pipeline renders it. Unsupported engines warn instead of throwing.
+         */
+        protected applyAmbientOcclusion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /**
+         * FR-34: screen space reflections -> one SSRRenderingPipeline per camera. PPv2 presets go through the preset table,
+         * PPv2 Custom reads the custom fields, HDRP reads rayMaxIterations / minSmoothness / screenFadeDistance. An SSR
+         * pipeline already attached to the camera is reused. Unsupported engines warn instead of throwing.
+         */
+        protected applyScreenSpaceReflections(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        /**
+         * FR-19 / FR-17: HDRP Exposure. `Fixed` exposure is exported into the scene-level image processing block, which the
+         * scene loader applies before scripts run, so the runtime writes nothing; every other mode (Automatic, Curve,
+         * UsePhysicalCamera, AutomaticHistogram) has no Babylon equivalent and warns once.
+         */
+        protected applyHdrpExposure(family: TOOLKIT.IPostProcessEffectModel): void;
+        /** A render pipeline of class `ctor` already attached to `camera`, if any (scans the pipeline manager). */
+        static FindRenderPipeline(scene: BABYLON.Scene, camera: BABYLON.Camera, ctor: any): BABYLON.PostProcessRenderPipeline;
+        /**
+         * Single occlusion pipeline per camera: a legacy pipeline of class `legacyCtor` (for example DefaultCameraSystem's
+         * SSAORenderingPipeline) attached to the camera is detached from it (its owner still disposes it) so the volume's
+         * pipeline is the only one rendering the camera.
+         */
+        protected detachLegacyPipeline(camera: BABYLON.Camera, legacyCtor: any, replacementCtor: any, label: string): void;
+        /** Ambient occlusion pipelines created or reused per camera (read-backs / tests). */
+        GetAmbientOcclusions(): {
+            camera: BABYLON.Camera;
+            pipeline: BABYLON.SSAO2RenderingPipeline;
+            reused: boolean;
+            settings: TOOLKIT.IPostProcessSsao;
+        }[];
+        /** Screen space reflection pipelines created or reused per camera (read-backs / tests). */
+        GetScreenSpaceReflections(): {
+            camera: BABYLON.Camera;
+            pipeline: BABYLON.SSRRenderingPipeline;
+            reused: boolean;
+            settings: TOOLKIT.IPostProcessSsr;
+        }[];
+        /** Registers a post-process this component created so destroy disposes it. */
+        protected trackPostProcess(postProcess: BABYLON.PostProcess, camera: BABYLON.Camera): void;
+        /** Registers a texture (for example the baked LUT) this component loaded. */
+        protected trackTexture(texture: BABYLON.BaseTexture): void;
+        /** Registers an SSAO2 / SSR pipeline this component created. */
+        protected trackRenderPipeline(pipeline: BABYLON.PostProcessRenderPipeline): void;
+        /** Disposes everything this instance created (reused pipelines are left to their owner). */
+        private disposeResources;
+    }
+}
+declare namespace TOOLKIT {
+    /** One Unity ParameterOverride / VolumeParameter: `{ value, overrideState }` (+ `unsupported` when the exporter could not serialise the type). */
+    interface IPostProcessParameter<T> {
+        value?: T;
+        overrideState?: boolean;
+        unsupported?: string;
+    }
+    /** Enum values are exported as `{ value: int, name: string }`. */
+    interface IPostProcessEnumValue {
+        value?: number;
+        name?: string;
+    }
+    /** Texture parameters exported to the scene assets folder. */
+    interface IPostProcessTextureReference {
+        url?: string;
+        type?: string;
+        width?: number;
+        height?: number;
+        exported?: boolean;
+    }
+    /** The baked colour-grading LUT strip (FR-5 / FR-6): N*N x N, PNG row 0 = green 0, blue selects the slice. */
+    interface IPostProcessLutReference extends IPostProcessTextureReference {
+        lutsize?: number;
+        lutlayout?: string;
+        identity?: boolean;
+    }
+    /** One effect of a volume profile (FR-3). `parameters` keys are the Unity field names lowercased. */
+    interface IPostProcessEffect {
+        effecttype?: string;
+        effectnamespace?: string;
+        enabled?: boolean;
+        active?: boolean;
+        parameters?: {
+            [key: string]: any;
         };
-        protected parseBloomSettings(settings: any): any;
-        protected applyBloomSettings(): void;
-        protected parseSharpenSettings(settings: any): any;
-        protected applySharpenSettings(): void;
-        protected parseGrainSettings(settings: any): any;
-        protected applyGrainSettings(): void;
-        protected parseVignetteSettings(settings: any): any;
-        protected applyVignetteSettings(): void;
-        protected parseDepthOfFieldSettings(settings: any): any;
-        protected applyDepthOfFieldSettings(): void;
-        protected parseMotionBlurSettings(settings: any): any;
-        protected applyMotionBlurSettings(): void;
-        protected parseAutoExposure(settings: any): any;
-        protected applyAutoExposureSettings(): void;
-        protected parseLensDistortionSettings(settings: any): any;
-        protected applyLensDistortionSettings(): void;
-        protected parseChromaticAberrationSettings(settings: any): any;
-        protected applyChromaticAberrationSettings(): void;
-        protected parseAmbientOcclusionSettings(settings: any): any;
-        protected parseScreenSpaceReflectionsSettings(settings: any): any;
-        static unwrapParam(param: any): any;
-        static extractParam(param: any): {
-            value: any;
-            overrideState: boolean | null;
+    }
+    /** The volume envelope (FR-2) as found in the component properties. */
+    interface IPostProcessVolumeProperties {
+        volumetype?: string;
+        isglobal?: boolean;
+        weight?: number;
+        priority?: number;
+        blenddistance?: number;
+        profilename?: string;
+        colorspace?: string;
+        effectcount?: number;
+        effects?: IPostProcessEffect[];
+    }
+    /** Camera enablement metadata (FR-7) copied to `camera.metadata.postprocessing`. */
+    interface IPostProcessCameraMetadata {
+        postprocessing?: boolean;
+        volumelayermask?: number;
+        antialiasing?: IPostProcessEnumValue;
+        msaasamples?: number;
+        allowhdr?: boolean;
+    }
+    interface IPostProcessField {
+        value: any;
+        overridden: boolean;
+        /** Set when the exporter could not serialise the parameter type (FR-17 warning by name). */
+        unsupported?: string;
+    }
+    interface IPostProcessEffectModel {
+        /** Canonical family name, e.g. "bloom". */
+        family: string;
+        /** Unity effect type(s) that fed this model, e.g. "ColorGrading" or "ColorAdjustments+Tonemapping". */
+        source: string;
+        /** Effect enabled AND active in Unity. */
+        active: boolean;
+        fields: {
+            [name: string]: IPostProcessField;
         };
+    }
+    interface IPostProcessUnsupportedEffect {
+        effecttype: string;
+        effectnamespace: string;
+    }
+    interface IPostProcessModel {
+        volumetype: string;
+        families: {
+            [family: string]: IPostProcessEffectModel;
+        };
+        lut: IPostProcessLutReference;
+        unsupported: IPostProcessUnsupportedEffect[];
+        warnings: string[];
+    }
+    /** A volume as collected from the scene: its exported properties plus the node name and Unity layer. */
+    interface IPostProcessVolumeEntry {
+        name: string;
+        layer: number;
+        properties: IPostProcessVolumeProperties;
+    }
+    interface IPostProcessIgnoredVolume {
+        name: string;
+        reason: string;
+    }
+    interface IPostProcessStack {
+        /** Blended model, or null when no volume contributed. */
+        model: IPostProcessModel;
+        /** Names of the volumes that contributed, in blend order. */
+        applied: string[];
+        ignored: IPostProcessIgnoredVolume[];
+        warnings: string[];
+    }
+    interface IPostProcessCameraCandidate {
+        name: string;
+        /** Whether this camera is the scene's main / active camera (legacy fallback target). */
+        main?: boolean;
+        metadata?: IPostProcessCameraMetadata;
+        /** Opaque handle (the BABYLON.Camera) carried through unchanged. */
+        camera?: any;
+    }
+    interface IPostProcessCameraSelection {
+        cameras: IPostProcessCameraCandidate[];
+        mode: string;
+        warning?: string;
+    }
+    /**
+     * Reads the exporter contract into the internal effect model, blends global volumes like Unity does
+     * and chooses the cameras that render them (FR-10 .. FR-13). Pure: no scene access, no Babylon
+     * objects created, so every rule is unit-testable against the exported fixtures.
+     * @class PostProcessingContract
+     */
+    class PostProcessingContract {
+        static readonly VOLUME_TYPES: string[];
+        /**
+         * Canonical families and their Unity defaults (PPv2 vocabulary where both exist). A field that is
+         * not overridden takes THIS value (FR-11), never the exporter's stored value and never zero.
+         */
+        static readonly Defaults: {
+            [family: string]: {
+                [field: string]: any;
+            };
+        };
+        /**
+         * Unity effect type -> canonical family, with field renames from the URP / HDRP vocabulary into the
+         * PPv2 one. Unlisted effect types land in `unsupported[]` (FR-17 / FR-36). Grading-family members
+         * whose operators only exist in the baked LUT (FR-37) are folded into colorGrading so the runtime
+         * still sees them (and their `lut`) without applying anything natively.
+         */
+        static readonly Vocabulary: {
+            [effecttype: string]: {
+                family: string;
+                rename?: {
+                    [from: string]: string;
+                };
+            };
+        };
+        /** Reads the component properties bag into the typed envelope. Missing keys stay undefined; nothing throws. */
+        static parseVolume(props: any): IPostProcessVolumeProperties;
+        /** One effect; reflection noise (nested parameters, hideflags, parametercount, active/enabled inside parameters) is dropped. */
+        static parseEffect(raw: any): IPostProcessEffect;
+        /** `{ value, overrideState }` -> `{ value, overridden }`; a bare value (legacy) counts as overridden. */
+        static readField(param: any): IPostProcessField;
+        /** Enum index from `{ value, name }`, a number, or a numeric string; fallback otherwise. */
+        static enumIndex(value: any, fallback?: number): number;
+        /** Enum name from `{ value, name }` (empty string when unknown). */
+        static enumName(value: any): string;
+        /** Builds the effect model of ONE volume: canonical families, `{ value, overridden }` fields, Unity defaults where not overridden. */
+        static normalise(volume: IPostProcessVolumeProperties): IPostProcessModel;
+        private static createFamily;
+        private static parseLut;
+        /** `volumetype` normalised to BuiltIn / URP / HDRP (legacy exports without the key are BuiltIn). */
+        static volumeType(volume: IPostProcessVolumeProperties): string;
+        /**
+         * Blends all GLOBAL volumes like Unity: sorted by priority ascending, each overridden field interpolated
+         * from the current stack value toward the override by `weight`. Local volumes, volumes outside
+         * `layerMask` (-1 / undefined = everything) and weight-0 volumes are reported in `ignored[]`.
+         */
+        static blendStack(volumes: IPostProcessVolumeEntry[], layerMask?: number): IPostProcessStack;
+        /** True when `layer` is inside `mask` (mask undefined, null or -1 = everything). */
+        static layerInMask(layer: number, mask: number): boolean;
+        /**
+         * First volume of the stack: overridden fields move from the Unity DEFAULT (the pipeline-specific one the
+         * family was created with) toward the override by weight. Fields without a declared default cannot be
+         * lerped (the Unity default is unknown) and keep the override.
+         */
+        private static scaleModel;
+        /** Later volume blended into the stack. */
+        private static blendInto;
+        /**
+         * Unity interpolation: numbers and numeric arrays lerp; everything else (booleans, enums, textures)
+         * takes the override as soon as weight > 0 (VolumeParameter&lt;T&gt;.Interp default).
+         */
+        static interpolate(from: any, to: any, t: number): any;
+        /**
+         * Chooses the cameras that render the volumes: every camera flagged `postprocessing: true`; when NO camera
+         * carries the key at all (legacy export) the main camera with a warning; when cameras carry the key and
+         * all are false, nothing (Unity semantics) with a warning.
+         */
+        static selectCameras(cameras: IPostProcessCameraCandidate[]): IPostProcessCameraSelection;
+        static isNumber(v: any): boolean;
+        static clone(v: any): any;
+        /** Convenience: the field value of a family, or the family default when the family is absent. */
+        static fieldOf(model: IPostProcessModel, family: string, name: string): IPostProcessField;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Result of a tone-mapper conversion: whether Babylon tone mapping is enabled and which
+     * BABYLON.ImageProcessingConfiguration.TONEMAPPING_* type to use. `warning` is set when the
+     * Unity mode has no Babylon equivalent and a substitute was chosen.
+     */
+    interface IPostProcessToneMapper {
+        enabled: boolean;
+        type: number;
+        warning?: string;
+    }
+    /** Vignette centre in Babylon's `vignetteCenterX` / `vignetteCenterY` space (0 = screen centre). */
+    interface IPostProcessVignetteCenter {
+        centerX: number;
+        centerY: number;
+    }
+    /** Depth of field derived from URP's Gaussian mode (approximation, always carries a warning). */
+    interface IPostProcessGaussianDof {
+        focusDistanceMm: number;
+        blurLevel: number;
+        warning: string;
+    }
+    /** SSAO2RenderingPipeline settings derived from a Unity ambient-occlusion effect. */
+    interface IPostProcessSsao {
+        totalStrength: number;
+        radius: number;
+        samples: number;
+        expensiveBlur: boolean;
+        ssaoRatio: number;
+        blurRatio: number;
+    }
+    /** SSRRenderingPipeline settings for one Unity preset (or a custom configuration). */
+    interface IPostProcessSsr {
+        maxSteps: number;
+        thickness: number;
+        strength: number;
+        ssrDownsample: number;
+        maxDistance?: number;
+        attenuateScreenBorders?: boolean;
+        roughnessFactor?: number;
+    }
+    /** Antialiasing flags derived from the camera metadata (FR-16). */
+    interface IPostProcessAntialiasing {
+        fxaa: boolean;
+        samples: number;
+        mode: number;
+    }
+    /**
+     * Unity -> Babylon post-processing value conversions (FR-18). Every conversion is a pure static
+     * function, one per parameter family, documented with the Unity range, the Babylon range and the
+     * rationale. Tunable constants are public static fields; every one of them was tuned by the browser
+     * verification loop (plan tasks T22-T25) and carries a `// frozen T<task>` comment quoting the measured evidence
+     * (`_specs/verification/post-processing/notes/*.md`); the feature spec's Decisions log records the final values.
+     *
+     * Nothing here touches a scene or a pipeline: the appliers in TOOLKIT.PostProcessor call these and
+     * assign the results, so the conversion table is testable in plain node against a stub BABYLON.
+     * @class PostProcessingConversions
+     */
+    class PostProcessingConversions {
+        /** Babylon contrast is a multiplier around 1; Unity contrast is -100..100 around 0. Clamp range of the result. */
+        static ContrastMin: number;
+        static ContrastMax: number;
+        /** Babylon tone mapper used for Unity "Neutral": STANDARD sits closer to Unity's Neutral capture than KHR_PBR_NEUTRAL, which expands contrast (T22). */
+        static NeutralToneMapperType: number;
+        /** EV values beyond this many stops are clamped so the exposure multiplier stays finite and positive. */
+        static ExposureMaxStops: number;
+        /** PPv2 / URP postExposure is in EV (stops): 0 -> 1.0, 0.75 -> ~1.68, -1 -> 0.5. Babylon exposure is a linear multiplier. */
+        static exposureFromEV(ev: number): number;
+        /** PPv2 / URP contrast -100..100 (0 neutral) -> Babylon contrast multiplier 1 + c/100 (0 -> exactly 1), clamped. */
+        static contrastFromUnity(contrast: number): number;
+        /** PPv2 / URP saturation -100..100 -> Babylon colorCurves.globalSaturation (same nominal range, clamped). */
+        static saturationFromUnity(saturation: number): number;
+        /** PPv2 / URP hueShift -180..180 -> Babylon colorCurves.globalHue 0..360 via (hue + 360) mod 360 (so +180 and -180 coincide). */
+        static hueFromUnity(hueShift: number): number;
+        /**
+         * PPv2 tonemapper enum (None=0, Neutral=1, ACES=2, Custom=3) -> Babylon. This is the ONLY place the
+         * Unity enum is interpreted (FR-24): None disables tone mapping, ACES -> TONEMAPPING_ACES, Neutral ->
+         * NeutralToneMapperType, Custom -> ACES with a warning.
+         */
+        static toneMapperFromPPv2(tonemapper: number): IPostProcessToneMapper;
+        /** URP / HDRP Tonemapping.mode (None=0, Neutral=1, ACES=2; HDRP Custom=3, External=4) -> Babylon (see toneMapperFromPPv2). */
+        static toneMapperFromSRP(mode: number): IPostProcessToneMapper;
+        private static toneMapperFromMode;
+        /** sRGB [r,g,b,(a)] 0..1 as authored in Unity -> linear (alpha unchanged). White stays white. */
+        static srgbToLinearColor(color: number[]): number[];
+        /** Single-channel sRGB -> linear (IEC 61966-2-1). */
+        static srgbToLinear(c: number): number;
+        /** True when a colour (any length >= 3) is white within tolerance: a neutral filter / bloom tint is skipped. */
+        static isWhite(color: number[], tolerance?: number): boolean;
+        /**
+         * PPv2 bloom `intensity` (0..inf, typical 0..10) is NOT a linear weight: BloomRenderer uses
+         * `intensity = exp2(intensity / 10) - 1` (3 -> 0.231, 10 -> 1.0) as the additive strength on the HDR colour.
+         * Babylon bloomWeight is the same kind of additive strength, so the exact curve is used with a unit multiplier
+         * (T23: the previous linear 0.2 * i overshot at low values and undershot at high ones).
+         */
+        static BloomWeightScalePPv2: number;
+        /** URP bloom `intensity` (0..inf, typical 0..5) IS the additive strength (used as-is by the URP bloom shader). */
+        static BloomWeightScaleURP: number;
+        /** Unity bloom thresholds are gamma-space values; Babylon extracts on linear luminance. Exponent of the conversion. */
+        static BloomThresholdGamma: number;
+        /** bloomKernel is a blur size in pixels; PPv2 diffusion 1..10 and URP scatter 0..1 map linearly into [KernelMin, KernelMax]. */
+        static BloomKernelMin: number;
+        static BloomKernelMax: number;
+        /** Fixed render-target ratio for Babylon's bloom (documented, not converted). */
+        static BloomScale: number;
+        /** Unity bloom intensity -> Babylon bloomWeight: PPv2 through exp2(i / 10) - 1, URP / HDRP linear (family selects the scale). */
+        static bloomWeightFromIntensity(intensity: number, volumetype?: string): number;
+        /**
+         * Unity bloom threshold (gamma space, >= 0) -> Babylon bloomThreshold (linear luminance). Unity applies a soft
+         * knee below the threshold (PPv2 `softKnee` 0..1, default 0.5: the curve starts at threshold * (1 - softKnee));
+         * Babylon extracts with a hard threshold, so the knee's midpoint threshold * (1 - softKnee * BloomKneeWeight) is
+         * used as the effective onset (T23: Unity's bloom lifts mid-bright areas that a hard 0.9 would exclude).
+         */
+        static bloomThresholdFromUnity(threshold: number, volumetype?: string, softKnee?: number): number;
+        /** Fraction of the soft knee (threshold * softKnee) that moves the hard threshold down (0 = ignore the knee, 1 = start of the knee). */
+        static BloomKneeWeight: number;
+        /** PPv2 diffusion 1..10 -> bloomKernel pixels [KernelMin, KernelMax]. */
+        static bloomKernelFromDiffusion(diffusion: number): number;
+        /** URP scatter 0..1 -> bloomKernel pixels [KernelMin, KernelMax]. */
+        static bloomKernelFromScatter(scatter: number): number;
+        private static kernelFromUnit;
+        /** Unity intensity 0..1 -> Babylon vignetteWeight; Babylon's default 1.5 looks like Unity ~0.35, so 1.5 / 0.35. */
+        static VignetteWeightScale: number;
+        /** Unity smoothness 0.01..1 -> Babylon vignetteStretch 0..1 (documented softness stand-in, never vignetteBlendMode). */
+        static VignetteStretchScale: number;
+        static vignetteWeightFromIntensity(intensity: number): number;
+        static vignetteStretchFromSmoothness(smoothness: number): number;
+        /**
+         * Unity vignette centre in UV (0..1, 0.5/0.5 = middle, y up) -> Babylon vignetteCenterX/Y, which live in the
+         * viewport space (-1..1, 0 = middle, y up). Applied exactly once: (uv - 0.5) * 2.
+         */
+        static vignetteCenter(uv: number[]): IPostProcessVignetteCenter;
+        /** Unity intensity 0..1 -> Babylon aberrationAmount (Babylon default 30). */
+        static ChromaticAberrationScale: number;
+        /** Fixed Babylon radialIntensity (documented). */
+        static ChromaticAberrationRadialIntensity: number;
+        /** Unity grain intensity 0..1 -> Babylon grain.intensity (Babylon default 30). */
+        static GrainIntensityScale: number;
+        /** URP FilmGrain.type (Thin1=0, Thin2=1, Medium1..Medium6=2..7, Large01=8, Large02=9) -> intensity multiplier. */
+        static FilmGrainTypeMultipliers: number[];
+        /** Unity sharpen intensity 0..1 -> Babylon sharpen.edgeAmount (Babylon default 0.3). */
+        static SharpenEdgeScale: number;
+        static chromaticAberrationAmount(intensity: number): number;
+        static grainIntensity(intensity: number): number;
+        static filmGrainTypeMultiplier(type: number): number;
+        static sharpenEdgeAmount(intensity: number): number;
+        /** Unity focusDistance is metres; Babylon depthOfField.focusDistance is millimetres. */
+        static dofFocusDistanceMm(metres: number): number;
+        /**
+         * PPv2 kernelSize (Small=0, Medium=1, Large=2, VeryLarge=3) -> BABYLON.DepthOfFieldEffectBlurLevel
+         * (Low, Medium, High, High). Never touches fStop.
+         */
+        static dofBlurLevelFromKernelSize(kernelSize: number): number;
+        /** URP Gaussian DoF (gaussianStart/End metres, gaussianMaxRadius 0.5..1.5) -> focus at start, blur level from the radius, with a warning. */
+        static dofFromGaussian(start: number, end: number, maxRadius: number): IPostProcessGaussianDof;
+        /**
+         * Scale k applied to the normalised Unity amount (shutterAngle / 360 or URP intensity) to reach Babylon motionStrength.
+         * Both express the blur length as a fraction of the per-frame displacement (Unity: shutter angle / 360; Babylon:
+         * motionStrength * screen-space velocity), so k stays 1.
+         */
+        static MotionStrengthK: number;
+        /** URP MotionBlurQuality (Low=0, Medium=1, High=2) -> motionBlurSamples. */
+        static MotionBlurQualitySamples: number[];
+        /** PPv2 shutterAngle 0..360 -> motionStrength = angle / 360 * k. */
+        static motionStrengthFromShutterAngle(shutterAngle: number): number;
+        /** URP intensity 0..1 -> motionStrength = intensity * k. */
+        static motionStrengthFromIntensity(intensity: number): number;
+        static motionSamplesFromQuality(quality: number): number;
+        /**
+         * Multiplier on the r^2 coefficient derived from the Unity model (1 = the second-order expansion of PPv2 / URP's
+         * tan / atan distortion, see lensDistortionIntensity).
+         */
+        static LensDistortionK: number;
+        /** PPv2 / URP: amount = 1.6 deg * max(|intensity -100..100|, 1), capped at 160 deg. */
+        static LensDistortionDegreesPerUnit: number;
+        static LensDistortionMaxDegrees: number;
+        /** Unity's field angle theta (radians) for a normalised -1..1 intensity: 1.6 deg * max(100 |n|, 1), capped at 160 deg. */
+        static lensDistortionTheta(normalised: number): number;
+        /**
+         * Normalised -1..1 intensity -> plugin distortionIntensity, the r^2 coefficient of `uv' = c + (uv - c) * (1 + K r^2)`.
+         * PPv2 / URP distort with ru' = tan(ru theta) / (ru sigma) for positive intensities and atan(ru sigma) / (ru theta)
+         * for negative ones (sigma = 2 tan(theta / 2)); their second-order expansions are (theta / sigma)(1 + theta^2 r^2 / 3)
+         * and (sigma / theta)(1 - sigma^2 r^2 / 3), so K = +theta^2 / 3 (barrel) or -sigma^2 / 3 (pincushion), times
+         * LensDistortionK; the leading zoom factor is lensDistortionModelScale. 0 -> exactly 0 (no pass created).
+         * PPv2 25 -> theta 40 deg -> K 0.1625.
+         */
+        static lensDistortionIntensity(normalised: number): number;
+        /**
+         * The zoom Unity's model applies at the centre: theta / sigma (< 1, zooms in) for positive intensities, sigma / theta
+         * (> 1, zooms out) for negative ones, 1 for zero. Multiplies the plugin distortionScale (PPv2 25 -> 0.959).
+         */
+        static lensDistortionModelScale(normalised: number): number;
+        /**
+         * Unity intensityX / intensityY are per-axis MULTIPLIERS (0..1, default 1) of the intensity; the plugin ADDS its
+         * per-axis terms to `distortionIntensity`, so the multiplier becomes an additive delta: intensity * (m - 1).
+         */
+        static lensDistortionAxisIntensity(intensity: number, multiplier: number): number;
+        /** Unity centre -1..1 (0 = middle) -> plugin uv centre 0..1 (0.5 = middle). */
+        static lensDistortionCenterUv(center: number): number;
+        /** Unity scale 0.01..5 (>1 zooms in) -> plugin distortionScale, which multiplies the sampling radius (>1 zooms out): 1 / scale. */
+        static lensDistortionScale(scale: number): number;
+        /** PPv2 intensity -100..100 and URP intensity -1..1 -> one internal range -1..1. */
+        static lensDistortionNormalised(value: number, volumetype?: string): number;
+        /** PPv2 AmbientOcclusionQuality (Lowest=0, Low=1, Medium=2, High=3, Ultra=4) -> SSAO2 sample count. */
+        static SsaoQualitySamples: number[];
+        /** Quality index at which SSAO2 expensiveBlur is enabled. */
+        static SsaoExpensiveBlurFromQuality: number;
+        /** Unity intensity (0..4) -> SSAO2 totalStrength (Babylon default 1). PPv2 MultiScaleVO darkens far more per unit of intensity than SSAO2. */
+        static SsaoStrengthScale: number;
+        /** Unity radius (metres) -> SSAO2 radius (world units, Babylon default 2). MultiScaleVO spreads its occlusion well beyond the nominal radius. */
+        static SsaoRadiusScale: number;
+        /** Fixed documented SSAO2 render ratios. */
+        static SsaoRatio: number;
+        static SsaoBlurRatio: number;
+        /**
+         * PPv2 / HDRP ambient occlusion -> SSAO2. `quality` is the PPv2 enum; HDRP passes `stepCount` (2..32)
+         * which wins over the quality table when given.
+         */
+        static ssaoFromUnity(intensity: number, radius: number, quality?: number, stepCount?: number): IPostProcessSsao;
+        /**
+         * PPv2 ScreenSpaceReflectionPreset (Lower=0, Low=1, Medium=2, High=3, Higher=4, Ultra=5, Overkill=6, Custom=7)
+         * -> SSRRenderingPipeline settings. Custom (7, or anything past the table) returns the Medium row; use ssrCustomFromUnity for the custom fields.
+         */
+        static SsrPresets: IPostProcessSsr[];
+        static ssrPresetTable(preset: number): IPostProcessSsr;
+        /**
+         * PPv2 custom SSR fields -> SSR settings: maximumIterationCount -> maxSteps, thickness -> thickness,
+         * resolution (Downsampled=0, FullSize=1, Supersampled=2) -> ssrDownsample (1, 0, 0), maximumMarchDistance -> maxDistance,
+         * distanceFade 0..1 -> strength (1 - fade * 0.5, documented falloff), vignette > 0 -> attenuateScreenBorders.
+         */
+        static ssrCustomFromUnity(maximumIterationCount: number, thickness: number, resolution: number, maximumMarchDistance: number, distanceFade: number, vignette: number): IPostProcessSsr;
+        /**
+         * HDRP ScreenSpaceReflection: rayMaxIterations -> maxSteps; screenFadeDistance > 0 -> attenuateScreenBorders;
+         * minSmoothness (surfaces smoother than this reflect) has no direct SSR counterpart and is approximated as the
+         * global roughness factor used by Babylon's roughness blur: roughnessFactor = 1 - minSmoothness (documented).
+         */
+        static ssrFromHdrp(rayMaxIterations: number, minSmoothness: number, screenFadeDistance: number): IPostProcessSsr;
+        /**
+         * Camera antialiasing metadata (PPv2 / URP enum: None=0, FXAA=1, SMAA=2, TAA=3) and MSAA sample count ->
+         * DefaultRenderingPipeline flags: FXAA -> fxaaEnabled; SMAA / TAA -> fxaaEnabled + samples = msaasamples;
+         * samples always follows msaasamples (>= 1). None enables nothing.
+         */
+        static antialiasingFromMetadata(mode: number, msaaSamples: number): IPostProcessAntialiasing;
+        /** Finite number or the fallback (exporter values arrive as JSON and may be null). */
+        static num(value: any, fallback: number): number;
+        static clamp(value: number, min: number, max: number): number;
     }
 }
 /** Babylon Toolkit Namespace */
