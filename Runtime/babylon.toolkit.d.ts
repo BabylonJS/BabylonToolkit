@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.22.3 - R1) */
+        /** Gets the toolkit framework version string (9.25.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -51,6 +51,19 @@ declare namespace TOOLKIT {
         static SpotLightIntensity: number;
         /** Set the directional light intensity factor */
         static DirectionalLightIntensity: number;
+        /** Global scale on every realtime shadow's DARKNESS (plan lbm F-L.33).
+         *
+         *  Unity's `Light.shadowStrength` is 0..1 and maps to Babylon as `setDarkness(1 - strength)`, so the
+         *  default Unity value of 1 asks for `setDarkness(0)` - a shadow that removes the light's direct
+         *  contribution completely. That is arithmetically faithful, and visibly wrong beside Unity, whose
+         *  realtime shadows keep more light than the mapping implies (URP's shadow fade, its soft-shadow
+         *  filter width, and the ambient it still admits).
+         *
+         *  This factor scales the STRENGTH before the mapping: `darkness = 1 - clamp(strength * scale)`.
+         *  1.0 reproduces Unity's number literally; the shipped default is the measured URP match. Lower it
+         *  for lighter shadows, raise it toward 1 for the literal reading. It is deliberately one knob for
+         *  every light and every bake mode. */
+        static ShadowDarknessScale: number;
         /** Set the exp fog density scale factor */
         static FogExpDensityScale: number;
         /** Set the exp2 fog density scale factor */
@@ -241,6 +254,14 @@ declare namespace TOOLKIT {
         static GetDefaultSkybox(scene: BABYLON.Scene): BABYLON.AbstractMesh;
         /** Get the scene default intenisty factor */
         static GetIntensityFactor(): number;
+        /** Get the scene's Unity mixed lightmap bake mode: "indirectonly" | "subtractive" | "shadowmask" (plan lbm D19). */
+        static GetLightmapBakeMode(): string;
+        /** Get the scene's Unity shadowmask quality mode: "shadowmask" | "distanceshadowmask" (plan lbm D13). ShadowmaskMode.Shadowmask is 0, so that is the default. */
+        static GetShadowmaskMode(): string;
+        /** Get the scene's Subtractive shadow colour, already LINEAR (plan lbm D9). Defaults to Unity's linearized (0.42, 0.478, 0.627). */
+        static GetSubtractiveShadowColor(): BABYLON.Color3;
+        /** Get the render pipeline the scene was exported from: "birp" | "urp" | "hdrp" (plan lbm D36). Older exports carry no such field and read as "birp". */
+        static GetRenderPipeline(): string;
         /** Get the system render quality local storage setting. */
         static GetRenderQuality(): TOOLKIT.RenderQuality;
         /** Set the system render quality local storage setting. */
@@ -1446,10 +1467,12 @@ declare namespace TOOLKIT {
      * @param showDefaultLoadingScreen show the default loading screen. Default false.
      * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
      * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+     * @param trackDevicePixelRatio re-apply the hardware scaling level (1 / window.devicePixelRatio) and resize the engine whenever the device pixel ratio changes (a window moved between displays, browser zoom). Default true when hardwareScalingLevel is not set, false when it is.
      */
     interface IRuntimeOptions {
         enableUserInput?: boolean;
         hardwareScalingLevel?: number;
+        trackDevicePixelRatio?: boolean;
         initSceneFileLoaders?: boolean;
         loadAsyncRuntimeLibs?: boolean;
         loadProjectScriptBundle?: boolean;
@@ -2118,6 +2141,9 @@ declare namespace TOOLKIT {
         private _animationGroups;
         private _materialMap;
         private _lightmapMap;
+        /** plan lbm D3: the Unity shadowmask, cached by lightmap index exactly as the lightmap is - one
+         *  texture per index, shared by every material that lands on it. */
+        private _shadowmaskMap;
         private _reflectionMap;
         private _reflectionCache;
         private _assetContainer;
@@ -2134,6 +2160,8 @@ declare namespace TOOLKIT {
         private _licenseType;
         private _pendingReflectionTextures;
         private static ScriptBundleCache;
+        private static _bundleWarned;
+        private _missingMaterialClasses;
         /** @hidden */
         constructor(loader: BABYLON.GLTF2.GLTFLoader);
         /** @hidden */
@@ -2188,6 +2216,15 @@ declare namespace TOOLKIT {
         loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
         private _getCachedMaterialByIndex;
         private _getCachedLightmapByIndex;
+        /** Registers the shadowmask on a toolkit material as a RAW sampler (plan lbm D18).
+         *  Guarded: not every parsed material is a CustomShaderMaterial, and a non-toolkit material simply
+         *  registers nothing and warns nothing. addTextureUniform also registers tkShadowmaskSamplerInfos
+         *  (vec2) and tkShadowmaskSamplerMatrix (mat4) through checkSampler - markTextureAsRaw suppresses only
+         *  the per-draw UPLOAD, not the declaration. This runs inside an async loadTextureInfoAsync callback,
+         *  after the material's effect may already exist, so the material is marked dirty to force a recompile
+         *  that includes the new sampler. */
+        private _registerShadowmaskSampler;
+        private _getCachedShadowmaskByIndex;
         /** @hidden */
         createMaterial(context: string, material: BABYLON.GLTF2.IMaterial, babylonDrawMode: number): BABYLON.Nullable<BABYLON.Material>;
         /**
@@ -2291,13 +2328,12 @@ declare namespace TOOLKIT {
         private _attributes;
         private _textures;
         private _vectors4;
+        private _matrices;
         private _vectors3;
         private _vectors2;
         private _floats;
         private _bools;
         private _ubos;
-        /** Track WGSL samplers emitted for this material to avoid duplicate declarations (WGSL has no preprocessor) */
-        private _wgslSamplers;
         /** Textures in this set skip per-draw-call matrix/infos upload — use for raw data samplers (VAT, LUTs). */
         private _noMatrixTextures;
         protected shader: string;
@@ -2330,6 +2366,7 @@ declare namespace TOOLKIT {
          *  vertex attribute (per-instance skins on a hardware-instanced mesh). Independent of which channels are on. */
         private _skinLayerUniform;
         private _skinArraySwitchingPlugin;
+        private _shadowmaskPlugin;
         getPlugin(): BABYLON.MaterialPluginBase;
         getClassName(): string;
         constructor(name: string, scene: BABYLON.Scene);
@@ -2452,12 +2489,22 @@ declare namespace TOOLKIT {
         markTextureAsRaw(name: string): void;
         /** Gets the texture uniform value */
         getTextureValue(name: string): BABYLON.Texture;
+        /** The shadowmask texture registered under tkShadowmaskSampler, or null (plan lbm D19).
+         *  getTextureValue returns undefined for an unregistered name, so normalise it here - the callers
+         *  and the tests both compare against null. */
+        getShadowmaskTexture(): BABYLON.BaseTexture;
         /** Adds a vector4 uniform property */
         addVector4Uniform(name: string, value: BABYLON.Vector4): TOOLKIT.CustomShaderMaterial;
         /** Sets the vector4 uniform value */
         setVector4Value(name: string, value: BABYLON.Vector4): TOOLKIT.CustomShaderMaterial;
         /** Gets the vector4 uniform value */
         getVector4Value(name: string): BABYLON.Vector4;
+        /** Adds a mat4 uniform property */
+        addMatrixUniform(name: string, value: BABYLON.Matrix): TOOLKIT.CustomShaderMaterial;
+        /** Sets the mat4 uniform value */
+        setMatrixValue(name: string, value: BABYLON.Matrix): TOOLKIT.CustomShaderMaterial;
+        /** Gets the mat4 uniform value */
+        getMatrixValue(name: string): BABYLON.Matrix;
         /** Adds a vector3 uniform property */
         addVector3Uniform(name: string, value: BABYLON.Vector3): TOOLKIT.CustomShaderMaterial;
         /** Sets the vector3 uniform value */
@@ -2500,6 +2547,11 @@ declare namespace TOOLKIT {
         getCustomFragmentCode(wgsl: boolean): string;
         /** Prepares the custom material defines */
         prepareCustomDefines(defines: BABYLON.MaterialDefines): void;
+        /** Writes the per-light shadowmask selectors and strengths for this draw (plan lbm D39).
+         *  ShadowmaskPlugin deliberately implements no bindForSubMesh - its uniforms are registered on THIS
+         *  material and uploaded by updateCustomBindings() - so the per-submesh hop happens here, driven by the
+         *  bindForSubMesh UnityStyleLightingPlugin already owns. */
+        updateShadowmaskBindings(subMesh: BABYLON.SubMesh): void;
         /** Update custom material bindings */
         updateCustomBindings(effectOrUniformBuffer: BABYLON.UniformBuffer | BABYLON.Effect): void;
         /** Update custom material bindings */
@@ -2602,6 +2654,124 @@ declare namespace TOOLKIT {
         private getWGSLEmissiveCode;
     }
     /**
+      * Unity Shadowmask Plugin (BABYLON.MaterialPluginBase)
+      *
+      * Samples a Unity shadowmask on UV2 and attenuates each light's direct contribution by its own channel
+      * (plan lbm D7, D12). Unity bakes up to FOUR mixed lights into the four channels of one RGBA texture; a
+      * light's `occlusionmaskchannel` (0-3, or -1 for "not in the mask") selects its channel.
+      *
+      * The injection is per-light, through Babylon's own `CUSTOM_LIGHT{X}_COLOR` marker inside the unrolled
+      * light loop (`lightFragment.ts:8`), which sits directly after `vec4 diffuse{X}=light{X}.vLightDiffuse;`.
+      * Multiplying `diffuse{X}.rgb` there attenuates that light's diffuse AND specular together, because the
+      * same value feeds computeDiffuseLighting / computeSpecularLighting / computeSheenLighting /
+      * computeClearCoatLighting - which is exactly Unity's semantics.
+      *
+      * Eight injection keys are returned from the FIRST call and never change (plan lbm D15, D29):
+      * MaterialPluginManager freezes the KEY SET at plugin construction while re-querying the CONTENTS every
+      * compile, so a key added later would silently no-op. Keys whose marker is absent from the compiled
+      * shader are harmless.
+      *
+      * Every injected line is gated behind TOOLKIT_SHADOWMASK (or TOOLKIT_SUBTRACTIVE), so a material with no
+      * shadowmask compiles to identical code.
+      * @class ShadowmaskPlugin - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class ShadowmaskPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(material: TOOLKIT.CustomShaderMaterial);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getClassName(): string;
+        /** Register the shadowmask sampler with the effect so setTexture() can bind it. */
+        getSamplers(samplers: string[]): void;
+        /** Nothing: UV2 reaches the fragment stage through Babylon's own LIGHTMAP path (vLightmapUV), not
+         *  through a plugin attribute. */
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** Writes this draw's per-light selectors and strengths onto the MATERIAL (plan lbm D17, D39).
+         *
+         *  `mesh.lightSources` is the array Babylon's own materialHelper indexes with {X} when it unrolls the
+         *  light loop, so slot i here is light{i} in the shader. Slots with no light get a zero selector, which
+         *  the branchless term turns into exactly 1.0.
+         *
+         *  The strength scaling is URP-only (plan lbm D10, D36): URP applies
+         *  LerpWhiteTo(bakedShadow, shadowParams.x), while Built-in and HDRP consume the mask raw. */
+        updateShadowmaskBindings(mesh: BABYLON.AbstractMesh): void;
+        /** Binds the Subtractive main-light uniforms (plan lbm D9, D30, D35).
+         *
+         *  Unity subtracts ONLY the main directional light. `tkSubtractiveDir` negates the Babylon direction
+         *  because Unity's `mainLight.direction` points TOWARDS the light while Babylon's `light.direction`
+         *  points away. `tkSubtractiveColor` is Unity's own light colour, with the toolkit's intensity factor
+         *  divided back out. `tkSubtractiveShadow` carries the scene's linear subtractive shadow colour with the
+         *  light's shadow strength in .a.
+         *
+         *  With no directional light the uniforms stay zeroed, which makes the subtraction a no-op. */
+        /** Is this light's DIRECT contribution already inside the lightmap (plan lbm F-L.31)?
+         *
+         *  Unity's Subtractive bake folds the direct light of every MIXED light into the lightmap, so on a
+         *  lightmapped surface the runtime must add none of it back. Unity's LightmapBakeType: 1 Mixed, 2 Baked,
+         *  4 Realtime. A light carrying NO lightmapType at all reads 0 - MetadataParser's own default for an
+         *  export written before the field existed - and is treated as Mixed, matching the main-light selection
+         *  below rather than silently splitting the two rules apart.
+         *
+         *  The scene's ambient hemispheric fill carries no toolkit metadata at all and is also baked (Unity's
+         *  ambient is part of the GI solve), so a light with no toolkit block counts as baked too. */
+        static IsBakedIntoLightmap(light: any): boolean;
+        private updateSubtractiveBindings;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** DELIBERATELY EMPTY (finding F-L.31). Unity's SubtractDirectMainLightFromLightmap used to be emitted
+         *  here, at CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION, on the reasoning that it is "the one point
+         *  where `lightmapColor` is fully built and not yet consumed". The second half of that is false.
+         *
+         *  `lightmapColor` reaches the frame by ONE of two routes, chosen by the bare `LIGHTMAPEXCLUDED` define
+         *  (set whenever ANY light has a non-default lightmapMode):
+         *
+         *    LIGHTMAPEXCLUDED off -> pbrBlockFinalColorComposition does `finalColor.rgb+=lightmapColor.rgb`,
+         *                            AFTER this hook - but with no surfaceAlbedo multiply, so it is not the
+         *                            route a diffuse GI lightmap may take.
+         *    LIGHTMAPEXCLUDED on  -> a LIGHTMAP_SHADOWSONLY light does `diffuseBase+=lightmapColor.rgb*shadow`
+         *                            inside the light loop, which pbrBlockFinalUnlitComponents then multiplies
+         *                            by surfaceAlbedo. This is the correct route, and it runs BEFORE this hook.
+         *
+         *  The toolkit always takes the second route, because the scene's ambient hemispheric fill is exported
+         *  LIGHTMAP_SHADOWSONLY (CanvasTools `ambientlightmap`). So every edit made here landed on a value that
+         *  had already been consumed and was discarded: the whole composition was dead code, and Subtractive
+         *  rendered an un-subtracted lightmap. `getCombineCode` now does the work, in the carrier light's own
+         *  post-shadow body.
+         *
+         *  The key itself is still returned, empty, because MaterialPluginManager freezes the key SET at plugin
+         *  construction (D15, D29) - dropping it would be a silent no-op today and a trap for the next author. */
+        private getSubtractiveCode;
+        /** The post-shadow combine (plan lbm D28, rewritten by finding F-L.31).
+         *
+         *  Replaces Babylon's own `aggShadow+=shadow;`, which sits OUTSIDE the per-light lighting exclusion and
+         *  therefore runs for every light - including one whose whole lighting block was compiled out. That is
+         *  the only injection point the Subtractive composition can use, because it is the one place where
+         *  `shadow` (this light's realtime shadow), `normalW` and an as-yet-UNCONSUMED `lightmapColor` are all
+         *  live at once. The very next statement Babylon emits for the carrier light is
+         *  `diffuseBase+=lightmapColor.rgb*shadow;`.
+         *
+         *  Why not CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION, where this used to live: by then the lightmap
+         *  has already been consumed. `finalColor.rgb+=lightmapColor.rgb` in pbrBlockFinalColorComposition is
+         *  compiled out whenever ANY light is non-default (`#ifndef LIGHTMAPEXCLUDED`), and the toolkit always
+         *  has one - the ambient hemispheric fill. Editing `lightmapColor` there changed nothing at all.
+         *
+         *  The body is ONE regex replacement shared by every unrolled slot, so "am I the carrier" cannot be
+         *  baked into the text. `_tkLightSlot` counts slots in `mesh.lightSources` order - the same order the
+         *  shadowmask selectors already rely on (D17) - and is compared against the `tkSubtractiveMainSlot`
+         *  uniform. A slot mismatch, or no main light at all (-1), leaves every value untouched.
+         *
+         *  The arithmetic is Unity's SubtractDirectMainLightFromLightmap, unchanged: estimate the main light's
+         *  direct contribution, mask it by the inverse of the realtime shadow, subtract it from the lightmap,
+         *  floor the result at the scene's subtractive shadow colour, ramp by shadow strength, and keep the
+         *  darker of the two. `shadow` is then forced to 1.0 for the carrier so Babylon's own
+         *  `lightmapColor.rgb*shadow` does not darken a lightmap that already carries the subtraction. */
+        private getCombineCode;
+        private getGLSLDefinitions;
+        private getGLSLSample;
+        private getGLSLLightCode;
+        private getWGSLDefinitions;
+        private getWGSLSample;
+        private getWGSLLightCode;
+    }
+    /**
      * Babylon custom uniform items (GLTF)
      */
     type CustomUniformProperty = {
@@ -2619,6 +2789,159 @@ declare namespace TOOLKIT {
         getShaderName(): string;
     }
 }
+declare namespace TOOLKIT {
+    /**
+     * Pure Unity -> Babylon lighting conversions (plan lbm D11). One static function per quantity, each
+     * naming the Unity source it ports. Never re-derive these inline.
+     *
+     * This is the lighting sibling of TOOLKIT.PostProcessingConversions: the same convention (a pure static
+     * function per quantity, Unity range -> Babylon range, the rationale in the doc comment) applied to a
+     * different domain, kept in APP/src/core because CanvasTools.ts and CustomMaterials.ts are core files and
+     * must not reach into APP/src/pro.
+     * @class LightingConversions - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LightingConversions {
+        /**
+         * Unity's shadowmask has exactly four channels (plan lbm D16), so at most four Mixed lights per scene
+         * can carry baked occlusion. A fifth is exported with occlusionmaskchannel -1 and stays fully realtime.
+         */
+        static readonly MaxShadowmaskLights: number;
+        /**
+         * One-hot selector for a shadowmask channel. Ports Unity's
+         * UniversalRenderPipelineCore.cs:1907-1913, which builds the same unit basis vector from the light's
+         * occlusionMaskChannel and leaves it all-zero when the light has no baked occlusion.
+         *
+         * The all-zero vector is what makes the shader branchless: dot(mask, zero) is 0 and
+         * dot(zero, vec4(1)) is 0, so the attenuation term collapses to exactly 1.0 with no `if`.
+         * @param channel The Unity occlusionMaskChannel, 0-3. Anything else (notably -1) yields all zeros.
+         */
+        static OcclusionSelector(channel: number): BABYLON.Vector4;
+        /**
+         * URP scales a sampled shadowmask value by the light's shadow strength before using it:
+         * bakedShadow = LerpWhiteTo(bakedShadow, shadowParams.x) (Shadows.hlsl:474-484 with
+         * CommonMaterial.hlsl:352-356), which is lerp(1, mask, strength).
+         *
+         * Built-in (UnityShadowLibrary.cginc:190-207) and HDRP consume the mask raw, i.e. as if strength were
+         * 1 - so callers pass 1.0 for those pipelines rather than calling a different function (plan lbm D10).
+         * @param maskValue The value sampled from the shadowmask channel, 0..1.
+         * @param shadowStrength The light's shadowstrength, 0..1. 1 returns the mask untouched, 0 returns 1.
+         */
+        static BakedShadowStrength(maskValue: number, shadowStrength: number): number;
+        /**
+         * The sRGB electro-optical transfer function, per channel:
+         * c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4).
+         *
+         * This is the exact curve Unity's CoreUtils.ConvertSRGBToActiveColorSpace applies through
+         * UnityEngine.Color.linear, so a colour linearized here matches what Unity uploads.
+         * @param c One sRGB channel, 0..1.
+         */
+        static SrgbToLinear(c: number): number;
+        /**
+         * Reads the exported subtractiveshadowcolor into a Babylon Color3.
+         *
+         * The exporter writes UnityEngine.RenderSettings.subtractiveShadowColor.linear (plan lbm D9), matching
+         * what URP uploads at UniversalRenderPipeline.cs:2306-2312, so the normal path is a straight
+         * pass-through. `assumeGamma` linearizes instead, which is only correct for a hand-authored glTF or an
+         * export that predates this feature.
+         * @param exported The metadata value, an object carrying r/g/b (a/alpha ignored).
+         * @param assumeGamma True to treat the value as sRGB and linearize it.
+         */
+        static SubtractiveShadowColor(exported: any, assumeGamma: boolean): BABYLON.Color3;
+        /**
+         * Unity's `mainLight.color` for a Babylon light, i.e. the colour Subtractive subtracts with.
+         *
+         * `MetadataParser.SetupLightComponent` multiplies a light's exported intensity by the per-type user scale
+         * (`SceneManager.DirectionalLightIntensity` and friends) before assigning it, so `light.diffuse` scaled by
+         * `light.intensity` is NOT what Unity's `SubtractDirectMainLightFromLightmap` saw. Dividing that exact
+         * factor back out recovers Unity's own value, which is what URP's GlobalIllumination.hlsl:478-502 uses.
+         *
+         * plan pli D12: the factor is read from the rider the parser stores, NOT from
+         * `SceneManager.GetIntensityFactor()`. That accessor returns the SCENE-level `intensityFactor`
+         * (01-SceneManager.ts:663, default 2.0 on read and 1.0 on write) which is a different number from the
+         * per-type scale actually applied - the two were never in sync, and this comment used to claim they were.
+         * The accessor stays as the fallback for a light this parser did not build.
+         * @param light The scene's main directional light, or null.
+         */
+        static MainLightColor(light: any): BABYLON.Color3;
+        /** Keys already warned about, so a per-parse or per-frame code path reports each problem once. */
+        private static Warned;
+        /**
+         * Emits one console warning the first time a key is seen and nothing afterwards (plan lbm D31). The
+         * spec's edge-case table says "warn once" in five places, and both the metadata parse and the material
+         * plugin run often enough that an unguarded BABYLON.Tools.Warn would spam every frame.
+         *
+         * Mirrors the PostProcessor.Warned policy with its own "TOOLKIT.Lighting:" prefix and its own table, so
+         * the two subsystems cannot mute each other.
+         * @param key The dedupe key, e.g. "channel:<light name>".
+         * @param message The message, emitted prefixed with "TOOLKIT.Lighting: ".
+         */
+        static WarnOnce(key: string, message: string): void;
+        /** True when a key has already been warned about. Test and diagnostics helper. */
+        static hasWarned(key: string): boolean;
+        /** Forget every warned key. Used by the tests and by a scene reload. */
+        static resetWarnings(): void;
+        /**
+         * The Babylon intensity mode to use when the glTF carries NO `intensitymode` - i.e. the mapping every
+         * export produced before that field existed was baked for (plan D23).
+         *
+         * This is deliberately the LEGACY contract, not the new one. A pre-feature export baked a point or spot
+         * intensity for LUMINOUSPOWER (the exporter's `8*PI`, which Babylon then divides by `4*PI`). Defaulting
+         * an absent field to LUMINOUSINTENSITY would re-read that same number against a photometricScale of 1.0
+         * and make every legacy point and spot 4*PI (~12.6x) too bright, silently. So absent means legacy, and
+         * the LUMINOUSINTENSITY mapping applies only when the exporter actually wrote the field - which every
+         * export since this feature does.
+         * @param lightType The exported component type: 0 directional, 1 point, 2 spot.
+         */
+        static IntensityModeFor(lightType: number): number;
+        /**
+         * True when Babylon resolves a USABLE photometric scale for this (type, mode) pair.
+         *
+         * Two failure modes are rejected, both silent in Babylon (plan D24):
+         *   - a pair `_getPhotometricScale` (Lights/light.ts:899-957) does not recognise at all - ILLUMINANCE on
+         *     a point light, say - falls through every `case` and returns 0.0, multiplying the light to black;
+         *   - LUMINANCE, which it DOES resolve, but only against an authored `radius` the exporter never writes:
+         *     a directional gets 2*PI*(1-cos(0.001)) ~ 3.1e-6 and a point gets radius^2 ~ 1e-10 at Babylon's
+         *     default. Both are black lights with extra steps.
+         * @param lightType 0 directional, 1 point, 2 spot.
+         * @param mode A BABYLON.Light.INTENSITYMODE_* value.
+         */
+        static IsIntensityModeValid(lightType: number, mode: number): boolean;
+        /**
+         * The Unity -> Babylon spherical-harmonics units policy (plan lpn D17), measured on the live Garden export
+         * (light-probe-network T2, F-P.2): Unity's SphericalHarmonicsL2 coefficients ARE the shader-constant form
+         * Unity's own Evaluate uses, so Babylon's computeEnvironmentIrradiance polynomial over the RAW 27 floats
+         * reproduces shEval6 to 0.00000. `true` means SphericalHarmonicsFromUnity marks the harmonics preScaled
+         * (no basis constants applied at bind) and ProbeUniformsFromUnity copies the raw floats. Both functions
+         * read this one constant; changing it changes both paths together.
+         */
+        static readonly UnitySHPreScaled: boolean;
+        /** Floats per probe in Unity's layout: [R0..R8, G0..G8, B0..B8], coefficient order L00, L1-1, L10, L11, L2-2, L2-1, L20, L21, L22. */
+        static readonly UnitySHStride: number;
+        /**
+         * Builds a BABYLON.SphericalHarmonics from 27 Unity floats at `offset` (Unity layout above), scaled by
+         * `scale` (the ambient diffuseIbl for the global probe, `lightprobes.scale` for a light probe). This is the
+         * ONE conversion the global ambient path (CanvasTools.generateSphericalHarmonics) and the tests use.
+         */
+        static SphericalHarmonicsFromUnity(coeffs: ArrayLike<number>, offset: number, scale: number): BABYLON.SphericalHarmonics;
+        /**
+         * Writes the 27 uniform values a probe-lit mesh binds (plan lpn D17): under UnitySHPreScaled the values the
+         * shader receives are the raw Unity floats times `scale`, in Unity layout, so a per-draw write is
+         * updateFloat3("vSphericalL<band>", out[b], out[9 + b], out[18 + b]). No allocation: `out` is caller-owned.
+         */
+        static ProbeUniformsFromUnity(coeffs: ArrayLike<number>, offset: number, scale: number, out: Float32Array, outOffset: number): Float32Array;
+        /**
+         * Mirrors Babylon's computeEnvironmentIrradiance (Shaders/ShadersInclude/harmonicsFunctions.ts:6-14) over a
+         * 27-float uniform block in Unity layout, for a unit normal (nx, ny, nz). Returns out = [r, g, b].
+         */
+        static EvaluateShUniforms(u: ArrayLike<number>, offset: number, nx: number, ny: number, nz: number, out: number[]): number[];
+        /**
+         * Barycentric weights of p inside the tetrahedron (a, b, c, d) by Cramer's rule on the 3x3 edge matrix
+         * (the MeshNormalProxy kernel, SmoothMeshNormal.ts:629-670, extended to four vertices; plan lpn D30).
+         * out[0..3] = weights of a, b, c, d (sum 1). Returns false and leaves `out` untouched when |det| < 1e-12.
+         */
+        static TetrahedronBarycentric(px: number, py: number, pz: number, ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, dx: number, dy: number, dz: number, out: Float32Array | number[]): boolean;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -2632,6 +2955,15 @@ declare namespace TOOLKIT {
         private _scriptList;
         private _babylonScene;
         constructor(scene: BABYLON.Scene);
+        /** Unity `Light.shadowStrength` (0 = no shadow, 1 = full) -> Babylon shadow-generator DARKNESS
+         *  (1 = black, 0 = the light's contribution fully removed), scaled by
+         *  `TOOLKIT.SceneManager.ShadowDarknessScale` (plan lbm F-L.33).
+         *
+         *  The literal mapping is `1 - strength`, which every Unity light using the default strength of 1
+         *  turns into `setDarkness(0)`. The scale is applied to the STRENGTH, not to the darkness, so that
+         *  `strength = 0` still means "no shadow" at every scale and only the depth of a real shadow moves.
+         *  Both the strength and the product are clamped, so no scale can produce a darkness outside 0..1. */
+        static GetShadowDarkness(shadowstrength: number): number;
         /** Parse the scene component metadata. Note: Internal use only */
         parseSceneComponents(entity: BABYLON.TransformNode): void;
         /** Post process pending scene components. Note: Internal use only */
@@ -2777,8 +3109,6 @@ declare namespace TOOLKIT {
         private _floats;
         private _bools;
         private _ubos;
-        /** Track WGSL samplers emitted for this material to avoid duplicate declarations (WGSL has no preprocessor) */
-        private _wgslSamplers;
         protected shader: string;
         protected plugin: BABYLON.MaterialPluginBase;
         getClassName(): string;
@@ -13311,6 +13641,27 @@ declare namespace TOOLKIT {
         /** Toggle debug layer on and off. */
         static ToggleDebug(scene: BABYLON.Scene, embed?: boolean, parent?: HTMLElement): void;
         private static debugLayerVisible;
+        /** The Inspector v2 tokens opened by ShowInspector, one per scene (disposed by HideInspector or when the Inspector closes itself). */
+        private static inspectorTokens;
+        /**
+         * The toolkit's single Inspector entry point (inspector-truth FR-6). When the Inspector v2 UMD global (`INSPECTOR`,
+         * `scripts/babylon.inspector-v2.js`) exposes `ShowInspector` and `ConvertOptions`, the Babylon `IInspectorOptions` are
+         * converted with the Inspector's own `ConvertOptions` and the toolkit's service definitions
+         * (`PostProcessingInspector.GetServiceDefinitions()`: the "Unity Post Processing" properties section, or `[]` when
+         * `PostProcessor.InspectorSection` is false / the global lacks a required export) are appended to whatever the
+         * conversion produced; the returned token is kept per scene so HideInspector can dispose it, and
+         * `PostProcessor.InspectorState.available` is recorded. Without that global (Inspector v1, no Inspector) the call is
+         * exactly the debug layer's own show with the same options object. Nothing is logged on either path.
+         */
+        static ShowInspector(scene: BABYLON.Scene, options: BABYLON.IInspectorOptions): void;
+        /** Closes the Inspector opened by ShowInspector for `scene` (disposes its Inspector v2 token), else `scene.debugLayer.hide()`. */
+        static HideInspector(scene: BABYLON.Scene): void;
+        /** Disposes the Inspector v2 token(s) kept for `scene`; returns whether there was one (no debug-layer fallback). */
+        private static DisposeInspectorToken;
+        /** The Inspector v2 UMD global (`INSPECTOR`) resolved from `globalThis` at call time, or null (never imported). */
+        static GetInspectorGlobal(): any;
+        /** The Inspector v2 token ShowInspector opened for `scene`, or null (read-backs / tests). */
+        static GetInspectorToken(scene: BABYLON.Scene): any;
         /** Get an item from window local storage. */
         static GetLocalStorageItem(key: string): string;
         /** Set an item to window local storage. */
@@ -13329,6 +13680,22 @@ declare namespace TOOLKIT {
         static SetWindowsLaunchMode(mode?: number): void;
         /** Gets the default window hardware scaling level (1 / window.devicePixelRatio) */
         static GetHardwareScalingLevel(): number;
+        /** The engines whose default hardware scaling level follows `window.devicePixelRatio` (see WatchDevicePixelRatio). */
+        private static devicePixelRatioWatches;
+        /** True when the engine's default hardware scaling level is re-applied on every devicePixelRatio change. */
+        static IsDevicePixelRatioWatched(engine: any): boolean;
+        /**
+         * Re-apply the DEFAULT hardware scaling level (1 / window.devicePixelRatio) whenever the ratio changes, then
+         * resize the engine (post-processing final-verification finding F-9.8). The level used to be set exactly once,
+         * when the engine was created; a window moved between displays of different density, or a browser zoom, then
+         * left the scene rendering at 4x or 1/4 the necessary pixels until the page was reloaded (measured: DPR 2 -> 1
+         * kept `hardwareScaling 0.5` and drew 3746x1814 for a 1873x907 canvas). A `resize` event does not fire for a
+         * ratio change on its own; the reliable signal is a `matchMedia("(resolution: <n>dppx)")` query that fires once
+         * when the ratio LEAVES the value it was armed on, so it is re-armed after every change. Only the default path
+         * tracks: an explicit `options.hardwareScalingLevel` is the caller's choice and is never overridden. Returns
+         * the stop function (also called when the engine is disposed); a second call for the same engine is a no-op.
+         */
+        static WatchDevicePixelRatio(engine: any, onChange?: (ratio: number, level: number) => void): () => void;
         /** Quit the Windows Runtime host application. */
         static QuitWindowsApplication(): void;
         static PrintToScreen(text: string, color?: string, duration?: number): void;
@@ -13345,6 +13712,10 @@ declare namespace TOOLKIT {
         static FPS: number;
         static EXIT: string;
         static TIME: number;
+        /** Sentinel (-1) for playAnimation / playDefault `normalizedTimeOffset`: carry the layer's current normalized phase into the new state (Unity CrossFade normalizedTimeOffset parity). Any other offset is clamped to [0,1]; a phase of 1 into a looping state starts at 0. */
+        static KEEP_PHASE: number;
+        /** Upper bound, per layer per advance, on loop-observable fires and on repeat fires of each animation event (animation events fire in skeleton mode only; skeleton blend trees raise no loop events). A huge external delta wraps many cycles; the phase and animationLoopCount stay exact. */
+        static MAX_LOOP_EVENTS_PER_ADVANCE: number;
         private _looptime;
         private _loopblend;
         private _frametime;
@@ -13409,19 +13780,43 @@ declare namespace TOOLKIT {
         private _parameters;
         private _smoothTargets;
         delayStart: number;
+        /** Signed global playback multiplier applied to every layer (effective speed = state.speed × speedRatio): 1 = normal, 0 = frozen, negative = reverse, in both VAT and skeleton modes. Scales the phase and the exit-time state timer; 0 also holds crossfades and events. A non-finite value counts as 0. Seeded from the exported machine speed at awake; setAnimationSpeed() is an alias. */
         speedRatio: number;
         delayUpdateUntilReady: boolean;
+        /** Master switch: while false no tick advances the machine (no phase, transition, event or crossfade update, no VAT frame push, no onAnimationUpdateObservable) and updateAnimation() only bootstraps; the one-time bootstrap still plays the entry state and the last rendered frame is kept. See pauseAnimation() to hold a frame while transitions keep evaluating. */
         enableAnimations: boolean;
         applyRootMotion: boolean;
+        /**
+         * When true the scene clock no longer advances this animator; call updateAnimation(deltaSeconds) yourself
+         * (Unity Animator.Update(dt) parity). The scene tick still runs with a zero advance: smooth-damp parameter springs
+         * run on the scene clock, the one-time bootstrap still plays the entry state, parameter-condition transitions still
+         * evaluate, and the current frame keeps being rendered. Toggling it never resets phase, state or crossfades. Default false.
+         */
+        externalClock: boolean;
         awakened(): boolean;
         initialized(): boolean;
         hasRootMotion(): boolean;
+        /** True when getAnimationTime() is exactly 0 (both modes; live in VAT mode). */
         isFirstFrame(): boolean;
+        /** True when getAnimationTime() is at or past 0.985 (both modes; live in VAT mode). */
         isLastFrame(): boolean;
         ikFrameEnabled(): boolean;
+        /**
+         * Layer 0's normalized phase in [0,1] (both modes; live in VAT mode). Seconds = getAnimationTime() * getCurrentAnimationLength().
+         * Play, seek and stop on layer 0 update it immediately (a skeleton seek on any layer resamples every layer, which also
+         * refreshes it to layer 0's current phase); per tick, VAT reports the phase after the advance while skeleton mode
+         * reports the phase captured before that tick's advance (one tick behind).
+         */
         getAnimationTime(): number;
         getFrameLoopTime(): boolean;
         getFrameLoopBlend(): boolean;
+        /**
+         * True when the last tick or seek sampled an active state and the animator is not paused (both modes; live in VAT mode).
+         * Sampling-based: false after stopAnimation() (layer 0; any layer in VAT) or killAnimations() until the first tick or seek
+         * after the next play (skeleton: a stop of layer 0 while another layer still samples is true again on the next tick). VAT
+         * reads layer 0 and stays true on a finished non-looping clip; skeleton mode is true when any layer sampled (blend trees
+         * always, a clip while it loops or until a non-looping clip has parked on its bound) and false once none did.
+         */
         getAnimationPlaying(): boolean;
         getRuntimeController(): string;
         getRootBoneTransform(): BABYLON.TransformNode;
@@ -13483,17 +13878,120 @@ declare namespace TOOLKIT {
         protected m_vertexAnimationController: TOOLKIT.VertexAnimationController;
         protected m_vertexAnimationDefaultClip: string;
         protected m_vertexAnimationSearchNodes: BABYLON.AbstractMesh[];
+        /** pauseAnimation() state: phase, crossfades, transition timers and events hold; the current frame keeps rendering. */
+        protected m_animationPaused: boolean;
+        /** updateAnimation() warned once about a non-finite delta (SPEC.md warn-once policy). */
+        protected m_warnedInvalidDelta: boolean;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected update(): void;
         protected destroy(): void;
-        playDefault(transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
-        playAnimation(state: string, transitionDuration?: number, animationLayer?: number, frameRate?: number): boolean;
+        /**
+         * Plays the layer's entry state (same rules as playAnimation). transitionDuration is the crossfade in seconds (not positive = no
+         * crossfade). VAT: the fade advances by |deltaSeconds × state.speed × speedRatio| per tick and frameRate is ignored. Skeleton mode
+         * converts it to a fixed blending step of 1 / (rate × transitionDuration), added once per tick with a non-zero scaled step, where
+         * rate is frameRate when non-zero, else the frame rate of the layer's currently active (outgoing) state, else 30.
+         * normalizedTimeOffset (clamped to [0,1], non-finite = 0) is the phase the new state starts at; pass
+         * TOOLKIT.AnimationState.KEEP_PHASE to carry the layer's current normalized phase into the new state (Unity Animator.CrossFade
+         * normalizedTimeOffset parity). VAT mode is single-layer (animationLayer ignored). Returns false (with a warning) before the
+         * animator initializes on its first tick and, in skeleton mode only, when animationLayer is not below the layer count; in
+         * skeleton mode a negative or fractional animationLayer is not validated and throws a TypeError.
+         */
+        playDefault(transitionDuration?: number, animationLayer?: number, frameRate?: number, normalizedTimeOffset?: number): boolean;
+        /**
+         * Plays a named state directly (bypasses transitions). transitionDuration is the crossfade in seconds, with the same VAT and
+         * skeleton (blending step, frameRate) rules as playDefault. normalizedTimeOffset (clamped to [0,1], non-finite = 0; a phase of
+         * 1 into a looping state starts at 0) is the phase the new state starts at; TOOLKIT.AnimationState.KEEP_PHASE carries the
+         * layer's current normalized phase across the switch so a looping cycle does not restart (Unity CrossFade
+         * normalizedTimeOffset parity). The state's exit-time timer still starts at 0. Playing the state that is already active, or a
+         * null, empty or [EXIT] name, is a no-op that returns true. VAT mode is single-layer (animationLayer ignored); in VAT mode the
+         * crossfade source is the clip and time driven on the previous frame. Returns false (with a warning) before the animator
+         * initializes on its first tick and, in skeleton mode only, when animationLayer is not below the layer count (in skeleton mode
+         * a negative or fractional animationLayer is not validated and throws a TypeError). An unknown state name (or a state of
+         * another layer) leaves the layer's state and phase unchanged and returns true, but in skeleton mode it restarts that layer's
+         * crossfade mixers (blend factor 0, blending step recomputed).
+         */
+        playAnimation(state: string, transitionDuration?: number, animationLayer?: number, frameRate?: number, normalizedTimeOffset?: number): boolean;
+        /**
+         * Stops the layer: resets its phase to 0, clears the active state (the layer stays idle until the next play)
+         * and, in VAT mode, stops the vertex controller. This is a RESET, not a pause — use pauseAnimation() to hold a
+         * frame (a pause flag is not cleared by a stop). Stopping layer 0 (always, in VAT mode) resets getAnimationTime() to 0
+         * and makes getAnimationPlaying() false until the next tick or seek that samples a state (skeleton mode: another layer
+         * still sampling makes it true again on the next tick); stopping another skeleton layer leaves getAnimationTime() as is.
+         * VAT mode is single-layer (animationLayer ignored). Returns false (with a warning) before the animator initializes and,
+         * in skeleton mode only, when animationLayer is not below the layer count; in skeleton mode a negative or fractional index
+         * is not validated (returns true, stops nothing, no warning).
+         */
         stopAnimation(animationLayer?: number): boolean;
+        /** Stops every layer (see stopAnimation): phases reset to 0, states cleared. Use pauseAnimation() to hold a frame instead. */
         killAnimations(): boolean;
+        /**
+         * Advances the animator by deltaSeconds (signed: negative rewinds) through the same path the scene clock uses, in both VAT
+         * and skeleton modes (Unity Animator.Update(dt) parity). Each layer's phase moves by deltaSeconds × state.speed × speedRatio
+         * of clip time (blend trees: of the weighted clip length), and loop, end and skeleton animation events follow that signed
+         * travel; the exit-time state timer adds |deltaSeconds × state.speed × speedRatio|, so a rewind still counts toward exit
+         * time; crossfades advance by that magnitude in VAT mode and by one fixed blending step per non-zero scaled advance in
+         * skeleton mode (see playDefault). Performs the one-time bootstrap (entry state, onAnimationInitObservable) if it has not
+         * happened yet, then ticks and notifies onAnimationUpdateObservable. Gating: while delayUpdateUntilReady is true and the rig
+         * is not ready nothing happens; while enableAnimations is false only the bootstrap runs; while paused (pauseAnimation) the
+         * tick advances by zero. May be called any number of times per frame; 0 advances nothing, but that tick still evaluates
+         * parameter-condition transitions and re-drives the current frame (VAT: the controller at its current time; skeleton: blend
+         * trees, looping clips and clips not yet held at a bound are resampled, while a non-looping clip held at its bound after a
+         * further push into it keeps its last pose). Calling it while externalClock is false simply adds an extra advance. A
+         * non-finite delta is treated as 0 (one warning). Before awake() has run there is no machine and the call returns without effect.
+         */
+        updateAnimation(deltaSeconds: number): void;
+        /**
+         * Holds every layer's phase: phase, crossfades, transition timers and events freeze while the current frame keeps being
+         * rendered (VAT: the controller keeps its last driven time; skeleton: the targets keep their last sampled values). Ticks
+         * continue with a zero advance, so parameter-condition transitions (no exit time) can still switch state, as at speedRatio 0;
+         * smooth-damp parameter springs keep running on the scene clock and blend-tree weights still follow live parameter changes
+         * (the held phase is re-driven with the new weights). Seeks still apply. getAnimationPlaying() is false while paused.
+         * Independent of enableAnimations (the master switch) and of externalClock. Use stopAnimation() to reset instead.
+         */
+        pauseAnimation(): void;
+        /** Continues from the identical frame pauseAnimation() held. */
+        resumeAnimation(): void;
+        /** True between pauseAnimation() and resumeAnimation() (stopAnimation and playAnimation do not clear it). */
+        getAnimationPaused(): boolean;
+        /**
+         * true: the internal (scene) clock is suspended — the animator no longer advances on its own (the scene tick
+         * still runs with a zero advance: bootstrap, parameter-condition transitions and the frame re-drive described in
+         * updateAnimation), while setAnimationTime / setAnimationNormalizedTime / updateAnimation keep applying, so a scrubber owns the frame.
+         * false: lifts that suspension only (it does not clear a pauseAnimation() hold).
+         */
         setTimelineScrubbing(isScrubbing: boolean): void;
+        /** True while setTimelineScrubbing(true) is in effect. */
         getIsTimelineScrubbing(): boolean;
-        setAnimationTime(seconds: number): boolean;
+        /**
+         * Seeks the layer to a normalized phase: looping states wrap into [0,1) (1.3 → 0.3, -0.25 → 0.75, 1 → 0), non-looping
+         * states clamp to [0,1]. Writes the layer phase and, in VAT mode, drives the controller immediately; in skeleton
+         * mode the targets are resampled at the new phase right away. Works while paused, scrubbing, or under an external
+         * clock with no advance. The seek itself fires no loop, end or animation events; the next advance counts crossings
+         * from the seeked phase. Returns false (no write) when normal is not a finite number, the layer does not exist or no
+         * state is active on it.
+         * VAT mode is single-layer: animationLayer is ignored and layer 0 is used.
+         */
+        setAnimationNormalizedTime(normal: number, animationLayer?: number): boolean;
+        /**
+         * Seeks in seconds of the current state's primary clip (see getCurrentAnimationLength): looping states wrap
+         * (1.3 s on a 1 s clip → 0.3 s), non-looping clamp (→ 1.0 s). Same immediacy and return rules as
+         * setAnimationNormalizedTime, and additionally returns false when the clip length is not positive. A finite
+         * seconds value whose ratio to the length overflows still seeks (looping: remainder; non-looping: nearest bound).
+         * Works in both VAT and skeleton modes (layer ignored in VAT).
+         */
+        setAnimationTime(seconds: number, animationLayer?: number): boolean;
+        /**
+         * Seconds of the current state's primary clip, or 0 when no state is active or no length resolves. Blend trees: the
+         * dominant weighted child in VAT; in skeleton mode the first entry of the evaluated weight list (else the state length).
+         * Layer ignored in VAT mode.
+         */
+        getCurrentAnimationLength(animationLayer?: number): number;
+        /**
+         * Alias for `speedRatio = speed` (both modes): a signed multiplier applied to every layer's phase — 0 freezes,
+         * negative rewinds (a non-finite value counts as 0). In VAT mode also forwarded to the vertex controller's own speed
+         * for auto-mode compatibility. Returns true.
+         */
         setAnimationSpeed(speed: number): boolean;
         setAnimationLoop(loop: boolean): boolean;
         hasBool(name: string): boolean;
@@ -13539,6 +14037,8 @@ declare namespace TOOLKIT {
         private getMachineState;
         private setMachineState;
         getCurrentState(layer: number): TOOLKIT.MachineState;
+        /** Name of the active state on the layer, or null when the layer has no active state (VAT mode: layer ignored, layer 0 used). */
+        getCurrentAnimationName(animationLayer?: number): string;
         getDefaultClips(): any[];
         getDefaultSource(): string;
         setLayerWeight(layer: number, weight: number): void;
@@ -13568,6 +14068,36 @@ declare namespace TOOLKIT {
         private updateStateMachine;
         private destroyStateMachine;
         private updateAnimationState;
+        /** Layer addressed by a public call: layer 0 in VAT mode, else _machine.layers[animationLayer]; null when unavailable. */
+        private getPublicLayer;
+        /** Loop policy of the layer's active state (D15): VAT → loopOverride ?? primary clip loop; skeleton clip → track looptime; skeleton tree → true. */
+        private isLayerLooping;
+        /** Seconds of the primary clip of the layer's active state (D16); 0 when unresolvable. */
+        private getLayerClipLength;
+        /** Signed effective speed of a layer (state.speed * speedRatio; state.speed defaults to 1; 0 when no state). speedParameter is not applied (unchanged from today). */
+        private computeLayerSpeed;
+        /**
+         * Advances one layer's normalized phase by a SIGNED step and applies the loop / end policy:
+         * looping states wrap in either direction (one loop event per wrap, capped), non-looping states clamp at
+         * 0 or TIME and raise the end condition once on arrival. Direction is the sign of the step deltaTime * effectiveSpeed (D8).
+         * Returns the number of wraps performed this advance (0 when not looping or no wrap).
+         */
+        private advanceLayerPhase;
+        /** Wraps a normalized value into [0,1). */
+        private static WrapNormal;
+        /**
+         * Counts how many times a LOOPING layer's normalized phase crossed eventTime during one advance (D27, run-log Decision 8).
+         * tPrev / tCurr are the wrapped normalized phases before / after the advance, wraps is the count advanceLayerPhase returned and dir is
+         * the sign of the step. Crossings are counted along the unwrapped travel (tCurr + dir * wraps): an event exactly on its time fires on
+         * arrival, never on departure, in either direction. Capped at MAX_LOOP_EVENTS_PER_ADVANCE. Shared by the clip and blend-tree event blocks.
+         */
+        private countEventCrossings;
+        /**
+         * Resolves the VAT primary / secondary clip for the layer's active state: a Clip-type tree drives its first
+         * child; a real blend tree is parsed against the current parameters and the top-2 weighted children are taken.
+         * Returns null when nothing can be driven (no state, no children, unknown clip, zero duration).
+         */
+        private resolveVertexAnimationClips;
         private updateVertexAnimationLayer;
         private updateAnimationTargets;
         private updateBlendableTargets;
@@ -13731,6 +14261,15 @@ declare namespace TOOLKIT {
         maskType: string;
         transformCount: number;
         transformPaths: string[];
+    }
+    /** Result of AnimationState.resolveVertexAnimationClips — the top-2 clips the VAT controller is driven with. */
+    interface IVertexAnimationClipSelection {
+        primaryName: string;
+        secondaryName: string | null;
+        primaryWeight: number;
+        primaryDuration: number;
+        secondaryDuration: number;
+        primaryLooping: boolean;
     }
     interface IAnimationLayer {
         owner: string;
@@ -14047,19 +14586,6 @@ declare namespace TOOLKIT {
         static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
     }
 }
-declare namespace TOOLKIT {
-    class ChannelMixerPlugin {
-        /**
-         * Creates a post-process that applies channel mixing.
-         * Unity channel mixer: each output channel (R,G,B) is a weighted sum of input channels (R,G,B).
-         */
-        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
-            red?: number[];
-            green?: number[];
-            blue?: number[];
-        }): BABYLON.PostProcess;
-    }
-}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -14259,33 +14785,789 @@ declare namespace TOOLKIT {
     type UniversalCharacterController = TOOLKIT.CharacterController | TOOLKIT.SimpleCharacterController | TOOLKIT.RecastCharacterController;
 }
 declare namespace TOOLKIT {
-    class ColorFilterPlugin {
+    /**
+     * The public Unity-unit settings of a chromatic-aberration pass (inspector-truth T3, FR-9), exposed as
+     * `postProcess.unity` and re-packed by `onApply` every frame.
+     */
+    interface IChromaticAberrationUnitySettings {
+        /** Unity `ChromaticAberration.intensity` 0..1 (packed `intensity * 0.05` into `aberrationAmount`). */
+        intensity: number;
+        /** Unity `ChromaticAberration.fastMode` (the three-tap `CHROMATIC_ABERRATION_LOW` variant). */
+        fastMode: boolean;
+    }
+    /**
+     * Unity PPv2 chromatic aberration port (post-processing-spit-and-polish FR-4).
+     *
+     * Implements the Uber.shader aberration loop exactly: `amount = intensity * 0.05`, an inward radial
+     * displacement `end = uv - coords * dot(coords, coords) * amount` (`coords = 2uv - 1`), a sample count
+     * `clamp(int(length(diff / texelSize / 2)), 3, 16)` (Unity's `_MainTex_TexelSize.zw * diff / 2`, the
+     * displacement length in pixels), taps at `(i + 0.5) / samples` weighted by a spectral LUT (default 3x1
+     * R, G, B strip, a profile `spectralLut` texture when exported) and normalised by the filter sum. (`filter` is a
+     * GLSL ES reserved word and fails glslang under WebGPU, so the per-tap weight is `filterW`, spit-and-polish T17.)
+     * `fastMode` is Unity's `CHROMATIC_ABERRATION_LOW` variant: three taps at 0.5/3, 1.5/3, 2.5/3.
+     *
+     * The shader works in UV units and reads the texel size from the post-process size every frame, so it is
+     * resize- and DPR-independent. The static factory follows the `LensDistortionPlugin` pattern: the GLSL is
+     * registered once in the shader store, the pass is created with `BABYLON.PostProcess`, and the live uniform
+     * state is mirrored on `_toolkitPlugin` for the verification read-back. Lifetime belongs to the orchestrator
+     * (`PostProcessor.trackPostProcess` / `releaseStacks`), which also releases the default spectral LUT
+     * through `ReleaseDefaultSpectralLut`.
+     */
+    class ChromaticAberrationPlugin {
+        /** Unity `ChromaticAberration.cs`: `_ChromaticAberration_Amount = intensity * 0.05`. */
+        static readonly AmountScale: number;
+        /** Unity Uber.shader tap clamp: `clamp(int(...), 3, 16)`. */
+        static readonly MinSamples: number;
+        static readonly MaxSamples: number;
+        /** Post-process shader name (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"` in the shader store). */
+        static readonly ShaderName: string;
+        /** Shader store key the fragment is registered under (a literal so the bundle can be grepped for it). */
+        static readonly ShaderKey: string;
+        /** Default 3x1 spectral LUTs, one per scene (Unity's `ChromaticAberration.cs` builds the same strip once, RGB24 there, RGBA here for WebGPU). */
         /**
-         * Creates a post-process that applies a color filter (multiplies the final color).
+         * The per-scene default spectral strip, REFERENCE COUNTED (review-fixes FR-4). One texture is shared by every
+         * aberration pass of a scene, so the first volume to be destroyed used to dispose it out from under the passes of
+         * every other volume still rendering. `count` is the number of passes currently holding it; the texture is disposed
+         * only when the last holder releases.
+         */
+        private static DefaultSpectralLuts;
+        /**
+         * Unity intensity (0..1) -> `_ChromaticAberration_Amount`: `intensity * 0.05`. Pure, clamps the intensity
+         * to Unity's [0, 1] parameter range and treats non-numbers as 0.
+         */
+        static PackAmount(intensity: number): number;
+        /**
+         * Unity's per-pixel sample count for a given displacement (UV units) at a render size: the pixel length of
+         * `diff / 2`, clamped to [3, 16]. Pure helper used for the read-back (`samplesAtCorner`) and tests.
+         */
+        static SampleCount(diffX: number, diffY: number, width: number, height: number): number;
+        /** The displacement (UV units) at a screen corner, where `coords = (-1, -1)` and `dot(coords, coords) = 2`: `4 * amount` per axis. */
+        static CornerDisplacement(amount: number): number;
+        /**
+         * The GLSL fragment source (registered once under `ShaderKey`). `DISABLE_UNIFORMITY_ANALYSIS` is Babylon's WebGPU
+         * escape hatch (spit-and-polish T17): the tap loop's trip count is per pixel, so WGSL's uniformity analysis rejects
+         * `textureSample` inside it ("must only be called from uniform control flow") and the render pipeline never builds;
+         * the define makes Babylon emit `diagnostic(off, derivative_uniformity)` in the transpiled WGSL, exactly as its own
+         * screen-space reflection shader does. WebGL2 ignores the define.
+         */
+        static GetFragmentShader(): string;
+        /**
+         * The default spectral LUT for a scene: a 3x1 RGB strip (255,0,0 / 0,255,0 / 0,0,255), bilinear, clamp
+         * addressing, no mipmaps, linear (Unity's `RGB24` texture, `wrapMode = Clamp`, `filterMode = Bilinear`).
+         * Created once per scene and cached; every call takes ONE reference, released through `ReleaseDefaultSpectralLut`
+         * (review-fixes FR-4).
+         */
+        static GetDefaultSpectralLut(scene: BABYLON.Scene): BABYLON.Texture;
+        /**
+         * Drops ONE reference on the cached default spectral LUT of `scene` and disposes it when the count reaches zero
+         * (review-fixes FR-4; no-op when none is cached). Returns true when the texture was actually disposed, so a caller
+         * can tell "released the last holder" from "another pass still holds it".
+         */
+        static ReleaseDefaultSpectralLut(scene: BABYLON.Scene): boolean;
+        /** Live reference count on the cached default spectral LUT of `scene` (0 when none is cached). Tests / read-backs. */
+        static DefaultSpectralLutCount(scene: BABYLON.Scene): number;
+        /**
+         * Creates the aberration pass for `camera`.
+         * @param options.intensity Unity intensity 0..1 (packed to `intensity * 0.05`).
+         * @param options.fastMode Unity `fastMode` (three-tap variant).
+         * @param options.spectralLutTexture An exported `spectralLut` texture (clamp addressing is enforced); the
+         *        default R/G/B strip of the scene is used when absent (`GetDefaultSpectralLut`).
+         * @param options.samplingMode Post-process sampling mode (bilinear by default).
          */
         static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
-            color?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            intensity?: number;
+            fastMode?: boolean;
+            spectralLutTexture?: BABYLON.Texture;
+            samplingMode?: number;
         }): BABYLON.PostProcess;
     }
 }
 declare namespace TOOLKIT {
-    class ColoredBloomPlugin {
+    /**
+     * The public Unity-unit settings of the LDR colour-filter pass (inspector-truth T4, FR-9), exposed as
+     * `postProcess.unity`; the pass multiplies with `srgbToLinearColor(color)`, re-derived whenever `color` changes.
+     */
+    interface IColorFilterUnitySettings {
+        /** Unity `ColorGrading.colorFilter` as authored, sRGB `[r, g, b, a]` 0..1 (white = no filter). */
+        color: number[];
+    }
+    class ColorFilterPlugin {
         /**
-         * Creates a colored bloom chain:
-         * - Prefilter PostProcess: extracts bright parts above threshold and tints with bloomColor
-         * - Blur Passes: two BlurPostProcess passes (horz + vert)
-         * - Composite PostProcess: additive blend back onto the final image
+         * One colour channel of the filter (review-fixes FR-3): a finite number, negatives clamped to 0, otherwise
+         * `fallback`. The old truthiness fallback turned a legitimate 0 into 1 and let NaN / null reach the shader.
+         */
+        private static channel;
+        /**
+         * Creates a post-process that applies a color filter (multiplies the final color).
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            /** The LINEAR filter colour (kept exactly as given until `unity.color` is edited). */
+            color?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            /** The colour as AUTHORED in Unity (sRGB, inspector-truth T4): the source of `unity.color`; linearised through the conversion table (takes precedence over `color`). */
+            colorSrgb?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+        }): BABYLON.PostProcess;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The public Unity-unit settings of the HDR grading pass (inspector-truth T4, FR-9), exposed as `postProcess.unity`
+     * and re-packed by `onApply` every frame (`PackPostExposure`: `2^postExposure`).
+     */
+    interface IColorGradingHdrUnitySettings {
+        /** Unity `ColorGrading.postExposure` / URP `ColorAdjustments.postExposure` in EV (0 on HDRP, whose exposure is its own component). */
+        postExposure: number;
+    }
+    /**
+     * Unity PPv2 HDR colour-grading pass (post-processing-spit-and-polish FR-7): the LogC-indexed LUT application.
+     *
+     * Unity's Uber.shader (`COLOR_GRADING_HDR_2D`) does `color *= _PostExposure; lutSpace = saturate(LinearToLogC(color));
+     * color = ApplyLut2D(_Lut2D, lutSpace, _Lut2D_Params)` with `_Lut2D_Params = (1 / width, 1 / height, height - 1)`
+     * and `_PostExposure = 2^postExposure`. The exporter bakes that LUT (tone mapper, trackballs, curves, mixer,
+     * colour filter inside) as a 32³ strip PNG carrying `lutspace: "logc"` and `lutencoding: "srgb"` (8-bit samples
+     * stored sRGB-encoded so shadows do not band); this pass decodes them after sampling and outputs display-linear
+     * colour, alpha untouched. The image-processing pass that follows stays neutral and only performs the gamma encode.
+     *
+     * The LUT texture is created by the orchestrator through its existing loader (`requestLutTexture` ->
+     * `finalizeLutTexture`, 3D repack when supported); the plugin never loads. It samples a `RawTexture3D` volume
+     * (`use3D`) or falls back to Unity's `ApplyLut2D` on the N*N x N strip. The static factory follows the
+     * `LensDistortionPlugin` pattern; lifetime belongs to the orchestrator (`PostProcessor.trackPostProcess`).
+     */
+    class ColorGradingHdrPlugin {
+        /** Alexa LogC (El 1000) constants from Unity's `Colors.hlsl`. */
+        static readonly LogC: {
+            cut: number;
+            a: number;
+            b: number;
+            c: number;
+            d: number;
+            e: number;
+            f: number;
+        };
+        /** Unity `ColorGrading.cs`: `k_Lut2DSize = 32`. */
+        static readonly DefaultLutSize: number;
+        /** Post-process shader name (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"`). */
+        static readonly ShaderName: string;
+        /** Shader store key the fragment is registered under. */
+        static readonly ShaderKey: string;
+        /** Unity `ColorGrading.cs`: `_PostExposure = 2^postExposure` (EV). Pure; non-numbers give 1. */
+        static PackPostExposure(ev: number): number;
+        /** Unity's non-precise `LinearToLogC`: `c * log10(a * x + b) + d` (JS mirror of the shader). */
+        static LinearToLogC(x: number): number;
+        /** Unity's non-precise `LogCToLinear`: `(10^((x - d) / c) - b) / a`. */
+        static LogCToLinear(x: number): number;
+        /** The exact sRGB EOTF (piecewise), JS mirror of the shader decode. */
+        static SrgbToLinear(v: number): number;
+        /**
+         * Unity `_Lut2D_Params` for the strip fallback: `(1 / width, 1 / height, height - 1)` with `width = n * n`,
+         * `height = n`; the 3D path uses `((n - 1) / n, 0.5 / n, n)`. Pure.
+         */
+        static PackLutParams(lutSize: number, use3D: boolean): {
+            x: number;
+            y: number;
+            z: number;
+        };
+        /**
+         * The GLSL fragment source (registered once under `ShaderKey`). Compiled with `#define LUT3D` for the volume
+         * path and `#define LUT_DECODE_SRGB` when the strip samples are sRGB-encoded (PostProcess `defines`).
+         */
+        static GetFragmentShader(): string;
+        /**
+         * Creates the HDR grading pass for `camera`.
+         * @param options.lut The LUT texture: a `RawTexture3D` volume (`use3D`) or the 2D N*N x N strip.
+         * @param options.lutSize N (32 for Unity's bake); inferred from the texture when omitted.
+         * @param options.use3D Sample the volume with `sampler3D`; false = Unity's `ApplyLut2D` on the strip.
+         * @param options.postExposure Unity post exposure in EV (`2^ev` is the uniform); 0 for SRP volumes.
+         * @param options.decodeSrgb The strip samples are sRGB-encoded (`lutencoding: "srgb"`): decode after sampling.
+         * @param options.samplingMode Post-process sampling mode (bilinear by default).
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options: {
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            lut: BABYLON.BaseTexture;
+            lutSize?: number;
+            use3D?: boolean;
+            postExposure?: number;
+            decodeSrgb?: boolean;
+            samplingMode?: number;
+        }): BABYLON.PostProcess;
+        /** N from the option, else from the texture (3D: depth / height, strip: height), else Unity's 32. */
+        private static inferLutSize;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The public Unity-unit settings of a bloom chain (inspector-truth T4, FR-9), exposed as `chain.unity` (mirrored on every
+     * owned pass for pass selection) and converted through the conversion table every frame. On a Built-in (PPv2) volume the
+     * chain is Unity's bloom PYRAMID (final-verification T15, F-7): `threshold` / `softKnee` derive Unity's `_Threshold` vector
+     * (`bloomThresholdVectorFromPPv2`), `intensity` the composite multiplier (`bloomWeightFromIntensity`, `exp2(i / 10) - 1`),
+     * `color` the linear tint (`gammaToLinearSpace`) and `diffusion` the pyramid depth (`bloomPyramidFromDiffusion`, rebuilt
+     * when the iteration count changes). On a URP / HDRP volume the chain is the retained blur pair: the prefilter derives
+     * `threshold` (`bloomThresholdFromUnity`) and the tint, the composite `weight` and the blur `kernel` (`bloomKernelFromScatter`).
+     */
+    interface IBloomUnitySettings {
+        /** Unity `Bloom.intensity` (PPv2 >= 0, exp2 curve; URP linear; HDRP 0..1 mix). */
+        intensity: number;
+        /** Unity `Bloom.threshold` (gamma space, >= 0). */
+        threshold: number;
+        /** PPv2 `Bloom.softKnee` 0..1 (ignored on URP / HDRP, which hardcode the knee). */
+        softKnee: number;
+        /** PPv2 `Bloom.diffusion` 1..10 (the pyramid depth; URP / HDRP use `scatter`). */
+        diffusion: number;
+        /** URP / HDRP `Bloom.scatter` 0..1 (the blur kernel on SRP volumes). */
+        scatter?: number;
+        /** Unity `Bloom.color` / URP `tint` as authored, sRGB `[r, g, b]` 0..1 (white = untinted). */
+        color: number[];
+        /** The authored pipeline (`BuiltIn` | `URP` | `HDRP`) that selects the weight / threshold / kernel conversions; `BuiltIn` when absent. */
+        volumetype?: string;
+        /** URP `Bloom.clamp` (default 65472). */
+        clamp?: number;
+        /** URP `Bloom.highQualityFiltering` (13-tap prefilter; bicubic upsample NOT ported -- warned). */
+        highQualityFiltering?: boolean;
+        /** URP `Bloom.downscale` enum index (0 Half, 1 Quarter). */
+        downscale?: number;
+        /** URP `Bloom.maxIterations` 2..8 (default 6). */
+        maxIterations?: number;
+    }
+    /**
+     * The derived state of a Built-in bloom pyramid chain (final-verification T15, F-7): what Unity's `BloomRenderer.Render`
+     * computes from the settings and the frame, re-derived every frame and mirrored for the read-back and the listing.
+     */
+    interface IBloomPyramidState {
+        /** Unity `Bloom.cs`: `clamp(floor(log2(max(tw, th)) + min(diffusion, 10) - 10), 1, 16)` for the frame the ladder was built for. */
+        iterations: number;
+        /** Unity `Bloom.cs`: `0.5 + logs - floor(logs)`, the tent radius in texels (live, follows the frame and `diffusion` every frame). */
+        sampleScale: number;
+        /** Unity `_Threshold`: `(lthresh, lthresh - knee, 2 knee, 0.25 / knee)`; the mirror array is written in place. */
+        threshold: number[];
+        /** Unity `_Bloom_Settings.y`: `exp2(intensity / 10) - 1`. */
+        intensity: number;
+        /** Unity `_Bloom_Color`: the authored tint in linear space; the mirror array is written in place. */
+        tint: number[];
+        /** The frame size (pixels) the ladder was built for. */
+        width: number;
+        height: number;
+        /** Unity `tw` / `th`: the half size the ladder starts from. */
+        tw: number;
+        th: number;
+    }
+    /** The derived state of a URP bloom ladder (urp-verification T9, D13), re-derived every frame, mirrored for the read-back. */
+    interface IBloomUrpPyramidState {
+        /** `bloomUrpLadder(...).mipCount` for the frame the ladder was built for. */
+        mipCount: number;
+        /** 1 (Half) or 2 (Quarter). */
+        downres: number;
+        /** Linear threshold, hardcoded knee, clamp (`_Params.zwy`). */
+        threshold: number;
+        knee: number;
+        clampMax: number;
+        /** `lerp(0.05, 0.95, scatter)` (`_Params.x`). */
+        scatter: number;
+        /** `_Bloom_Params.x` = intensity * BloomIntensityMultiplier. */
+        intensity: number;
+        /** `_Bloom_Params.yzw`: the luminance-normalised linear tint; written in place. */
+        tint: number[];
+        /** 1 when highQualityFiltering (13-tap prefilter), else 0. */
+        hq: number;
+        width: number;
+        height: number;
+        tw: number;
+        th: number;
+    }
+    /**
+     * Unity PPv2 bloom port (final-verification T15, F-7) and the retained SRP blur chain.
+     *
+     * Unity (`Runtime/Effects/Bloom.cs`, `Shaders/Builtins/Bloom.shader`, `Shaders/Sampling.hlsl`, `Uber.shader:148-166`)
+     * renders bloom as a mip pyramid on the linear HDR scene, before the Uber pass: a PREFILTER (13-tap downsample of the
+     * source to half size, `SafeHDR`, `QuadraticThreshold` with the `_Threshold` vector) into `mipDown[0]`, then
+     * `iterations - 1` further 13-tap DOWNSAMPLES halving each time, then `iterations - 1` TENT UPSAMPLES from the smallest
+     * level back up, each adding the same-level downsample (`Combine`), and finally the Uber pass tent-upsamples the last
+     * level to full size, multiplies it by `exp2(intensity / 10) - 1` and the linear tint and ADDS it to the scene colour.
+     * `iterations` and the tent radius `sampleScale` follow `log2(max(tw, th)) + min(diffusion, 10) - 10`, so the ladder is
+     * a function of the frame size: the port rebuilds its inner passes whenever the iteration count for the live frame
+     * changes (a resize, a `diffusion` edit), deferred to `scene.onBeforeRenderObservable` so a running chain is never cut.
+     *
+     * The port keeps that structure as `2 * iterations` owned passes named `coloredBloom_*` (the family predicate of the
+     * orchestrator's toggle and Inspector plumbing):
+     *
+     *   prefilter (ratio 1)  ->  down_1 (1/2) ... down_{n-1} (1/2^(n-1))  ->  up_{n-2} (1/2^n) ... up_0 (1/4)  ->  composite (1/2)
+     *
+     * A Babylon post-process samples its OWN input texture (sized by its ratio) and draws into the NEXT pass's input, so
+     * `down_k` reads `mipDown[k-1]` and writes `mipDown[k]`, `up_j` reads the level below and writes `mipUp[j]`, adding
+     * `mipDown[j]` = the input texture of `down_{j+1}` (bound through `setTextureFromPostProcess`), and the composite reads
+     * `mipUp[0]` (its own input, half size) with the scene bound from the prefilter's input, exactly Unity's texture flow.
+     * Every texel size is the live size of the texture being sampled (`PostProcess.width / height`). Unsupported and recorded
+     * as silent defaults (the truth table): `anamorphicRatio` (0: `tw = width / 2`), `clamp` (65472 in gamma space, i.e. above
+     * `SafeHDR`'s half-float max, which the prefilter applies), `fastMode` (the 4-tap / box variants), `dirtTexture` /
+     * `dirtIntensity`, auto exposure (1). GLSL only, registered once under literal `ShaderStore` keys (Babylon transpiles it
+     * for WebGPU); every tap is uniform control flow. Lifetime belongs to the orchestrator (`PostProcessor.trackPostProcess` /
+     * `releaseStacks`), which re-tracks the ladder through `options.onRebuild` when it is rebuilt.
+     *
+     * The blur pair (prefilter, one horizontal + vertical `BlurPostProcess` at `ratio`, composite) is retained for URP / HDRP
+     * volumes only (`scatter` -> kernel), whose own bloom algorithms are deferred to their verification specs.
+     */
+    class ColoredBloomPlugin {
+        /** Post-process shader names of the pyramid passes (`BABYLON.PostProcess` resolves `Name + "FragmentShader"`). */
+        static readonly PrefilterShaderName: string;
+        static readonly DownsampleShaderName: string;
+        static readonly UpsampleShaderName: string;
+        static readonly CompositeShaderName: string;
+        /**
+         * `PostProcessingConversions.BloomIntensityMultiplier` read at call time (1 when the conversions class is absent or the
+         * value is not a positive finite number), folded into the composite weight by both derive paths every frame. Default 0.5:
+         * see the knob's own documentation for the F-9.28 measurement it corrects.
+         */
+        static IntensityMultiplier(): number;
+        /** Shader store keys of the pyramid pass fragments. */
+        static readonly PrefilterShaderKey: string;
+        static readonly DownsampleShaderKey: string;
+        static readonly UpsampleShaderKey: string;
+        static readonly CompositeShaderKey: string;
+        /** Unity `Bloom.cs` `k_MaxPyramidSize`. */
+        static readonly MaxIterations: number;
+        /** Unity `StdLib.hlsl` `HALF_MAX` (`SafeHDR`) and `EPSILON` (`QuadraticThreshold`). */
+        static readonly HalfMax: number;
+        static readonly Epsilon: number;
+        /**
+         * Unity `Sampling.hlsl` `DownsampleBox13Tap`: the thirteen tap offsets A..M in texels of the SOURCE, and the two
+         * weights (`div = (1 / 4) * (0.5, 0.125)`): the inner 2x2 (D E I J) at 0.5 / 4, the four outer 2x2 boxes at 0.125 / 4.
+         */
+        static readonly DownsampleTaps: number[][];
+        static readonly DownsampleWeights: number[];
+        /** Unity `Sampling.hlsl` `UpsampleTent`: the 3x3 tent weights (row major, top left to bottom right) over 16, at `texelSize * sampleScale`. */
+        static readonly TentWeights: number[];
+        static readonly TentDivisor: number;
+        /** Post-process shader names of the URP ladder passes (`BABYLON.PostProcess` resolves `Name + "FragmentShader"`). */
+        static readonly UrpPrefilterShaderName: string;
+        static readonly UrpBlurHShaderName: string;
+        static readonly UrpBlurVShaderName: string;
+        static readonly UrpUpsampleShaderName: string;
+        static readonly UrpCompositeShaderName: string;
+        /** Shader store keys of the URP ladder pass fragments. */
+        static readonly UrpPrefilterShaderKey: string;
+        static readonly UrpBlurHShaderKey: string;
+        static readonly UrpBlurVShaderKey: string;
+        static readonly UrpUpsampleShaderKey: string;
+        static readonly UrpCompositeShaderKey: string;
+        /** Unity `Bloom.shader` `FragBlurH`: nine taps at -4..4 source texels x2. */
+        static readonly UrpBlurHWeights: number[];
+        /** Unity `Bloom.shader` `FragBlurV`: five BILINEAR taps, their offsets in source texels and their weights. */
+        static readonly UrpBlurVOffsets: number[];
+        static readonly UrpBlurVWeights: number[];
+        /** Babylon input-texture ratio of URP level `level` (`mipDown[level]`) for `downres` 1 | 2: `0.5 ^ (level + downres)`. Pure. */
+        static UrpLevelRatio(level: number, downres: number): number;
+        /** The names of the `3 * mipCount - 1` URP ladder passes in chain order (prefilter, `mipCount - 1` blurH / blurV pairs, `mipCount - 1` upsamples, composite). Pure. */
+        static UrpPyramidPassNames(mipCount: number): string[];
+        /** Finite number or `fallback`. */
+        private static num;
+        /**
+         * One tint channel of the bloom (review-fixes FR-3): a finite number, negatives clamped to 0, otherwise
+         * `fallback`. The old truthiness fallback turned a legitimate 0 into 1 and let NaN / null reach the shader.
+         */
+        private static channel;
+        /** The Babylon render-target ratio of pyramid level `level` (0 = half size, Unity's `mipDown[0]`). Pure. */
+        static LevelRatio(level: number): number;
+        /** The names of the `2 * iterations` pyramid passes in chain order. Pure. */
+        static PyramidPassNames(iterations: number): string[];
+        /** The GLSL of the four pyramid fragments (shared tap functions emitted once per shader from the tables above). */
+        static GetPyramidShaders(): {
+            prefilter: string;
+            downsample: string;
+            upsample: string;
+            composite: string;
+        };
+        /** Registers the four pyramid fragments in the shader store once (an existing entry is left untouched). */
+        private static registerPyramidShaders;
+        /**
+         * The GLSL of the five URP ladder fragments (`Bloom.shader` FragPrefilter / FragBlurH / FragBlurV / FragUpsample and
+         * `UberPost.shader`'s bloom composite, URP 17.5.0). Emitted from the weight tables with the same `f()` formatter the
+         * PPv2 pyramid uses. No helper takes a `sampler2D` PARAMETER (F-9.27: Babylon's WebGPU GLSL path rejects it) and no
+         * line carries a `//` comment (the shader processor splits on the `;` inside one).
+         */
+        static GetUrpPyramidShaders(): {
+            prefilter: string;
+            blurH: string;
+            blurV: string;
+            upsample: string;
+            composite: string;
+        };
+        /** Registers the five URP ladder fragments in the shader store once (an existing entry is left untouched). */
+        private static registerUrpPyramidShaders;
+        /**
+         * Creates a bloom chain on `camera`:
+         * - Unity's bloom PYRAMID (`pyramid` true, the default for a Built-in `unity`): prefilter, `iterations - 1` downsamples,
+         *   `iterations - 1` tent upsamples, composite (see the class comment); returns `{ prefilter, down, up, composite,
+         *   postProcesses, pyramid: true, state, unity, iterationsFor, rebuild, dispose }`.
+         * - URP's Gaussian ladder (`urp` true, the default for a `unity.volumetype === "URP"`, urp-verification T9 / D13):
+         *   prefilter, `mipCount - 1` blurH / blurV pairs, `mipCount - 1` upsamples, composite; returns
+         *   `{ prefilter, blurs, up, composite, postProcesses, urp: true, pyramid: false, state, unity, mipCountFor, rebuild, dispose }`.
+         * - the blur pair (`pyramid` false, the default for an HDRP `unity` and for a chain created from converted
+         *   values alone): prefilter, one horizontal + vertical `BlurPostProcess`, composite; returns
+         *   `{ prefilter, blurPasses, composite, passes, saturation, postProcesses, pyramid: false, unity, dispose }`.
          */
         static CreateColoredBloom(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            /** Blur pair: the linear extraction threshold. Pyramid without `unity`: the gamma-space Unity threshold. */
             threshold?: number;
             color?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            /** Blur pair: the additive weight. Pyramid without `unity`: the composite intensity multiplier. */
             weight?: number;
             kernel?: number;
             ratio?: number;
             passes?: number;
             saturation?: number;
             downsampleRatio?: number;
+            /** The Unity-unit settings driving the chain every frame (inspector-truth T4); the pass values are then derived from it. */
+            unity?: TOOLKIT.IBloomUnitySettings;
+            /** Force the pyramid (true) or the blur pair (false); default: pyramid for a Built-in `unity`, blur pair otherwise. */
+            pyramid?: boolean;
+            /** Force URP's Gaussian ladder (true) or keep it off (false); default: the ladder for a `unity.volumetype === "URP"` (urp-verification T9, D13). */
+            urp?: boolean;
+            /** Pyramid without `unity` (or without the conversion table): the fixed ladder, knee and depth. */
+            diffusion?: number;
+            softKnee?: number;
+            iterations?: number;
+            sampleScale?: number;
+            /** Pyramid: called after the ladder was rebuilt for a new iteration count, with the passes removed and added, so the owner can re-track and re-order them. */
+            onRebuild?: (chain: any, removed: BABYLON.PostProcess[], added: BABYLON.PostProcess[]) => void;
         }): any;
+        private static createPyramid;
+        private static createBlurChain;
+        private static createUrpPyramid;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The public Unity-unit settings of the FXAA tail pass (final-verification F-6), exposed as `postProcess.unity` on
+     * the luma pass and the FXAA pass alike and read by `onApply` every frame, so an edit reaches the next frame.
+     */
+    interface IFxaaUnitySettings {
+        /**
+         * PPv2 `PostProcessLayer.fastApproximateAntialiasing.fastMode`: FXAA 3.11 quality preset 12 with the FXAA_LOW
+         * thresholds instead of preset 28. A LAYER setting the camera export does not carry, so it defaults to false.
+         */
+        fastMode: boolean;
+    }
+    /**
+     * Unity PPv2 FXAA 3.11 port (post-processing-final-verification F-6).
+     *
+     * Unity renders FXAA in `FinalPass.shader` AFTER the Uber pass: `FXAA_PC 1`, `FXAA_GREEN_AS_LUMA 0` (the Uber pass
+     * stores `Luminance(saturate(output))` of its LINEAR output in alpha when `_LumaInAlpha` is set, `Uber.shader`),
+     * `FXAA_QUALITY__PRESET 28` with `FXAA_QUALITY_SUBPIX 1.0 / EDGE_THRESHOLD 0.063 / EDGE_THRESHOLD_MIN 0.0312`, or
+     * (`fastMode`, keyword `FXAA_LOW`) preset 12 with `1.0 / 0.166 / 0.0625`. The intermediate target is ARGBHalf on an
+     * HDR camera, so the whole FXAA pass -- edge detection AND the final bilinear fetch -- runs in linear colour.
+     *
+     * The port keeps that structure as TWO owned passes in the one tail slot (`PostProcessor.TailSlots.fxaa`), appended
+     * after the DefaultRenderingPipeline passes so FXAA is last as in Unity:
+     *
+     * 1. `fxaaLuma` (`toolkitFxaaLumaFragmentShader`): Babylon's image-processing pass returns GAMMA-encoded colour
+     *    (`toGammaSpace`, `pow(1 / 2.2)`), so this pass decodes it (`pow(2.2)`, the exact inverse), writes Unity's
+     *    Rec. 709 luma of the saturated linear colour into alpha and -- on a half-float / float chain target -- the linear
+     *    colour into rgb (`fxaaLinear` 1). On an 8-bit target the rgb stays gamma-encoded (an 8-bit linear store would band
+     *    in the darks) and only the luma is linear (`fxaaLinear` 0): the blend then happens in gamma space, a recorded
+     *    deviation that the HDR chain of the reference scene never takes.
+     * 2. `fxaa` (`toolkitFxaaFragmentShader`): `FxaaPixelShader` for `FXAA_PC`, `FXAA_GATHER4_ALPHA 0`, `FXAA_DISCARD 0`,
+     *    luma from alpha, both preset tables unrolled from `QualityPresetSteps` / `FastPresetSteps` (P0..P(PS-1) of
+     *    `FastApproximateAntialiasing.hlsl`) and selected per frame by the `fxaaFast` uniform (no shader swap on an
+     *    Inspector edit), `fxaaQuality` = `PackQuality(fastMode)`, `fxaaRcpFrame` = Unity's `_MainTex_TexelSize.xy`
+     *    from the live pass size; the output is re-encoded to gamma when the input was linear and written with alpha 1
+     *    (Unity's `FXAA_NO_ALPHA` variant returns the luma in alpha, which a canvas backbuffer must not carry).
+     *
+     * Unity dithers AFTER FXAA (`FinalPass.shader`); the toolkit's dither stays in the image-processing pass ahead of
+     * this pair (the amplitude is below `EDGE_THRESHOLD_MIN`, so flat dithered regions early-exit unchanged). GLSL only,
+     * registered once under literal `ShaderStore` keys (Babylon transpiles it for WebGPU); the per-pixel search loop
+     * samples inside non-uniform control flow, hence `#define DISABLE_UNIFORMITY_ANALYSIS`. Lifetime belongs to the
+     * orchestrator (`PostProcessor.trackPostProcess` / `releaseStacks`).
+     */
+    class FxaaPlugin {
+        /** Post-process shader name of the FXAA pass (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"`). */
+        static readonly ShaderName: string;
+        /** Shader store key of the FXAA pass fragment. */
+        static readonly ShaderKey: string;
+        /** Post-process shader name of the luma pass. */
+        static readonly LumaShaderName: string;
+        /** Shader store key of the luma pass fragment. */
+        static readonly LumaShaderKey: string;
+        /** Unity `FinalPass.shader`: `FXAA_QUALITY__PRESET 28` (default) and `12` (`FXAA_LOW`, `fastMode`). */
+        static readonly QualityPreset: number;
+        static readonly FastPreset: number;
+        /** `FastApproximateAntialiasing.hlsl` preset 28: `FXAA_QUALITY__PS 11`, P0..P10. */
+        static readonly QualityPresetSteps: number[];
+        /** `FastApproximateAntialiasing.hlsl` preset 12: `FXAA_QUALITY__PS 5`, P0..P4. */
+        static readonly FastPresetSteps: number[];
+        /** Unity `FinalPass.shader` (preset 28): `FXAA_QUALITY_SUBPIX 1.0`, `FXAA_QUALITY_EDGE_THRESHOLD 0.063`, `FXAA_QUALITY_EDGE_THRESHOLD_MIN 0.0312`. */
+        static readonly QualitySettings: {
+            subpix: number;
+            edgeThreshold: number;
+            edgeThresholdMin: number;
+        };
+        /** Unity `FinalPass.shader` (`FXAA_LOW`, preset 12): `1.0`, `0.166`, `0.0625`. */
+        static readonly FastSettings: {
+            subpix: number;
+            edgeThreshold: number;
+            edgeThresholdMin: number;
+        };
+        /** Unity `Colors.hlsl` `Luminance(linearRgb)`: Rec. 709 weights. */
+        static readonly LumaCoefficients: number[];
+        /** Babylon's `toGammaSpace` / `toLinearSpace` power approximation (the image-processing pass encodes with `1 / 2.2`). */
+        static readonly GammaPower: number;
+        /** The preset number a `fastMode` value selects (12 fast, 28 quality). */
+        static PresetNumber(fast: boolean): number;
+        /** The P0..P(PS-1) search steps of the preset a `fastMode` value selects (a copy). */
+        static PresetSteps(fast: boolean): number[];
+        /**
+         * Unity `FinalPass.shader` quality knobs packed as the `fxaaQuality` uniform: `(subpix, edgeThreshold, edgeThresholdMin)`
+         * of preset 28, or of preset 12 when `fast`. Pure.
+         */
+        static PackQuality(fast: boolean): {
+            x: number;
+            y: number;
+            z: number;
+        };
+        /** Unity `_MainTex_TexelSize.xy` (`fxaaQualityRcpFrame`): `(1 / width, 1 / height)`, 0 for a non-positive size. Pure. */
+        static PackRcpFrame(width: number, height: number): {
+            x: number;
+            y: number;
+        };
+        /** Whether a render-target type stores enough precision for LINEAR colour (half float / float): the `fxaaLinear` decision. */
+        static IsLinearTextureType(textureType: number): boolean;
+        /** `pow(max(v, 0), 2.2)`: the exact inverse of Babylon's `toGammaSpace` (pure JS mirror of the luma pass, for tests). */
+        static LinearFromGamma(value: number): number;
+        /** `pow(max(v, 0), 1 / 2.2)`: Babylon's `toGammaSpace` (pure JS mirror of the FXAA pass output, for tests). */
+        static GammaFromLinear(value: number): number;
+        /** Unity `Luminance(saturate(linearRgb))` as the Uber pass writes it into alpha (pure JS mirror, for tests). */
+        static Luminance(r: number, g: number, b: number): number;
+        /** Formats a preset step as a GLSL float literal (`1.0`, `1.5`, `12.0`). */
+        private static glslFloat;
+        /**
+         * The end-of-span search of `FxaaPixelShader` for one preset table, unrolled exactly as `FastApproximateAntialiasing.hlsl`
+         * does with `FXAA_QUALITY__PS = steps.length`: P0 places the first probes, P1 follows the first (unconditional) test,
+         * and every further step nests inside `if (doneNP)`. Writes `posN`, `posP`, `lumaEndN`, `lumaEndP`, `doneN`, `doneP`,
+         * `doneNP` declared by the caller. Public so a test can pin the generated structure against the table.
+         */
+        static GetSearchCode(steps: number[], indent?: string): string;
+        /** GLSL of the luma pass: gamma decode, Unity's luma into alpha, linear or gamma rgb by `fxaaLinear`. */
+        static GetLumaShader(): string;
+        /** GLSL port of Unity's `FxaaPixelShader` (FXAA_PC, luma in alpha), both presets, selected by the `fxaaFast` uniform. */
+        static GetFragmentShader(): string;
+        /**
+         * Creates the FXAA tail pair for `camera`: the luma pass first, then the FXAA pass (creation order is chain order
+         * inside the tail slot). Returns the FXAA pass; the luma pass hangs off it as `postProcess._toolkitFxaaLumaPass`
+         * (and points back through `_toolkitFxaaPass`). Both carry the shared `unity` settings (`IFxaaUnitySettings`) and a
+         * `_toolkitPlugin = { name, uniforms }` mirror refreshed in `onApply`.
+         * @param options.textureType Render-target type of both passes (the chain type, artifact-cleanup T5: HALF_FLOAT on
+         *        the HDR chain); decides `fxaaLinear` (see the class comment). Babylon's 8-bit default when omitted.
+         * @param options.fastMode PPv2 `fastMode` (preset 12); default false.
+         * @param options.samplingMode Post-process sampling mode (bilinear by default, Unity's linear-clamp sampler).
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            textureType?: number;
+            fastMode?: boolean;
+            samplingMode?: number;
+        }): BABYLON.PostProcess;
+        private static num;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The public Unity-unit settings of a grain pass (inspector-truth T3, FR-9), exposed as `postProcess.unity` and
+     * re-packed by `onApply` every frame, so an edit reaches the next frame and the authored values pack bit-identically.
+     */
+    interface IGrainUnitySettings {
+        /** Unity `Grain.intensity` 0..1 (packed `intensity * 20 * typeMultiplier` into `grainParams1.y`). */
+        intensity: number;
+        /** Unity `Grain.size` 0.3..3 (the noise tile scale `width / 128 / size`). */
+        size: number;
+        /** Unity `Grain.lumContrib` 0..1 (`grainParams1.x`). */
+        lumContrib: number;
+        /** Unity `Grain.colored` (the baker's `colored` uniform: three phase offsets, one per channel). */
+        colored: boolean;
+    }
+    /**
+     * Unity PPv2 grain port (post-processing-spit-and-polish FR-6).
+     *
+     * Unity (`Grain.cs` + `GrainBaker.shader` + Uber.shader) bakes a 128x128 noise lookup EVERY FRAME on the GPU
+     * (Timothy Lottes' "large grain": hash -> 3x3 high-pass `Step1` (kernel 1,2,1 / 2,-12,2 / 1,2,1 over 24) ->
+     * 3x3 smooth `Step2` (kernel 1,2,1 / 2,4,2 / 1,2,1 over 16), evaluated at `uv * 128`, one phase for BW grain
+     * and three phase offsets 0.07 / 0.11 / 0.13 for coloured grain, `_Phase = time % 10`) into a bilinear, repeat-
+     * wrapped render texture, then the Uber pass samples it at `uv * Params2.xy + Params2.zw` where
+     * `Params1 = (lumContrib, intensity * 20)`, `Params2 = (width / 128 / size, height / 128 / size, haltonX, haltonY)`
+     * (a Halton (2, 3) offset advancing once per frame over a 1024 cycle) and applies
+     * `lum = lerp(1, 1 - sqrt(Luminance(saturate(color))), lumContrib); color += color * grain * intensity20 * lum`.
+     *
+     * The port does the same: a `BABYLON.ProceduralTexture` (128x128, `refreshRate = 1`, repeat wrap, bilinear, no
+     * mipmaps, half-float when the engine renders to it) runs a GLSL port of `GrainBaker.shader`; the grain pass
+     * packs Unity's parameter vectors per frame from the post-process size. URP `FilmGrain.type` keeps the toolkit's
+     * frozen `FilmGrainTypeMultipliers` on top (`typeMultiplier`). The static factory follows the `LensDistortionPlugin`
+     * pattern; lifetime belongs to the orchestrator (`PostProcessor.trackPostProcess` / `releaseStacks`), which
+     * also disposes the noise texture exposed as `_toolkitGrainTexture`.
+     */
+    class GrainPlugin {
+        /** Unity PPv2 `Grain.cs`: `_Grain_Params1.y = intensity * 20` (Uber.shader GRAIN). */
+        static readonly IntensityScale: number;
+        /** URP `UberPostProcessPass.cs:640` `k_FilmGrainIntensityScale = 4f`: `_Grain_Params.x = intensity * 4`. */
+        static readonly IntensityScaleURP: number;
+        /**
+         * The [-1,1] standard deviation of URP's own `Medium01` film-grain texture, measured from
+         * `com.unity.render-pipelines.universal/Textures/FilmGrain/Medium01.png` (512x512, SingleChannel, sRGB off):
+         * red-channel mean 0.5020, std 0.0156, so `(x - 0.5) * 2` has std **0.0312**. The URP bake normalises to this,
+         * which is what lets `PostProcessingConversions.FilmGrainAmplitudeScaleURP` be exactly 1.0 (a port, not a fit).
+         */
+        static readonly UrpGrainTextureStd: number;
+        /**
+         * Standard deviation of uniform [0,1) noise (1/sqrt(12)) after TWO 3x3 binomial passes: the composite separable
+         * kernel [1,4,6,4,1]/16 has squared-coefficient sum 70/256 per axis, so the 2D factor is 70/256 = 0.273438 and
+         * 0.288675 * 0.273438 = 0.078935. `BuildUrpGrainTexels` normalises by its MEASURED spread and is checked against this.
+         */
+        static readonly UrpBakeRawStd: number;
+        /**
+         * Seed of the URP grain generator (the golden-ratio constant). URP ships ten AUTHORED grain textures; the port
+         * has no asset pipeline to ship a PNG through, so it generates one deterministically instead -- and a fixed seed
+         * is what makes it an asset: every engine, every run and every capture gets the SAME texture, exactly as loading
+         * `Medium01.png` would.
+         */
+        static readonly UrpGrainSeed: number;
+        /** Unity `Grain.cs`: the noise lookup is 128x128 (`m_GrainLookupRT`). */
+        static readonly NoiseSize: number;
+        /**
+         * URP bake resolution. Unity ships its grain as 512x512 textures and tiles them one texel per pixel
+         * (`CalcNoiseTextureTilingParams`: `cameraPixelWidth / noiseTexture.width`), so at the reference 3746 px the
+         * pattern repeats 7.3 times. Baking the URP path at PPv2's 128 would repeat it 29 times, and CLUMPED grain
+         * makes that repeat visible where near-Nyquist noise hides it -- measured +0.879 horizontal autocorrelation at
+         * lag 128 on the first fixed build, i.e. a grain grid.
+         */
+        static readonly UrpNoiseSize: number;
+        /** Unity `Grain.cs`: `k_SampleCount = 1024` Halton samples before the index wraps. */
+        static readonly SampleCount: number;
+        /** Unity `GrainBaker.shader`: `_NoiseParameters = (12.9898, 78.233, 43758.5453)`. */
+        static readonly NoiseParameters: number[];
+        /** Unity `GrainBaker.shader`: coloured grain phase offsets. */
+        static readonly ColoredPhaseOffsets: number[];
+        /** Unity `Grain.cs`: `_Phase = Time.realtimeSinceStartup % 10`. */
+        static readonly PhasePeriod: number;
+        /** Post-process shader name (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"`). */
+        static readonly ShaderName: string;
+        /** Shader store key of the grain pass fragment. */
+        static readonly ShaderKey: string;
+        /** Procedural-texture fragment name (`BABYLON.ProceduralTexture` resolves `BakerName + "PixelShader"`). */
+        static readonly BakerName: string;
+        /** Shader store key of the noise baker fragment. */
+        static readonly BakerKey: string;
+        /** Unity `HaltonSeq.Get(index, radix)`: the Halton low-discrepancy value in [0, 1). Pure. */
+        static Halton(index: number, radix: number): number;
+        /**
+         * `PostProcessingConversions.GrainIntensityMultiplier` read at call time (1 when the conversions class is absent or the
+         * value is not a positive finite number), folded into the `typeMultiplier` term of `PackParams1` by the pass every frame.
+         */
+        static IntensityMultiplier(): number;
+        /**
+         * Unity `_Grain_Params1 = (lumContrib, intensity * 20)`, pure. `typeMultiplier` (URP `FilmGrain.type`,
+         * `PostProcessingConversions.filmGrainTypeMultiplier`, 1 for PPv2) scales the intensity term.
+         *
+         * `intensityScale` (4th, optional, urp-verification T10 / D15) replaces the PPv2 `IntensityScale` for a URP volume,
+         * which packs `intensity * IntensityScaleURP (4) * FilmGrainAmplitudeScaleURP` instead. Built-in and HDRP callers
+         * pass nothing and keep `* 20` exactly.
+         */
+        static PackParams1(intensity: number, lumContrib: number, typeMultiplier?: number, intensityScale?: number): {
+            x: number;
+            y: number;
+        };
+        /**
+         * Unity `_Grain_Params2 = (width / 128 / size, height / 128 / size, Halton(index & 1023, 2), Halton(index & 1023, 3))`,
+         * pure. `size` is Unity's grain particle size (0.3..3, default 1); a non-positive size falls back to 1.
+         */
+        static PackParams2(width: number, height: number, size: number, index: number, noiseSize?: number): {
+            x: number;
+            y: number;
+            z: number;
+            w: number;
+        };
+        /** Unity `_Phase`: seconds modulo 10 (pure; `seconds` defaults to the high-resolution clock). */
+        static Phase(seconds?: number): number;
+        /** Unity `Uber.shader` luminance response for one linear colour (pure JS mirror, for tests). */
+        static LuminanceResponse(r: number, g: number, b: number, lumContrib: number): number;
+        /** GLSL port of Unity's `GrainBaker.shader` (both passes, selected by the `colored` uniform). */
+        static GetBakerShader(): string;
+        /** GLSL port of the Uber.shader GRAIN block as a stand-alone pass. */
+        static GetFragmentShader(): string;
+        /**
+         * `mulberry32`: a small, fast, well-distributed 32-bit PRNG. Deliberately NOT `GrainBaker.shader`'s
+         * `fract(sin(dot(n, vec2(12.9898, 78.233))) * 43758.5453)`: that hash is evaluated on the GPU in float32, where
+         * `sin` of a large argument depends on the driver's range reduction. At PPv2's 128x128 the argument reaches
+         * ~11,600 radians and the resulting error is hidden by the high-pass; at URP's 512x512 it reaches ~46,600 and
+         * the error is COHERENT, so the two binomial passes -- which exist to keep low frequencies -- amplify it into
+         * visible diagonal waves. Measured on the GPU bake: a 62 px-wavelength component 27x above its own frequency
+         * band, where true noise through the same passes gives 2.96x. Integer bit-mixing has no such failure mode, and
+         * the CPU has the exact arithmetic to do it in.
+         */
+        static Mulberry32(seed: number): () => number;
+        /**
+         * Builds URP's film-grain texels: `size * size` signed values with mean 0 and standard deviation
+         * `UrpGrainTextureStd`, reproducing the CLUMPED structure of Unity's scanned grain textures rather than PPv2's
+         * high-passed noise. Uniform noise runs through two wrapped 3x3 binomial passes -- composite 1D kernel
+         * [1,4,6,4,1]/16, whose autocorrelation is (+0.800, +0.400, +0.114) against `Medium01`'s measured
+         * (+0.749, +0.392, +0.146). The passes wrap, so the texture tiles seamlessly at Unity's own 512 period.
+         *
+         * The normalisation divides by the MEASURED standard deviation, not the analytic `UrpBakeRawStd`, so the result
+         * lands on `UrpGrainTextureStd` exactly for any size or seed; `UrpBakeRawStd` remains the expected value that
+         * measurement is checked against.
+         */
+        static BuildUrpGrainTexels(size: number, seed?: number, targetStd?: number): Float32Array;
+        /** IEEE 754 binary16 encoding of `value` (grain is signed and tiny, so half-float is lossless enough and filters). */
+        static ToHalfFloat(value: number): number;
+        /**
+         * Creates URP's film-grain lookup: a STATIC `size x size` `BABYLON.RawTexture` holding `BuildUrpGrainTexels`,
+         * repeat-wrapped and bilinear, standing in for the authored `Textures/FilmGrain/*.png` that URP loads. URP does
+         * not bake anything per frame -- it samples a fixed texture and animates by offsetting the sample UV
+         * (`GetRandomOffset2D`), which the Halton offset in `PackParams2` already mirrors -- so nothing here regenerates.
+         * `refreshRate` is set to 0 on the instance purely so the live-state mirror reports one shape for both paths.
+         */
+        static CreateUrpGrainTexture(scene: BABYLON.Scene, size?: number, seed?: number): BABYLON.Texture;
+        /**
+         * Creates the grain lookup for `scene`. On a URP volume (`film`) there is no bake at all: `CreateUrpGrainTexture`
+         * returns the static stand-in for Unity's authored grain texture. Otherwise this is PPv2's per-frame noise bake
+         * for `scene`: a 128x128 `ProceduralTexture` running `GetBakerShader`,
+         * refreshed every frame, repeat wrap, bilinear, no mipmaps, half-float (Unity's `ARGBHalf`) when the engine
+         * can render to it (the high-pass noise is signed). The `phase` uniform is refreshed before every generation
+         * through `onBeforeGenerationObservable` (falls back to the grain pass' `onApply` when unavailable).
+         */
+        static CreateNoiseTexture(scene: BABYLON.Scene, colored: boolean, film?: boolean): BABYLON.BaseTexture;
+        /**
+         * Creates the grain pass for `camera` (and its per-frame noise bake, exposed as `postProcess._toolkitGrainTexture`).
+         * The Unity parameters live on `postProcess.unity` (`IGrainUnitySettings`, initialised from the options) and are
+         * re-packed every frame by `onApply` (inspector-truth T3): `intensity` / `lumContrib` through `PackParams1`, `size`
+         * through `PackParams2`, and `colored` re-sent to the baker's `colored` uniform when it changes (the noise is baked
+         * every frame, so the next generation switches between the BW and the three-phase coloured bake; nothing is rebuilt).
+         * @param options.intensity Unity intensity 0..1 (packed x20).
+         * @param options.size Unity grain particle size 0.3..3 (default 1).
+         * @param options.lumContrib Unity luminance contribution 0..1 (default 0.8).
+         * @param options.colored Unity `colored` (default true).
+         * @param options.typeMultiplier URP `FilmGrain.type` multiplier from the conversion table (default 1).
+         * @param options.samplingMode Post-process sampling mode (bilinear by default).
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            intensity?: number;
+            size?: number;
+            lumContrib?: number;
+            colored?: boolean;
+            /** URP (urp-verification follow-up): bake Unity's clumped film grain instead of PPv2's high-passed noise. */
+            film?: boolean;
+            typeMultiplier?: number;
+            /** URP: `IntensityScaleURP * PostProcessingConversions.FilmGrainAmplitudeScaleURP`; omitted on PPv2 / HDRP, which keep `IntensityScale` (20). */
+            intensityScale?: number;
+            samplingMode?: number;
+        }): BABYLON.PostProcess;
+        private static halfBuffer;
+        private static halfBits;
+        private static now;
+        private static clamp01;
+        private static num;
     }
 }
 /**
@@ -14636,28 +15918,49 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
-    class LUTBlendPlugin {
-        /**
-         * Creates a post-process that applies cross-faded LUTs to the rendered image.
-         * Assumes LUTs are exported as 2D textures arranged as NxN tiles.
-         */
-        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
-            lutA?: string | BABYLON.Texture;
-            lutB?: string | BABYLON.Texture;
-            mix?: number;
-        }): BABYLON.PostProcess;
-        /**
-         * Returns WGSL shader code for LUT blend (for WebGPU). Uses texture_2d sampling with vec2 coords.
-         */
-        getWGSLShaderCode(): string;
+    /**
+     * The public Unity-unit settings of a lens-distortion pass (inspector-truth T3, FR-9), exposed as `postProcess.unity`
+     * and converted to the plugin's model coefficients by `LensDistortionPlugin.DeriveModel` every frame (through the
+     * conversion table: `lensDistortionNormalised` / `lensDistortionIntensity` / `lensDistortionModelScale` /
+     * `lensDistortionAxisIntensity` / `lensDistortionCenterUv` / `lensDistortionScale`). The runtime shares ONE object per
+     * camera between the lens pass and the vignette pass (`VignettePlugin` `options.distortionSettings`), so the vignette
+     * keeps following Unity's `uvDistorted` after an edit.
+     */
+    interface ILensDistortionUnitySettings {
+        /** Unity `LensDistortion.intensity`: PPv2 -100..100, URP -1..1 (the unit follows `volumetype`). */
+        intensity: number;
+        /** Unity `intensityX` / URP `xMultiplier` 0..1 (default 1). */
+        intensityX: number;
+        /** Unity `intensityY` / URP `yMultiplier` 0..1 (default 1). */
+        intensityY: number;
+        /** Unity centre `[centerX, centerY]` -1..1 (default `[0, 0]`; URP's uv centre is converted to this range by the contract). */
+        center: number[];
+        /** Unity `scale` 0.01..5 (default 1; > 1 zooms in). */
+        scale: number;
+        /** The authored pipeline (`BuiltIn` | `URP` | `HDRP`) that fixes the unit of `intensity`; `BuiltIn` when absent. */
+        volumetype?: string;
     }
-}
-declare namespace TOOLKIT {
     /**
      * Unity-Style Lens Distortion Plugin
      * Implements barrel/pincushion distortion for post-processing
      */
     class LensDistortionPlugin {
+        /**
+         * The model coefficients of a set of Unity lens-distortion settings (inspector-truth T3), pure per settings object:
+         * `{ distortionIntensity, distortionIntensityX, distortionIntensityY, distortionCenterX, distortionCenterY, distortionScale }`
+         * through the conversion table, or `null` when the intensity resolves to zero (no distortion; the pass then samples
+         * screen UV and the vignette falls back to screen UV). Unity's defaults (multipliers 1, centre 0 / 0, scale 1) map to
+         * the plugin's own defaults (axis terms 0, centre 0.5 / 0.5, the model zoom alone), so a settings object built from an
+         * un-overridden family derives the same model as the applier's `deriveLensDistortionOptions`.
+         */
+        static DeriveModel(unity: TOOLKIT.ILensDistortionUnitySettings): {
+            distortionIntensity: number;
+            distortionIntensityX: number;
+            distortionIntensityY: number;
+            distortionCenterX: number;
+            distortionCenterY: number;
+            distortionScale: number;
+        };
         private _distortionIntensity;
         private _distortionIntensityX;
         private _distortionIntensityY;
@@ -14747,14 +16050,13 @@ declare namespace TOOLKIT {
          */
         getFragmentShaderCode(): string;
         /**
-         * Gets the WGSL shader code for the distortion effect
-         */
-        getWGSLShaderCode(): string;
-        /**
          * Creates a post-process version of the lens distortion effect
          * @param scene The scene to create the post-process in
          * @param camera The camera to attach the post-process to
-         * @param options Post-process options
+         * @param options Post-process options: either the model coefficients (`distortion*`, a FIXED model) or `unity`
+         *        (inspector-truth T3: the Unity-unit settings, exposed as `postProcess.unity` and converted through
+         *        `DeriveModel` every frame, so an edit reaches the next frame; the runtime passes the object it shares with
+         *        the vignette pass). Without `unity` the pass has no Unity source and `postProcess.unity` is null.
          * @returns The created post-process
          */
         static CreatePostProcess(scene: any, camera: any, options?: {
@@ -14764,6 +16066,10 @@ declare namespace TOOLKIT {
             distortionCenterX?: number;
             distortionCenterY?: number;
             distortionScale?: number;
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            /** The Unity-unit settings driving the pass every frame (inspector-truth T3); the `distortion*` coefficients are ignored when present. */
+            unity?: TOOLKIT.ILensDistortionUnitySettings;
         }): any;
     }
 }
@@ -14952,16 +16258,95 @@ declare namespace TOOLKIT {
             exposure?: number;
             contrast?: number;
             globalSaturation?: number;
-            globalHue?: number;
             colorCurvesEnabled?: boolean;
             toneMappingEnabled?: boolean;
             toneMappingType?: number;
             colorGradingEnabled?: boolean;
+            /** Final-pass dither (artifact-cleanup T3): written on every stack, so the drift guard covers grading-less stacks too. */
+            ditheringEnabled?: boolean;
+            ditheringIntensity?: number;
         };
         /** Scene-relative url of the loaded LUT strip (null when the identity LUT was skipped). */
         lutUrl: string;
         /** Linear colour filter handed to ColorFilterPlugin (null when white / not overridden). */
         colorFilter: number[];
+        /** True when the camera grades through the HDR LogC LUT pass (image processing kept neutral). */
+        hdr?: boolean;
+        /**
+         * Set when `pushGradingState` dropped this state because another camera grades the SAME configuration through the
+         * other path (review-fixes FR-10). The state's still-pending LUT callback must then write nothing: it would put an
+         * LDR grade back on a configuration the HDR pass needs neutral, one frame after the conflict was resolved.
+         */
+        dropped?: boolean;
+    }
+    /**
+     * One image-processing value as it was BEFORE this volume first wrote it (review-fixes FR-6). The image processing
+     * configuration is SHARED -- it is usually `scene.imageProcessingConfiguration`, which materials, the exporter's
+     * scene-level writes and `DefaultCameraSystem` all read and write too -- so destroying a volume has to put back what
+     * it found rather than leave the scene graded by a component that no longer exists.
+     */
+    interface IPostProcessImagingSnapshot {
+        configuration: BABYLON.ImageProcessingConfiguration;
+        /** Configuration field, or `colorCurves.<field>` when the value lives on the configuration's ColorCurves. */
+        key: string;
+        curve: boolean;
+        value: any;
+        /**
+         * The camera whose applier made the write, by NAME (final-verification T11 / F-2). A name rather than the
+         * camera object: the entry outlives the camera it belongs to, and holding a reference would keep a disposed
+         * camera alive. `null` for a write with no camera context. It exists so ONE camera's writes can be undone --
+         * `restoreImagingFor` -- when that camera loses a shared-configuration conflict, instead of only being able to
+         * undo everything at destroy time.
+         */
+        camera: string;
+    }
+    /** Decisions that span the appliers of one camera stack (spit-and-polish T13), derived from the blended model. */
+    interface IPostProcessStackFlags {
+        /** A Classic vignette with intensity > 0 is active: bloom must run through the head chain (never after the vignette). */
+        vignetteActive: boolean;
+        /** Grading takes the HDR LogC LUT path (HDR-mode profile, LogC LUT exported, HDR pipeline). */
+        hdrGrading: boolean;
+        /** Why not (or "hdr"): "ldr" (LDR profile), "nolut" (no baked LUT), "lutspace" (older export without lutspace), "nohdr" (camera without allowhdr). */
+        hdrReason: string;
+    }
+    /**
+     * One editable / read-only value of an effect in the per-camera listing (inspector-truth T6, FR-10). `get` returns the
+     * Unity value (Unity units); `set` converts on write (toolkit passes: their `unity` object; Babylon-driven effects: the
+     * conversion table onto the live Babylon object) and notifies `PostProcessor.onEffectListingChangedObservable`.
+     */
+    interface IPostProcessInspectorField {
+        /** Unique within the effect (e.g. `intensity`, `center.x`, `color.r`). */
+        key: string;
+        /** The Unity field name as shown. */
+        label: string;
+        kind: "number" | "switch" | "text";
+        unit?: string;
+        min?: number;
+        max?: number;
+        step?: number;
+        readOnly?: boolean;
+        description?: string;
+        get(): any;
+        set?(value: any): void;
+    }
+    /** One Unity effect of a camera's applied stack as the Inspector section lists it (inspector-truth T6, FR-10). */
+    interface IPostProcessInspectorEffect {
+        camera: BABYLON.Camera;
+        /** Canonical family (`grain`, `bloom`, ... `antialiasing`). */
+        family: string;
+        /** The Unity effect name(s) that fed the family (`model.families[f].source`, e.g. `ColorAdjustments+Tonemapping`). */
+        unityEffect: string;
+        /** FR-2 slot (`PostProcessor.EffectOrders`). */
+        order: number;
+        /** True only when a Babylon object renders it (created or reused). */
+        applied: boolean;
+        /** The Babylon object that renders it (pass name / pipeline name); null when not applied. */
+        target: string;
+        /** Why it is not applied (e.g. the SSR rendering-path gate) when `applied` is false, or what is still pending (e.g. "HDR LUT loading") while an asynchronous pass has not arrived. */
+        reason?: string;
+        /** The `SetEffectEnabled` state (true until toggled off). */
+        enabled: boolean;
+        fields: IPostProcessInspectorField[];
     }
     /**
      * Post-processing volume component (Unity PostProcessVolume / Volume). One instance is attached per
@@ -14971,6 +16356,27 @@ declare namespace TOOLKIT {
      * (FR-19 .. FR-36). `destroy` disposes everything this component created (FR-15).
      * @class PostProcessor
      */
+    /** One bloom chain this instance created (`GetColoredBloomChains`, the read-back's `postProcessor.coloredBloom[]`). */
+    interface IPostProcessBloomRecord {
+        camera: BABYLON.Camera;
+        /** The `ColoredBloomPlugin` chain (pyramid on Built-in, blur pair on SRP). */
+        chain: any;
+        /** The linear tint handed to the chain. */
+        color: number[];
+        /** `bloomWeightFromIntensity` at apply time (the pyramid's composite multiplier, the blur pair's additive weight). */
+        weight: number;
+        /** The pyramid: Unity's linear threshold (`_Threshold.x`); the blur pair: `bloomThresholdFromUnity`. */
+        threshold: number;
+        /** The blur pair's kernel (SRP `scatter`); null on the pyramid. */
+        kernel: number;
+        /** F-7: the pyramid's initial depth / tent radius for the engine's render size at apply time; null on the blur pair (the live values are on `chain.state`). */
+        iterations: number;
+        sampleScale: number;
+        /** urp-verification T9b (D13): the URP ladder's mip count for the engine's render size at apply time (the PPv2 pyramid reports its `iterations` here too); null on the blur pair. */
+        mipCount?: number;
+        /** urp-verification T9b: the URP ladder's `lerp(0.05, 0.95, scatter)` upsample factor; null on every other chain. */
+        scatter?: number;
+    }
     class PostProcessor extends TOOLKIT.ScriptComponent {
         private static GlobalInstance;
         private static Registry;
@@ -14995,6 +16401,86 @@ declare namespace TOOLKIT {
         static LutSamplingMode: number;
         /** Repack the loaded strip into a RawTexture3D when the engine supports 3D textures (see requestLutTexture). */
         static LutUse3D: boolean;
+        /**
+         * Opt-in for PPv2 screen space reflections on forward cameras (spit-and-polish FR-8). Unity's PPv2 renders
+         * `ScreenSpaceReflections` only when `camera.actualRenderingPath == DeferredShading`; the runtime honours the exported
+         * `renderingpath` and skips SSR (one warning) on forward cameras so the Babylon frame matches the Unity one. Set this
+         * to true BEFORE the scene loads (for example from an init script) to attach the SSR pipeline on any camera anyway;
+         * URP / HDRP volumes are not affected (those pipelines render SSR on forward).
+         */
+        static ForceScreenSpaceReflections: boolean;
+        /**
+         * Final-pass dithering (artifact-cleanup T3). Unity's PPv2 / URP dither every final pass (`FinalPass.shader`,
+         * `Uber.shader` DITHERING: one-level triangular blue noise after the LUT), which is why its dark vignette corners
+         * show no 8-bit banding rings; the runtime enables Babylon's image-processing dither (`ditheringEnabled`,
+         * amplitude `PostProcessingConversions.DitheringIntensity`) on EVERY stack, LDR, HDR and grading-less alike, and
+         * records it in the colour-grading drift guard. Set this to false BEFORE the scene loads (init script) to opt out.
+         */
+        static Dithering: boolean;
+        /**
+         * Half-float render targets for every pass the volume creates (artifact-cleanup T5). Unity's PPv2 / URP run the
+         * whole post-processing chain in ARGBHalf and quantise once in the final pass; Babylon's `DefaultRenderingPipeline`
+         * does the same for its own passes (HDR pipeline) but every other `PostProcess` defaults to an 8-bit target, and
+         * the FIRST pass of the chain owns the target the scene is rendered into, so dark linear values were quantised to
+         * 1/255 before the vignette darkened them further: the concentric banding rings in the dark corners
+         * (`notes/artifact-cleanup.md`, ~1/510 steps in linear). With this on, the SSAO2 pipeline, the motion blur and the
+         * plugin passes are created with `TEXTURETYPE_HALF_FLOAT` whenever the camera pipeline is HDR (`allowhdr`) and the
+         * engine can render to half float (`caps.textureHalfFloatRender`; Babylon's own pipeline rule). Set false BEFORE
+         * the scene loads to keep 8-bit targets (halves the render-target bandwidth, restores the rings).
+         */
+        static HalfFloatChain: boolean;
+        /**
+         * Inspector-truth (FR-5): register the "Unity Post Processing" properties section with Babylon's Inspector v2 when the
+         * toolkit opens it (`WindowManager.ShowInspector` / `ToggleDebug` / `PopupDebug`). Set false before opening the
+         * Inspector to keep the stock Inspector alone; nothing is logged either way.
+         */
+        static InspectorSection: boolean;
+        /** Inspector-truth: whether the Inspector v2 global with every required export was seen (`available`) and whether the section is currently registered (`registered`); read-backs. */
+        static InspectorState: {
+            available: boolean;
+            registered: boolean;
+        };
+        /**
+         * Chain slots of the owned plugin passes, Unity's order (lower renders first, spit-and-polish FR-2): motion blur
+         * and lens distortion (Unity's separate passes before Uber), then the Uber order chromatic aberration, the tinted
+         * bloom chain, vignette, grain, and the HDR grading pass or the LDR colour filter. Every owned pass registers its
+         * slot when created (`registerPass`); the whole group precedes the DefaultRenderingPipeline passes.
+         */
+        static readonly HeadSlots: {
+            motionBlur: number;
+            lensDistortion: number;
+            chromaticAberration: number;
+            bloom: number;
+            vignette: number;
+            grain: number;
+            grading: number;
+            grainAfterGrading: number;
+        };
+        /**
+         * Chain slot of the owned TAIL pass group (final-verification F-6). Unity renders FXAA in its FinalPass, after the
+         * Uber pass, so the toolkit's FXAA 3.11 port (`FxaaPlugin`: the luma pass and the FXAA pass) registers in the ONE
+         * tail slot and `reorderPluginPasses` appends every tail pass after the DefaultRenderingPipeline passes -- FXAA is
+         * always last. A slot at or above `TailSlotBase` is a tail slot; everything below is a `HeadSlots` slot.
+         */
+        static readonly TailSlotBase: number;
+        static readonly TailSlots: {
+            fxaa: number;
+        };
+        /** Whether `slot` belongs to the tail group (`TailSlots`) rather than the head group (`HeadSlots`). */
+        static IsTailSlot(slot: number): boolean;
+        static readonly BuiltInPipeline: string;
+        static readonly SrpPipelines: string[];
+        /**
+         * The pipeline a volume was authored in, normalised to exactly "URP", "HDRP" or "BuiltIn".
+         *
+         * There is ONE normaliser in the runtime -- `PostProcessingContract.volumeType`, applied at the boundary where a
+         * volume's properties become a model -- and this delegates to it so the two can never disagree. It tolerates the
+         * exporter's casing ("urp" is a URP volume) and maps everything it does not recognise, including an absent flag,
+         * to Built-in. The fallback below is the same rule for a caller that reaches this before the contract is loaded.
+         */
+        static VolumeTypeOf(model: any): string;
+        /** True only for a volume the exporter stamped "URP" or "HDRP"; every other value is Built-in. */
+        static IsSrpVolume(model: any): boolean;
         /** FR-17: every unsupported effect or parameter warns exactly once per key (per page load, reset when the last volume is destroyed). */
         static warnOnce(key: string, message: string): void;
         /** Whether a warning key has already fired (tests / read-backs). */
@@ -15020,22 +16506,69 @@ declare namespace TOOLKIT {
          * property change rebuilds and re-attaches its own passes, which would otherwise reorder them after the plugins.
          * Deferring keeps the order deterministic: pipeline passes first, plugin passes after.
          */
+        /**
+         * Plugin passes queued by the appliers and attached at the end of `applyStack`. Each entry carries the render-target
+         * type of the stack that queued it (review-fixes FR-5): the drain -- and every asynchronous callback the entry starts
+         * -- must use the type of ITS OWN stack, not whatever the last applied camera happened to leave behind.
+         */
         private pendingPlugins;
         /** onBuildObservable subscriptions that keep the plugin passes after the pipeline passes across rebuilds. */
         private buildObservers;
         private reordering;
-        /** Owned plugin passes that belong at the HEAD of the camera chain (before tone mapping): the tinted bloom. */
+        /**
+         * Every owned plugin pass with its `HeadSlots` slot, kept in slot order (creation order inside a slot). They all
+         * belong at the HEAD of the camera chain, before the DefaultRenderingPipeline passes; `frontPostProcesses` is the
+         * derived, ordered list. The tail group (`TailSlots`, final-verification F-6) is kept apart in `tailSlots` /
+         * `tailPostProcesses` and placed at the END of the chain by `placeTailPasses`.
+         */
         private frontPostProcesses;
+        private frontSlots;
+        private tailPostProcesses;
+        private tailSlots;
+        /** F-6: the FXAA tail pairs this instance created (the FXAA pass and its luma pass), per camera. */
+        private fxaas;
         private coloredBloom;
-        private roundedVignettes;
+        private vignettes;
+        private chromaticAberrations;
+        private grains;
+        private hdrGradings;
+        private pluginTextures;
         private depthOfFields;
         private motionBlurs;
         private lensDistortions;
+        /** Inspector-truth T3: the Unity lens-distortion settings object SHARED per camera by the lens pass and the vignette pass (built once per apply). */
+        private lensUnitySettings;
         private antialiasings;
         private ambientOcclusions;
+        private ditherings;
         private screenSpaceReflections;
+        private ssrGates;
         private gradingStates;
+        /** Inspector-truth T5: the drifted grading keys per camera from the last `verifyColorGrading` (observe-only; cleared by `releaseStacks`). */
+        private gradingDrift;
+        /** Inspector-truth T6: the per-camera effect listing (rebuilt at the end of every applyStack and after every asynchronous pass creation). */
+        private effectListings;
+        /** Inspector-truth T7: the enabled flag per (camera, family) written by `SetEffectEnabled` (absent = enabled). */
+        private effectEnabled;
+        /** Inspector-truth T7: the dense FR-2 chain order per camera, recorded on the first toggle (every family on). */
+        private toggleOrders;
+        /** Inspector-truth T7: the passes detached per (camera, family), re-inserted by the next ON. */
+        private detachedPasses;
+        /** Inspector-truth T7: pipeline flags / image-processing values / screen-space pipelines remembered by the first toggle. */
+        private toggleSaved;
+        /** Pre-write values of every image-processing field this volume touched, in write order (FR-6, see `writeImaging`). */
+        private imagingSnapshots;
+        /** What this volume WROTE per configuration+key+camera (F-2): the values `assertGradingState` replays. */
+        private imagingWrites;
+        /** Grading states dropped as the loser of a shared-configuration conflict (FR-10, see `pushGradingState`). */
+        private droppedGradingStates;
         private gradingReadBackScheduled;
+        /**
+         * Set by `releaseStacks`, cleared by `applyVolumes`. The LUT strip is read back and repacked ASYNCHRONOUSLY, so the
+         * volume can be destroyed between the request and its resolution; without this the promise handler created a 3D
+         * texture nobody owned (and bound it into a disposed stack), leaking one texture per interrupted load (FR-8).
+         */
+        private disposed;
         /** The pipeline of the first rendered camera (legacy accessor). */
         GetDefaultRenderPipeline(): BABYLON.DefaultRenderingPipeline;
         GetSSAORRenderPipeline(): BABYLON.SSAO2RenderingPipeline;
@@ -15057,11 +16590,20 @@ declare namespace TOOLKIT {
         /**
          * The toolkit may run `ready` before `awake` (edit mode / ScenePlaying false), so orchestration starts from
          * whichever of the two happens LAST, deferred one frame so every volume of the same load has registered.
-         * The first registered volume of the scene then orchestrates once.
+         *
+         * Review-fixes FR-9: this schedules a RE-application, not a one-shot. A volume that registers or becomes ready
+         * after the scene's orchestrator has already applied (a streamed-in level chunk, a volume enabled from script,
+         * an additive scene load) used to be silently ignored -- it sat in the registry contributing nothing until the
+         * next full reload. The scheduling itself is still once per frame per scene through `Scheduled`, so N volumes
+         * arriving in one frame collapse into ONE re-application.
          */
         private tryOrchestrate;
         protected destroy(): void;
-        /** Blends the registered volumes and applies them to every targeted camera. Idempotent per instance. */
+        /**
+         * Blends the registered volumes and applies them to every targeted camera. Re-entrant (review-fixes FR-9): calling it
+         * again releases the stacks this instance currently owns and rebuilds them from the FULL registry, so a volume that
+         * arrived after the first apply contributes to the blend. Pipelines this instance did not create are left as found.
+         */
         applyVolumes(): void;
         /**
          * FR-14: exactly one DefaultRenderingPipeline per camera. An existing pipeline attached to the camera
@@ -15070,15 +16612,26 @@ declare namespace TOOLKIT {
         getOrCreatePipeline(camera: BABYLON.Camera, hdr: boolean): BABYLON.DefaultRenderingPipeline;
         /**
          * Every DefaultRenderingPipeline property change rebuilds the pipeline, which detaches and re-attaches its own
-         * passes at the END of the camera chain, i.e. after the plugin passes this component attached later (tinted
-         * bloom, rounded vignette, colour filter, motion blur, lens distortion). That silently moves the plugins in
-         * front of tone mapping and changes their result. The pipeline's onBuildObservable fires after each rebuild;
-         * this subscription re-appends the owned plugin passes so the documented order (pipeline first, plugins after)
-         * survives any later toggle.
+         * passes at the END of the camera chain, and Babylon attaches new passes wherever they are created. The
+         * pipeline's onBuildObservable fires after each rebuild; this subscription re-runs `reorderPluginPasses` so the
+         * documented order (owned plugin passes in slot order, then the pipeline passes) survives any later toggle.
          */
         protected watchPipelineBuilds(pipeline: BABYLON.DefaultRenderingPipeline): void;
-        /** Marks `passes` as head-of-chain passes (pre tone mapping) and moves them to the front of `camera`'s chain now. */
-        protected placeAtFront(camera: BABYLON.Camera, passes: BABYLON.PostProcess[]): void;
+        /**
+         * Registers owned `passes` in `slot` and moves every registered pass of `camera` into place now: a `HeadSlots` slot
+         * puts the head group at the front of the chain in slot order (creation order inside a slot); a `TailSlots` slot
+         * (final-verification F-6) appends the tail group at the END. `reorderPluginPasses` restores the same order, with
+         * the SSAO2 / SSR passes ahead of the head group, after every pipeline rebuild.
+         */
+        protected registerPass(camera: BABYLON.Camera, passes: BABYLON.PostProcess[], slot: number): void;
+        /**
+         * Removes the `null` holes `detachPostProcess` leaves behind: Babylon nulls the slot and lets its own render loop
+         * skip it, so a chain that is detached and re-attached on every reorder (every pipeline rebuild, every asynchronous
+         * LUT arrival) grows one hole per moved pass per reorder. The holes are harmless to render but they make
+         * `_postProcesses[0]` -- and `_getFirstPostProcess()` -- walk an ever longer array, and they are what the MSAA
+         * first-pass lookup reads (review-fixes FR-12).
+         */
+        static CompactChain(camera: BABYLON.Camera): void;
         /**
          * Passes of the SSAO2 / SSR pipelines rendering `camera`, in their current chain order. They consume the prepass
          * (depth / normals / reflectivity) and the raw scene colour, so they belong at the very start of the chain, in
@@ -15087,28 +16640,114 @@ declare namespace TOOLKIT {
          */
         protected screenSpacePasses(camera: BABYLON.Camera): BABYLON.PostProcess[];
         /**
-         * Restores this component's pass order on every camera chain of `pipeline`: the SSAO2 / SSR passes first
-         * (screen-space effects in linear HDR), then the head plugin passes (tinted bloom, pre tone mapping), then
-         * whatever the pipeline and others attached, then the remaining owned plugin passes (vignette, colour filter,
-         * motion blur, lens distortion) at the tail, each group in its current relative order. Runs after the stack is
-         * applied and after every pipeline rebuild. Returns how many passes moved.
+         * Normalises this component's pass order on every camera chain of `pipeline` to Unity's chain (spit-and-polish
+         * FR-2): the SSAO2 / SSR passes first (screen-space effects on the raw linear scene), then every owned plugin pass
+         * in `HeadSlots` order (motion blur, lens distortion, chromatic aberration, tinted bloom chain, vignette, grain,
+         * HDR grading pass or LDR colour filter), attached at indices 0..n; whatever the DefaultRenderingPipeline and
+         * others attached (depth of field, native bloom, image processing, sharpen) follows, and the owned TAIL passes
+         * (`TailSlots`: the FXAA 3.11 luma + FXAA pair, final-verification F-6) are appended after them, last as Unity's FinalPass.
+         * Runs after the stack is applied (pendingPlugins drained), after every asynchronous plugin arrival (LUT / spectral
+         * LUT load) and after every pipeline rebuild (onBuildObservable). Returns how many passes moved.
+         *
+         * Deviation from Unity (recorded, spec Open Questions): Unity runs depth of field before its Uber pass, i.e.
+         * before distortion, aberration, bloom, vignette and grain; Babylon's depth of field lives inside the
+         * DefaultRenderingPipeline and therefore runs AFTER the plugin group (after distortion and grain). Grain, chromatic
+         * aberration and vignette are never enabled on the pipeline, so nothing of the Uber chain runs twice.
          */
         reorderPluginPasses(pipeline: BABYLON.DefaultRenderingPipeline): number;
+        /**
+         * F-6: moves the owned tail passes of `camera` (`TailSlots` order) to the END of its chain when they are not already
+         * its last live passes in that order -- a pipeline rebuild re-attaches the pipeline's own passes behind them, and a
+         * toggle ON re-inserts them at the position the recorded order implies, which a rebuild in between may have made
+         * stale. Detached passes are left alone (a toggled-off family stays off). Never touches the head, so the MSAA target
+         * does not move (the WebGPU depth-attachment rule of review-fixes T13). Returns how many passes moved; the caller
+         * compacts the chain.
+         */
+        protected placeTailPasses(camera: BABYLON.Camera): number;
         /** The DefaultRenderingPipeline already attached to `camera`, if any (scans the pipeline manager). */
         static FindDefaultPipeline(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.DefaultRenderingPipeline;
+        /**
+         * What each family applier actually CONSUMES: every field it reads, plus the fields the exporter's LUT bake carries
+         * for it (review-fixes FR-15). Paired with `PostProcessingContract.KnownFields`, this is the whole unsupported-input
+         * policy -- every overridden field of a known family is either claimed here or warned, and the fields-audit test
+         * diffs the two tables without touching Babylon. The lists live next to the appliers they describe (named in each
+         * comment) so a change to an applier and a change to its claim are one edit apart.
+         */
+        static readonly Consumes: {
+            [family: string]: string[];
+        };
+        /**
+         * Fields consumed by the URP branches ONLY (urp-verification D35), passed as the `extra` argument of
+         * `warnUnconsumedFields` by those branches. They are deliberately NOT in `Consumes`, which is pipeline-agnostic: a
+         * name added there would silence the `param:` warning for Built-in AND HDRP volumes too (`clamp` is a Built-in bloom
+         * field, `response` an HDRP grain one), and those warnings are verified behaviour.
+         */
+        static readonly ConsumesUrp: {
+            [family: string]: string[];
+        };
         private applyStack;
         /**
-         * FR-16: antialiasing from the camera metadata (the HDR flag was consumed when the pipeline was created). Without
-         * an `antialiasing` key (legacy export) nothing is written; otherwise `samples` follows `msaasamples` and FXAA / SMAA /
-         * TAA enable Babylon's FXAA (the single screen-space AA Babylon offers). `None` enables nothing.
+         * Artifact-cleanup T5: the texture type of the passes a camera stack creates. HALF_FLOAT when `HalfFloatChain` is set,
+         * the camera allows HDR (`allowhdr`, default true, the same flag that makes the DefaultRenderingPipeline HDR) and the
+         * engine renders to half float; FLOAT when only full float is renderable; otherwise Babylon's 8-bit default.
+         *
+         * Review-fixes FR-5: `pipeline` is passed ONLY for a pipeline this volume reused rather than created (for example a
+         * `DefaultCameraSystem` pipeline). Such a pipeline was built with somebody else's HDR flag, and the plugin passes have
+         * to match the target they render into, so its `_hdr` wins over the camera's `allowhdr`.
          */
-        protected applyAntialiasing(pipeline: BABYLON.DefaultRenderingPipeline, metadata: TOOLKIT.IPostProcessCameraMetadata): void;
-        /** Antialiasing flags written per pipeline (read-backs / tests). */
+        static ChainTextureType(scene: BABYLON.Scene, metadata: TOOLKIT.IPostProcessCameraMetadata, pipeline?: BABYLON.DefaultRenderingPipeline): number;
+        /**
+         * The cross-applier decisions of one camera stack (pure, spit-and-polish T13): `vignetteActive` = a Classic vignette
+         * with intensity > 0 (Unity's `IsEnabledAndSupported`); `hdrGrading` = the colour-grading family is active and in
+         * HDR mode (PPv2 HighDefinitionRange, or any URP / HDRP volume), the export carries a LogC LUT (`lutspace: "logc"`)
+         * and the camera allows HDR. `hdrReason` names the fallback cause otherwise.
+         */
+        static DeriveStackFlags(model: TOOLKIT.IPostProcessModel, metadata: TOOLKIT.IPostProcessCameraMetadata): TOOLKIT.IPostProcessStackFlags;
+        /**
+         * FR-16 / final-verification F-6: antialiasing from the camera metadata (the HDR flag was consumed when the pipeline
+         * was created). Without an `antialiasing` key (legacy export) nothing is written; otherwise `samples` follows
+         * `msaasamples`, and FXAA / SMAA / TAA render through the toolkit's Unity FXAA 3.11 port (`FxaaPlugin`: Unity's
+         * FinalPass, quality preset 28, or the fast preset 12 when `fastMode` is set -- a layer setting the export does not
+         * carry, so false) as the ONE tail pass group of the chain (`TailSlots.fxaa`, queued through `pendingPlugins` at the
+         * chain texture type like every plugin pass). The pipeline's own `fxaaEnabled` is written FALSE whenever that pass
+         * renders. When the plugin class is absent (a sandbox without it) the pipeline's Babylon FXAA is enabled instead, as
+         * before F-6. `None` enables nothing.
+         */
+        protected applyAntialiasing(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, metadata: TOOLKIT.IPostProcessCameraMetadata, textureType?: number): void;
+        /**
+         * FR-1: `DefaultRenderingPipeline.samples` only reaches the passes the pipeline itself owns, and only the pass that
+         * LEADS a camera's chain renders into a multisampled target at all (every later pass reads an already resolved
+         * texture). The toolkit deliberately puts its own plugin passes -- and the SSAO2 / SSR passes -- in front of the
+         * pipeline (`reorderPluginPasses`), so the pipeline's `samples` landed on a pass that could never resolve them and
+         * MSAA was silently lost on every stack with a head pass. This writes the camera's recorded sample count onto the
+         * pass that currently leads its chain and resets the pass it previously led to 1 (one multisampled target at a time).
+         *
+         * Runs at the end of every `reorderPluginPasses`, which is the single funnel every chain change goes through: the
+         * initial apply, the pipeline's `onBuildObservable` rebuild hook, the pending-plugin drain and every asynchronous
+         * LUT / spectral-LUT arrival. Skipped -- silently, it is not a misconfiguration -- when the engine reports no MSAA
+         * support or the recorded count is <= 1. The engine clamps the write to `caps.maxMSAASamples`, so a camera authored
+         * with 8 on a 4x device reads back 4.
+         */
+        protected applySamplesToFirstPass(camera: BABYLON.Camera): void;
+        /**
+         * F-9.22 (final-verification T16): true when a LUT reference carries an `operators` list that names NO
+         * `tonemapper:<mode>` entry -- a strip the exporter baked WITHOUT the tone mapper (its degraded
+         * ACES-without-shader path, or the SRP CPU fallback). A reference without any list answers false: an older
+         * export says nothing about what it folded in, and the "bound strip already tone-maps" premise stands for it.
+         */
+        static StripLacksToneMapper(lut: TOOLKIT.IPostProcessLutReference): boolean;
+        /** Antialiasing flags written per camera (read-backs / tests). */
         GetAntialiasings(): {
             pipeline: BABYLON.DefaultRenderingPipeline;
+            camera: BABYLON.Camera;
             mode: number;
             fxaa: boolean;
             samples: number;
+            firstPass: BABYLON.PostProcess;
+            prePassSamples?: number;
+            fxaaPass?: BABYLON.PostProcess;
+            lumaPass?: BABYLON.PostProcess;
+            fast?: boolean;
         }[];
         /**
          * FR-19 .. FR-25 / FR-9: colour grading. Only OVERRIDDEN fields are written, to the pipeline's shared image
@@ -15117,7 +16756,72 @@ declare namespace TOOLKIT {
          * colour curves, the single tone-mapper conversion, a ColorFilterPlugin pass for a non-white filter and the
          * baked LUT strip when it is not the identity. HDRP exposure is owned by the scene-level path and skipped.
          */
-        protected applyColorGrading(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyColorGrading(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number, flags?: TOOLKIT.IPostProcessStackFlags): void;
+        /**
+         * Spit-and-polish FR-7: HDR-mode grading. Unity's bake put contrast, curves, the tone mapper, the colour filter and
+         * the mixer inside the LogC LUT, so the image-processing pass is kept NEUTRAL (exposure 1, contrast 1, tone
+         * mapping off, curves off, no LUT, no vignette) and only gamma-encodes; the LUT is applied by a
+         * ColorGradingHdrPlugin pass (head group, grading slot) once the strip has loaded, with the `2^postExposure`
+         * uniform and the sRGB decode when the export says so. Post exposure is never baked: PPv2's Uber and URP's
+         * post pass both multiply `2^postExposure` in before the LUT, so PPv2 and URP `postexposure` feed the uniform;
+         * HDRP exposure lives in its own Exposure component (scene-level path) and passes 0 EV here.
+         *
+         * Review-fixes FR-7 -- HDRP exposure PRECEDENCE. HDRP's Fixed exposure is exported into the scene-level
+         * `imageprocessing.exposure` block (CanvasTools), which the scene loader applies BEFORE any script runs, and it is
+         * NOT in the LogC bake. Neutralising the configuration to `exposure 1` therefore threw the authored HDRP exposure
+         * away on every HDRP stack. On HDRP the neutral value is the configuration's CURRENT exposure (1 when the block was
+         * absent) -- so it survives (and the observe-only drift guard, inspector-truth T5, records any later overwrite against it). PPv2 and
+         * URP still neutralise to 1: their post exposure rides the `2^postExposure` uniform on the grading pass instead.
+         */
+        protected applyHdrColorGrading(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, imaging: BABYLON.ImageProcessingConfiguration, textureType: number): void;
+        /**
+         * Artifact-cleanup T3: final-pass dithering on every stack. Writes `ditheringEnabled` (`PostProcessor.Dithering`) and
+         * `ditheringIntensity` (`PostProcessingConversions.DitheringIntensity`) through the shared image processing
+         * configuration, keeps the image-processing pass enabled (the dither lives in it), and records both values in the
+         * camera's colour-grading state so `verifyColorGrading` guards them like every other grading value; a stack without a
+         * colour-grading family gets a minimal state record (no LUT, LDR) for that purpose.
+         */
+        protected applyDithering(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline): void;
+        /** The dither values written per camera (read-backs / tests, artifact-cleanup T3). */
+        GetDitherings(): {
+            camera: BABYLON.Camera;
+            configuration: BABYLON.ImageProcessingConfiguration;
+            enabled: boolean;
+            intensity: number;
+        }[];
+        /**
+         * Writes one image-processing value, snapshotting what was there the FIRST time this volume writes that field of
+         * that configuration (review-fixes FR-6). `key` may be `colorCurves.<field>`, in which case the value lives on the
+         * configuration's ColorCurves. The configuration is shared with the scene, its materials and whatever else grades
+         * (the exporter writes `imageprocessing.contrast` / `exposure` before scripts run), so `releaseStacks` puts every
+         * snapshot back in reverse write order instead of leaving the scene graded by a destroyed volume.
+         */
+        protected writeImaging(configuration: BABYLON.ImageProcessingConfiguration, key: string, value: any, camera?: string): void;
+        /**
+         * Undoes the writes ONE camera made to one configuration, newest first, and forgets them (F-2). Used when a
+         * camera's grading state loses a shared-configuration conflict: its values are already on the object, and the
+         * winner's expectation cannot simply be re-asserted over them because the loser may have written fields the
+         * winner never touches. Returns the keys it put back.
+         *
+         * The oldest entry for a configuration+key -- the one holding what the volume originally found -- is left
+         * alone unless it belongs to this camera, so the destroy-time restore still ends at the pre-volume value.
+         */
+        protected restoreImagingFor(camera: string, configuration: BABYLON.ImageProcessingConfiguration): string[];
+        /**
+         * Writes one grading state's whole expectation back onto its configuration (F-2). `expected` is keyed by the
+         * configuration's own field names, except `globalSaturation`, which lives on the ColorCurves -- the same
+         * mapping `verifyColorGrading` reads.
+         */
+        protected assertGradingState(state: TOOLKIT.IPostProcessColorGradingState): void;
+        /**
+         * Puts every snapshotted image-processing value back, newest first (FR-6): a field two volumes wrote returns to what
+         * the FIRST of them found, and a `colorCurves` object this volume created is nulled only after the curve fields it
+         * wrote have been restored on it. Called by `releaseStacks` before the owned textures are disposed, so
+         * `colorGradingTexture` is off the configuration before the strip behind it dies.
+         */
+        protected restoreImaging(): void;
+        /** The image-processing values this volume snapshotted, in write order (tests / read-backs). */
+        GetImagingSnapshots(): TOOLKIT.IPostProcessImagingSnapshot[];
         /**
          * The shared image processing configuration a DefaultRenderingPipeline writes to: the pipeline's
          * ImageProcessingPostProcess configuration when it exists (it IS scene.imageProcessingConfiguration for an
@@ -15134,6 +16838,12 @@ declare namespace TOOLKIT {
          * gives the same hardware trilinear filtering Unity uses. The strip itself is bound only as the fallback.
          */
         protected requestLutTexture(lut: TOOLKIT.IPostProcessLutReference, apply: (texture: BABYLON.BaseTexture) => void): void;
+        /**
+         * Loads (once per url per instance) a plugin texture, for example the exported chromatic-aberration spectral LUT,
+         * with the documented settings (no mipmaps, invertY false, bilinear, clamp, linear) and hands it to `apply` once
+         * it is usable. A failed load warns once and hands `null` (the plugin then falls back to its default).
+         */
+        protected requestPluginTexture(url: string, purpose: string, apply: (texture: BABYLON.Texture) => void): void;
         /** Strip loaded: repack into a 3D volume when possible, then bind the final texture for every waiting camera. */
         private finalizeLutTexture;
         /**
@@ -15145,63 +16855,179 @@ declare namespace TOOLKIT {
         static ResolveSceneUrl(scene: BABYLON.Scene, url: string): string;
         /**
          * CanvasTools writes the scene-level `imageprocessing.contrast/exposure` before scripts run; the applier's writes
-         * must stay in place afterwards. The values are read back one frame later (or immediately without a render
-         * loop): a drift is re-asserted once and reported with a warning.
+         * are read back one frame later (or immediately without a render loop). Inspector-truth T5 (FR-4): the guard is
+         * OBSERVE-ONLY -- it records the keys whose live value differs from what this volume applied (`GetColorGradingDrift`,
+         * reported by the verification read-back) and never writes a value back or warns, so an Inspector edit of the image
+         * processing is never fought. On an HDRP stack the expected exposure IS the scene-level value (review-fixes FR-7).
          */
         private scheduleGradingReadBack;
-        /** Compares every applied grading value with the live configuration; re-asserts drifted values when `reassert`. Returns the drifted keys. */
+        /**
+         * Compares every applied grading value with the live configuration and returns the drifted keys (inspector-truth T5,
+         * FR-4: observe-only -- nothing is written back and nothing is warned; a missing colour-curves holder counts as drift
+         * for its key). The result is also kept per camera in `GetColorGradingDrift()` for the read-back. The `reassert`
+         * parameter is accepted for the callers that still pass it (the read-back passes `false`) and is ignored.
+         */
         verifyColorGrading(reassert?: boolean): string[];
+        /** The drifted grading keys per camera recorded by the last `verifyColorGrading` run (inspector-truth T5; read-backs / tests). Never re-asserted. */
+        GetColorGradingDrift(): {
+            camera: string;
+            keys: string[];
+        }[];
+        /**
+         * Records one camera's grading state, keyed by the CONFIGURATION rather than the camera (review-fixes FR-10). Two
+         * cameras usually share `scene.imageProcessingConfiguration`, so two cameras that resolve to DIFFERENT grading paths
+         * (one HDR LogC pass, one LDR image-processing grade) write mutually exclusive expectations onto the same object and
+         * the drift guard (which re-asserted values before inspector-truth T5) then fought them against each other every frame. The HDR
+         * expectation wins -- it is the neutral configuration the LogC pass requires -- the LDR one is dropped, and the
+         * conflict is warned once naming both cameras.
+         */
+        private pushGradingState;
         /** The grading values this instance applied per camera (read-backs / tests). */
         GetColorGradingStates(): TOOLKIT.IPostProcessColorGradingState[];
-        /** FR-26: bloom -> DefaultRenderingPipeline bloom (native) or ColoredBloomPlugin when the tint is not white. */
-        protected applyBloom(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
-        /** FR-27: vignette -> shared image processing vignette (Classic) or RoundedVignettePlugin (rounded). Masked mode is unsupported. */
-        protected applyVignette(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
-        /** FR-28: chromatic aberration -> pipeline chromaticAberration (amount from intensity, fixed radial intensity). */
-        protected applyChromaticAberration(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
-        /** FR-29: grain -> pipeline grain (intensity scaled, URP FilmGrain.type multiplier, always animated). */
-        protected applyGrain(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
+        /**
+         * FR-26: bloom. A Built-in (PPv2) bloom ALWAYS renders through the `ColoredBloomPlugin` PYRAMID chain (final-verification
+         * T15, F-7): Unity's `Bloom.cs` ladder (13-tap downsamples, tent upsamples, `iterations` from `diffusion` and the frame
+         * size) has no native Babylon equivalent -- the pipeline's `BloomEffect` is one blur pair -- so the tint / vignette
+         * routing of the earlier ports no longer decides the Built-in path. A URP / HDRP bloom keeps the DefaultRenderingPipeline
+         * bloom (native) unless the tint is not white or (spit-and-polish T13) a vignette pass is active, when it takes the
+         * retained blur chain (the pipeline's native bloom would run AFTER the vignette and brighten its corners); the SRP bloom
+         * algorithms themselves are deferred to their verification specs.
+         */
+        protected applyBloom(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number, flags?: TOOLKIT.IPostProcessStackFlags): void;
+        /**
+         * The owned passes of a bloom chain in chain order: the plugin's `postProcesses` list when it carries one, else the
+         * legacy shape (prefilter, blur H / V pairs, composite) of a stand-in chain.
+         */
+        static ChainPasses(chain: any): BABYLON.PostProcess[];
+        /**
+         * F-7: the bloom pyramid rebuilt its ladder (`removed` disposed, `added` created between the prefilter and the
+         * composite). Forgets the removed passes everywhere this instance remembers a pass, tracks the added ones, and
+         * re-registers the WHOLE chain in the bloom slot in chain order (fresh slot orders, so the new passes sit between the
+         * two fixed ends), which re-attaches the head group and compacts the chain; the MSAA head is re-asserted after.
+         */
+        protected rechainBloom(camera: BABYLON.Camera, chain: any, removed: BABYLON.PostProcess[], added: BABYLON.PostProcess[]): void;
+        /** Drops `passes` from every per-pass record of this instance (ownership, slots, toggle order, detached lists). */
+        private forgetPostProcesses;
+        /**
+         * FR-27 / spit-and-polish FR-5: vignette -> VignettePlugin (Unity's Classic vignette; `rounded` is the aspect term)
+         * in the head chain after bloom and before grain, with Unity's raw parameters. The pipeline's own vignette is never
+         * enabled. Masked mode is unsupported (warned once); an intensity of 0 applies nothing (Unity's IsEnabledAndSupported).
+         */
+        protected applyVignette(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /**
+         * FR-28 / spit-and-polish FR-4: chromatic aberration -> ChromaticAberrationPlugin (Unity's Uber loop with the raw
+         * intensity, `fastMode` and the exported spectral LUT when present, loaded through requestPluginTexture) at the head
+         * of the chain, before bloom. The pipeline's own effect is never enabled; intensity 0 applies nothing.
+         */
+        protected applyChromaticAberration(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /**
+         * FR-29 / spit-and-polish FR-6: grain -> GrainPlugin (Unity's per-frame GrainBaker noise + Uber grain block with the
+         * raw intensity, size, lumContrib and colored; URP FilmGrain keeps the frozen type multiplier) in the head chain after
+         * the vignette. The pipeline's own grain is never enabled; only `response` / `texture` remain unsupported.
+         *
+         * urp-verification T10 (D15): a URP volume packs URP's own scale (`IntensityScaleURP` 4 x `FilmGrainAmplitudeScaleURP`)
+         * instead of PPv2's 20, reads `lumContrib` from URP's `response` (Contract default 0.8 when un-overridden) and
+         * registers AFTER the grading pass (`HeadSlots.grainAfterGrading`), because URP applies grain after the LUT
+         * (`UberPost.shader:273` grading, `:278` grain). Built-in and HDRP volumes keep every line above exactly (D30).
+         */
+        protected applyGrain(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
         /** FR-35: sharpen -> pipeline sharpen edge amount. */
         protected applySharpen(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
         /** Model field value (Unity default when not overridden), undefined when the family has no such field. */
         protected fieldValue(family: TOOLKIT.IPostProcessEffectModel, name: string): any;
         protected fieldOverridden(family: TOOLKIT.IPostProcessEffectModel, name: string): boolean;
+        /**
+         * FR-15: reports every overridden field of `family` that `PostProcessor.Consumes[family]` does not claim. Fields in
+         * `PostProcessingContract.ModeOnlyFields[family]` are reported TOGETHER under one `<family>:mode-only-fields` key --
+         * they belong to a whole Unity mode Babylon has no equivalent of (HDR output, automatic exposure, ray-traced SSR),
+         * so one message naming the group is the useful signal, not twenty "parameter X is ignored" lines. Everything else
+         * gets the per-parameter warning.
+         *
+         * This replaces the hand-written per-applier lists: those enumerated the fields the author happened to think of, so
+         * a parameter nobody listed was ignored in silence.
+         */
+        protected warnUnconsumedFields(family: TOOLKIT.IPostProcessEffectModel, extra?: string[]): void;
         /** FR-17: one warning per OVERRIDDEN parameter Babylon cannot honour (an un-overridden one is the Unity default and changes nothing). */
         protected warnUnsupportedFields(family: TOOLKIT.IPostProcessEffectModel, names: string[]): void;
         /** `[x,y]` or `{x,y}` -> number array, else the fallback. */
         static ToVector2Array(value: any, fallback: number[]): number[];
         /** Coloured bloom chains created by this instance (read-backs / tests). */
-        GetColoredBloomChains(): {
-            camera: BABYLON.Camera;
-            chain: any;
-            color: number[];
-            weight: number;
-            threshold: number;
-            kernel: number;
-        }[];
-        /** Rounded vignette passes created by this instance (read-backs / tests). */
-        GetRoundedVignettes(): {
+        GetColoredBloomChains(): TOOLKIT.IPostProcessBloomRecord[];
+        /** Vignette passes created by this instance (read-backs / tests). */
+        GetVignettes(): {
             camera: BABYLON.Camera;
             postProcess: BABYLON.PostProcess;
             center: number[];
             intensity: number;
             smoothness: number;
+            roundness: number;
+            rounded: boolean;
             color: number[];
+            distortion: TOOLKIT.IVignetteDistortion;
+        }[];
+        /** Chromatic aberration passes created by this instance (read-backs / tests). */
+        GetChromaticAberrations(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            intensity: number;
+            fastMode: boolean;
+            spectralLutUrl: string;
+            spectralLut: BABYLON.BaseTexture;
+        }[];
+        /** Grain passes created by this instance (read-backs / tests). */
+        GetGrains(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            intensity: number;
+            size: number;
+            lumContrib: number;
+            colored: boolean;
+            typeMultiplier: number;
+            noise: BABYLON.BaseTexture;
+        }[];
+        /** HDR grading passes created by this instance (read-backs / tests). */
+        GetHdrGradings(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            lutUrl: string;
+            postExposure: number;
+            decodeSrgb: boolean;
+            use3D: boolean;
+            lutSize: number;
+        }[];
+        /** The head-group slot order of the owned plugin passes (read-backs / tests). */
+        GetHeadPasses(): {
+            postProcess: BABYLON.PostProcess;
+            slot: number;
+        }[];
+        /** The tail-group slot order of the owned passes (F-6: the FXAA luma + FXAA pair; read-backs / tests). */
+        GetTailPasses(): {
+            postProcess: BABYLON.PostProcess;
+            slot: number;
+        }[];
+        /** FXAA tail pairs created by this instance (read-backs / tests). */
+        GetFxaaPasses(): {
+            camera: BABYLON.Camera;
+            postProcess: BABYLON.PostProcess;
+            lumaPass: BABYLON.PostProcess;
+            fastMode: boolean;
         }[];
         /**
          * FR-30: depth of field -> pipeline depthOfField (bokeh). focusDistance metres -> mm, fStop = aperture, focalLength
          * as authored, blur level from the PPv2 kernel size (never from fStop). URP `Off` disables nothing (family left
-         * untouched); URP `Gaussian` is approximated through dofFromGaussian with its warning. A backend without a depth
-         * renderer warns instead of throwing.
+         * untouched); URP `Gaussian` is approximated through dofFromGaussian with its warning; URP `Bokeh` takes its own
+         * branch (urp-verification T11, D16) whose blur level comes from `highQualitySampling`, never from the `kernelSize`
+         * URP does not export. The blade-shape fields stay warned (D5) -- there is no Babylon equivalent to approximate.
+         * A backend without a depth renderer warns instead of throwing.
          */
-        protected applyDepthOfField(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyDepthOfField(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, metadata?: TOOLKIT.IPostProcessCameraMetadata): void;
         /**
          * FR-31: motion blur -> one BABYLON.MotionBlurPostProcess per camera. An existing one on the camera (for example the
          * racing VehicleCameraManager's "FastMotionBlur") is reused and re-tuned, never duplicated. Strength from the PPv2
          * shutter angle or the URP intensity, samples from PPv2 sampleCount or the URP quality, camera-only blur for PPv2
          * (which only blurs camera motion) and URP `CameraOnly`; URP `CameraAndObjects` keeps Babylon's object-based blur.
          */
-        protected applyMotionBlur(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyMotionBlur(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
         /** The MotionBlurPostProcess already attached to `camera`, if any (class check, with a duck-typed fallback for foreign builds). */
         static FindMotionBlur(camera: BABYLON.Camera): BABYLON.MotionBlurPostProcess;
         /**
@@ -15211,7 +17037,32 @@ declare namespace TOOLKIT {
          * yMultiplier, renamed by the contract), `centerX/Y` (-1..1, URP uv centre already converted by the contract) and
          * `scale` are passed only when overridden, else the plugin defaults apply. A zero intensity creates no pass.
          */
-        protected applyLensDistortion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyLensDistortion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /**
+         * The LensDistortionPlugin options of a lens-distortion family (pure per model): null when the family is missing,
+         * inactive or resolves to a zero intensity (no pass). Shared by the lens applier and the vignette (which follows
+         * Unity's uvDistorted, spit-and-polish T18).
+         */
+        protected deriveLensDistortionOptions(family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): any;
+        /**
+         * Inspector-truth T3: the Unity-unit lens-distortion settings of a family (`ILensDistortionUnitySettings`, the raw
+         * authored values with Unity's defaults for un-overridden fields: multipliers 1, centre 0 / 0, scale 1), or null when
+         * the family is missing / inactive. `LensDistortionPlugin.DeriveModel` turns them into the same model coefficients
+         * `deriveLensDistortionOptions` records.
+         */
+        protected deriveLensUnitySettings(family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): TOOLKIT.ILensDistortionUnitySettings;
+        /**
+         * The ONE lens-distortion settings object of `camera` for this apply (inspector-truth T3), built on first request from
+         * the model's lens family and handed to both the lens pass and the vignette pass so an edit reaches both. A camera
+         * without an active lens family gets a zero-intensity object (the vignette then derives no distortion, and a later edit
+         * of it still reaches the vignette). Cleared by `releaseStacks`.
+         */
+        protected getLensUnitySettings(camera: BABYLON.Camera, model: TOOLKIT.IPostProcessModel): TOOLKIT.ILensDistortionUnitySettings;
+        /** The shared Unity lens-distortion settings per camera (inspector-truth T3; read-backs / tests). */
+        GetLensUnitySettings(): {
+            camera: BABYLON.Camera;
+            settings: TOOLKIT.ILensDistortionUnitySettings;
+        }[];
         /** Depth of field settings written per pipeline (read-backs / tests). */
         GetDepthOfFields(): {
             pipeline: BABYLON.DefaultRenderingPipeline;
@@ -15237,21 +17088,39 @@ declare namespace TOOLKIT {
         }[];
         /**
          * FR-33: ambient occlusion -> one SSAO2RenderingPipeline per camera (intensity -> totalStrength, radius -> radius,
-         * PPv2 quality -> samples / expensiveBlur, HDRP stepCount -> samples). An SSAO2 pipeline already attached to the
+         * PPv2 quality -> samples / expensiveBlur, HDRP stepCount -> samples; artifact-cleanup T2: epsilon, base, maxZ,
+         * minZAspect and the bilateral blur from the conversion table's `Ssao*` statics). An SSAO2 pipeline already attached to the
          * camera is reused and re-tuned; a legacy SSAORenderingPipeline (PROJECT.DefaultCameraSystem) is detached from the
          * camera so only one occlusion pipeline renders it. Unsupported engines warn instead of throwing.
          */
-        protected applyAmbientOcclusion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyAmbientOcclusion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
         /**
-         * FR-34: screen space reflections -> one SSRRenderingPipeline per camera. PPv2 presets go through the preset table,
-         * PPv2 Custom reads the custom fields, HDRP reads rayMaxIterations / minSmoothness / screenFadeDistance. An SSR
-         * pipeline already attached to the camera is reused. Unsupported engines warn instead of throwing.
+         * FR-34 / spit-and-polish FR-8: screen space reflections -> one SSRRenderingPipeline per camera. PPv2 presets go
+         * through the preset table, PPv2 Custom reads the custom fields, HDRP reads rayMaxIterations / minSmoothness /
+         * screenFadeDistance. PPv2 renders SSR only on deferred cameras (`ScreenSpaceReflections.cs` checks
+         * `actualRenderingPath == DeferredShading`), so a BuiltIn volume applies it only when the camera export carries
+         * `renderingpath: "DeferredShading"` or `PostProcessor.ForceScreenSpaceReflections` is set; a forward camera (or a
+         * legacy export without the key, treated as Forward) warns once and attaches nothing, releasing any SSR pipeline this
+         * volume created for the camera earlier. URP / HDRP keep rendering SSR on forward. A pipeline this volume creates
+         * runs ahead of the HDR pipeline on linear input, so both gamma flags are set false and Babylon's roughness blur is
+         * enabled from the conversion table; a pipeline already attached to the camera is reused with its flags read back
+         * (warned once when either is gamma) and never rewritten. Unsupported engines warn instead of throwing.
          */
-        protected applyScreenSpaceReflections(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel): void;
+        protected applyScreenSpaceReflections(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, metadata: TOOLKIT.IPostProcessCameraMetadata, textureType: number): void;
+        /**
+         * Releases the SSR pipeline THIS volume created for `camera` (spit-and-polish FR-8): a camera that the gate now skips
+         * must not keep an SSR pass from an earlier apply. The camera is detached; the pipeline is disposed once it renders no
+         * camera. A pipeline the volume merely reuses is left to its owner.
+         */
+        protected releaseScreenSpaceReflections(camera: BABYLON.Camera): void;
         /**
          * FR-19 / FR-17: HDRP Exposure. `Fixed` exposure is exported into the scene-level image processing block, which the
          * scene loader applies before scripts run, so the runtime writes nothing; every other mode (Automatic, Curve,
          * UsePhysicalCamera, AutomaticHistogram) has no Babylon equivalent and warns once.
+         *
+         * PRECEDENCE (review-fixes FR-7): the scene-level block wins on HDRP, and it is applied before this component's
+         * `awake`. Nothing here writes exposure -- and, since FR-7, nothing in `applyHdrColorGrading` overwrites it either:
+         * the HDR grading path adopts the configuration's current exposure as its neutral value instead of forcing 1.
          */
         protected applyHdrpExposure(family: TOOLKIT.IPostProcessEffectModel): void;
         /** A render pipeline of class `ctor` already attached to `camera`, if any (scans the pipeline manager). */
@@ -15276,14 +17145,164 @@ declare namespace TOOLKIT {
             reused: boolean;
             settings: TOOLKIT.IPostProcessSsr;
         }[];
+        /** The PPv2 SSR rendering-path gate per camera the applier ran for (spit-and-polish FR-8; read-backs / tests). */
+        GetSsrGates(): TOOLKIT.IPostProcessSsrGate[];
+        /** FR-2 slot of every family in the listing (lower first): screen-space passes, the head group, the pipeline's own effects, antialiasing last. */
+        static readonly EffectOrders: {
+            [family: string]: number;
+        };
+        /** The Unity effect names a listing row shows for the camera-level antialiasing (PostProcessLayer) row. */
+        static readonly AntialiasingEffectName: string;
+        /** Notified after every listing build and after every field `set` / enable change (the Inspector section re-renders on it). */
+        onEffectListingChangedObservable: BABYLON.Observable<PostProcessor>;
+        /** The effect listing of every applied camera (read-backs / the Inspector section). */
+        GetEffectListings(): {
+            camera: BABYLON.Camera;
+            effects: TOOLKIT.IPostProcessInspectorEffect[];
+        }[];
+        /** The effect listing of one camera (null when the camera has no applied stack). */
+        GetEffectListing(camera: BABYLON.Camera): TOOLKIT.IPostProcessInspectorEffect[];
+        /** Whether a family is enabled on a camera (true until `SetEffectEnabled` turned it off). */
+        IsEffectEnabled(camera: BABYLON.Camera, family: string): boolean;
+        /** Records the enabled flag of a family on a camera (the listing's `enabled` reads it). */
+        protected setEffectEnabledFlag(camera: BABYLON.Camera, family: string, enabled: boolean): void;
+        /** Rebuilds the listing of `camera` from the blended model, the fact lists and the gates, and notifies the observable. */
+        protected rebuildEffectListing(camera: BABYLON.Camera): void;
+        /** Notifies the listing observable (after a build, a `set` or an enable change). */
+        protected notifyEffectListing(): void;
+        private buildEffectListing;
+        /** A row skeleton for `family` on `camera`; `fields` are appended by the builders. */
+        private listingRow;
+        /** A number field: `get` / `set` close over the caller's accessors; `set` notifies the listing observable. */
+        private numberField;
+        private switchField;
+        private textField;
+        /** Three sRGB 0..1 number rows (r, g, b) on a colour array plus a read-only hex text row. */
+        private colorFields;
+        /** The Unity enum name of a field value (`{ value, name }` envelopes) or its number as text. */
+        private enumLabel;
+        /** A per-effect cache of the Unity values the Babylon-driven fields show (seeded from the authored model, updated by `set`). */
+        private listingValues;
+        private static fmt;
+        private listGrain;
+        private listVignette;
+        private listChromaticAberration;
+        private listBloom;
+        private listColorGrading;
+        private listDepthOfField;
+        private listMotionBlur;
+        private listLensDistortion;
+        private listAmbientOcclusion;
+        private listScreenSpaceReflections;
+        private listSharpen;
+        private listAntialiasing;
+        /** The families `SetEffectEnabled` understands (the listing's families plus the camera-level antialiasing row). */
+        static readonly ToggleFamilies: string[];
+        /**
+         * Enables / disables one effect family on `camera` without a re-export (FR-11). Returns true when the family had
+         * something to toggle on that camera (an owned pass, a pipeline flag or a screen-space pipeline); false otherwise.
+         */
+        SetEffectEnabled(camera: BABYLON.Camera, family: string, enabled: boolean): boolean;
+        /** The dense FR-2 chain order recorded per camera the first time a toggle was requested (read-backs / tests). */
+        GetToggleOrder(camera: BABYLON.Camera): BABYLON.PostProcess[];
+        private pipelineOf;
+        private pluginNameOf;
+        /**
+         * A pass that arrives AFTER a toggle recorded the chain order (an asynchronous LUT / spectral-LUT pass) is spliced into
+         * that order at the position its head slot implies, so a later ON re-inserts the toggled family around it correctly
+         * (inspector-truth T7; without this the re-insert index ignored the late pass until the next pipeline rebuild).
+         */
+        private spliceIntoToggleOrder;
+        private recordToggleOrder;
+        /** The owned passes of `camera` matching `predicate` (detached ones included, so ON finds them again). */
+        private toggleOwnedPasses;
+        /** Detaches `passes` (OFF) or re-inserts the family's detached passes at their recorded slot among the live passes (ON). */
+        private togglePasses;
+        /** Flips a DefaultRenderingPipeline boolean (remembering the applied value the first time, restored on ON). */
+        private togglePipelineFlag;
+        /** LDR grading: neutralises the image-processing grade (OFF) and puts the applied values back (ON), like `__ppToggle('colorGrading')`. */
+        private toggleImagingGrade;
+        /** SSAO2 / SSR: detaches / re-attaches the camera on the pipeline manager, then normalises the chain (the only families that do). */
+        private toggleRenderPipeline;
         /** Registers a post-process this component created so destroy disposes it. */
         protected trackPostProcess(postProcess: BABYLON.PostProcess, camera: BABYLON.Camera): void;
         /** Registers a texture (for example the baked LUT) this component loaded. */
         protected trackTexture(texture: BABYLON.BaseTexture): void;
         /** Registers an SSAO2 / SSR pipeline this component created. */
         protected trackRenderPipeline(pipeline: BABYLON.PostProcessRenderPipeline): void;
-        /** Disposes everything this instance created (reused pipelines are left to their owner). */
-        private disposeResources;
+        /**
+         * Disposes everything this instance created and puts the shared image processing back (reused pipelines are left to
+         * their owner). Called by `destroy`, and by `applyVolumes` when it RE-applies (review-fixes FR-9): a late volume
+         * changes the blend, so the orchestrator lets go of the stacks it owns and builds them again from the full registry.
+         */
+        protected releaseStacks(): void;
+        /** Master switch. Set false BEFORE the scene loads to leave Babylon's glslang/twgsl loading alone. */
+        static GlslangWatchdog: boolean;
+        /** How long (ms) an owned GLSL pass may stay not ready while glslang/twgsl is not loaded before the first retry. */
+        static GlslangStallDelay: number;
+        /** Time (ms) one retry of `prepareGlslangAndTintAsync` is given before the next one starts. */
+        static GlslangRetryTimeout: number;
+        /** Delay (ms) before each retry; its length is the number of tries. */
+        static GlslangRetryBackoff: number[];
+        /** The warn-once key of the final failure. */
+        static readonly GlslangWarningKey: string;
+        /** Clock (ms) and timer used by the watchdog (replaceable by tests). */
+        static GlslangClock: () => number;
+        static GlslangSchedule: (callback: () => void, ms: number) => any;
+        private glslangObserver;
+        private glslangObserverScene;
+        private glslangToken;
+        private glslangStuckSince;
+        private glslangState;
+        /** The engine the watchdog applies to: a WebGPU engine exposing `prepareGlslangAndTintAsync`, else null (WebGL, NullEngine). */
+        static GlslangEngine(scene: BABYLON.Scene): any;
+        /** Read-back of the watchdog: whether it is watching, the tries made, the final state and the passes still not ready. */
+        GetGlslangWatchdogState(): {
+            armed: boolean;
+            attempts: number;
+            running: boolean;
+            failed: boolean;
+            recovered: boolean;
+            reason: string;
+            rebuilt: string[];
+            stuckPasses: string[];
+        };
+        /** The owned GLSL passes whose effect is not ready (WGSL passes are never waiting for glslang and are skipped). */
+        GetGlslangStuckPasses(): BABYLON.PostProcess[];
+        /** Starts watching after a stack is applied (WebGPU only, and only while glslang/twgsl is not loaded yet). */
+        protected armGlslangWatchdog(): void;
+        /** One watchdog tick (every frame while armed). */
+        protected checkGlslangWatchdog(): void;
+        /** Clears the dead cached promise and retries `prepareGlslangAndTintAsync` with a timeout and backoff. */
+        private startGlslangRetry;
+        /**
+         * glslang.js and twgsl.js each memoise their own module promise (`instance`), and a failed or stalled wasm leaves it
+         * pending forever: clearing Babylon's cached promise alone would re-await that same dead promise without a request.
+         * Before a retry, the script globals Babylon loaded are dropped (never a module passed through the engine options),
+         * so `_initGlslangAsync` / `initTwgsl` load the scripts again with fresh closures. A glslang that already loaded
+         * (`engine._glslang`) is kept, and a twgsl that already loaded is skipped by Babylon itself (`WebGPUTintWASM._Twgsl`).
+         * Returns the globals it dropped.
+         */
+        static ResetGlslangScriptCaches(engine: any): string[];
+        /** glslang/twgsl is loaded: rebuild the passes still waiting on the dead promise, refresh the listings, stop watching. */
+        private recoverGlslang;
+        /** Every try failed: warn once with what is not rendering and why, surface it in the listings, stop watching. */
+        private failGlslang;
+        /**
+         * Recreates the effect of every pass in `passes`. Babylon caches effects by source + defines, so a plain
+         * `updateEffect` would hand back the same stuck effect: its cache entry is dropped first. The pass's OWN defines
+         * must be passed back explicitly -- `updateEffect(null)` replaces them with "" -- and they live in the effect
+         * wrapper options (`_postProcessDefines` is undefined on these passes): measured on Oasis, a define-less rebuild
+         * reported every pass ready while colorGradingHdr lost `LUT3D` / `LUT_DECODE_SRGB` and the frame stayed ungraded
+         * (p1 63.4 / mean 126.4 against 39.6 / 107.8). Re-preparing the stuck effect in place (`Effect._prepareEffect`)
+         * is NOT an option: it re-processes already processed code and glslang fails ("GLSL compilation failed").
+         */
+        static RebuildGlslangPasses(engine: any, passes: BABYLON.PostProcess[]): string[];
+        /** Appends the watchdog reason to the listing rows whose pass is waiting for (or lost to) glslang/twgsl. */
+        private annotateGlslangReasons;
+        private removeGlslangObserver;
+        /** Stops the watchdog and abandons any retry in flight (releaseStacks: re-apply and destroy). */
+        protected disarmGlslangWatchdog(): void;
     }
 }
 declare namespace TOOLKIT {
@@ -15306,11 +17325,26 @@ declare namespace TOOLKIT {
         height?: number;
         exported?: boolean;
     }
-    /** The baked colour-grading LUT strip (FR-5 / FR-6): N*N x N, PNG row 0 = green 0, blue selects the slice. */
+    /**
+     * The baked colour-grading LUT strip (FR-5 / FR-6): N*N x N, PNG row 0 = green 0, blue selects the slice.
+     * Spit-and-polish FR-7: HDR-mode bakes carry `lutspace` ("logc": the strip is indexed by LogC-encoded scene
+     * colour and already contains the tone mapper) and `lutencoding` ("srgb": 8-bit samples stored sRGB-encoded,
+     * to be decoded after sampling). Both are ABSENT (undefined) on LDR strips and on older exports, which decode
+     * exactly as before; the runtime keys its decode branch on the fields, never on the file.
+     */
     interface IPostProcessLutReference extends IPostProcessTextureReference {
         lutsize?: number;
         lutlayout?: string;
         identity?: boolean;
+        lutspace?: string;
+        lutencoding?: string;
+        /**
+         * Review-fixes FR-2 / FR-18: the ordered Unity operators the exporter baked into this strip
+         * (`"hueShift"`, `"externalLut"`, `"ldrLut"`, `"temperature"`, `"hdr:logc"`, `"tonemapper:ACES"`, ...).
+         * Present on every BAKED strip, empty when the bake was the identity; ABSENT on an export that predates
+         * the list, which is exactly how the runtime tells "this value was baked" from "this export never baked it".
+         */
+        operators?: string[];
     }
     /** One effect of a volume profile (FR-3). `parameters` keys are the Unity field names lowercased. */
     interface IPostProcessEffect {
@@ -15322,10 +17356,29 @@ declare namespace TOOLKIT {
             [key: string]: any;
         };
     }
+    /**
+     * A local volume's trigger shape, in the volume node's LOCAL space (urp-material-export-parity D25).
+     * The exporter writes the collider on the volume's own GameObject; the node's world matrix is already on the
+     * glTF node, so nothing is baked into world space and the bounds survive animation and reparenting.
+     */
+    interface IPostProcessVolumeBounds {
+        shape: "box" | "sphere";
+        center: number[];
+        size?: number[];
+        radius?: number;
+    }
     /** The volume envelope (FR-2) as found in the component properties. */
     interface IPostProcessVolumeProperties {
         volumetype?: string;
         isglobal?: boolean;
+        /** Local volumes only: the trigger shape the runtime blends against (urp-material-export-parity D25). */
+        bounds?: IPostProcessVolumeBounds;
+        /**
+         * URP's two PIPELINE DEFAULT layers, the profiles `VolumeManager.Initialize()` seeds the stack with
+         * (urp-material-export-parity D13 / finding F-M.16). They are not scene Volumes - they have no GameObject
+         * and no layer - so the camera's volume layer mask does not apply to them, and neither does ours.
+         */
+        pipelinedefault?: boolean;
         weight?: number;
         priority?: number;
         blenddistance?: number;
@@ -15341,6 +17394,38 @@ declare namespace TOOLKIT {
         antialiasing?: IPostProcessEnumValue;
         msaasamples?: number;
         allowhdr?: boolean;
+        /** Unity `Camera.actualRenderingPath` name ("Forward", "DeferredShading", ...); absent on older exports (spit-and-polish FR-8). */
+        renderingpath?: string;
+        /**
+         * `physicalaperture` is `UnityEngine.Camera.aperture` (f-stop) and `physicalfocallength` is `.focalLength` (mm),
+         * exported ONLY when the camera has `usePhysicalProperties` (review-fixes FR-13). HDRP's depth of field
+         * `UsePhysicalCamera` mode reads its bokeh from the camera rather than from the volume, so the runtime needs both
+         * here; every other export, and any camera without physical properties, carries neither key.
+         */
+        physicalaperture?: number;
+        physicalfocallength?: number;
+    }
+    /**
+     * The PPv2 SSR rendering-path gate of one camera (spit-and-polish FR-8, read-backs / tests): `renderingpath` as exported
+     * (null when the export predates the key), `forced` = `PostProcessor.ForceScreenSpaceReflections`, `applied` whether an
+     * SSR pipeline renders the camera after the applier ran, `reason` why not (`renderingpath:<name>`, `renderingpath:missing`,
+     * `unsupported`), `reused` whether the pipeline belonged to someone else, and the colour-space `flags` read back from it.
+     */
+    interface IPostProcessSsrGate {
+        camera: string;
+        volumetype: string;
+        renderingpath: string;
+        forced: boolean;
+        applied: boolean;
+        reused: boolean;
+        reason: string;
+        flags: {
+            inputTextureColorIsInGammaSpace: boolean;
+            generateOutputInGammaSpace: boolean;
+            enableSmoothReflections: boolean;
+            blurDispersionStrength: number;
+            roughnessFactor: number;
+        };
     }
     interface IPostProcessField {
         value: any;
@@ -15365,6 +17450,13 @@ declare namespace TOOLKIT {
     }
     interface IPostProcessModel {
         volumetype: string;
+        /**
+         * Every volume type that CONTRIBUTED to this stack, in blend order (review-fixes FR-7). `volumetype` is the FIRST
+         * contributor's, which is all a single-pipeline export ever needs; a mixed stack (authoring scenes carry PPv2, URP
+         * and HDRP volumes side by side) still has to know that an HDRP volume took part, because HDRP's Fixed exposure is
+         * exported into the scene-level image processing block and must not be neutralised away.
+         */
+        volumetypes: string[];
         families: {
             [family: string]: IPostProcessEffectModel;
         };
@@ -15377,6 +17469,12 @@ declare namespace TOOLKIT {
         name: string;
         layer: number;
         properties: IPostProcessVolumeProperties;
+        /**
+         * Local volumes only: the active camera's position in THIS volume's local space, computed by the caller
+         * (`PostProcessing.ts`), which has real Babylon. Keeping the transform outside the contract is what lets
+         * `localVolumeWeight` stay pure arithmetic (urp-material-export-parity D26).
+         */
+        cameraLocal?: number[];
     }
     interface IPostProcessIgnoredVolume {
         name: string;
@@ -15411,6 +17509,11 @@ declare namespace TOOLKIT {
      */
     class PostProcessingContract {
         static readonly VOLUME_TYPES: string[];
+        /** PPv2 `GradingMode` enum (`ColorGrading.gradingMode`): 0 LowDefinitionRange, 1 HighDefinitionRange (default), 2 External. */
+        static readonly GRADING_MODES: string[];
+        /** Unity `RenderingPath` names as exported in `renderingpath`; PPv2 renders SSR only on `DeferredShading`. */
+        static readonly RENDERING_PATH_DEFERRED: string;
+        static readonly RENDERING_PATH_FORWARD: string;
         /**
          * Canonical families and their Unity defaults (PPv2 vocabulary where both exist). A field that is
          * not overridden takes THIS value (FR-11), never the exporter's stored value and never zero.
@@ -15421,6 +17524,47 @@ declare namespace TOOLKIT {
             };
         };
         /**
+         * Every PUBLIC parameter each supported Unity effect exports, per pipeline, lower-cased and AFTER the `Vocabulary`
+         * renames (review-fixes FR-15). This is the single source of truth for the unsupported-input policy: an overridden
+         * field is either in the applier's `PostProcessor.Consumes` list for its family, or it is warned. `KnownFields` is
+         * what the fields-audit test enumerates, so a Unity upgrade that adds a parameter shows up as a failing audit
+         * rather than as a silently ignored authored value.
+         *
+         * Sources, read field by field: PPv2 3.5.4 `PostProcessing/Runtime/Effects/*.cs`, URP and HDRP 17.5.0 overrides /
+         * components (the field tables in the review-fixes plan's Codebase Analysis; the names were re-checked against the
+         * 14.0.12 sources on disk, which differ only by the additions noted inline), and the exported fixtures under
+         * `APP/tests/fixtures/postprocessing`.
+         *
+         * NOT listed, because they never reach a family's `fields`: `lut` (lifted to `model.lut` by `normalise`),
+         * LensDistortion `center` (split into `centerx` / `centery`), and the reflection noise `parameters` / `hideflags` /
+         * `active` / `parametercount` that `parseEffect` drops. Unity's authorable `enabled` VolumeParameter is listed as
+         * `effectenabled`, the name `parseEffect` gives it.
+         */
+        static readonly KnownFields: {
+            [family: string]: {
+                BuiltIn?: string[];
+                URP?: string[];
+                HDRP?: string[];
+            };
+        };
+        /**
+         * Parameter groups that only make sense in a mode Babylon does not implement (review-fixes FR-15). They are real,
+         * known fields -- so they are NOT "unsupported parameter" noise, one per field -- but there is nothing to map them
+         * to, so the whole group is reported under a single `<family>:mode-only-fields` key naming the fields.
+         */
+        static readonly ModeOnlyFields: {
+            [family: string]: string[];
+        };
+        /**
+         * The OVERRIDDEN fields of `family` that `consumes` does not claim, in declaration order (review-fixes FR-15). An
+         * un-overridden field is the Unity default and changes nothing, so it is never reported. `effectenabled` is never
+         * reported either: it is the effect's on/off control (FR-14), not a parameter with a visual meaning. A field the
+         * exporter could not serialise (`unsupported` set) is also skipped here -- `applyStack` reports those with the
+         * type-specific message, and both warnings share the `param:<family>.<field>` key, so reporting it twice would
+         * suppress the more informative one.
+         */
+        static unconsumedFields(family: IPostProcessEffectModel, consumes: string[]): string[];
+        /**
          * Unity effect type -> canonical family, with field renames from the URP / HDRP vocabulary into the
          * PPv2 one. Unlisted effect types land in `unsupported[]` (FR-17 / FR-36). Grading-family members
          * whose operators only exist in the baked LUT (FR-37) are folded into colorGrading so the runtime
@@ -15428,14 +17572,24 @@ declare namespace TOOLKIT {
          */
         static readonly Vocabulary: {
             [effecttype: string]: {
-                family: string;
+                family: string | null;
                 rename?: {
                     [from: string]: string;
                 };
+                consumedElsewhere?: boolean;
             };
         };
+        /** HDRP namespace prefix, used to tell the obsolete HDRP shims from the PPv2 effects that share their type name. */
+        static readonly HDRP_NAMESPACE: string;
         /** Reads the component properties bag into the typed envelope. Missing keys stay undefined; nothing throws. */
         static parseVolume(props: any): IPostProcessVolumeProperties;
+        /**
+         * A local volume's exported `bounds`, accepted only when it is complete and well-formed: `shape` is
+         * "box" or "sphere", `center` is three finite numbers, and the shape's own field (`size` / `radius`) is
+         * present and finite. Anything else returns null, and the volume is then treated as an older export
+         * that carries no bounds at all. Never throws.
+         */
+        static parseVolumeBounds(raw: any): IPostProcessVolumeBounds;
         /** One effect; reflection noise (nested parameters, hideflags, parametercount, active/enabled inside parameters) is dropped. */
         static parseEffect(raw: any): IPostProcessEffect;
         /** `{ value, overrideState }` -> `{ value, overridden }`; a bare value (legacy) counts as overridden. */
@@ -15448,12 +17602,43 @@ declare namespace TOOLKIT {
         static normalise(volume: IPostProcessVolumeProperties): IPostProcessModel;
         private static createFamily;
         private static parseLut;
+        /**
+         * A texture parameter exported to the assets folder (`{ url, type, width, height, exported }`), e.g. the
+         * chromatic-aberration `spectrallut` (spit-and-polish FR-4). Returns null for `null` / non-objects / entries
+         * without a url (an un-authored texture parameter is exported as null).
+         */
+        static parseTexture(raw: any): IPostProcessTextureReference;
+        /** Parameter names whose value is a texture reference (parsed through `parseTexture`, null when un-authored). */
+        static readonly TextureFields: {
+            [family: string]: string[];
+        };
+        /**
+         * The colour-grading mode of a (blended) model as `{ value, name }`: PPv2's `gradingmode` (default
+         * HighDefinitionRange); URP / HDRP grading is always HDR and reports HighDefinitionRange (spit-and-polish FR-7).
+         */
+        static gradingMode(model: IPostProcessModel): IPostProcessEnumValue;
+        /** True when the model grades in HDR (PPv2 HighDefinitionRange, or any URP / HDRP volume). */
+        static isHdrGrading(model: IPostProcessModel): boolean;
+        /** The tone mapper enum `{ value, name }` of the colour-grading family (PPv2 default None). */
+        static tonemapper(model: IPostProcessModel): IPostProcessEnumValue;
+        /** The camera's exported rendering path, or undefined when the export predates the key (spit-and-polish FR-8). */
+        static renderingPath(metadata: IPostProcessCameraMetadata): string;
         /** `volumetype` normalised to BuiltIn / URP / HDRP (legacy exports without the key are BuiltIn). */
         static volumeType(volume: IPostProcessVolumeProperties): string;
         /**
-         * Blends all GLOBAL volumes like Unity: sorted by priority ascending, each overridden field interpolated
-         * from the current stack value toward the override by `weight`. Local volumes, volumes outside
-         * `layerMask` (-1 / undefined = everything) and weight-0 volumes are reported in `ignored[]`.
+         * URP's local-volume weight (urp-material-export-parity D26). `cameraLocal` is the camera position
+         * ALREADY IN THE VOLUME'S LOCAL SPACE - pure arithmetic, no BABYLON, so the stub-based test suite can run
+         * it. Returns 0 for any missing / non-finite input. A camera INSIDE the bounds is always 1, whatever
+         * `blendDistance` is: the blend band only applies outside.
+         */
+        static localVolumeWeight(bounds: IPostProcessVolumeBounds, cameraLocal: number[], blendDistance: number): number;
+        /**
+         * Blends volumes like Unity: sorted by priority ascending, each overridden field interpolated from the
+         * current stack value toward the override by `weight`. A LOCAL volume contributes when the camera is
+         * inside its exported `bounds` or within `blenddistance` of them, at `weight x localVolumeWeight(...)`
+         * (urp-material-export-parity D26); a local volume with no bounds (an older export) is still dropped.
+         * Volumes outside `layerMask` (-1 / undefined = everything) and weight-0 volumes are reported in
+         * `ignored[]`, except a `pipelinedefault` layer, which no layer mask applies to.
          */
         static blendStack(volumes: IPostProcessVolumeEntry[], layerMask?: number): IPostProcessStack;
         /** True when `layer` is inside `mask` (mask undefined, null or -1 = everything). */
@@ -15505,7 +17690,11 @@ declare namespace TOOLKIT {
         blurLevel: number;
         warning: string;
     }
-    /** SSAO2RenderingPipeline settings derived from a Unity ambient-occlusion effect. */
+    /**
+     * SSAO2RenderingPipeline settings derived from a Unity ambient-occlusion effect. The first six fields are the T24 port;
+     * the lever set below them (artifact-cleanup T2) carries every remaining SSAO2 tunable so the fit against Unity's MSVO can
+     * use the whole pipeline, not just strength and radius.
+     */
     interface IPostProcessSsao {
         totalStrength: number;
         radius: number;
@@ -15513,6 +17702,20 @@ declare namespace TOOLKIT {
         expensiveBlur: boolean;
         ssaoRatio: number;
         blurRatio: number;
+        /** SSAO2 `epsilon` (compile-time define: the depth-difference threshold below which a sample does not occlude; flat-surface self-occlusion lever). */
+        epsilon: number;
+        /** SSAO2 `base` (added to the occlusion result: caps the peak darkening). */
+        base: number;
+        /** SSAO2 `maxZ` (view-space distance beyond which occlusion fades out). */
+        maxZ: number;
+        /** SSAO2 `minZAspect` (limits the sampling radius near the camera: `correctedRadius = min(radius, minZAspect * depth / near)`). */
+        minZAspect: number;
+        /** SSAO2 bilateral blur taps per direction (only with `expensiveBlur`). */
+        bilateralSamples: number;
+        /** SSAO2 bilateral blur softening of the depth-difference weight (only with `expensiveBlur`). */
+        bilateralSoften: number;
+        /** SSAO2 bilateral blur depth tolerance (only with `expensiveBlur`). */
+        bilateralTolerance: number;
     }
     /** SSRRenderingPipeline settings for one Unity preset (or a custom configuration). */
     interface IPostProcessSsr {
@@ -15523,10 +17726,16 @@ declare namespace TOOLKIT {
         maxDistance?: number;
         attenuateScreenBorders?: boolean;
         roughnessFactor?: number;
+        /** Babylon roughness blur (spit-and-polish FR-8): set on every SSR pipeline the volume creates. */
+        blurDispersionStrength?: number;
+        enableSmoothReflections?: boolean;
     }
     /** Antialiasing flags derived from the camera metadata (FR-16). */
     interface IPostProcessAntialiasing {
+        /** FXAA / SMAA / TAA: the toolkit's Unity FXAA 3.11 tail pass renders (final-verification F-6). */
         fxaa: boolean;
+        /** PPv2 `PostProcessLayer.fastMode` (FXAA quality preset 12 instead of 28): a layer setting the camera export does not carry, so always false. */
+        fast: boolean;
         samples: number;
         mode: number;
     }
@@ -15534,8 +17743,10 @@ declare namespace TOOLKIT {
      * Unity -> Babylon post-processing value conversions (FR-18). Every conversion is a pure static
      * function, one per parameter family, documented with the Unity range, the Babylon range and the
      * rationale. Tunable constants are public static fields; every one of them was tuned by the browser
-     * verification loop (plan tasks T22-T25) and carries a `// frozen T<task>` comment quoting the measured evidence
-     * (`_specs/verification/post-processing/notes/*.md`); the feature spec's Decisions log records the final values.
+     * verification loop and carries a `// frozen T<task>` comment quoting the measured evidence
+     * (`_specs/verification/post-processing/notes/*.md`); each feature spec's Decisions log records the final values.
+     * The task ids in those markers belong to four plans, in order: the port plan (T22-T26), spit-and-polish (T19),
+     * artifact-cleanup (T4 / T5) and this review-fixes plan.
      *
      * Nothing here touches a scene or a pipeline: the appliers in TOOLKIT.PostProcessor call these and
      * assign the results, so the conversion table is testable in plain node against a stub BABYLON.
@@ -15555,8 +17766,6 @@ declare namespace TOOLKIT {
         static contrastFromUnity(contrast: number): number;
         /** PPv2 / URP saturation -100..100 -> Babylon colorCurves.globalSaturation (same nominal range, clamped). */
         static saturationFromUnity(saturation: number): number;
-        /** PPv2 / URP hueShift -180..180 -> Babylon colorCurves.globalHue 0..360 via (hue + 360) mod 360 (so +180 and -180 coincide). */
-        static hueFromUnity(hueShift: number): number;
         /**
          * PPv2 tonemapper enum (None=0, Neutral=1, ACES=2, Custom=3) -> Babylon. This is the ONLY place the
          * Unity enum is interpreted (FR-24): None disables tone mapping, ACES -> TONEMAPPING_ACES, Neutral ->
@@ -15570,67 +17779,238 @@ declare namespace TOOLKIT {
         static srgbToLinearColor(color: number[]): number[];
         /** Single-channel sRGB -> linear (IEC 61966-2-1). */
         static srgbToLinear(c: number): number;
+        /**
+         * Single-channel linear -> sRGB (the exact inverse of `srgbToLinear`, IEC 61966-2-1). Inspector-truth T3: the only
+         * Babylon -> Unity direction in this table, used to show a pass created from a LINEAR colour (a caller that never
+         * had the authored sRGB value) in the Unity units the Inspector section edits. Pure.
+         */
+        static linearToSrgb(c: number): number;
+        /** Linear [r,g,b,(a)] -> sRGB [r,g,b,(a)] 0..1 (alpha unchanged); the inverse of `srgbToLinearColor`. */
+        static linearToSrgbColor(color: number[]): number[];
         /** True when a colour (any length >= 3) is white within tolerance: a neutral filter / bloom tint is skipped. */
         static isWhite(color: number[], tolerance?: number): boolean;
         /**
          * PPv2 bloom `intensity` (0..inf, typical 0..10) is NOT a linear weight: BloomRenderer uses
-         * `intensity = exp2(intensity / 10) - 1` (3 -> 0.231, 10 -> 1.0) as the additive strength on the HDR colour.
-         * Babylon bloomWeight is the same kind of additive strength, so the exact curve is used with a unit multiplier
-         * (T23: the previous linear 0.2 * i overshot at low values and undershot at high ones).
+         * `intensity = exp2(intensity / 10) - 1` (3 -> 0.231, 10 -> 1.0) as the additive strength on the HDR colour
+         * (`Bloom.cs`, `_Bloom_Settings.y`, multiplied into the tent-upsampled pyramid by `Uber.shader`).
+         *
+         * Final-verification T15 (F-7): the Built-in bloom renders Unity's own pyramid (`ColoredBloomPlugin`, 13-tap
+         * downsamples / tent upsamples, `iterations` from `diffusion` and the frame size), so the curve is applied with NO
+         * multiplier. `BloomWeightScalePPv2` (2.0, frozen T23 as the single-blur compensation: one blur pair reached 66 % of
+         * Unity's full-frame signal at 1.5) is RETIRED with the blur pair; its history stays in the port spec's Decisions.
          */
-        static BloomWeightScalePPv2: number;
         /** URP bloom `intensity` (0..inf, typical 0..5) IS the additive strength (used as-is by the URP bloom shader). */
         static BloomWeightScaleURP: number;
-        /** Unity bloom thresholds are gamma-space values; Babylon extracts on linear luminance. Exponent of the conversion. */
+        /**
+         * Unity bloom thresholds are gamma-space values; Babylon's NATIVE bloom extracts on linear luminance. Exponent of the
+         * conversion for the native / SRP path (`bloomThresholdFromUnity`). The Built-in pyramid takes Unity's exact
+         * `_Threshold` vector instead (`bloomThresholdVectorFromPPv2`, `gammaToLinearSpace`) since final-verification T15.
+         */
         static BloomThresholdGamma: number;
-        /** bloomKernel is a blur size in pixels; PPv2 diffusion 1..10 and URP scatter 0..1 map linearly into [KernelMin, KernelMax]. */
+        /**
+         * bloomKernel is a blur size in pixels; URP scatter 0..1 maps linearly into [KernelMin, KernelMax] on the native / SRP
+         * blur path. PPv2 `diffusion` no longer maps to a kernel: since final-verification T15 (F-7) it sets the pyramid depth
+         * (`bloomPyramidFromDiffusion`, Unity `Bloom.cs`), and `bloomKernelFromDiffusion` (32..256, frozen T23) is retired.
+         */
         static BloomKernelMin: number;
         static BloomKernelMax: number;
-        /** Fixed render-target ratio for Babylon's bloom (documented, not converted). */
+        /** Fixed render-target ratio for Babylon's native bloom (documented, not converted); the pyramid's first level is Unity's own half size. */
         static BloomScale: number;
-        /** Unity bloom intensity -> Babylon bloomWeight: PPv2 through exp2(i / 10) - 1, URP / HDRP linear (family selects the scale). */
+        /** Unity `Bloom.cs` `k_MaxPyramidSize`: the iteration clamp of the bloom pyramid (a Unity constant, not a tuned lever). */
+        static BloomMaxIterations: number;
+        /**
+         * HDRP bloom intensity is a 0..1 MIX STRENGTH between the scene and the bloom pyramid, not URP's linear weight, so it
+         * gets its own scale (review-fixes FR-20) rather than sharing URP's.
+         */
+        static BloomWeightScaleHDRP: number;
+        /**
+         * Unity bloom intensity -> the additive bloom strength: PPv2 through Unity's own `exp2(i / 10) - 1` (the pyramid
+         * composite's `intensity` uniform, `Bloom.cs` / `Uber.shader`, no multiplier since final-verification T15), URP / HDRP
+         * linear through the family's scale (the native pipeline's `bloomWeight`).
+         */
         static bloomWeightFromIntensity(intensity: number, volumetype?: string): number;
         /**
-         * Unity bloom threshold (gamma space, >= 0) -> Babylon bloomThreshold (linear luminance). Unity applies a soft
-         * knee below the threshold (PPv2 `softKnee` 0..1, default 0.5: the curve starts at threshold * (1 - softKnee));
-         * Babylon extracts with a hard threshold, so the knee's midpoint threshold * (1 - softKnee * BloomKneeWeight) is
-         * used as the effective onset (T23: Unity's bloom lifts mid-bright areas that a hard 0.9 would exclude).
+         * Unity bloom threshold (gamma space, >= 0) -> Babylon's NATIVE bloomThreshold (linear luminance). Unity applies a
+         * soft knee below the threshold; Babylon's native bloom extracts with a hard one, so the effective onset drops by
+         * `BloomKneeWeight` of the knee's width (T23: Unity's bloom lifts mid-bright areas that a hard 0.9 would exclude).
+         * Since final-verification T15 the Built-in applier no longer uses this (the pyramid prefilter runs Unity's
+         * `QuadraticThreshold` on `bloomThresholdVectorFromPPv2`); the PPv2 branch is kept as the documented closed form of
+         * the native approximation, the SRP branch drives the URP / HDRP native path.
+         *
+         * The knee is NOT the same across pipelines (review-fixes FR-20):
+         * - PPv2 authors it as `softKnee` (0..1, default 0.5) and applies it to the GAMMA-space threshold, so the onset is
+         *   `t * (1 - softKnee * BloomKneeWeight)` and the gamma conversion follows.
+         * - URP hardcodes it on the LINEAR threshold: `thresholdKnee = GammaToLinear(threshold) * 0.5`
+         *   (`PostProcessPass.cs:1090`, "Hardcoded soft knee"), and `softKnee` does not exist on its Bloom component.
+         *   Since urp-verification T8 (D13/D14) the URP branch returns `GammaToLinearSpace(t)` alone -- the knee is carried
+         *   separately by `bloomUrpPrefilterParams` and applied by the ported ladder's prefilter, never folded in here.
+         * - HDRP does the same: `knee = lthresh * k_Softness + 1e-5` with `k_Softness = 0.5`
+         *   (`HDRenderPipeline.PostProcess.cs:4670-4672`).
+         * So on URP / HDRP the authored `softKnee` is ignored (there is none) and the knee is taken off the linear value.
          */
         static bloomThresholdFromUnity(threshold: number, volumetype?: string, softKnee?: number): number;
+        /**
+         * The knee URP and HDRP hardcode as a fraction of the LINEAR threshold (both use 0.5; see bloomThresholdFromUnity).
+         * A Unity constant read from the two sources above, not a tuned lever, so it carries no `// frozen` marker. NOTE: the
+         * sample scene's SRP verification volumes author no bloom, so this branch has no browser oracle in this project --
+         * it rests on the cited sources alone, like `BloomWeightScaleHDRP`.
+         */
+        static BloomHardKneeSRP: number;
         /** Fraction of the soft knee (threshold * softKnee) that moves the hard threshold down (0 = ignore the knee, 1 = start of the knee). */
         static BloomKneeWeight: number;
-        /** PPv2 diffusion 1..10 -> bloomKernel pixels [KernelMin, KernelMax]. */
-        static bloomKernelFromDiffusion(diffusion: number): number;
+        /**
+         * Unity `Mathf.GammaToLinearSpace` (Runtime/Math/Color.h): the sRGB EOTF below 1 and `pow(v, 2.2)` above it, so an
+         * HDR "gamma" value (a bloom threshold or clamp above 1) converts the way Unity converts it. Negative input reads 0
+         * (every field this serves is authored `[Min(0)]`). Pure.
+         */
+        static gammaToLinearSpace(value: number): number;
+        /**
+         * Unity `Bloom.cs` (`BloomRenderer.Render`, final-verification T15 / F-7): the pyramid depth and the tent radius for a
+         * frame of `width` x `height` pixels at `diffusion` (1..10, default 7):
+         *
+         *     tw = floor(width / 2), th = floor(height / 2)          (anamorphicRatio 0: the ladder starts at half size)
+         *     logs = log2(max(tw, th)) + min(diffusion, 10) - 10     (float32, as Unity computes it)
+         *     iterations = clamp(floor(logs), 1, BloomMaxIterations)
+         *     sampleScale = 0.5 + logs - floor(logs)
+         *
+         * NOTE the size term is `max(tw, th)` (`Bloom.cs:163`, `int s = Mathf.Max(tw, th)`), i.e. the LONGER half-extent, which
+         * on a landscape frame is the width -- the plan's Acceptance quoted the height alone; the port follows Unity. A missing
+         * or non-numeric diffusion reads Unity's default 7; a frame smaller than 2 px counts as 1 (log2(0) is not a number).
+         * Returns `{ iterations, sampleScale, logs, tw, th }`. Pure.
+         */
+        static bloomPyramidFromDiffusion(diffusion: number, width: number, height: number): {
+            iterations: number;
+            sampleScale: number;
+            logs: number;
+            tw: number;
+            th: number;
+        };
+        /**
+         * Unity `Bloom.cs` prefilter vector `_Threshold` (final-verification T15 / F-7), consumed by `QuadraticThreshold` in
+         * `Bloom.shader`: `lthresh = GammaToLinearSpace(threshold)`, `knee = lthresh * softKnee + 1e-5`, and the vector is
+         * `(lthresh, lthresh - knee, knee * 2, 0.25 / knee)`. `threshold` defaults to Unity's 1, `softKnee` to 0.5 (clamped
+         * 0..1). Pure.
+         */
+        static bloomThresholdVectorFromPPv2(threshold: number, softKnee?: number): number[];
         /** URP scatter 0..1 -> bloomKernel pixels [KernelMin, KernelMax]. */
         static bloomKernelFromScatter(scatter: number): number;
         private static kernelFromUnit;
-        /** Unity intensity 0..1 -> Babylon vignetteWeight; Babylon's default 1.5 looks like Unity ~0.35, so 1.5 / 0.35. */
-        static VignetteWeightScale: number;
-        /** Unity smoothness 0.01..1 -> Babylon vignetteStretch 0..1 (documented softness stand-in, never vignetteBlendMode). */
-        static VignetteStretchScale: number;
-        static vignetteWeightFromIntensity(intensity: number): number;
-        static vignetteStretchFromSmoothness(smoothness: number): number;
+        /**
+         * URP `BloomPostProcessPass.cs:92-95` prefilter parameters: `threshold = GammaToLinearSpace(threshold)`,
+         * `thresholdKnee = threshold * 0.5` (hardcoded -- URP has no softKnee), `clamp` as authored (default 65472).
+         * `gammaToLinearSpace` is Unity's `Mathf.GammaToLinearSpace` (piecewise sRGB EOTF, see `:295`). Pure.
+         */
+        static bloomUrpPrefilterParams(threshold: number, clamp?: number): {
+            threshold: number;
+            knee: number;
+            clamp: number;
+        };
+        /** URP `BloomPostProcessPass.cs:98`: `Mathf.Lerp(0.05f, 0.95f, scatter)`, the upsample blend factor. Pure. */
+        static bloomUrpScatter(scatter: number): number;
+        /**
+         * URP `BloomPostProcessPass.cs:151-190` `CalcBloomResolution` + `CalcBloomMipCount`: `downres` 1 (Half, 0) or 2
+         * (Quarter, 1); `tw = max(1, width >> downres)`, `th` likewise; `mipCount = clamp(floor(log2(max(tw, th)) - 1), 1,
+         * maxIterations)` with `maxIterations` clamped to URP's 2..8 (default 6). `Mathf.Log(x, 2f)` is float32. Pure.
+         */
+        static bloomUrpLadder(width: number, height: number, downscale?: number, maxIterations?: number): {
+            tw: number;
+            th: number;
+            mipCount: number;
+            downres: number;
+        };
+        /**
+         * URP `UberPostProcessPass.cs:401-404`: the authored tint linearised, then normalised by its own luminance
+         * (`ColorUtils.Luminance`, Rec. 709 weights); a black tint is white. Takes the authored sRGB `[r, g, b]`. Pure.
+         */
+        static bloomUrpTint(color: number[]): number[];
+        /** URP `DepthOfField.highQualitySampling` -> Babylon blur level: High when true, Medium otherwise (D16). Pure. */
+        static dofBlurLevelFromUrpBokeh(highQualitySampling: boolean): number;
         /**
          * Unity vignette centre in UV (0..1, 0.5/0.5 = middle, y up) -> Babylon vignetteCenterX/Y, which live in the
          * viewport space (-1..1, 0 = middle, y up). Applied exactly once: (uv - 0.5) * 2.
          */
         static vignetteCenter(uv: number[]): IPostProcessVignetteCenter;
-        /** Unity intensity 0..1 -> Babylon aberrationAmount (Babylon default 30). */
-        static ChromaticAberrationScale: number;
-        /** Fixed Babylon radialIntensity (documented). */
-        static ChromaticAberrationRadialIntensity: number;
-        /** Unity grain intensity 0..1 -> Babylon grain.intensity (Babylon default 30). */
-        static GrainIntensityScale: number;
+        /**
+         * Unity vignette colour (authored sRGB `[r, g, b(, a)]`) -> the LINEAR rgb triple the VignettePlugin multiplies with
+         * (spit-and-polish FR-5). Alpha is dropped (Unity's vignette multiplies rgb only). Pure.
+         */
+        static vignetteColorLinear(rgba: number[]): number[];
+        /**
+         * Whether a colour-grading model grades in HDR (spit-and-polish FR-7): PPv2 `gradingMode` HighDefinitionRange (1)
+         * or External (2), or any URP / HDRP volume (their grading is always HDR). Only `LowDefinitionRange` (0) keeps the
+         * LDR path. External joined the HDR side in final-verification T13 (F-4): PPv2's `RenderExternalPipeline3D`
+         * (`ColorGrading.cs:435-448`) binds the authored LUT as `_Lut3D` under `COLOR_GRADING_HDR_3D`, and
+         * `Uber.shader:211-216` indexes it with LogC-encoded scene colour exactly like the HDR 2D branch, so the exporter
+         * bakes it as a `lutspace: "logc"` strip and the runtime must build the HDR grading pass for it. Pure.
+         */
+        static gradingModeIsHdr(gradingMode: number, volumetype: string): boolean;
+        /**
+         * Whether the authored grading mode's UNITY renderer bakes the tone mapper (final-verification T13). This is a
+         * different question from `gradingModeIsHdr`, and T13 split the two: `External` grades through the LogC LUT
+         * (so it is HDR for the grading path) but `RenderExternalPipeline3D` evaluates NO tone mapper at all, exactly
+         * like `RenderLDRPipeline2D` -- only `RenderHDRPipeline2D/3D` bake one (`ColorGrading.cs:423-430`). PPv2
+         * `HighDefinitionRange` (1) is therefore the only Built-in mode that bakes it; URP / HDRP always do. Pure.
+         */
+        static gradingModeBakesToneMapper(gradingMode: number, volumetype: string): boolean;
+        /**
+         * Toolkit-side multiplier on Unity's grain intensity (default 1.0 = Unity's formula exactly as authored). `GrainPlugin`
+         * multiplies the authored intensity by it before the x20 packing (`grainParams1.y = intensity * 20 * typeMultiplier * this`)
+         * and reads it every frame, so `TOOLKIT.PostProcessingConversions.GrainIntensityMultiplier = 1.5` from DevTools or an init
+         * script re-packs on the next frame without a rebuild or a Unity change. It is a tuning knob for the toolkit's render, not
+         * the retired `GrainIntensityScale` (x60, replaced by the formula port): the Inspector section keeps showing and editing
+         * Unity's intensity and reports the multiplier as a read-only row when it is not 1.
+         */
+        static GrainIntensityMultiplier: number;
+        /**
+         * Toolkit-side multiplier on Unity's bloom intensity (1.0 = Unity's formula exactly as authored). `ColoredBloomPlugin`
+         * multiplies the converted composite weight by it (`bloomWeightFromIntensity(...) * this`) inside its per-frame derive,
+         * on BOTH the pyramid and the retained blur-pair paths and for every `volumetype`, so
+         * `TOOLKIT.PostProcessingConversions.BloomIntensityMultiplier = 1` from DevTools or an init script restores Unity's
+         * authored strength on the next frame without a rebuild.
+         *
+         * Default **0.75** (2026-09-07), chosen from the measurement rather than from the worst case. The final-verification
+         * review found the toolkit's bloom carrying **1.32x** Unity's energy FRAME-WIDE and **2.1-2.2x** around the rough gold
+         * sphere (`notes/final-verification.md`, F-9.28), and traced the excess to Babylon's specular highlights being HOTTER
+         * than Unity's BEFORE any post-processing runs -- an IBL / probe question, not a bloom one. 1 / 1.32 = 0.76, so 0.75
+         * puts general bloom energy on Unity's while leaving Unity's authored intent otherwise intact. A value tuned to the
+         * gold sphere instead (~0.45-0.5) would dim every correctly-matching highlight by a third to compensate for one hot
+         * input, and would hide the IBL finding rather than leave it visible.
+         *
+         * It is a deliberate toolkit-side render correction, not a claim about Unity's formula (which the pyramid port
+         * reproduces exactly). Set it to 1 for any capture that measures the port against a Unity oracle, exactly as
+         * `GrainIntensityMultiplier` is pinned to 1 for oracle captures.
+         */
+        static BloomIntensityMultiplier: number;
         /** URP FilmGrain.type (Thin1=0, Thin2=1, Medium1..Medium6=2..7, Large01=8, Large02=9) -> intensity multiplier. */
         static FilmGrainTypeMultipliers: number[];
+        /**
+         * URP grain amplitude. URP packs `_Grain_Params.x = intensity * 4` (`UberPostProcessPass.cs:640`,
+         * `k_FilmGrainIntensityScale`) and samples one of ten scanned grain textures. The URP grain pass packs
+         * `intensity * GrainPlugin.IntensityScaleURP (4) * this * typeMultiplier * GrainIntensityMultiplier`, so **1.0
+         * is parity**: the bake is normalised to `GrainPlugin.UrpGrainTextureStd`, Medium01's own amplitude, and
+         * `FilmGrainTypeMultipliers` carries each other type's measured amplitude relative to it. Nothing is fitted.
+         *
+         * It was 1.375 between urp-verification T15 and this fix, standing in for an amplitude mismatch that was never
+         * the real problem: the bake was PPv2's HIGH-PASSED noise, whose energy sits at Nyquist, so it read as a clean
+         * dither rather than as grain however it was scaled. T14/T15 could not see that, because the metric they fitted
+         * against (`noise_added`, a high-pass residual) measures exactly the band the defect lives in. The bake now
+         * reproduces URP's CLUMPED grain structure instead, and the scalar goes back to unity.
+         */
+        static FilmGrainAmplitudeScaleURP: number;
         /** Unity sharpen intensity 0..1 -> Babylon sharpen.edgeAmount (Babylon default 0.3). */
         static SharpenEdgeScale: number;
-        static chromaticAberrationAmount(intensity: number): number;
-        static grainIntensity(intensity: number): number;
         static filmGrainTypeMultiplier(type: number): number;
         static sharpenEdgeAmount(intensity: number): number;
         /** Unity focusDistance is metres; Babylon depthOfField.focusDistance is millimetres. */
         static dofFocusDistanceMm(metres: number): number;
+        /**
+         * HDRP `Manual` depth of field (review-fixes FR-13): the focus plane is authored as two RANGES -- a near band
+         * (`nearFocusStart` .. `nearFocusEnd`) and a far band (`farFocusStart` .. `farFocusEnd`), everything between
+         * `nearFocusEnd` and `farFocusStart` being in focus. Babylon's bokeh has ONE focus distance, so the in-focus band's
+         * midpoint `(nearFocusEnd + farFocusStart) / 2` is used. Returns null when the band is inverted
+         * (`farFocusStart < nearFocusEnd`), which the caller warns about and skips rather than focusing behind the subject.
+         */
+        static dofFocusDistanceFromHdrpRanges(nearFocusEnd: number, farFocusStart: number): number;
         /**
          * PPv2 kernelSize (Small=0, Medium=1, Large=2, VeryLarge=3) -> BABYLON.DepthOfFieldEffectBlurLevel
          * (Low, Medium, High, High). Never touches fStop.
@@ -15688,25 +18068,87 @@ declare namespace TOOLKIT {
         static lensDistortionNormalised(value: number, volumetype?: string): number;
         /** PPv2 AmbientOcclusionQuality (Lowest=0, Low=1, Medium=2, High=3, Ultra=4) -> SSAO2 sample count. */
         static SsaoQualitySamples: number[];
-        /** Quality index at which SSAO2 expensiveBlur is enabled. */
+        /**
+         * Quality index at which SSAO2 expensiveBlur is enabled by the T24 quality gate. Since artifact-cleanup T2 the gate only
+         * matters when `SsaoExpensiveBlur` is false: the configurable bilateral blur (`SsaoBilateral*`) needs `expensiveBlur`,
+         * so the artifact-cleanup fit runs it on every quality and this constant is kept as the documented opt-out path.
+         */
         static SsaoExpensiveBlurFromQuality: number;
         /** Unity intensity (0..4) -> SSAO2 totalStrength (Babylon default 1). PPv2 MultiScaleVO darkens far more per unit of intensity than SSAO2. */
         static SsaoStrengthScale: number;
-        /** Unity radius (metres) -> SSAO2 radius (world units, Babylon default 2). MultiScaleVO spreads its occlusion well beyond the nominal radius. */
+        /**
+         * Unity radius (metres) -> SSAO2 radius (world units, Babylon default 2). MSVO ignores the authored `radius` (it is SAO-only) and
+         * occludes over a screen-space footprint, so this scale is fitted to MSVO's spatial profile at the reference size rather
+         * than derived from the authored value (which SAO-mode profiles still carry through this same conversion).
+         */
         static SsaoRadiusScale: number;
         /** Fixed documented SSAO2 render ratios. */
         static SsaoRatio: number;
         static SsaoBlurRatio: number;
+        /** SSAO2 `epsilon` (Babylon default 0.02): depth difference below which a sample does not occlude; raised to stop flat surfaces self-occluding. Compile-time define: set first, it recompiles the effect. */
+        static SsaoEpsilon: number;
+        /** SSAO2 `base` (Babylon default 0): added to the occlusion term, caps the peak darkening (the sphere-base depth). */
+        static SsaoBase: number;
+        /** SSAO2 `maxZ` (Babylon default 100): occlusion fades over [0.75 * maxZ, maxZ] view-space units. */
+        static SsaoMaxZ: number;
+        /** SSAO2 `minZAspect` (Babylon default 0.2): near-camera radius limiter (`min(radius, minZAspect * depth / near)`). */
+        static SsaoMinZAspect: number;
+        /** SSAO2 `expensiveBlur` (artifact-cleanup default true): the configurable bilateral blur replaces the fixed 13-tap legacy blur so `SsaoBilateral*` are live on every quality; false restores the T24 quality gate (`SsaoExpensiveBlurFromQuality`). */
+        static SsaoExpensiveBlur: boolean;
+        /** SSAO2 `bilateralSamples` (Babylon default 16): taps per blur direction. */
+        static SsaoBilateralSamples: number;
+        /** SSAO2 `bilateralSoften` (Babylon default 0): softens the depth-difference weight so the blur spreads across mild depth steps. */
+        static SsaoBilateralSoften: number;
+        /** SSAO2 `bilateralTolerance` (Babylon default 0): depth tolerance of the bilateral weight. */
+        static SsaoBilateralTolerance: number;
+        /**
+         * Declared (frozen) value of every numeric `Ssao*` lever, captured from the statics above at class-definition
+         * time so nothing is duplicated as a literal. `frozen()` falls back to these, NOT to Babylon's raw defaults:
+         * a probe (or a stray write) that leaves a static NaN / undefined must land on the value this file declares,
+         * which is what the read-backs were fitted against (review-fixes FR-11).
+         */
+        private static SsaoDeclared;
+        /**
+         * Current value of the named `Ssao*` lever when it is a finite number, otherwise the value this file declares
+         * for it (`SsaoDeclared`). One fallback path for every lever (review-fixes FR-11) instead of per-call literals
+         * that drifted from the statics they guard.
+         */
+        static frozen(name: string): number;
         /**
          * PPv2 / HDRP ambient occlusion -> SSAO2. `quality` is the PPv2 enum; HDRP passes `stepCount` (2..32)
-         * which wins over the quality table when given.
+         * which wins over the quality table when given. The lever fields are copied from the `Ssao*` statics (read at apply
+         * time, so a probe can override them before the stack applies); a non-finite static falls back to Babylon's default.
          */
         static ssaoFromUnity(intensity: number, radius: number, quality?: number, stepCount?: number): IPostProcessSsao;
+        /**
+         * Amplitude of Babylon's image-processing dither (`ImageProcessingConfiguration.ditheringIntensity`), applied on every
+         * stack by `PostProcessor.applyDithering`. Babylon adds a uniform `+-0.5 * intensity * 255` levels after the gamma encode
+         * (`dither = mix(-i, +i, rand)` with `i = 0.5 * intensity`, static hash noise); Unity's FINALPASS adds a triangular
+         * +-1 level of per-frame blue noise in sRGB space. One-level reading = 1/255 (Babylon's default), equal variance =
+         * 1.414/255, equal peak = 2/255; the corner-ring metric of `effect-metrics.py reference` picks the amplitude.
+         */
+        static DitheringIntensity: number;
         /**
          * PPv2 ScreenSpaceReflectionPreset (Lower=0, Low=1, Medium=2, High=3, Higher=4, Ultra=5, Overkill=6, Custom=7)
          * -> SSRRenderingPipeline settings. Custom (7, or anything past the table) returns the Medium row; use ssrCustomFromUnity for the custom fields.
          */
         static SsrPresets: IPostProcessSsr[];
+        /**
+         * Roughness blur of the SSR pipelines this volume creates (spit-and-polish FR-8). PPv2 SSR reads per-pixel smoothness
+         * from the G-buffer and blurs the reflection accordingly; Babylon approximates that with `enableSmoothReflections`
+         * (a blur pass whose width follows the surface roughness) driven by `blurDispersionStrength` and a global
+         * `roughnessFactor` (surfaces rougher than it reflect nothing). PPv2 volumes carry no smoothness threshold, so the
+         * factor is a table constant; HDRP's `minSmoothness` overrides it (see ssrFromHdrp). Both constants are tuned on
+         * the glossy-sphere high-pass metric of the T19 loop (AC-6) and frozen there.
+         */
+        static SsrBlurDispersionStrength: number;
+        static SsrRoughnessFactor: number;
+        /** The roughness-blur fields for one SSR pipeline: `minSmoothness` (HDRP, 0..1) -> roughnessFactor = 1 - minSmoothness, else the table constant. */
+        static ssrRoughnessBlur(minSmoothness?: number): {
+            roughnessFactor: number;
+            blurDispersionStrength: number;
+            enableSmoothReflections: boolean;
+        };
         static ssrPresetTable(preset: number): IPostProcessSsr;
         /**
          * PPv2 custom SSR fields -> SSR settings: maximumIterationCount -> maxSteps, thickness -> thickness,
@@ -15717,19 +18159,192 @@ declare namespace TOOLKIT {
         /**
          * HDRP ScreenSpaceReflection: rayMaxIterations -> maxSteps; screenFadeDistance > 0 -> attenuateScreenBorders;
          * minSmoothness (surfaces smoother than this reflect) has no direct SSR counterpart and is approximated as the
-         * global roughness factor used by Babylon's roughness blur: roughnessFactor = 1 - minSmoothness (documented).
+         * global roughness factor used by Babylon's roughness blur: roughnessFactor = 1 - minSmoothness (documented,
+         * ssrRoughnessBlur), with the blur itself enabled like every other SSR pipeline the volume creates.
          */
         static ssrFromHdrp(rayMaxIterations: number, minSmoothness: number, screenFadeDistance: number): IPostProcessSsr;
         /**
          * Camera antialiasing metadata (PPv2 / URP enum: None=0, FXAA=1, SMAA=2, TAA=3) and MSAA sample count ->
-         * DefaultRenderingPipeline flags: FXAA -> fxaaEnabled; SMAA / TAA -> fxaaEnabled + samples = msaasamples;
-         * samples always follows msaasamples (>= 1). None enables nothing.
+         * `{ fxaa, fast, samples, mode }`. FXAA / SMAA / TAA -> `fxaa` true: rendered by the toolkit's Unity FXAA 3.11 tail
+         * pass (`FxaaPlugin`, final-verification F-6; SMAA / TAA have no screen-space counterpart and are an accepted
+         * deviation, `mode` is preserved so the listing can name them). `fast` is PPv2's `PostProcessLayer.fastMode`
+         * (quality preset 12 with the FXAA_LOW thresholds instead of preset 28) -- a LAYER setting the camera export does
+         * not carry (`FastApproximateAntialiasing.cs` lives on the layer, not the camera), so it is always false and nothing
+         * is warned. `samples` always follows msaasamples (>= 1). None enables nothing.
          */
         static antialiasingFromMetadata(mode: number, msaaSamples: number): IPostProcessAntialiasing;
         /** Finite number or the fallback (exporter values arrive as JSON and may be null). */
         static num(value: any, fallback: number): number;
         static clamp(value: number, min: number, max: number): number;
     }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** A disposable registration handed back by the Inspector's properties service (local structural mirror, no import). */
+    interface IInspectorDisposable {
+        dispose(): void;
+    }
+    /** One accordion row: the Inspector calls `component({ context })` and mounts what it returns (local structural mirror). */
+    interface IInspectorSectionRow {
+        section: string;
+        order?: number;
+        component: (props: {
+            context: any;
+        }) => any;
+    }
+    /** The subset of Inspector v2's `IPropertiesService` the toolkit uses (`babylon.inspector-v2.d.ts`, `PropertiesServiceIdentity`). */
+    interface IInspectorPropertiesService {
+        addSection(section: {
+            identity: string;
+            order?: number;
+            collapseByDefault?: boolean;
+        }): IInspectorDisposable;
+        addSectionContent(content: {
+            key: string;
+            predicate: (entity: unknown) => boolean;
+            content: readonly IInspectorSectionRow[];
+        }): IInspectorDisposable;
+    }
+    /** Inspector v2's `WeaklyTypedServiceDefinition` shape (local structural mirror). */
+    export interface IInspectorServiceDefinition {
+        friendlyName: string;
+        consumes?: any[];
+        produces?: any[];
+        factory: (...args: any[]) => any;
+    }
+    /** One catalogue row of the "Unity Post Processing" section: a family's field the runtime can emit, in its FR-2 slot. */
+    export interface IPostProcessInspectorRow {
+        family: string;
+        field: string;
+        order: number;
+    }
+    /** One `addSectionContent` registration: a catalogue row rendered as one line kind (number / switch / text / message), `key` = "<section>/<family>/<field>/<kind>". */
+    export interface IPostProcessInspectorRegistration extends IPostProcessInspectorRow {
+        kind: string;
+        key: string;
+    }
+    /**
+     * Inspector-truth (FR-5, FR-7, FR-8, FR-12): the "Unity Post Processing" properties section of Babylon's Inspector v2.
+     *
+     * The runtime owns the row model (`PostProcessor.GetEffectListing(camera)`, T6); this module only renders it, by
+     * composing the plain-function property lines the Inspector exports on its UMD global (`INSPECTOR.NumberInputPropertyLine`,
+     * `SwitchPropertyLine`, `TextPropertyLine`, `MessageBar`) inside row components the Inspector mounts itself. No React is
+     * shipped or referenced: a component must return exactly one element, so the section is ONE `addSectionContent`
+     * registration per catalogue row and line kind (`RowRegistrations`), each row calling exactly one property line of its
+     * kind; whether a row is present for the selected entity is its registration PREDICATE (`IsRowPresent`), never a null
+     * branch inside the component (the pane keeps one React fiber per key across selections and two of the lines call hooks
+     * inline, so a branch trips React's hook-order check). Listing changes re-register one row so the predicates re-run. `INSPECTOR` is resolved from `globalThis` at call time
+     * (never imported); every export the module relies on is named in `RequiredExports` and checked by `IsAvailable`, so a
+     * renamed export disables the section with one `inspector:section` warning instead of an error, and an absent global
+     * (Inspector v1, no Inspector) registers nothing and logs nothing. `PostProcessor.InspectorSection = false` opts out.
+     * The section reaches the Inspector only through the toolkit's own show path (`WindowManager.ShowInspector`, T9):
+     * Babylon core's `IInspectorOptions` carries no service definitions.
+     */
+    export class PostProcessingInspector {
+        /** The section identity (its title) and its order (before every built-in section of the entity). */
+        static readonly SectionIdentity: string;
+        static readonly SectionOrder: number;
+        /** The Inspector v2 exports the section composes; each is checked by name before anything registers (FR-12). */
+        static readonly RequiredExports: string[];
+        /**
+         * The stock DefaultRenderingPipeline sections that get a "rendered by the toolkit pass" note (FR-3), per family.
+         * `antialiasing` -> "FXAA & Glow" (final-verification F-6): the installed bundle's section carrying the "FXAA Enabled"
+         * switch, which reads OFF whenever the toolkit FXAA tail pass renders; the note names that pass. The pin test checks
+         * every identity against the bundle.
+         */
+        static readonly StockSections: {
+            [family: string]: string;
+        };
+        /** `_toolkitPlugin.name` -> listing family (a `coloredBloom_*` pass belongs to bloom). */
+        static readonly PassFamilies: {
+            [plugin: string]: string;
+        };
+        /** Every field key the runtime's listing can emit per family (T6 builders), in FR-2 order; the header rows are added per family. */
+        static readonly FamilyFields: {
+            [family: string]: string[];
+        };
+        /** The header rows every family gets before its fields: the ON / OFF switch and the "rendered by" line. */
+        static readonly HeaderFields: string[];
+        /** Key of the "no effects applied yet" row (shown while the deferred apply has not run). */
+        static readonly EmptyRowKey: string;
+        /** The static row catalogue: `HeaderFields` + `FamilyFields` per family, `order` = FR-2 slot x 100 + index. */
+        static get RowCatalogue(): IPostProcessInspectorRow[];
+        private static catalogue;
+        /** The property-line kinds a field row registers separately (one registration per kind; the predicate picks the one the descriptor has). */
+        static readonly RowKinds: string[];
+        /**
+         * Every `addSectionContent` registration of the section: each catalogue row x the line kinds it can render (`enabled` ->
+         * switch; `target` -> text when applied, message when not; fields -> `RowKinds`), `key` = "<section>/<family>/<field>/<kind>".
+         * Presence is decided by the registration's PREDICATE (`IsRowPresent`), never inside the component: the Inspector keeps
+         * one React fiber per key across selection changes and `NumberInputPropertyLine` / `MessageBar` call hooks inline, so a
+         * component that flips between a line and null (or between kinds) on the same fiber trips React's hook-order check.
+         */
+        static get RowRegistrations(): IPostProcessInspectorRegistration[];
+        /** Whether registration `reg` is present for `entity`: its family resolves and (for a field) the descriptor has the registration's kind. */
+        static IsRowPresent(entity: any, reg: IPostProcessInspectorRegistration): boolean;
+        /** The "no effects" row's presence: an inspectable entity whose camera has no listing yet, or a pass mapped to no family. */
+        static IsEmptyRowPresent(entity: any): boolean;
+        /** The "no effects" row's text for an entity. */
+        static EmptyRowMessage(entity: any): string;
+        /** The toolkit pass a stock-section note names for `family` on an owned pipeline, or null (the pipeline renders it itself, or nothing applied). */
+        static ResolveNoteTarget(entity: any, family: string): string;
+        /** The Inspector v2 UMD global (`INSPECTOR`) resolved at call time from `globalThis`, or null. */
+        static GetInspectorGlobal(): any;
+        /**
+         * Whether the section can be registered: the `INSPECTOR` global exists and carries every `RequiredExports` name
+         * (FR-12). A global that lacks one warns ONCE (`inspector:section`, naming the export) and returns false; an absent
+         * global returns false silently (Inspector v1 / no Inspector, FR-5). Records `PostProcessor.InspectorState.available`.
+         */
+        static IsAvailable(inspector?: any): boolean;
+        /**
+         * The service definitions the toolkit's show path passes to `INSPECTOR.ShowInspector` (FR-6): `[]` when
+         * `PostProcessor.InspectorSection` is false or the Inspector is unavailable, else the one section service.
+         */
+        static GetServiceDefinitions(inspector?: any): IInspectorServiceDefinition[];
+        /** Whether an entity gets the section: a DefaultRenderingPipeline this toolkit owns, or any object carrying `_toolkitPlugin`. */
+        static IsInspectable(entity: any): boolean;
+        /** A `DefaultRenderingPipeline` whose name starts with `PostProcessor.PipelinePrefix`. */
+        static IsOwnedPipeline(entity: any): boolean;
+        /** A post-process carrying the toolkit's `_toolkitPlugin` marker. */
+        static IsToolkitPass(entity: any): boolean;
+        /**
+         * The camera listing an entity resolves to: a pipeline -> its first camera with a listing (every row); a toolkit
+         * pass -> its camera and the family of `_toolkitPlugin.name` (that family's rows only). Null when nothing applies.
+         */
+        static ResolveContext(entity: any): {
+            camera: any;
+            family: string;
+            effects: IPostProcessInspectorEffect[];
+            unmapped?: boolean;
+        };
+        /** The listing row of `family` for an entity (null when absent or hidden by the entity's own family scope). */
+        static ResolveEffect(entity: any, family: string): IPostProcessInspectorEffect;
+        /** The field descriptor `field` of `family` for an entity (null when absent). */
+        static ResolveField(entity: any, family: string, field: string): IPostProcessInspectorField;
+        /** The service definition (`friendlyName`, `consumes: [PropertiesServiceIdentity]`, factory) for one Inspector global. */
+        static CreateServiceDefinition(inspector: any): IInspectorServiceDefinition;
+        /**
+         * The factory body: registers the section, one content per row REGISTRATION (`RowRegistrations`: catalogue row x line
+         * kind, presence decided by the predicate), the "no effects" row and the four stock notes; subscribes to the listing
+         * observable so the registered content is refreshed (predicates re-run) on every listing change; returns the
+         * disposable that removes them all. `PostProcessor.InspectorState.registered` follows.
+         */
+        static Register(inspector: any, properties: IInspectorPropertiesService): {
+            dispose: () => void;
+        };
+        /**
+         * One row component (called by the Inspector as a function component): the hook first, unconditionally, then exactly
+         * ONE plain-function property line of the registration's kind. It never returns null and never changes kind: the
+         * Inspector keeps one React fiber per registration key across selection changes, and `NumberInputPropertyLine` /
+         * `MessageBar` call hooks inline, so a component that flips between a line and null (or between kinds) on the same
+         * fiber trips React's hook-order check (error #300, found live in T11). Presence is the registration's predicate;
+         * a descriptor that vanished after mount (a listing rebuild) renders a disabled placeholder until the pane refreshes.
+         */
+        static RenderRow(inspector: any, context: any, reg: IPostProcessInspectorRegistration, observable: any, notify: () => void): any;
+        private static state;
+        private static setRegistered;
+    }
+    export {};
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
@@ -16271,18 +18886,6 @@ declare namespace TOOLKIT {
          * Ignores the body passed if it is in the query
          */
         ignoreBody?: BABYLON.PhysicsBody;
-    }
-}
-declare namespace TOOLKIT {
-    class RoundedVignettePlugin {
-        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
-            color?: number[] | BABYLON.Color3 | BABYLON.Color4;
-            center?: number[];
-            intensity?: number;
-            smoothness?: number;
-            rounded?: boolean;
-            blendMode?: string | number;
-        }): BABYLON.PostProcess;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -17993,6 +20596,136 @@ declare namespace TOOLKIT {
         static ShowCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
         static HideCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
         static AttachClickHandler(element: BABYLON.GUI.Control, func: (eventData?: BABYLON.GUI.Vector2WithInfo, eventState?: BABYLON.EventState) => any): BABYLON.Observer<BABYLON.GUI.Vector2WithInfo> | null;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity PPv2 vignette port, Classic mode (post-processing-spit-and-polish FR-5).
+     *
+     * Implements Uber.shader's vignette exactly. `Vignette.cs` packs `_Vignette_Settings =
+     * (intensity * 3, smoothness * 5, (1 - roundness) * 6 + roundness, rounded ? 1 : 0)` and the shader computes
+     * `d = abs(uv - center) * settings.x`, `d.x *= lerp(1, width / height, settings.w)` (the `rounded` aspect term),
+     * `d = pow(saturate(d), settings.z)`, `vfactor = pow(saturate(1 - dot(d, d)), settings.y)`,
+     * `rgb *= lerp(color, 1, vfactor)`, `a = lerp(1, a, vfactor)`. Multiply blend only, in linear space.
+     *
+     * The screen size is read from the post-process size every frame, so the aspect term follows resizes and DPR.
+     * The vignette is evaluated on the lens-distorted UV like Unity's Uber (`options.distortion` carries the active
+     * LensDistortionPlugin model, spit-and-polish T18; without a lens distortion it is plain screen UV). The static factory follows
+     * the `LensDistortionPlugin` pattern; lifetime belongs to the orchestrator (`PostProcessor.trackPostProcess`).
+     * It replaces both the native pipeline vignette and the former `RoundedVignettePlugin` (rounded is just the
+     * aspect term).
+     */
+    /** The lens-distortion model parameters the vignette follows (LensDistortionPlugin's `distortion = (1 + (i + ix) r^2 + (i + iy) r^4) * scale`). */
+    interface IVignetteDistortion {
+        intensity: number;
+        intensityX: number;
+        intensityY: number;
+        center: number[];
+        scale: number;
+    }
+    /**
+     * The public Unity-unit settings of a vignette pass (inspector-truth T3, FR-9), exposed as `postProcess.unity` and
+     * re-packed by `onApply` every frame (`PackSettings`, the centre, and the colour through the conversion table's
+     * `vignetteColorLinear` whenever `color` changes).
+     */
+    interface IVignetteUnitySettings {
+        /** Unity `Vignette.intensity` 0..1 (packed `intensity * 3`). */
+        intensity: number;
+        /** Unity `Vignette.smoothness` 0.01..1 (packed `smoothness * 5`). */
+        smoothness: number;
+        /** Unity `Vignette.roundness` 0..1 (packed `(1 - roundness) * 6 + roundness`). */
+        roundness: number;
+        /** Unity `Vignette.rounded` (the aspect term on d.x). */
+        rounded: boolean;
+        /** Unity `Vignette.center` in UV `[x, y]` (default `[0.5, 0.5]`). */
+        center: number[];
+        /** Unity `Vignette.color` as authored, sRGB `[r, g, b]` 0..1 (default black). */
+        color: number[];
+    }
+    class VignettePlugin {
+        /** Unity `Vignette.cs`: `_Vignette_Settings.x = intensity * 3`. */
+        static readonly IntensityScale: number;
+        /** Unity `Vignette.cs`: `_Vignette_Settings.y = smoothness * 5`. */
+        static readonly SmoothnessScale: number;
+        /** Unity `Vignette.cs`: `_Vignette_Settings.z = (1 - roundness) * 6 + roundness`. */
+        static readonly RoundnessScale: number;
+        /** Unity `Vignette.roundness` default (a missing `roundness` packs as 1). */
+        static readonly DefaultRoundness: number;
+        /** Post-process shader name (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"` in the shader store). */
+        static readonly ShaderName: string;
+        /** Shader store key the fragment is registered under (a literal so the bundle can be grepped for it). */
+        static readonly ShaderKey: string;
+        /**
+         * Unity `Vignette.cs` settings packing, pure: `{ x: intensity * 3, y: smoothness * 5,
+         * z: (1 - roundness) * 6 + roundness, w: rounded ? 1 : 0 }`. Non-numbers pack as Unity's defaults
+         * (intensity 0, smoothness 0.2, roundness 1); the ranges are Unity's parameter ranges (all 0..1).
+         */
+        static PackSettings(intensity: number, smoothness: number, roundness: number, rounded: boolean): {
+            x: number;
+            y: number;
+            z: number;
+            w: number;
+        };
+        /** Unity's vignette factor for one UV (pure JS mirror of the shader, for tests and read-back checks). */
+        static Factor(uvX: number, uvY: number, centerX: number, centerY: number, settings: {
+            x: number;
+            y: number;
+            z: number;
+            w: number;
+        }, width: number, height: number, distortion?: IVignetteDistortion): number;
+        private static clamp01;
+        /** The GLSL fragment source (registered once under `ShaderKey`). */
+        static GetFragmentShader(): string;
+        /**
+         * Creates the vignette pass for `camera`.
+         * @param options.intensity Unity intensity 0..1 (packed x3).
+         * @param options.smoothness Unity smoothness 0.01..1 (packed x5).
+         * @param options.roundness Unity roundness 0..1 (missing = 1).
+         * @param options.rounded Unity `rounded` (aspect term on d.x).
+         * @param options.center Unity centre in UV (`{ x, y }` or `[x, y]`, default 0.5 / 0.5).
+         * @param options.color Vignette colour, LINEAR rgb (`[r, g, b]`, `[r, g, b, a]`, or a Color3 / Color4); default black.
+         * @param options.colorSrgb The colour as AUTHORED in Unity (sRGB `[r, g, b(, a)]`), inspector-truth T3: becomes
+         *        `unity.color` and is linearised through `PostProcessingConversions.vignetteColorLinear` every time it changes
+         *        (takes precedence over `color`). Without it `unity.color` starts as the sRGB form of `color`
+         *        (`linearToSrgbColor` when the conversion table is loaded, else the triple as given) and the linear colour is
+         *        kept exactly as passed until `unity.color` is edited.
+         * @param options.samplingMode Post-process sampling mode (bilinear by default).
+         * @param options.distortionSettings The Unity lens-distortion settings SHARED with the lens pass (inspector-truth T3):
+         *        the vignette derives the distortion model from them every frame (`LensDistortionPlugin.DeriveModel`), so a
+         *        lens edit moves the vignette too; takes precedence over `distortion`.
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
+            textureType?: number;
+            intensity?: number;
+            smoothness?: number;
+            roundness?: number;
+            rounded?: boolean;
+            center?: {
+                x: number;
+                y: number;
+            } | number[];
+            color?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            /** The authored sRGB colour (inspector-truth T3), the source of `unity.color`. */
+            colorSrgb?: number[] | BABYLON.Color3 | BABYLON.Color4;
+            samplingMode?: number;
+            /** The active lens distortion (LensDistortionPlugin options) so the vignette follows Unity's uvDistorted (spit-and-polish T18). */
+            distortion?: IVignetteDistortion;
+            /** The Unity lens-distortion settings shared with the lens pass (inspector-truth T3); derived every frame. */
+            distortionSettings?: TOOLKIT.ILensDistortionUnitySettings;
+        }): BABYLON.PostProcess;
+        /**
+         * Normalises the `distortion` option: null / undefined / a zero intensity -> null (screen UV); otherwise the
+         * LensDistortionPlugin model parameters with the plugin's defaults (centre 0.5 / 0.5, axis terms 0, scale 1).
+         */
+        static toDistortion(distortion: any): IVignetteDistortion;
+        /** The UV the lens-distortion pass samples for screen UV (uvX, uvY): the JS mirror of the shader's distortion step (pure). */
+        static DistortUv(uvX: number, uvY: number, distortion: IVignetteDistortion): number[];
+        private static toCenter;
+        /** The linear rgb of an sRGB triple through the conversion table (`vignetteColorLinear`); the triple itself when the table is not loaded. */
+        private static linearOf;
+        private static toColor;
+        private static num;
     }
 }
 /** Babylon Toolkit Namespace */
