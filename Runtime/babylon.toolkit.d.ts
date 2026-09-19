@@ -27,6 +27,8 @@ declare namespace TOOLKIT {
         static PauseRenderLoop: boolean;
         /** Defines whether the toolkit scene simulation is currently playing (true) or paused for editing (false). Defaults to true so shipped runtimes are unaffected. The editor sets this false for a static edit mode and true to enter live play mode. Use SetScenePlaying() to also freeze/resume the physics world. */
         static ScenePlaying: boolean;
+        /** light-probe-network D46: a node carrying extras.metadata.lightprobes is loaded as its own mesh, never as a hardware instance, so every exported renderer keeps its own probe (Unity's model). Set false before loading to restore instancing for probe-lit nodes (they then share their source node's probe). */
+        static DeinstanceProbeLitNodes: boolean;
         /** Cached physics engine time step used to resume the simulation after a pause. */
         private static PhysicsTimeStep;
         /** The webgl render context has been lost flag */
@@ -625,6 +627,81 @@ declare namespace TOOLKIT {
          */
         static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
         static DestroyNavigationMeshData(scene?: BABYLON.Scene): void;
+        /** Detour polygon areas are 6-bit ids (0..63). Unity area ids (0..31) map 1:1. */
+        static MAX_NAVIGATION_AREAS: number;
+        /** Unity built-in navigation area ids. */
+        static NAVIGATION_AREA_WALKABLE: number;
+        static NAVIGATION_AREA_NOT_WALKABLE: number;
+        static NAVIGATION_AREA_JUMP: number;
+        /** Default vertical tolerance (world units) between a navmesh polygon and an area surface mesh. */
+        static NAVIGATION_AREA_HEIGHT_TOLERANCE: number;
+        /** Fires after navigation areas or area costs change (navigation agents refresh their crowd filters). */
+        static OnNavigationAreasChangedObservable: BABYLON.Observable<number>;
+        private static NavAreaNames;
+        private static NavAreaCosts;
+        private static NavAreaVolumes;
+        private static NavAreaMeshes;
+        private static NavAreaHandle;
+        private static NavAreaBaseline;
+        private static NavAreaDebugger;
+        private static NavAreaDebugMaterial;
+        private static NavAreaShowDebug;
+        private static NavAreaScene;
+        private static NavAreaWarnings;
+        /** Registers (or renames) a navigation area with a traversal cost (Unity NavMesh.SetAreaCost). */
+        static RegisterNavigationArea(id: number, name: string, cost?: number): void;
+        /** Sets the scene default traversal cost of a navigation area. Costs clamp to >= 1 (Unity rule). */
+        static SetNavigationAreaCost(id: number, cost: number): void;
+        /** Gets the scene default traversal cost of a navigation area (1 when never set). */
+        static GetNavigationAreaCost(id: number): number;
+        /** Gets a navigation area id by name (Unity NavMesh.GetAreaFromName), or -1. */
+        static GetNavigationAreaByName(name: string): number;
+        /** Gets the registered navigation area names, indexed by area id. */
+        static GetNavigationAreaNames(): string[];
+        /** Converts a navigation area id to Detour polygon flags (areas 15..63 share bit 15, Not Walkable = 0). */
+        static NavigationAreaToFlags(area: number): number;
+        /** Converts a Unity 32-bit area mask to 16-bit Detour include flags (bits 15..31 fold into bit 15). */
+        static AreaMaskToIncludeFlags(areaMask: number): number;
+        /** Writes area costs and include flags into a Detour query filter (scene defaults plus optional overrides). */
+        static ConfigureNavigationQueryFilter(filter: any, includeFlags?: number, areaCosts?: Map<number, number>): void;
+        /** Adds a world-space box volume that marks the navmesh polygons whose centre lies inside it. Returns a handle. */
+        static AddNavigationAreaVolume(area: number, minimum: BABYLON.Vector3, maximum: BABYLON.Vector3): number;
+        /** Removes a navigation area volume by handle. */
+        static RemoveNavigationAreaVolume(handle: number): void;
+        /** Removes every navigation area volume. */
+        static ClearNavigationAreaVolumes(): void;
+        /** Marks the navmesh polygons lying over this surface mesh (e.g. the patio floor) with an area id.
+         * @param mesh The surface mesh (its world-space triangles are tested from above)
+         * @param area The navigation area id
+         * @param heightTolerance Max vertical distance between the polygon centre and the mesh surface
+         */
+        static AddNavigationAreaMesh(mesh: BABYLON.AbstractMesh, area: number, heightTolerance?: number): void;
+        /** Removes a navigation area surface mesh. */
+        static RemoveNavigationAreaMesh(mesh: BABYLON.AbstractMesh): void;
+        /** Removes every navigation area surface mesh. */
+        static ClearNavigationAreaMeshes(): void;
+        /**
+         * Marks the current navmesh polygons from the registered area volumes and surface meshes. Runs automatically
+         * inside every build / load path before OnNavMeshReadyObservable fires; call it again after changing sources
+         * on a live navmesh. Removed sources revert to the areas the mesh was built with. Returns the number of
+         * polygons whose area differs from the built baseline.
+         */
+        static ApplyNavigationAreas(): number;
+        /** Gets the navigation area id of the navmesh polygon nearest to a position, or -1. */
+        static GetNavigationAreaAtPosition(position: BABYLON.Vector3): number;
+        /** Rebuilds the area overlay debug mesh (polygons with a non-zero area, coloured by area id). */
+        static RefreshNavigationAreaDebugMesh(scene: BABYLON.Scene): BABYLON.Mesh;
+        /** Gets the area overlay debug mesh (null unless the navmesh was built with a debug mesh and has marked areas). */
+        static GetNavigationAreaDebug(): BABYLON.Mesh | null;
+        private static PrepareNavigationAreas;
+        private static RefreshNavigationAreaCosts;
+        private static IsValidNavigationArea;
+        private static ClampNavigationAreaCost;
+        private static ResolveNavigationArea;
+        private static GetNavigationAreaColor;
+        private static ForEachNavigationPolygon;
+        private static CreateNavigationAreaSurface;
+        private static IsOverNavigationAreaSurface;
         /** Toggle full screen scene mode. */
         static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Enter full screen scene mode. */
@@ -1041,6 +1118,23 @@ declare namespace TOOLKIT {
         detailsampledist: number;
         detailsamplemaxerror: number;
         buildheightmesh: boolean;
+    }
+    /**
+     * Navigation area box volume (world space) registered with SceneManager.AddNavigationAreaVolume
+     */
+    interface INavigationAreaVolume {
+        handle: number;
+        area: number;
+        minimum: BABYLON.Vector3;
+        maximum: BABYLON.Vector3;
+    }
+    /**
+     * Navigation area surface mesh registered with SceneManager.AddNavigationAreaMesh
+     */
+    interface INavigationAreaMesh {
+        mesh: BABYLON.AbstractMesh;
+        area: number;
+        heightTolerance: number;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -2602,7 +2696,16 @@ declare namespace TOOLKIT {
         /** Provide custom uniforms (UBO) declarations */
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** Runs on EVERY draw, before Babylon's own BindIBLParameters (pbrBaseMaterial.pure.ts:1970) - plan lpn D3. */
+        hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
         bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Writes a probe-lit mesh's nine SH uniforms from mesh.metadata.toolkit.lightProbeSH (Unity layout, plan lpn
+         * D17, D28). Never calls uniformBuffer.update() - the material's single flush (:2244) uploads it. Returns
+         * true when it wrote. A mesh without the rider, or a shader compiled without SPHERICAL_HARMONICS /
+         * USESPHERICALFROMREFLECTIONMAP (no such uniforms exist), is left untouched.
+         */
+        static WriteProbeHarmonics(uniformBuffer: BABYLON.UniformBuffer, subMesh: BABYLON.SubMesh): boolean;
     }
     /**
       * Per-Skin Texture2DArray Switching Plugin (BABYLON.MaterialPluginBase)
@@ -2801,6 +2904,15 @@ declare namespace TOOLKIT {
      * @class LightingConversions - All rights reserved (c) 2024 Mackey Kinard
      */
     class LightingConversions {
+        /**
+         * The light-probe rider cache epoch (lpn ledger F-P.56). A mesh caches its D28 rider
+         * `metadata.toolkit.lightProbeSH` in `_tkLightProbeSH`, stamped `_tkLightProbeEpoch`; the per-draw
+         * UnityStyleLightingPlugin.WriteProbeHarmonics trusts the cache only while the stamp equals this value, and
+         * otherwise re-reads the metadata once. LightProbeNetwork.attach/detach bump it, so every change of a rider
+         * reference reaches every mesh that shares that metadata (a raw Mesh.clone shares its source's). User code
+         * that replaces `metadata.toolkit.lightProbeSH` itself instead of calling attach/detach must increment it.
+         */
+        static ProbeRiderEpoch: number;
         /**
          * Unity's shadowmask has exactly four channels (plan lbm D16), so at most four Mixed lights per scene
          * can carry baked occlusion. A fifth is exported with occlusionmaskchannel -1 and stays fully realtime.
@@ -16076,6 +16188,156 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
+     * Tetrahedral light-probe lookup over typed arrays (plan lpn D30). No allocation after construction.
+     *
+     * The tables come straight from the exporter's binary (plan lpn D23): `positions` are Unity world coordinates,
+     * which ARE Babylon world coordinates (plan lpn D18 - the exporter's (-1, 1, 1) glTF conversion and the loader's
+     * __root__ compose to the identity), `indices` are four probe indices per cell with positive signed volume, and
+     * `adjacency[t * 4 + i]` is the cell across the face opposite vertex i (-1 on the hull).
+     * @class LightProbeTetraWalker - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LightProbeTetraWalker {
+        readonly probeCount: number;
+        readonly tetraCount: number;
+        readonly positions: Float32Array;
+        readonly probeSh: Float32Array;
+        readonly indices: Int32Array;
+        readonly adjacency: Int32Array;
+        maxWalkSteps: number;
+        /** Steps taken by the last locate() (0 when the start cell contained the point). */
+        lastSteps: number;
+        /** True when the last locate() clamped onto a hull face or exhausted maxWalkSteps twice. */
+        lastClamped: boolean;
+        /** The four weights of the last locate(). */
+        readonly weights: Float32Array;
+        private readonly _probeTetra;
+        constructor(positions: Float32Array, probeSh: Float32Array, indices: Int32Array, adjacency: Int32Array);
+        /** Index of the probe nearest to (px, py, pz); -1 when probeCount is 0. O(probeCount), no allocation. */
+        nearestProbe(px: number, py: number, pz: number): number;
+        /** Cell containing the point (weights filled), walking from `startTet` (or the nearest probe's cell when < 0). -1 only when tetraCount is 0. */
+        locate(px: number, py: number, pz: number, startTet: number): number;
+        /** Outer-tetrahedra approximation (plan lpn D30, recorded deviation): negatives to 0, renormalise, equal weights when nothing is left. */
+        private _clampWeights;
+        /** out[outOffset + k] = scale * sum_i weights[i] * probeSh[indices[tet*4+i]*27 + k], k in 0..26. */
+        blend(tet: number, scale: number, out: Float32Array, outOffset: number): void;
+        /** locate + blend; with tetraCount 0 copies the nearest probe. Returns the cell used (-1 for the nearest-probe fallback). */
+        sample(px: number, py: number, pz: number, startTet: number, scale: number, out: Float32Array, outOffset: number): number;
+    }
+    /**
+     * Unity light-probe network (plan lpn D8): per-renderer L2 spherical harmonics from the exporter's
+     * tetrahedralised probe cloud, delivered per draw by UnityStyleLightingPlugin.
+     * @class LightProbeNetwork - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LightProbeNetwork extends TOOLKIT.ScriptComponent {
+        /** Metres a dynamic renderer's sample point must move before it is re-interpolated (FR-14). */
+        static MoveThreshold: number;
+        /** Upper bound on tetrahedra visited per lookup before the walk restarts from the nearest probe (FR-14). */
+        static MaxWalkSteps: number;
+        /** The binary's seven sections in file order (plan lpn D23); the header's `layout` names them. */
+        private static readonly Sections;
+        private _url;
+        private _probeCount;
+        private _tetraCount;
+        private _rendererCount;
+        private _scale;
+        private _walker;
+        private _rendererSh;
+        private _rendererOcclusion;
+        private _rendererAnchor;
+        private _networkActive;
+        private _networkReason;
+        private _networkAwake;
+        private _networkLoaded;
+        private _networkAttached;
+        private _networkLoadRequested;
+        private _dynMeshes;
+        private _dynCount;
+        private _dynTet;
+        private _dynLast;
+        private _dynAnchor;
+        private _dynHasAnchor;
+        private _staticCount;
+        private _pending;
+        private _newMeshObserver;
+        private _bakedLights;
+        private _lastWalkSteps;
+        private _tmp;
+        private _nearestWarned;
+        /**
+         * Sets (or clears, with null) a mesh's rider: the D28 source of truth `metadata.toolkit.lightProbeSH` AND the
+         * per-draw cache `mesh._tkLightProbeSH` that UnityStyleLightingPlugin.WriteProbeHarmonics reads first. The two
+         * hold the same Float32Array (updated in place by the dynamic walk). The epoch bump makes every OTHER mesh
+         * whose cache was stamped earlier re-read its metadata once - a raw Mesh.clone shares this mesh's metadata,
+         * so it follows the rider (F-P.56); this mesh is re-stamped at once and keeps its fast path.
+         */
+        private static SetRider;
+        /** The network of a scene, or null (set in the constructor, cleared in destroy). */
+        static Get(scene: BABYLON.Scene): TOOLKIT.LightProbeNetwork;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** The component's properties supply ONLY the preload url; every count, the scale and the layout come from the scene header in onDataLoaded. */
+        private readProperties;
+        /** Queues the binary through the scene preloader (D33); a no-op once a load was requested or completed. */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        protected awake(): void;
+        /** D33: the runtime-instantiated-prefab path - loads the binary through a private AssetsManager; called only from the deferred after-render check registered by awake(). */
+        private selfLoad;
+        /**
+         * Frame (Control flow › Frame): runs after every update(), before the render passes. Steps 1-3 here - the
+         * pending drain allocates nothing (the push happened on add, the drain truncates in place).
+         */
+        protected late(): void;
+        /** Observer removed, every rider this network wrote detached (dynamic registry and static copies), the scene handle cleared. */
+        protected destroy(): void;
+        /** True once the header and binary validated and the global ambient SH exists (D32). */
+        isActive(): boolean;
+        /** Why the network is inactive, or null. */
+        getDisabledReason(): string;
+        getProbeCount(): number;
+        getTetraCount(): number;
+        getRendererCount(): number;
+        getStaticCount(): number;
+        getDynamicCount(): number;
+        /** Steps of the most recent dynamic lookup (AC-7). */
+        getLastWalkSteps(): number;
+        getWalker(): TOOLKIT.LightProbeTetraWalker;
+        /**
+         * Attaches a mesh: static copies its exported slot once; dynamic joins the registry and is evaluated on the
+         * next late(). Returns false (with one warning) for an InstancedMesh, an inactive network, or a mesh with
+         * neither a valid exported slot nor `dynamic === true`.
+         */
+        attach(mesh: BABYLON.AbstractMesh, dynamic: boolean): boolean;
+        /** Clears the mesh's riders, lifts the Baked-light exclusion, and (dynamic) compacts the registry by moving the last entry in. */
+        detach(mesh: BABYLON.AbstractMesh): void;
+        /** Re-interpolates one dynamic mesh now (ignores MoveThreshold). Returns the cell used. */
+        sampleMeshNow(mesh: BABYLON.AbstractMesh): number;
+        /** One registry entry's re-interpolation (Control flow › Frame step 4). */
+        private sampleDynamic;
+        /** Grows the struct-of-arrays registry by doubling from 64 (allocation on attach only). */
+        private ensureCapacity;
+        /** The node key the exporter wrote (plan lpn D24), or null. */
+        private probeKeyOf;
+        /** Interpolates at a world point into out[0..26] (Unity layout, scale applied). Returns the cell used. Test / tool helper. */
+        evaluateAt(px: number, py: number, pz: number, out: Float32Array): number;
+        /**
+         * Attaches every keyed mesh once awake has run AND the data validated (plan lpn D29, D33 - either order).
+         * Collects the Baked lights (D16), subscribes the new-mesh observable (the pending path), then scans the scene.
+         */
+        private tryAttachAll;
+        /** Disables the network for the scene with one warning (plan lpn D32); the scene keeps the global SH. Never throws. */
+        private disable;
+        private sceneLabel;
+        /**
+         * Validates the scene header and the binary (plan lpn D32) and builds the walker. The header is read from
+         * scene.metadata.toolkit.lightprobes only (CanvasTools stores the scene extras there before any component
+         * exists). Any failure disables the network with one warning and returns - nothing throws. A second
+         * delivery (preloader and self-load both answering) is ignored.
+         */
+        private onDataLoaded;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
      * Babylon toolkit navigation agent pro class (Unity Style Navigation Agent System)
      * @class NavigationAgent - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -16110,6 +16372,11 @@ declare namespace TOOLKIT {
         private m_stuckCounter;
         private m_reachObserver;
         private m_navMeshDestroyObserver;
+        private m_navAreasObserver;
+        private m_areaCosts;
+        private m_filterSlot;
+        private static CROWD_FILTER_SLOTS;
+        private static CROWD_FILTER_WARNED;
         speed: number;
         reachRadius: number;
         heightOffset: number;
@@ -16171,6 +16438,9 @@ declare namespace TOOLKIT {
         private getLookAtStopDistance;
         private updateAgentParameters;
         private applyAgentUpdateFlags;
+        private applyAgentFilter;
+        private refreshAgentPolicy;
+        private getFilteredClosestPoint;
         private destroyNavigationAgent;
         /** Move agent relative to current position. */
         move(offset: BABYLON.Vector3, closetPoint?: boolean): void;
@@ -16220,6 +16490,18 @@ declare namespace TOOLKIT {
          * data is available.
          */
         releaseNavigationCrowd(): void;
+        /** Sets the Unity area mask (bit per area id) of areas this agent may walk on. -1 = all areas. */
+        setAreaMask(areaMask: number): void;
+        /** Gets the Unity area mask of areas this agent may walk on. */
+        getAreaMask(): number;
+        /** Overrides the traversal cost of a navigation area for this agent only (Unity NavMeshAgent.SetAreaCost). Clamps to >= 1. */
+        setAreaCost(area: number, cost: number): void;
+        /** Gets this agent's traversal cost of a navigation area (its override, else the scene default). */
+        getAreaCost(area: number): number;
+        /** Removes every per-agent area cost override (back to the scene defaults). */
+        resetAreaCosts(): void;
+        /** Gets the Detour crowd query filter this agent plans with (null until the agent is on a crowd). */
+        getQueryFilter(): any;
         /** Gets debug destination mesh. */
         getDebugDestinationMesh(): BABYLON.Mesh;
         /** Shows or hides the debug destination mesh. */
