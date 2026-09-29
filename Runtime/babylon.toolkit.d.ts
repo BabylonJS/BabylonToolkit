@@ -5868,6 +5868,16 @@ declare namespace TOOLKIT {
          * @param lazyLoadTextures  Direct value of animatorProps["lazyloadtextures"].
          */
         setupAnimations(settings: TOOLKIT.IVertexAnimationSettings[], controllerId: string, rootUrl?: string, lazyLoadTextures?: boolean): TOOLKIT.VertexAnimationController;
+        /**
+         * Babylon 9.28 ShadowDepthWrapper race: _makeEffect copies the depth draw wrapper's `defines` ONCE, from
+         * subMesh._getDrawWrapper(pass).defines for the pass the material's effect was last created in. When that
+         * draw wrapper has no defines yet (e.g. the race camera takes over mid-load and the material recompiles
+         * in the new camera's render pass), the entry keeps defines = null, PBR bindForSubMesh returns at
+         * `if (!subMesh.materialDefines)`, nothing (VAT textures, samplers, Light0/Light1) is bound into the
+         * depth draw context, and WebGPU throws in createBindGroup — killing the render loop.
+         * Heal the entry from the material's defines, or report not-ready so that submesh skips one shadow frame.
+         */
+        static GuardShadowDepthDefines(wrapper: BABYLON.ShadowDepthWrapper): BABYLON.ShadowDepthWrapper;
         private _captureRendererTarget;
         private _resolveRendererTarget;
         private _matchRendererByGuid;
