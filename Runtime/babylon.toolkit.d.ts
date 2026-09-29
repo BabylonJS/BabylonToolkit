@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.25.1 - R1) */
+        /** Gets the toolkit framework version string (9.28.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -254,6 +254,8 @@ declare namespace TOOLKIT {
         static HasSceneBeenPreLoaded(scene: BABYLON.Scene): boolean;
         /** Get the scene default skybox mesh */
         static GetDefaultSkybox(scene: BABYLON.Scene): BABYLON.AbstractMesh;
+        /** Get the scene default skybox material (a TOOLKIT.ProceduralSkyMaterial for a procedural sky) */
+        static GetDefaultSkyboxMaterial(scene: BABYLON.Scene): BABYLON.Material;
         /** Get the scene default intenisty factor */
         static GetIntensityFactor(): number;
         /** Get the scene's Unity mixed lightmap bake mode: "indirectonly" | "subtractive" | "shadowmask" (plan lbm D19). */
@@ -264,6 +266,16 @@ declare namespace TOOLKIT {
         static GetSubtractiveShadowColor(): BABYLON.Color3;
         /** Get the render pipeline the scene was exported from: "birp" | "urp" | "hdrp" (plan lbm D36). Older exports carry no such field and read as "birp". */
         static GetRenderPipeline(): string;
+        private static _UnexposedImageProcessing;
+        /**
+         * HDRP de-exposure (unity-gui-pipeline-parity T15). HDRP writes Unlit colour (ShaderPassForwardUnlit.hlsl:
+         * bsdfData.color * _DeExposureMultiplier, 1 by default) and legacy / UI shader output straight into its pre-exposed
+         * frame: the exposure never touches them, the tone mapper still does. Babylon applies the HDRP scene exposure
+         * (EV100 14 = 5e-5) inside every material, which rendered those surfaces black. Returns one configuration per scene
+         * that mirrors the scene's image processing (tone mapping, contrast, curves, grading, vignette, dithering) and keeps
+         * following it, with the exposure fixed at 1. Null when the scene is not an HDRP export (nothing to undo there).
+         */
+        static GetUnexposedImageProcessing(scene: BABYLON.Scene): BABYLON.ImageProcessingConfiguration;
         /** Get the system render quality local storage setting. */
         static GetRenderQuality(): TOOLKIT.RenderQuality;
         /** Set the system render quality local storage setting. */
@@ -323,6 +335,42 @@ declare namespace TOOLKIT {
         static RunOnce(scene: BABYLON.Scene, func: () => void, timeout?: number): void;
         /** Disposes entire scene and release all resources */
         static DisposeScene(scene: BABYLON.Scene, clearColor?: BABYLON.Color4): void;
+        /** Scenes DisposeScene has already run for (a second call, or a scene whose dispose threw part-way, returns immediately). */
+        private static _DisposedScenes;
+        private static ErrorMessage;
+        private static CompactGamepadSlots;
+        /** Wraps each scene component's dispose (on the instance) so one throwing component cannot abort Scene.dispose. */
+        private static GuardSceneComponents;
+        /** Babylon's _renderFrame re-binds FloatingOriginCurrentScene.getScene to a closure over the scene - drop it for a disposed scene. */
+        private static ReleaseFloatingOriginScene;
+        /** The InputController registries are engine-wide: release them only when the engine has no scene left. */
+        private static ReleaseUserInput;
+        /**
+         * Releases the compiled effects a disposed scene leaves pinned in the engine's effect cache (called by DisposeScene after scene.dispose).
+         * Two kinds are released with effect.dispose(true), and only when no live scene (engine.scenes, engine._virtualScenes) uses them:
+         * - an effect carrying a material-plugin closure (_processCodeAfterIncludes) - that closure holds its material, and so its scene;
+         * - on WebGPU, an effect the disposed scene used whose pipeline context owns a "leftOver-" uniform buffer - that buffer's per-draw
+         *   slot pool is only destroyed with the effect.
+         * Every other cached effect is kept, so the next scene recompiles only what was released. engine.releaseEffects() is never used.
+         */
+        private static ReleaseDisposedSceneEffects;
+        /**
+         * WebGPU, only once no scene is left: disposes every "leftOver-" uniform buffer no cached effect owns. Those belong to effects
+         * Babylon already released (refcount 0) - e.g. particle custom effects swapped or a loader's decode passes - whose pools
+         * WebGPUEngine._deletePipelineContext never frees. With a scene still alive this is skipped: an uncached effect that scene
+         * still renders with (an EffectWrapper built from raw source) cannot be told apart from an orphan.
+         */
+        private static ReleaseOrphanLeftOverBuffers;
+        /** True when the effect's (WebGPU) pipeline context owns a "leftOver-" uniform buffer. */
+        private static OwnsLeftOverUniformBuffer;
+        /**
+         * Every effect the scenes' renderables hold right now: materials (draw wrapper, shadow depth wrapper), sub-meshes (every render
+         * pass, shadow maps included), post-processes (scene, camera and engine lists - pipeline passes live on the engine list),
+         * particle systems (custom effects included), effect layers, layers, lens flares and sprites.
+         */
+        private static CollectSceneEffects;
+        /** WebGPU only: release the textures / buffers queued for deletion, when no render loop will reach its endFrame flush. */
+        private static FlushDeferredGpuRelease;
         /** Safely destroy transform node */
         static SafeDestroy(transform: BABYLON.TransformNode, delay?: number, disable?: boolean): void;
         /** Get the root url the last scene properties was loaded from */
@@ -584,6 +632,9 @@ declare namespace TOOLKIT {
         private static NavMeshDebugger;
         private static NavMeshMaterial;
         private static CrowdInterface;
+        /** The scene the current navigation mesh was built for (its dispose releases every navigation static). */
+        private static NavMeshScene;
+        private static NavWatchedScenes;
         /** Has recast navigation data. */
         static HasNavigationData(): boolean;
         /** Gets the recast navigation data. */
@@ -626,7 +677,20 @@ declare namespace TOOLKIT {
          * @param showDebugMesh Whether to show a debug mesh
          */
         static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        /**
+         * Scene lifecycle: the navigation statics are engine-wide but hold the scene they were built for. Registered once per
+         * scene (the TerrainBuilder idiom); when that scene is disposed its navmesh, debug meshes, crowd and area sources go too.
+         * A navmesh built for another, still-live scene is left alone.
+         */
+        private static WatchNavigationScene;
+        private static ReleaseNavigationScene;
         static DestroyNavigationMeshData(scene?: BABYLON.Scene): void;
+        private static NavMeshBuildContext;
+        private static CreateNavigationPluginInstanceAsync;
+        private static GenerateTiledNavigationMesh;
+        private static GenerateNavigationTileData;
+        private static NavigationLog2;
+        private static NavigationNextPow2;
         /** Detour polygon areas are 6-bit ids (0..63). Unity area ids (0..31) map 1:1. */
         static MAX_NAVIGATION_AREAS: number;
         /** Unity built-in navigation area ids. */
@@ -2194,6 +2258,31 @@ declare namespace TOOLKIT {
          * The details/layers atlas IS color and must stay sRGB, so only mark the true data maps.
          */
         private static readonly NonColorDataSamplers;
+        /** T16: the CustomShaderMaterial registration for a customTextures `kind` ("cube" | "3d" | "2darray"), or null. */
+        static KindRegistration(kind: string): string;
+        /**
+         * shadergraph-transpiler-complete-coverage T16: builds the texture of one customTextures `kind` entry (the exporter's
+         * shape - UnityTools_ShaderGraph.WriteGraphBags):
+         *   { kind: "cube", faces: [px, py, pz, nx, ny, nz], linear }  -> BABYLON.CubeTexture from the six face images (the
+         *      skybox export's face orientation; an sRGB cube loads into an sRGB buffer so the shader reads linear values);
+         *   { kind: "3d", url, width, height, depth, linear }           -> BABYLON.RawTexture3D from the slice atlas (slices left to
+         *      right, width*depth by height; an sRGB volume is decoded to linear half floats on load - WebGL2 / WebGPU have no
+         *      sRGB 3D upload here), bilinear, no mips;
+         *   { kind: "2darray", urls: [...], linear }                    -> TOOLKIT.SkinTextureArray.Build (never flipped: toolkit
+         *      images are top-down like every invertY=false texture; an sRGB array is linearised to 8 bits on load).
+         * URLs are relative to the glTF. Resolves null when the images cannot be loaded (the class keeps the kind's neutral).
+         */
+        static LoadKindTexture(scene: BABYLON.Scene, rootUrl: string, info: any): Promise<BABYLON.BaseTexture>;
+        /** T16: an image's RGBA8 pixels (top-down, as decoded), or null. */
+        static LoadImagePixels(src: string): Promise<Uint8ClampedArray>;
+        /**
+         * T16: a (width * depth) x height slice atlas (slice z at x offset z * width) re-laid as a width x height x depth volume
+         * (x fastest, then y, then z). `decodeSrgb`: the bytes are sRGB-encoded - returns linear half floats (Uint16Array);
+         * otherwise the bytes unchanged (Uint8Array).
+         */
+        static AtlasToVolume(pixels: Uint8ClampedArray | Uint8Array, w: number, h: number, d: number, decodeSrgb: boolean): ArrayBufferView;
+        /** T16: IEEE half-float bits of a value in [0, 1]. */
+        static ToHalf(value: number): number;
         /** True when a custom sampler holds linear data and must not be loaded as an sRGB color texture. */
         static IsNonColorDataSampler(samplerName: string): boolean;
         private static _boxProjectionShaderPatched;
@@ -2256,6 +2345,9 @@ declare namespace TOOLKIT {
         private static ScriptBundleCache;
         private static _bundleWarned;
         private _missingMaterialClasses;
+        /** shadergraph-transpiler-complete-coverage T8: materials of this load with a non-default transparent render queue. */
+        private _renderQueues;
+        private _loadedMaterials;
         /** @hidden */
         constructor(loader: BABYLON.GLTF2.GLTFLoader);
         /** @hidden */
@@ -2281,6 +2373,8 @@ declare namespace TOOLKIT {
          * Safe to await: this runs during the extension factory phase, before any material is created.
          */
         preloadProjectScriptBundleAsync(): Promise<void>;
+        /** Loads one script bundle beside the scene once (cache key = the lower-cased file name), warning once on failure. */
+        private static LoadBundleOnceAsync;
         /** @hidden */
         onLoading(): void;
         /** @hidden */
@@ -2307,6 +2401,12 @@ declare namespace TOOLKIT {
         private _loadSceneExAsync;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
+        /**
+         * shadergraph-transpiler-complete-coverage X10: a glTF texture whose extras carry Unity sampler state glTF cannot express
+         * (`anisolevel`, `coverage` - GLTFMetaDataExporter.TextureSamplerExtras) loads through the normal chain (this extension is
+         * skipped on the nested call by the loader's own re-entry guard) and gets TextureSampling.ApplyExtras before it is assigned.
+         */
+        _loadTextureAsync(context: string, texture: any, assign: (babylonTexture: BABYLON.BaseTexture) => void): Promise<BABYLON.BaseTexture>;
         loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
         private _getCachedMaterialByIndex;
         private _getCachedLightmapByIndex;
@@ -2342,28 +2442,41 @@ declare namespace TOOLKIT {
         private _setupBabylonMesh;
         private _setupBabylonMultiMaterials;
         /**
-         * Rebuilds Unity-style LOD switching from the per-node `lods`/`distances` metadata (this project does
-         * not use MSFT_lod). Each `lods` entry is one LOD level and is either a single renderer name (a
-         * `string`, `"*"` = the group root) or the names of every renderer in that level (a `string[]`); legacy
-         * single-renderer metadata (all strings) parses unchanged. `distances[i]` is the far threshold of level
-         * `i` and `distances[N-1]` doubles as the cull threshold.
+         * Rebuilds Unity-style LOD switching from the per-node `lods` metadata (this project does not use MSFT_lod).
+         * Each `lods` entry is one LOD level and is either a single renderer name (a `string`, `"*"` = the group
+         * root) or the names of every renderer in that level (a `string[]`); legacy single-renderer metadata (all
+         * strings) parses unchanged.
          *
-         * HYBRID strategy, decided per group after normalization:
-         *  - Native fast path (every level resolves to exactly one mesh): `master.addLODLevel(distances[i-1], mesh)`
-         *    for the detail levels plus a final `addLODLevel(cull, null)` band - identical perf/behavior to
-         *    legacy content. Native LOD cannot be used on an InstancedMesh master, so unused detail instances
-         *    are disposed as the legacy code did.
-         *  - Custom switcher (any level has >1 mesh): a single `onBeforeRenderObservable` handler that toggles
-         *    all meshes of a level together on band transitions, because native `addLODLevel` is strictly
-         *    1 master -> 1 replacement and cannot express N renderers per level.
+         * Two threshold sources:
+         *  - `distances` (a GUI export with a scene-view camera): `distances[i]` is the far threshold of level `i`
+         *    and `distances[N-1]` doubles as the cull threshold. Unchanged HYBRID strategy: every level one mesh =>
+         *    native `master.addLODLevel(distances[i-1], mesh)` plus a final `addLODLevel(cull, null)` band (an
+         *    InstancedMesh master keeps the legacy dispose of its unused detail levels); any level with >1 mesh =>
+         *    the scene's shared switcher (`_setupLevelOfDetailSwitcher`).
+         *  - `coverages` only (every headless export - there is no scene-view camera to turn heights into
+         *    distances, F-M.57): Unity's own rule, `UnityLodAndLights.SelectCoverageLevel` on the screen-relative
+         *    height `worldSize * lodBias / (2 * tan(vfov / 2) * distance)` of the group, through the same switcher.
+         *    Before T12.8 these groups were skipped, so every level of every group rendered (and cast) at once.
          */
         private _processLevelOfDetail;
         /**
-         * Registers a single per-frame LOD switcher for a group that has at least one level with multiple
-         * renderers (native `addLODLevel` cannot represent that structurally). Toggles every mesh of the active
-         * level together, only on band transitions, and tears the observer down on scene/root dispose.
+         * Registers one group with the scene's shared LOD switcher (`TOOLKIT.UnityLodGroups`: ONE
+         * `onBeforeRenderObservable` handler for every group, not one per group). Exactly one level is enabled at
+         * a time (none when culled), every mesh of a level toggles together, and only on a level change.
+         *
+         * MODE_COVERAGE needs the group's size and reference point. Unity's LODGroup.RecalculateBounds takes them
+         * from the bounds of every renderer in the group: size = the largest dimension of that box, reference
+         * point = its centre. The export carries neither, so both come from the union of the level meshes' world
+         * boxes at load (the reference point is stored in the root's local space, so a moving group keeps it).
          */
         private _setupLevelOfDetailSwitcher;
+        /**
+         * T12.8: Unity's per-object light selection for every mesh of the scene (`TOOLKIT.UnityLightSelector`).
+         * The additional-light limit is the exported URP "Per Object Limit" (`additionallightsperobject`) when the
+         * export carries it, else URP's default 4; HDRP has no per-object limit (clustered lighting), so every
+         * light in range is kept up to the unrolled slot count.
+         */
+        private _installUnityLightSelection;
         private _processShaderMaterials;
         private preProcessSceneProperties;
         private postProcessSceneProperties;
@@ -2372,6 +2485,8 @@ declare namespace TOOLKIT {
         private lateProcessSceneProperties;
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
+        /** The render pipeline this load was exported from (its scene metadata), else the scene-wide value. */
+        private _exportedRenderPipeline;
         private _parseCommonConstantProperties;
         private _parseUniformAndSamplerProperties;
         private applyRepoWatermark;
@@ -2417,6 +2532,10 @@ declare namespace TOOLKIT {
     class CustomShaderMaterial extends BABYLON.PBRMaterial {
         universalMaterial: boolean;
         private _defines;
+        /** X2: prepareCustomDefines runs for every draw of every pass - its key list and class define are cached (null = stale). */
+        private _defineKeysCache;
+        private _shaderDefineCache;
+        private _shaderDefineSource;
         private _uniforms;
         private _samplers;
         private _attributes;
@@ -2463,10 +2582,149 @@ declare namespace TOOLKIT {
         private _shadowmaskPlugin;
         getPlugin(): BABYLON.MaterialPluginBase;
         getClassName(): string;
+        /**
+         * unity-terrain-parity T12.6 (D48): a transpiled Shader Graph class can declare more fragment samplers than the stage allows
+         * (Shader Graphs/Rock: 13 graph textures + its glTF albedo/normal + environment + BRDF = 17 on WebGL2's 16, a failed link
+         * the scene's readiness check logs before anything is drawn). Before an effect is (re)built, the stock PBR textures the
+         * graph overwrites are given up while the estimate is over the budget (TerrainTrees.PreFitSamplerBudget). Acts only on a
+         * graph class that would otherwise fail to compile.
+         */
+        isReadyForSubMesh(mesh: BABYLON.AbstractMesh, subMesh: BABYLON.SubMesh, useInstances?: boolean): boolean;
+        private static _webgpuCompileStates;
+        /** "ok" | "pending" | the WGSL error text for this effect's shader modules (always "ok" off WebGPU). */
+        private webgpuCompileState;
+        /** T32.1 fix loop: drops a failed effect from the engine's compiled-effect cache (Scene.isReady waits on every cached effect). */
+        static ReleaseFailedEffect(engine: BABYLON.AbstractEngine, effect: BABYLON.Effect): void;
+        /** T32.1 fix loop: the per-variant trim and budget fit, for this material's effects (null when the graph is disabled). */
+        getGraphFinalCodeProcessor(): (shaderType: string, code: string) => string;
+        /**
+         * T32.1 fix loop - a graph's shader after Babylon's preprocessor (compile keywords resolved), before the shader processor
+         * binds samplers. (1) Dead code: the generator writes every node of the graph, and a compile keyword only selects which
+         * result is used, so a variant still sampled every texture of every branch (ProductionReady Rock: 15 graph textures in
+         * each variant, 27 fragment bindings) - GLSL counts a statically used sampler against MAX_TEXTURE_IMAGE_UNITS and WGSL binds
+         * every declaration. Unused `sg_` values are removed (RemoveDeadGraphCode) and the graph samplers nothing reads any more
+         * are not declared. (2) Budget: while the stage still declares more than the device allows, WebGPU graph samplers of the
+         * same state are shared (WebGPU allows 16 samplers but more textures), then the last graph textures are read as their
+         * neutral value - each step reported once as a deviation of this material.
+         */
+        protected processGraphFinalCode(shaderType: string, code: string): string;
+        /** T32.1: occurrences of one identifier (whole word) in the code. */
+        static CountIdentifier(code: string, name: string): number;
+        /**
+         * T32.1: removes the generated graph values (`sg_*` declarations with an initializer) nothing reads, repeatedly, after the
+         * preprocessor resolved the compile keywords. Only whole declaration statements are removed; a statement whose initializer
+         * writes a variable (an out / inout / pointer argument, a no-initializer declaration) is kept.
+         */
+        static RemoveDeadGraphCode(code: string, wgsl: boolean): string;
+        /** T32.1: removes the declarations of the named samplers (and a WGSL `<name>Sampler`) the code no longer reads. */
+        static StripUnusedSamplers(code: string, names: string[], wgsl: boolean): string;
+        /** T32.1: texture and sampler bindings a stage declares (WGSL: separate counts, GLSL: texture units for both). */
+        static CountSamplerBindings(code: string, wgsl: boolean): {
+            textures: number;
+            samplers: number;
+        };
+        /** T32.1: every read through `from` samples through `to` instead, and `from`'s declaration goes. */
+        static ShareSampler(code: string, from: string, to: string): string;
+        /** T32.1: the RGBA a neutral stand-in samples as (the generated sgEnsureTexture table; white otherwise). */
+        static NeutralValueOf(texture: BABYLON.BaseTexture): number[];
+        /**
+         * T32.1: every read of the 2D texture `name` becomes the constant `value` (sampling / fetch calls, size queries). Null
+         * when the texture is used any other way (then it is left alone).
+         */
+        static NeutralizeTexture(code: string, name: string, value: number[], wgsl: boolean): string;
+        private _graphDisabled;
+        /** T9 (F-T.195): the effect updateCustomBindings last bound this material's textures into. */
+        private _sgLastBoundEffect;
+        /** Phase 9 carry-over 5: the stand-in each sampler binds while its texture is missing, loading or failed (the neutral it replaced, or its kind's). */
+        private _sgStandIns;
+        /** Phase 9 carry-over 5: the sampler type of a Cube / 3D / 2D-array slot (a 2D stand-in would not satisfy it). */
+        private _sgKindTypes;
+        private _graphDisabledReason;
+        private _graphOwned;
+        private _graphGlobalsVersion;
+        /** The generated class's static SgInfo (shadergraph-transpiler-complete-coverage D13), or null for a non-graph material. */
+        getGraphInfo(): TOOLKIT.IShaderGraphInfo;
+        /** True once D17 disabled the graph on this material. */
+        get graphDisabled(): boolean;
+        /** Why the graph was disabled (the compile error), or null. */
+        get graphDisabledReason(): string;
+        /** A transpiled Shader Graph class (has SgInfo, or is a MY.* class generated before SgInfo existed). */
+        private isGraphMaterial;
+        private getGraphShaderName;
+        /** Read-only Inspector text (D13): the class's deviations, one per line. */
+        get __sgDeviationText(): string;
+        set __sgDeviationText(value: string);
+        /** A uniform / sampler the generated graph owns: one of SgInfo.properties' keys, or a g_sg / kw_ name. Base tk* entries never. */
+        private isGraphOwnedName;
+        /**
+         * D17: disable the generated plugin, drop the graph's own uniforms / samplers / textures from the declaration and binding
+         * lists (base tk* entries stay), and rebuild. The mesh keeps this material; Babylon's PBR renders the glTF inputs.
+         */
+        disableGraph(reason: string): void;
+        /**
+         * D16: pull the Unity globals this class reads (SgInfo.globals) from TOOLKIT.ShaderGlobals - only when ShaderGlobals.version
+         * changed. Called by the generated update() once per frame.
+         */
+        protected syncGraphGlobals(): void;
+        /**
+         * D14 / D16 (T6): every RUNTIME keyword's kw_ uniform = the material's own value OR the global keyword state
+         * (ShaderGlobals.IsKeywordEnabled; an enum takes the first globally enabled "<REF>_<ENTRY>"). A per-renderer Predefined
+         * keyword (LIGHTMAP_ON) follows the material's own lightmap texture.
+         */
+        protected syncGlobalKeywords(info: TOOLKIT.IShaderGraphInfo): void;
+        private _keywordOwn;
+        /** The material's own value of a keyword float (before the global OR), captured the first time it is needed. */
+        private keywordOwnValue;
+        /** Unity property name -> the exported uniform key (SgInfo.properties); an unknown name is tried as an exported key. */
+        private graphKey;
+        setFloat(unityName: string, value: number): void;
+        setVector(unityName: string, value: BABYLON.Vector4 | BABYLON.Vector3 | BABYLON.Vector2): void;
+        /** Like Unity's Material.SetColor in a linear project: the colour is converted to linear. */
+        setColor(unityName: string, value: BABYLON.Color4 | BABYLON.Color3): void;
+        setTexture(unityName: string, value: BABYLON.BaseTexture): void;
+        setMatrix(unityName: string, value: BABYLON.Matrix): void;
+        getFloat(unityName: string): number;
+        getVector(unityName: string): BABYLON.Vector4;
+        /** The stored (linear) colour. */
+        getColor(unityName: string): BABYLON.Color4;
+        getTexture(unityName: string): BABYLON.BaseTexture;
+        /** A keyword by Unity name: a keyword reference ("_FANCY"), or an enum entry keyword ("_MODE_FAST"). */
+        private graphKeyword;
+        private setKeywordValue;
+        /** Unity Material.EnableKeyword: compile-time keywords switch the plugin define (effect rebuilt), runtime ones the kw_ float. */
+        enableKeyword(unityName: string): void;
+        disableKeyword(unityName: string): void;
+        isKeywordEnabled(unityName: string): boolean;
+        private _budgetCheckedEffects;
+        /**
+         * Unity's reflection model for a toolkit PBR material. URP and Built-in GlossyEnvironmentReflection sample the reflection
+         * probe's prefiltered mip for the surface roughness and nothing else. Babylon 9 PBR defaults
+         * brdf.mixIblRadianceWithIrradiance to true, which lerps the specular radiance toward the reflection texture's SH
+         * irradiance by alphaG. A local probe carries the scene's GLOBAL ambient SH (ApplyGlobalReflectionProbeDiffuse), so every
+         * rough surface in a probe zone picked up the sky colour instead of the room it reflects (TerminalScene floors: grey-blue
+         * where Unity is brown). Babylon also skips the mix when lighting is disabled, which is why a stock sphere looked right.
+         */
+        static ApplyUnityReflectionModel(material: BABYLON.PBRBaseMaterial): void;
+        /**
+         * shadergraph-transpiler-complete-coverage T8 (FR-B10): the render state the exporter writes into a material's metadata
+         * when it differs from Babylon's default - `cullmode: "front"` (Unity Render Face Back: cull FRONT faces), `depthfunction`
+         * (UnityEngine.Rendering.CompareFunction), `depthwrite` (false = Unity writes no depth), `preservespecular` (transparent
+         * Lit Preserve Specular Lighting). Returns the transparent `renderqueue` (Unity queue, applied by the loader as the
+         * meshes' alphaIndex once they are bound) or -1.
+         */
+        static ApplyUnityRenderState(material: BABYLON.Material, commonConstant: any): number;
+        /**
+         * T8 (FR-B10): Unity sorts transparent draws by render queue first. Babylon sorts by mesh.alphaIndex (default MAX_VALUE)
+         * then distance, so once any material of a load carries a non-default queue, every alpha-blended mesh bound to a material
+         * of that load takes its queue as alphaIndex (3000 when none was exported) - equal indices keep Babylon's distance sort.
+         */
+        static ApplyRenderQueues(materials: BABYLON.Material[], queues: Map<BABYLON.Material, number>): void;
         constructor(name: string, scene: BABYLON.Scene);
         initMaterial(): void;
         /** Adds a custom attribute property */
         addAttribute(attributeName: string): void;
+        /** Sets (or clears) a shader define of this material (copied into the defines by prepareCustomDefines). */
+        setDefine(name: string, value: boolean): void;
         /** Checks uniform values. Internal Use Only */
         checkUniform(uniformName: string, type: string, value?: any): void;
         /** Checks sampler values. Internal Use Only */
@@ -2567,12 +2825,53 @@ declare namespace TOOLKIT {
          * prefer that for VAT materials.
          */
         clone(name: string, cloneTexturesOnlyOnce?: boolean, rootUrl?: string): TOOLKIT.CustomShaderMaterial;
+        /**
+         * shadergraph-transpiler-complete-coverage T8 (FR-B11): a generated graph class that casts through its own shader builds
+         * its BABYLON.ShadowDepthWrapper in awake() (sgEnableShadowDepth) - and a clone never runs awake(). Every clone() caller
+         * (TerrainTrees / TerrainDetails material cache, MaterialPropertyBlock clones, prefab instancing) therefore drew the
+         * shadow maps and the depth renderer with Babylon's STOCK depth shader: the undisplaced, unclipped shape. The clone gets
+         * its OWN wrapper, bound to the clone (a wrapper is never shared across materials). A source still deciding between the
+         * stock shadow and its own (sgWatchShadowDepth, textures not yet loaded) is mirrored once it decides.
+         */
+        static CopyShadowDepthOwnership(source: BABYLON.Material, clone: BABYLON.Material): void;
         /** Copies all toolkit-private state (custom shader collections + skin-array config) onto a clone. */
         protected copyCustomStateTo(result: TOOLKIT.CustomShaderMaterial): void;
+        /**
+         * shadergraph-transpiler-complete-coverage T16 (FR-E1): a samplerCube / texture_cube<f32> uniform (Shader Graph Cubemap
+         * property / asset). Declared by getCustomFragmentCode, pushed in getSamplers, bound in updateCustomBindings. A null
+         * texture binds Unity's default for the kind (grey), so the sampler is always bound (WebGPU refuses an unbound one).
+         */
+        addCubeTextureUniform(name: string, texture: BABYLON.BaseTexture): TOOLKIT.CustomShaderMaterial;
+        /** T16: a highp sampler3D / texture_3d<f32> uniform (Shader Graph Texture3D property / asset). */
+        addTexture3DUniform(name: string, texture: BABYLON.BaseTexture): TOOLKIT.CustomShaderMaterial;
+        /**
+         * T16: a highp sampler2DArray / texture_2d_array<f32> uniform (Shader Graph Texture2DArray property / asset). Unlike
+         * addTextureArrayUniform (whose declaration the skin-array plugin emits) this one declares its sampler itself.
+         */
+        addTexture2DArrayUniform(name: string, texture: BABYLON.BaseTexture): TOOLKIT.CustomShaderMaterial;
+        /** The sampler kinds getCustomFragmentCode declares beyond sampler2D. */
+        static readonly KindSamplerTypes: string[];
+        private addKindTextureUniform;
+        /**
+         * T16: Unity's default for a Cube / 3D / 2DArray slot with nothing assigned - grey (sRGB 0.5 = linear 0.2158, alpha 0.5) -
+         * as a 1x1 (x1 / x6) texture of that kind, one per scene and kind.
+         */
+        static NeutralKindTexture(scene: BABYLON.Scene, type: string): BABYLON.BaseTexture;
         /** Adds a texture uniform property */
         addTextureUniform(name: string, texture: BABYLON.Texture): TOOLKIT.CustomShaderMaterial;
         /** Sets the texture uniform value */
         setTextureValue(name: string, texture: BABYLON.Texture): TOOLKIT.CustomShaderMaterial;
+        /**
+         * Phase 9 carry-over 5: the texture a sampler binds while its own is missing, still loading or failed - the neutral the
+         * generated class gave it, else its kind's neutral (Cube / 3D / 2D array), else a 1x1 white (Unity's unassigned default).
+         * WebGPU validates every sampler of a draw's material context, and a texture whose GPU resource does not exist (a failed
+         * image decode) made createBindGroup throw a TypeError that stopped the render loop; this is never undefined.
+         */
+        getTextureStandIn(name: string): BABYLON.BaseTexture;
+        /** Phase 9 carry-over 5: the scene's shared 1x1 white stand-in (the generated classes' "__sgNeutralColor" cache key). */
+        static NeutralWhiteTexture(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        /** Phase 9 carry-over 5: a texture that can be bound as itself - it exists, is ready and has a GPU resource. */
+        static IsBindable(texture: BABYLON.BaseTexture): boolean;
         /**
          * Marks a texture sampler as a raw data texture — skips the per-draw-call texture matrix and
          * coordinate infos upload in updateCustomBindings(). Use for pure data samplers (VAT position/
@@ -2647,6 +2946,9 @@ declare namespace TOOLKIT {
          *  bindForSubMesh UnityStyleLightingPlugin already owns. */
         updateShadowmaskBindings(subMesh: BABYLON.SubMesh): void;
         /** Update custom material bindings */
+        private static _uboNameSets;
+        /** X2: a uniform buffer's uniform names as a Set (rebuilt when the buffer's name list changes). */
+        static UboNameSet(buffer: any): Set<string>;
         updateCustomBindings(effectOrUniformBuffer: BABYLON.UniformBuffer | BABYLON.Effect): void;
         /** Update custom material bindings */
         legacyUpdateCustomBindings(effect: BABYLON.UniformBuffer): void;
@@ -2698,6 +3000,12 @@ declare namespace TOOLKIT {
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
         /** Runs on EVERY draw, before Babylon's own BindIBLParameters (pbrBaseMaterial.pure.ts:1970) - plan lpn D3. */
         hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * X2: true while the material is bound for a DEPTH-ONLY draw - a shadow map through the material's ShadowDepthWrapper
+         * (ShadowGenerator sets the sub-mesh's main draw wrapper override for that bind) or the SgDepthPass depth map. Those
+         * shaders stop at the depth write, so the per-draw lighting inputs (shadowmask selectors, probe harmonics) are skipped.
+         */
+        static IsDepthOnlyBind(subMesh: BABYLON.SubMesh, engine: BABYLON.AbstractEngine): boolean;
         bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
         /**
          * Writes a probe-lit mesh's nine SH uniforms from mesh.metadata.toolkit.lightProbeSH (Unity layout, plan lpn
@@ -2779,6 +3087,8 @@ declare namespace TOOLKIT {
       * @class ShadowmaskPlugin - All rights reserved (c) 2024 Mackey Kinard
       */
     class ShadowmaskPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        /** One declaration per unrolled light slot (T12.8: LightingConversions.MaxLightSlots), e.g. `float _tkShadowmaskTerm0;`. */
+        static SlotDeclarations(prefix: string, suffix: string): string;
         constructor(material: TOOLKIT.CustomShaderMaterial);
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getClassName(): string;
@@ -2796,6 +3106,14 @@ declare namespace TOOLKIT {
          *
          *  The strength scaling is URP-only (plan lbm D10, D36): URP applies
          *  LerpWhiteTo(bakedShadow, shadowParams.x), while Built-in and HDRP consume the mask raw. */
+        private static _selNames;
+        private static _strNames;
+        private static _killNames;
+        private static _selectors;
+        static SelName(i: number): string;
+        static StrName(i: number): string;
+        static KillName(i: number): string;
+        static Selector(channel: number): BABYLON.Vector4;
         updateShadowmaskBindings(mesh: BABYLON.AbstractMesh): void;
         /** Binds the Subtractive main-light uniforms (plan lbm D9, D30, D35).
          *
@@ -2919,6 +3237,14 @@ declare namespace TOOLKIT {
          */
         static readonly MaxShadowmaskLights: number;
         /**
+         * unity-terrain-parity T12.8: how many light slots the toolkit's CustomShaderMaterial unrolls its per-light
+         * shadowmask / Subtractive bodies for. Distinct from MaxShadowmaskLights (the four mask CHANNELS): Unity's
+         * per-object selection (UnityLightSelector) hands a mesh the ambient fill, the main light and up to the
+         * URP per-object limit (4 by default, 8 at most) additional lights, and every one of those slots needs its
+         * own body - a slot past the unrolled ones would reuse the previous slot's shadowmask term.
+         */
+        static readonly MaxLightSlots: number;
+        /**
          * One-hot selector for a shadowmask channel. Ports Unity's
          * UniversalRenderPipelineCore.cs:1907-1913, which builds the same unit basis vector from the light's
          * occlusionMaskChannel and leaves it all-zero when the light has no baked occlusion.
@@ -2975,8 +3301,60 @@ declare namespace TOOLKIT {
          * @param light The scene's main directional light, or null.
          */
         static MainLightColor(light: any): BABYLON.Color3;
+        /**
+         * The chromaticity of Unity's `light.color.linear * CorrelatedColorTemperatureToRGB(T)` for a Babylon light the
+         * toolkit built (unscaled - multiply by the intensity separately).
+         *
+         * The exporter writes `light.color` in sRGB ("Do Not To Linear Here", CVTools light export) and, when both Unity
+         * colour-temperature flags are on, multiplies in the LINEAR temperature factor, which it also exports alone as
+         * `colortemperature` (read into `metadata.toolkit.colorTemperature`). Linearising the whole product - what the
+         * transpiled Shader Graph classes did before T12.4 - bends a 5000 K sun (1, 0.78, 0.62) to (1, 0.58, 0.35). So the
+         * factor is divided out, only the authored part goes through the sRGB curve, and the factor is multiplied back.
+         * With no factor (flags off, or an older export) this is a plain per-channel SrgbToLinear, exactly as before.
+         * @param light A Babylon light (reads `diffuse` and `metadata.toolkit.colorTemperature`), or null.
+         */
+        static UnityLinearLightColor(light: any): BABYLON.Color3;
         /** Keys already warned about, so a per-parse or per-frame code path reports each problem once. */
         private static Warned;
+        /**
+         * shadergraph-transpiler-complete-coverage T8 fix loop: Unity PANCAKES directional shadow casters - a caster between the
+         * light and a cascade is clamped onto the cascade's near plane (the URP / Built-in ShadowCaster pass clamps to
+         * UNITY_NEAR_CLIP_VALUE), so each cascade's depth range is the cascade itself. Babylon's CascadedShadowGenerator without
+         * depthClamp stretches every cascade back to the farthest caster toward the light (12 km skybox mountains, 1 km terrain
+         * tiles), and its normalized bias then pushes every realtime shadow off every receiver. The exported
+         * LightSettings.setDepthClamps (default false) is a Babylon knob Unity does not have, so a cascade always clamps.
+         */
+        static ApplyUnityCascadeClamp(generator: BABYLON.CascadedShadowGenerator): void;
+        /**
+         * shadergraph-transpiler-complete-coverage X4: Unity renders a spot or point light's realtime shadow map only from the
+         * casters that can reach it - the casters culled to the light (a spot light's shadow frustum, the light's range
+         * sphere). Babylon's RenderTargetTexture draws EVERY mesh of a shadow map's renderList into it with no culling at all
+         * (ObjectRenderer._prepareRenderingManager), so GardenScene drew all 560 caster sub-meshes into each of its six
+         * range-5 m spot maps every frame (~46 ms of a 116 ms frame; the graph casters among them each a full material bind).
+         *
+         * The installed getCustomRenderList drops a caster whose world bounding box lies entirely:
+         *  - outside one of the spot shadow projection's four SIDE planes (such a caster cannot write a single texel; the near
+         *    and far planes are not used, so a clamped or pancaked depth range never loses a caster), or
+         *  - outside the light's range sphere (light.range): a shadow needs its caster between the light and the receiver, so a
+         *    caster beyond the range only shadows receivers beyond it, which the glTF range falloff (Unity's range cut-off)
+         *    leaves unlit, or
+         *  - beyond the shadow projection's FAR plane (light.shadowMaxZ, a depth along the light axis - not a radius): for a
+         *    spot the plane at shadowMaxZ along the light direction, for a point the six cube faces' far planes (the cube of
+         *    half-size shadowMaxZ around the light, the faces being world-axis aligned). A caster near the cone edge can be
+         *    farther than shadowMaxZ from the light yet in front of the far plane (fix loop 2: the old min(range, shadowMaxZ)
+         *    sphere dropped it).
+         * A mesh whose bounds Babylon itself does not trust for culling (alwaysSelectAsActiveMesh: skinned, particle and
+         * terrain instancing hosts) and anything without a bounding box always stays, the same rule the camera's frustum culling
+         * applies. The result is the same shadow map. Directional lights keep Babylon's own path (their casters toward the
+         * light still matter). A list installed earlier (e.g. the terrain's per-pass culling) is chained in front.
+         */
+        static ApplyUnityCasterCulling(generator: BABYLON.ShadowGenerator): void;
+        private static _cullPlanes;
+        private static _cullLightPos;
+        /** The casters of `renderList[0..count)` a spot / point light's shadow map can receive (ApplyUnityCasterCulling), into `out`. */
+        static CullPunctualCasters(generator: any, renderList: BABYLON.AbstractMesh[], count: number, out: BABYLON.AbstractMesh[]): BABYLON.AbstractMesh[];
+        /** True when the world AABB [mn, mx] lies entirely on the negative side of one of the (inward, normalized) planes. */
+        static AabbOutsidePlanes(mn: BABYLON.Vector3, mx: BABYLON.Vector3, planes: BABYLON.Plane[]): boolean;
         /**
          * Emits one console warning the first time a key is seen and nothing afterwards (plan lbm D31). The
          * spec's edge-case table says "warn once" in five places, and both the metadata parse and the material
@@ -3076,6 +3454,21 @@ declare namespace TOOLKIT {
          *  `strength = 0` still means "no shadow" at every scale and only the depth of a real shadow moves.
          *  Both the strength and the product are clamped, so no scale can produce a darkness outside 0..1. */
         static GetShadowDarkness(shadowstrength: number): number;
+        /**
+         * Unity cascade splits (URP m_Cascade2Split / m_Cascade4Split: cumulative fractions of the shadow distance, measured
+         * from the camera) onto a CascadedShadowGenerator (unity-terrain-system-parity D44). Babylon only offers the lambda
+         * log/uniform blend, so the instance's split step is replaced: cascade e ends at splits[e] * shadowMaxZ, the last at
+         * shadowMaxZ. Needs splits.length === numCascades - 1 (strictly increasing, inside 0..1), else the lambda stays.
+         */
+        static ApplyCascadeSplits(generator: BABYLON.CascadedShadowGenerator, splits: number[]): boolean;
+        /**
+         * Unity "No Cascades" for a directional light (unity-terrain-system-parity D44): one shadow map fitted every frame to
+         * the camera frustum up to Unity's shadow distance, instead of Babylon's auto-extend over every caster (which
+         * stretches one map over a whole 2 km terrain group). The box is the bounding sphere of that frustum slice (constant
+         * size, so rotating does not rescale it), its centre snapped to whole texels in light space so moving does not
+         * shimmer, and its depth opened 3 radii toward the light for casters above the slice.
+         */
+        static FitDirectionalShadow(scene: BABYLON.Scene, light: BABYLON.DirectionalLight, generator: BABYLON.ShadowGenerator, distance: number): void;
         /** Parse the scene component metadata. Note: Internal use only */
         parseSceneComponents(entity: BABYLON.TransformNode): void;
         /** Post process pending scene components. Note: Internal use only */
@@ -3087,6 +3480,741 @@ declare namespace TOOLKIT {
         private static DoProcessPendingFreezes;
         private static SetupCameraComponent;
         private static SetupLightComponent;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity's `_CameraOpaqueTexture` for transpiled Shader Graph materials (unity-terrain-parity D49, T12.5).
+     *
+     * A Shader Graph Scene Color node samples the OPAQUE scene - everything drawn before the transparents, skybox included
+     * (URP's CopyColorPass runs at AfterRenderingSkybox) - at a screen UV. Babylon has no grab pass, so this renders that
+     * picture itself, the way Babylon's own transmission helper does for PBR refraction: one RenderTargetTexture per
+     * camera, the camera's opaque meshes only (no alpha-blended mesh, no particles, no sprites), in linear HDR before image
+     * processing, registered in `scene.customRenderTargets` so it is drawn every frame before the main pass. A generated
+     * class binds it as `g_sgSceneColor` through `GetTexture`.
+     *
+     *  - Follows URP's own rules, exported per camera (T12.5): the camera produces the texture only when it requires it
+     *    (`requiresopaquetexture`: the camera's Opaque Texture override, else the URP asset's), and its size and filter
+     *    follow the asset's `opaquedownsampling` exactly like CopyColorPass.ConfigureDescriptor: None = full size, POINT;
+     *    2x Bilinear = half size, bilinear; 4x Box / 4x Bilinear = quarter size, bilinear. An export without the keys
+     *    (Built-in, HDRP, older exports) gets the full-size bilinear target.
+     *  - A camera that does not produce the texture gets what Unity's shader reads then - Render Graph rebinds every
+     *    unproduced global texture to its default BLACK texture (RenderGraph.ClearGlobalBindings), measured in Unity -
+     *    with no target and no warning.
+     *  - Created only when a generated class asks for it, and shared by every material that asks for the same camera.
+     *  - A material that samples the target registers itself, and its meshes are kept out of it - a surface must never
+     *    read itself (Unity's opaque texture never contains the transparent water that samples it).
+     *  - When the target cannot be made the material gets the 1x1 BLACK texture and the console one warning - never the
+     *    surface's own albedo, which is what the old stand-in used and what put a normal map on screen as water.
+     * @class OpaqueSceneColor - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class OpaqueSceneColor {
+        /**
+         * Optional override of the target's size relative to the render size (1 = full resolution). Null (the default)
+         * follows the camera's exported URP opaque downsampling.
+         */
+        static Ratio: number;
+        /** The per-scene store key; the value maps a camera uniqueId to its target. */
+        private static readonly StoreKey;
+        /**
+         * The opaque scene-colour texture for a camera: the shared target, created on first use, or the black fallback.
+         * @param scene The scene.
+         * @param camera The camera whose view the target renders (normally scene.activeCamera). Null gives the black
+         *   fallback without a warning - there is nothing to render yet.
+         * @param material The material that samples the target; its meshes are excluded from the target.
+         */
+        static GetTexture(scene: BABYLON.Scene, camera: BABYLON.Camera, material?: BABYLON.Material): BABYLON.BaseTexture;
+        /**
+         * The target's settings from a camera's exported URP opaque-texture metadata (`camera.metadata.cameratextures`,
+         * T12.5). Pure - the tests drive it with plain objects.
+         *  - `produce`: false only when the export says the camera does not require the opaque texture;
+         *  - `ratio` / `samplingMode`: CopyColorPass.ConfigureDescriptor - None = 1 / NEAREST, _2xBilinear = 0.5 / BILINEAR,
+         *    _4xBox and _4xBilinear = 0.25 / BILINEAR. No downsampling key (Built-in, HDRP, older exports) = 1 / BILINEAR.
+         * @param metadata `{ requiresopaquetexture?: boolean, requiresdepthtexture?: boolean, opaquedownsampling?: string }` or null.
+         */
+        static SettingsFor(metadata: any): {
+            produce: boolean;
+            ratio: number;
+            samplingMode: number;
+            downsampling: string;
+        };
+        /**
+         * Whether a mesh belongs in the opaque target: enabled, visible, not alpha-blended, and not drawn with a material
+         * that samples the target. Pure - the tests drive it with plain objects.
+         * @param mesh The candidate mesh.
+         * @param samplers The materials that sample the target (a Set, or anything with `has`).
+         */
+        static IsOpaqueCandidate(mesh: any, samplers: any): boolean;
+        /** Whether a mesh draws with one of `materials` (directly or as a sub-material). Pure. */
+        static UsesAnyMaterial(mesh: any, materials: any): boolean;
+        /**
+         * T12.5: the scene-depth map a generated class OWNS (TOOLKIT's own DepthRenderer, not one a post-process shares) is
+         * drawn only on frames where a mesh that samples it is active - the same rule as the opaque target. `material`
+         * registers a sampler; `depthMap`, when given, is the owned map to gate (installed once).
+         */
+        static GateDepthMap(scene: BABYLON.Scene, material: BABYLON.Material, depthMap?: BABYLON.RenderTargetTexture): void;
+        /** The target's pixel size for a render size: the render size times `ratio` (floored like URP's integer divide), at least 1x1. Pure. */
+        static SizeFor(renderWidth: number, renderHeight: number, ratio: number): {
+            width: number;
+            height: number;
+        };
+        /** The texture type for the target: half float when the engine can render to it (HDR range), else 8-bit. */
+        static TextureTypeFor(caps: any): number;
+        /** Disposes every target this scene holds (a scene reload calls it; the scene's dispose also frees them). */
+        static Dispose(scene: BABYLON.Scene): void;
+        private static GetStore;
+        private static GetBlack;
+        private static CreateTarget;
+        /**
+         * T32.1 fix loop 2: true once the shadow map of every enabled shadow-casting light (the camera's own generator for a
+         * cascaded light) has rendered at least once. Maps that have not are hooked to flag their first render.
+         */
+        static ShadowMapsRendered(scene: BABYLON.Scene, camera: BABYLON.Camera): boolean;
+        /** T12.5: fill the targets by copying the main pass's colour target before its transparents (URP's CopyColorPass). False = re-render the opaque scene (the T12.4 path). */
+        static UseCopy: boolean;
+        /** Whether a rendering group's transparent queue holds a sub-mesh drawn with one of `materials` (the copy's trigger). Pure. */
+        static QueueSamples(subMeshes: any, materials: any): boolean;
+        /**
+         * Hooks every rendering group of the scene's main rendering manager (re-checked each frame: groups are created on
+         * demand) so that, right before a group draws its transparents, the colour target the camera is drawing into is
+         * copied into that camera's opaque target - when, and only when, that transparent queue holds a surface that
+         * samples it. Transparents are what sample the opaque texture in URP; the copy is at the target's own size, so
+         * 2x / 4x downsampling is one bilinear downsample of the full colour buffer, as in URP's CopyColorPass.
+         */
+        static InstallCopy(scene: BABYLON.Scene, store: any): void;
+        private static CopyNow;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T19 (D23): the render pipeline's lighting model on a transpiled Shader Graph Lit class.
+     * Every generated Lit-kind class attaches it in awake() with the mode of its target (`urp | builtin | hdrp`), through `any` (D49).
+     *
+     *  - urp: URP's DirectBRDFSpecular has no Fresnel and its environment term is EnvironmentBRDFSpecular (BRDF.hlsl:157-161):
+     *    TerrainFoliagePlugin.ApplyUrpSpecular (metallic workflow: F90 = F0 for dielectrics, diffuse albedo * 0.96) and
+     *    TerrainFoliagePlugin.UrpEnvironmentCode(define, wgsl, true) as a ratio on finalRadianceScaled (both CALLED, not copied).
+     *    In the specular workflow the direct Fresnel is removed by F90 = F0 (the regex key below) - URP's brdfData.specular is
+     *    the Specular block itself at every angle.
+     *  - builtin: Unity Standard BRDF1 (UnityStandardBRDF.cginc) - direct Fresnel kept (Babylon's own), environment term
+     *    surfaceReduction * FresnelLerp(specColor, grazingTerm, nv) with surfaceReduction = 1 / (roughness^2 + 1), roughness =
+     *    perceptualRoughness^2, grazingTerm = saturate(smoothness + (1 - oneMinusReflectivity)), FresnelLerp = Pow5.
+     *  - hdrp: Babylon's default response; the surface blocks (coat, SSS, ...) are the class's own features (T20).
+     *  - sixway (T23, D37): a Six Way class lights itself from its six light maps (per light in the light loop, the composition in
+     *    the late hook); the plugin supplies the environment SH along a world direction, pl_sixWayIrradiance(dirW) - Babylon's own
+     *    computeEnvironmentIrradiance with the reflection matrix, colour, level and lighting intensity its irradiance uses.
+     *
+     * The injection-point key SET is returned in full on every call (MaterialPluginManager collects the keys when a plugin is
+     * added, before this plugin's mode is known).
+     */
+    class PipelineLightingPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        static readonly PRIORITY: number;
+        /** The specular-workflow F90 regex key (GLSL `vec3 specularEnvironmentR90=...`, WGSL `var specularEnvironmentR90: vec3f= ...`). */
+        static readonly SPECULAR_F90_KEY: string;
+        /**
+         * Phase 7 fix loop 3 (X6): URP's DirectBRDFSpecular visibility (BRDF.hlsl:108-123). URP's specular term is
+         * r2 / (d^2 * max(0.1, LoH^2) * (4r + 2)) - Babylon's GGX distribution (with the toolkit's pi-scaled light) is r2 / d^2, so
+         * URP's "visibility" is 1 / (max(0.1, LoH^2) * (4 alphaG + 2)) in place of Babylon's height-correlated Smith term
+         * (measured on the SgLighting fixture: the Smith term made rough URP surfaces 1.2-1.3x brighter than Unity).
+         */
+        static readonly SPECULAR_VISIBILITY_KEY: string;
+        /** Phase 7 fix loop 3 (X6): URP's clear coat direct term - kDielectricSpec.r * DirectBRDFSpecular(coat), no Fresnel (Lighting.hlsl LightingPhysicallyBased). */
+        static readonly CLEARCOAT_VISIBILITY_KEY: string;
+        static readonly CLEARCOAT_FRESNEL_KEY: string;
+        mode: string;
+        constructor(material: BABYLON.Material, mode: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        static NormalizeMode(mode: string): string;
+        /**
+         * X7: whether the loader attaches the scene's pipeline mode to this material - a stock PBR material (BABYLON.PBRMaterial or
+         * the toolkit's stock-shader classes such as UniversalShaderMaterial), never a generated Shader Graph class. Every generated
+         * class reports getClassName() "PBRMaterial" too, but carries its static SgInfo and attaches its own mode in awake().
+         */
+        static IsStockPbr(material: BABYLON.Material): boolean;
+        /** X7: the material state the urp mode overrides (F0 factors, energy conservation), saved so a mode switch can restore it. */
+        private _urpSaved;
+        /**
+         * Installs the plugin once per material (metadata.tkPipelineLighting); a second call returns the existing plugin (a new
+         * mode replaces the old one). URP applies URP's direct-specular factors and drops Babylon's multi-scatter energy
+         * compensation; switching away from urp restores what the material had before (X7).
+         */
+        static Attach(material: BABYLON.Material, mode: string): TOOLKIT.PipelineLightingPlugin;
+        /**
+         * URP's material-level BRDF: TerrainFoliagePlugin.ApplyUrpSpecular (F90 = F0 for dielectrics) and no multi-scattering energy
+         * compensation - X6: Babylon's (brdf.useEnergyConservation) lit a rough URP/Lit metal 1.36x brighter than Unity on the
+         * SgLighting fixture (1.01x with it off). The prior state is saved first.
+         */
+        private static ApplyUrp;
+        /** X7: undoes ApplyUrp when a material leaves the urp mode. */
+        private static RestoreUrp;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** URP's environment term (a ratio on finalRadianceScaled), skipped where a terrain foliage clone already applies it. */
+        static UrpCode(wgsl: boolean): string;
+        /** Unity Standard BRDF1's environment term (linear colour space) as a ratio on finalRadianceScaled. */
+        static BuiltinCode(wgsl: boolean): string;
+        /** T23 (D37): the environment SH irradiance along a world direction, as Babylon's own irradiance term scales it (0 without SH). */
+        static SixWayCode(wgsl: boolean): string;
+        /** URP specular workflow: F90 = F0, so the direct specular carries the Specular block at every angle (no Fresnel). */
+        static SpecularF90Code(): string;
+        /** X6: URP's direct specular visibility (see SPECULAR_VISIBILITY_KEY). */
+        static SpecularVisibilityCode(): string;
+        /**
+         * X6: URP's coat (Lighting.hlsl LightingPhysicallyBased, _CLEARCOAT): the coat's direct specular is kDielectricSpec.r
+         * (0.04) * mask * DirectBRDFSpecular(coat) with NO Fresnel, and the base is darkened by 1 - mask * coatFresnel, coatFresnel
+         * = 0.04 + 0.96 * Pow4(1 - NoV). Babylon returns the base factor as 1 - fresnel and the term as fresnel * D * visibility,
+         * so `fresnel` becomes mask * coatFresnel (the base factor) and the visibility carries 0.04 * mask / fresnel with URP's
+         * DirectBRDFSpecular visibility (the term is then exactly 0.04 * mask * D * V_urp).
+         */
+        static ClearCoatFresnelCode(): string;
+        static ClearCoatVisibilityCode(): string;
+        /** asfloat(hash) (the Diffusion Profile block / property value) back to the profile's uint hash. */
+        static HashFromFloat(value: number): number;
+        /** The scene's exported diffusion profile with this hash (scene metadata `diffusionprofiles`, T17), or null. */
+        static FindDiffusionProfile(scene: BABYLON.Scene, hash: number): any;
+        /**
+         * shadergraph-transpiler-complete-coverage T20 (D24): binds a generated class's diffusion profile uniforms from the scene's
+         * exported profiles - g_sgSssShape (scattering distance in mm, the multiplier applied; a = filter radius in mm), g_sgSssRemap
+         * (thickness remap min / max in mm, world scale, 1 = bound) and g_sgSssTint (transmission tint). Called once per frame by
+         * update(); a profile is resolved once per material and hash (the scene metadata arrives after awake()).
+         */
+        static BindDiffusionProfile(material: BABYLON.Material, hashValue: number): boolean;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+    }
+}
+declare namespace TOOLKIT {
+    /** One scene's clock, matching Unity's `Time` (shadergraph-transpiler-complete-coverage D18). */
+    interface IShaderClock {
+        time: number;
+        deltaTime: number;
+        smoothDeltaTime: number;
+        frame: number;
+    }
+    /**
+     * Unity's shader globals for transpiled Shader Graph classes (shadergraph-transpiler-complete-coverage D16, D18).
+     *
+     * Engine-wide, like Unity's `Shader.SetGlobal*` (process-wide, not per scene), keyed by the Unity reference name. Every
+     * setter bumps `version`; a generated class re-reads the globals it lists in `SgInfo.globals` only when the version
+     * changed (`CustomShaderMaterial.syncGraphGlobals`). The exporter writes the values Unity held at export into scene
+     * metadata `shaderglobals` (`LoadSceneGlobals`).
+     *
+     * A colour and a vector share one slot per name, as in Unity (a colour IS a vector4 there): the last setter wins, and a
+     * colour is uploaded converted to linear (Unity converts `SetGlobalColor` in a linear project), a vector as given.
+     *
+     * The scene clock: `GetClock(scene)` returns `{ time, deltaTime, smoothDeltaTime, frame }`, advanced once per frame in
+     * `scene.onBeforeRenderObservable` before that frame renders: `deltaTime = min(engine.getDeltaTime() / 1000, 1/3)`
+     * (Unity's default `Time.maximumDeltaTime`), `time` = the sum of every frame's deltaTime, `smoothDeltaTime += 0.2 *
+     * (deltaTime - smoothDeltaTime)` (initialised to the first deltaTime). It never pauses for hidden materials, so every
+     * generated material of a scene animates in lockstep.
+     */
+    class ShaderGlobals {
+        private static _version;
+        private static _floats;
+        private static _vectors;
+        private static _textures;
+        private static _matrices;
+        private static _keywords;
+        private static _clocks;
+        /** Bumped by every setter (and by LoadSceneGlobals). */
+        static get version(): number;
+        static SetGlobalFloat(name: string, value: number): void;
+        static SetGlobalVector(name: string, value: BABYLON.Vector4 | BABYLON.Vector3 | BABYLON.Vector2): void;
+        static SetGlobalColor(name: string, value: BABYLON.Color4 | BABYLON.Color3): void;
+        static SetGlobalTexture(name: string, value: BABYLON.BaseTexture): void;
+        static SetGlobalMatrix(name: string, value: BABYLON.Matrix): void;
+        /** undefined when never set. */
+        static GetGlobalFloat(name: string): number;
+        /** The vector (or the colour's raw rgba) set under the name; undefined when never set. */
+        static GetGlobalVector(name: string): BABYLON.Vector4;
+        /** The colour (or the vector as rgba) set under the name; undefined when never set. */
+        static GetGlobalColor(name: string): BABYLON.Color4;
+        /** True when the name's vector slot was last set by SetGlobalColor (uploaded converted to linear). */
+        static IsGlobalColor(name: string): boolean;
+        static GetGlobalTexture(name: string): BABYLON.BaseTexture;
+        static GetGlobalMatrix(name: string): BABYLON.Matrix;
+        static EnableKeyword(name: string): void;
+        static DisableKeyword(name: string): void;
+        static IsKeywordEnabled(name: string): boolean;
+        /**
+         * Scene metadata `shaderglobals` (Data shapes): `{ floats, vectors, colors, textures, matrices, keywords }`. Texture
+         * entries are `{ url, linear }` relative to the scene's root url. Also starts the scene clock, so it runs from the
+         * scene's first frame.
+         */
+        static LoadSceneGlobals(scene: BABYLON.Scene, block: any): void;
+        /** The scene clock (registered on first use, removed when the scene is disposed). */
+        static GetClock(scene: BABYLON.Scene): TOOLKIT.IShaderClock;
+    }
+}
+declare namespace TOOLKIT {
+    /** shadergraph-transpiler-complete-coverage T28 (D49): the SgPass block of a generated Pass-host data class. */
+    interface IShaderGraphPassData {
+        uniforms: {
+            name: string;
+            type: string;
+        }[];
+        samplers: {
+            name: string;
+            kind: string;
+        }[];
+        defaults: {
+            [name: string]: number[] | string | null;
+        };
+        keywords?: {
+            key: string;
+            define?: string;
+            entries?: string[];
+        }[];
+        requirements?: number;
+        blend?: string;
+        blendFactors?: number[];
+        crt?: boolean;
+        customBuffers?: boolean;
+        /** T31 (D40): a UiElement host (uGUI Canvas / UI Toolkit graph), whether it reads the clock or the scene, and whether it multiplies the vertex colour. */
+        ui?: boolean;
+        animated?: boolean;
+        tint?: boolean;
+        glsl: string;
+        wgsl: string;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T28 (D27, D30, D49, FR-E4): the PASS host. A generated Fullscreen / custom-pass / Custom
+     * Render Texture class is a DATA class (`SgInfo` + `SgPass`, no base class); this wraps it: registers its GLSL / WGSL fragment in
+     * Babylon's ShaderStore once, holds its property values (the material bags, set* calls, keywords) and binds every uniform the
+     * program declares - the graph's properties, the engine uniforms the material host uploads (clock, screen, camera, matrices, main
+     * light, ambient, exposure, fog), the view-ray corners the Unity Fullscreen world position is rebuilt from, the scene depth
+     * (camera-space z, like the material host), the prepass world normal / velocity / reflectivity when the graph reads a sample
+     * buffer, the HDRP custom-pass colour / depth targets and a Custom Render Texture's previous buffer.
+     * @class ShaderGraphPass - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderGraphPass {
+        static readonly RequireDepth: number;
+        static readonly RequireNormal: number;
+        static readonly RequireColor: number;
+        static readonly RequireMotion: number;
+        static readonly RequireReflectivity: number;
+        private static _registered;
+        private static _neutral;
+        readonly className: string;
+        readonly scene: BABYLON.Scene;
+        readonly data: TOOLKIT.IShaderGraphPassData;
+        readonly info: any;
+        /** Extra requirement bits (the Unity feature's own `requirements`). */
+        requirements: number;
+        /** 1 when the pass input arrives gamma encoded (decoded / re-encoded in the shader); set by the creator from the chain. */
+        inputGamma: number;
+        private _values;
+        private _textures;
+        private _keywords;
+        private _owned;
+        /** Set by RenderToTexture / the CRT runtime: the previous buffer and the target size / slice. */
+        crtSelf: BABYLON.BaseTexture;
+        crtSize: number[];
+        /** sg_passInfo.z: the exposure a Volume host applies to its raymarch (the in-material image-processing exposure, InMaterialImageProcessing). */
+        exposure: number;
+        crtSlice: number;
+        /** T31 (D40): the UiElement host's inputs - vertex colour (linear), element pixel rect (x, y top-origin, w, h), render type,
+         *  element texture and its size, and the screen size the element's screen position is measured in (null: the target size). */
+        uiColor: number[];
+        uiRect: number[];
+        uiRenderType: number;
+        uiTexture: BABYLON.BaseTexture;
+        uiTextureSize: number[];
+        uiScreen: number[];
+        private constructor();
+        /** The generated class by name (TOOLKIT.Utilities.InstantiateClass), or the class itself. */
+        static ResolveClass(klassOrName: any): any;
+        /** D49: wrap a generated Pass data class (reads klass.SgInfo + klass.SgPass); null when it is not one. */
+        static FromClass(klass: any, scene: BABYLON.Scene): ShaderGraphPass;
+        /** Registers the class's two fragment sources in Babylon's ShaderStore, once per fragment name. */
+        static Register(fragmentName: string, data: TOOLKIT.IShaderGraphPassData): boolean;
+        /** "sg_<Class>" - the ShaderStore key without "FragmentShader". */
+        getFragmentName(): string;
+        getGraphInfo(): any;
+        getUniformNames(): string[];
+        getSamplerNames(): string[];
+        getRequirements(): number;
+        /** The `#define` lines of the program (compile-time keywords from their kw_ values, Babylon reserved-sampler defines). */
+        getDefines(): string;
+        private unityKey;
+        private valueOf;
+        setFloat(unityName: string, value: number): void;
+        setVector(unityName: string, value: any): void;
+        setColor(unityName: string, value: any): void;
+        setMatrix(unityName: string, value: BABYLON.Matrix): void;
+        setTexture(unityName: string, value: BABYLON.BaseTexture): void;
+        getFloat(unityName: string): number;
+        enableKeyword(unityName: string): void;
+        disableKeyword(unityName: string): void;
+        private setKeyword;
+        /** Applies a portable graph material block (floats / colors / vectors / textures / matrices; ShaderGraphRuntime shapes). */
+        applyBlock(block: any): void;
+        dispose(): void;
+        private static _neutralKinds;
+        /** A 1x1 white neutral of a sampler kind ("2d" | "3d" | "cube" | "2darray"): WebGPU needs the view dimension to match. */
+        private static NeutralOf;
+        private static Neutral;
+        /** The camera-space-z depth map (Babylon's own renderer when it stores camera-space z, else one the toolkit owns). */
+        static SceneDepth(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.RenderTargetTexture;
+        /** World-space view rays (depth 1 along the camera forward) at vUV (0,0), and the steps to (1,0) and (0,1). */
+        static ViewRays(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.Vector4[];
+        /** The Unity-unit main light (the generated material's sgUpdateMainLight rule): direction and colour. */
+        private static MainLight;
+        private static PrepassTexture;
+        /**
+         * Uploads every uniform and sampler the program declares. `camera` is the rendering camera, `width` / `height` the target size.
+         */
+        bind(effect: BABYLON.Effect, camera?: BABYLON.Camera, width?: number, height?: number): void;
+        private static Upload;
+        /** The scene's custom-pass colour / depth targets (created by EnableCustomBuffers), or null. */
+        static CustomBuffer(scene: BABYLON.Scene, depth: boolean): BABYLON.RenderTargetTexture;
+        /**
+         * HDRP DrawRenderersCustomPass targeting the Custom colour / depth buffer: the meshes on `layerMask` (Unity layer bits, the
+         * exported toolkit layer of each node) are drawn into `sgCustomColor` (their own materials, or `overrideMaterial`) and their
+         * camera-space depth into `sgCustomDepth`, before post-processing.
+         */
+        static EnableCustomBuffers(scene: BABYLON.Scene, camera: BABYLON.Camera, entries: any[]): void;
+        /** The prepass textures a requirement bit set needs (TAA pattern). */
+        static PrepassTypes(requirements: number): number[];
+        /** The image processing the scene's materials apply themselves: gamma 1 when they write gamma encoded colour, and their exposure. */
+        static InMaterialImageProcessing(scene: BABYLON.Scene): {
+            gamma: number;
+            exposure: number;
+        };
+        /** Whether the input of a pass at `injection` arrives gamma encoded (image processing already applied). */
+        static InputGamma(scene: BABYLON.Scene, injection: string): number;
+        /**
+         * D30: a BABYLON.PostProcess for a generated Fullscreen class on `camera`. `options.requirements` = the Unity feature's input bits;
+         * the pass's own sample-buffer reads add theirs. The graph's normal / motion / reflectivity reads enable the prepass.
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, className: any, options?: {
+            slot?: number;
+            order?: number;
+            requirements?: number;
+            blend?: string;
+            name?: string;
+            injection?: string;
+            block?: any;
+            textureType?: number;
+        }): BABYLON.PostProcess;
+        /**
+         * Renders `pass` (a Custom Render Texture / UI element program) into `target`, `self` = its previous buffer (D34). True when it
+         * rendered, false while its effect compiles; throws when the program failed to compile (the caller falls back and warns).
+         */
+        static RenderToTexture(pass: ShaderGraphPass, target: BABYLON.RenderTargetTexture, self?: BABYLON.BaseTexture): boolean;
+        private static _managed;
+        /** The fullscreen passes this runtime attached to `camera` itself (not through a PostProcessor). */
+        static AttachedTo(camera: BABYLON.Camera): BABYLON.PostProcess[];
+        /** Releases the passes attached to `camera` by ApplySceneFeatures (a PostProcessor takes the camera over). */
+        static Release(camera: BABYLON.Camera): void;
+        /** The ordered fullscreen entries of scene metadata `renderfeatures` (beforePost first, then afterPost; feature order inside). */
+        static Entries(scene: BABYLON.Scene): any[];
+        /**
+         * D30 without a PostProcessor: the scene's fullscreen features on every rendering camera - beforePost passes at the front of the
+         * chain, afterPost passes at the end (a PostProcessor that later owns the camera releases these and registers its own).
+         */
+        static ApplySceneFeatures(scene: BABYLON.Scene, block?: any): void;
+    }
+    /**
+     * D30: game code drives a script-only fullscreen graph (Unity's FullscreenEffect scripts are not exported):
+     * `TOOLKIT.ShaderGraphFullscreen.Create(scene, "MY.FullscreenTransition_Graph")`.
+     * @class ShaderGraphFullscreen - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderGraphFullscreen {
+        static Create(scene: BABYLON.Scene, className: string, options?: {
+            camera?: BABYLON.Camera;
+            injection?: string;
+            order?: number;
+            block?: any;
+        }): {
+            pass: ShaderGraphPass;
+            postProcess: BABYLON.PostProcess;
+            enabled: boolean;
+            dispose(): void;
+        };
+    }
+}
+declare namespace TOOLKIT {
+    /** A generated Shader Graph class's static `SgInfo` (shadergraph-transpiler-complete-coverage Design Reference). */
+    interface IShaderGraphInfo {
+        graph: string;
+        subTarget: string;
+        host: string;
+        pipeline: string;
+        deviations: string[];
+        properties: {
+            [unityRef: string]: string;
+        };
+        keywords: {
+            [unityRef: string]: {
+                key: string;
+                mode: string;
+                entries?: string[];
+            };
+        };
+        globals: string[];
+        readsStock: string[];
+        writesStock: string[];
+        animated?: boolean;
+        sceneColorLod?: boolean;
+        /** T22 (D43): Hybrid Per Instance uniform keys -> instanced-buffer size (1 float, 4 vector / colour). */
+        perInstance?: {
+            [key: string]: number;
+        };
+    }
+    /**
+     * Runtime reporting for transpiled Shader Graph classes (shadergraph-transpiler-complete-coverage D13, D17).
+     *
+     * One grouped console summary per scene (`FlushSceneSummary`, called once when the scene finishes loading): the materials
+     * whose class records deviations, and every runtime last resort. A last resort is also warned once per material the
+     * moment it happens (a compile failure can arrive after the summary). Classes missing from the project bundle are
+     * summarised in one warning with the remedy. Per-scene records are keyed by `scene.uniqueId` and dropped on dispose.
+     */
+    class ShaderGraphRuntime {
+        /** Read at flush time: print the deviation group. Default = SceneManager.IsDebugMode(). */
+        static ReportDeviations: boolean;
+        static readonly MissingClassRemedy: string;
+        private static _records;
+        private static Record;
+        private static ClassNameOf;
+        /** A generated material was created (called from its constructor). Starts the scene clock too, before the first frame. */
+        static NoteMaterial(scene: BABYLON.Scene, materialName: string, info: TOOLKIT.IShaderGraphInfo, className?: string): void;
+        /**
+         * T32.1 fix loop: a deviation decided at runtime (a shader over the device's texture budget read some graph textures as
+         * their neutral value) - added to the material's entry of the scene summary.
+         */
+        static NoteRuntimeDeviation(scene: BABYLON.Scene, materialName: string, className: string, deviation: string): void;
+        /** T32.1 fix loop: the summary prints once no graph material was recorded for this long (ms). */
+        static SummaryQuietMs: number;
+        /** T32.1 fix loop: ... but at most this long after the scene became ready / the first late record (ms). */
+        static SummaryMaxWaitMs: number;
+        /**
+         * T32.1 fix loop: the scene summary waits for the scene to be ready, one rendered frame, and a quiet period with no new
+         * record (script components build their decal / carrier materials and clones after the glTF finished loading - Garden's
+         * 27 and Terminal's 41 decal deviations were recorded after the summary had printed). Anything recorded after that
+         * prints one follow-up group, after its own quiet period.
+         */
+        static ScheduleSceneSummary(scene: BABYLON.Scene): void;
+        /** (Re)arms the quiet-period flush of a scheduled summary (bounded by SummaryMaxWaitMs). */
+        private static ArmQuiet;
+        /** A record while a summary is waiting re-arms its quiet period; one after the summary printed schedules a follow-up. */
+        private static ScheduleLate;
+        /** D17: a graph was disabled on its material (or a constructor threw). Warns once per material. */
+        static ReportLastResort(scene: BABYLON.Scene, materialName: string, className: string, error: string): void;
+        /** A material names a class the project bundle does not register (collected, reported once in FlushSceneSummary). */
+        static ReportMissingClass(scene: BABYLON.Scene, className: string, count: number): void;
+        /**
+         * D17: `new klass(materialName, scene)`, or null when the constructor throws - reported as a last resort once; the
+         * caller then falls back to its stand-in (the loader's UniversalShaderMaterial).
+         */
+        static InstantiateMaterial(klass: any, className: string, materialName: string, scene: BABYLON.Scene): BABYLON.Material;
+        /**
+         * Phase 9 (T24 particles, T25 / T25.1 carriers, T26 terrain templates; D28 / D38 / D39): a generated graph class built from a
+         * PORTABLE block (the exporter's UnityTools_ShaderGraph.PortableGraphMaterial) - for a renderer that has no glTF material.
+         * `{ customMaterial, name, customTextures, customFloats, customColors, customVectors, customMatrices, stock }`: the class is
+         * resolved through TOOLKIT.Utilities.InstantiateClass and constructed like the loader does (InstantiateMaterial), every bag is
+         * applied the way CanvasTools applies a glTF material's extras, the reserved `stock` slots go to Babylon's own members
+         * (albedoTexture / bumpTexture / metallic / roughness / alphaCutOff), then awake() runs (initMaterial). A texture is
+         * `{ url, linear, uScale, vScale, uOffset, vOffset, wrapU, wrapV, sampling }` (url relative to the scene root, loaded
+         * invertY = false like every toolkit texture); a Cube / 3D / 2D-array value keeps its `kind` shape. Null when the block names
+         * no class, the class is not registered (counted as missing), or its constructor throws (a last resort).
+         */
+        static CreateMaterialFromBlock(scene: BABYLON.Scene, block: any, name?: string): BABYLON.Material;
+        /** The scene-relative url of a portable texture (absolute / data / blob urls unchanged). */
+        static ResolveBlockUrl(scene: BABYLON.Scene, url: string): string;
+        /** A portable texture `{ url, linear, uScale, vScale, uOffset, vOffset, wrapU, wrapV, sampling }` as a Babylon texture (invertY false). */
+        static LoadBlockTexture(scene: BABYLON.Scene, info: any): BABYLON.Texture;
+        /** Applies a portable block's bags and reserved slots to a generated class instance (CreateMaterialFromBlock; reapply after a property change). */
+        static ApplyBlock(material: any, block: any, scene: BABYLON.Scene): void;
+        /** The scene's root url with a trailing slash ("" when none). */
+        private static RootOf;
+        /**
+         * D44 (T6): a MaterialPropertyBlock of the renderer (`renderer.propertyblocks[i]`, exported keys) becomes a clone of the
+         * material used by this mesh only (`<name>#mpb<meshId>`), with the overrides applied. For a MultiMaterial the sub-material
+         * at `index` is cloned inside a cloned MultiMaterial; a multi-primitive node applies block `index` to its child primitive
+         * mesh of that order. Waits for the loader to assign the material. `loadTexture(info, done)` loads a TextureInfo.
+         */
+        static ApplyPropertyBlocks(node: BABYLON.Node, blocks: any[], loadTexture?: (info: any, done: (texture: BABYLON.BaseTexture) => void) => void): void;
+        /** The Shader Graph class info of a material (a MultiMaterial's sub-material `sub`), or null. */
+        private static InfoOf;
+        /**
+         * T22 (D43): true when the drawn mesh (or its source mesh) carries the per-instance buffer `kind` - an instanced buffer
+         * (registerInstancedBuffer) or a thin-instance buffer (thinInstanceSetBuffer). A generated class raises its `<CLASS>_HPI`
+         * define and pushes the `sg_<key>` attributes from this.
+         */
+        static HasInstanceBuffer(mesh: BABYLON.AbstractMesh, kind: string): boolean;
+        /** A property-block value for a per-instance key: a number (size 1) or a Vector4 (size 4); undefined when the block has none. */
+        private static BlockInstanceValue;
+        /** The material's own value of a per-instance key (the value every instance without a block keeps). */
+        private static MaterialInstanceValue;
+        /**
+         * T22 (D43 / D44): register the class's Hybrid Per Instance keys (SgInfo.perInstance) as instanced buffers `sg_<key>` on a
+         * source mesh, seeded with the material's value for the source and every existing instance (Babylon copies the source's
+         * values into instances created later). Idempotent. Returns false when the source has no material yet.
+         */
+        static EnsureInstanceBuffers(source: BABYLON.Mesh, sub?: number): boolean;
+        /**
+         * Phase 9 carry-over 4 (T22 step 3): the THIN-INSTANCE twin of EnsureInstanceBuffers. A mesh drawn with thin instances whose
+         * material class lists Hybrid Per Instance keys (SgInfo.perInstance) gets one `sg_<key>` thin-instance buffer per key
+         * (thinInstanceSetBuffer, stride = the key's size), sized to the mesh's thin-instance capacity (its matrix buffer, else its
+         * count) and seeded with the material's own value - so the class's <CLASS>_HPI path reads a defined value for every instance
+         * and SetThinInstanceValue can vary one. A buffer already large enough is kept (with its values). Returns false when the mesh
+         * has no material or no thin instances yet.
+         */
+        static EnsureThinInstanceBuffers(mesh: BABYLON.Mesh, sub?: number): boolean;
+        /** Carry-over 4: one thin instance's Hybrid Per Instance value (a number for a size-1 key, a Vector4 / [x, y, z, w] otherwise). */
+        static SetThinInstanceValue(mesh: BABYLON.Mesh, index: number, key: string, value: any, sub?: number): boolean;
+        /**
+         * T22 (D43 / D44): an InstancedMesh's property block. The Hybrid Per Instance keys its class lists become that instance's
+         * instanced-buffer values (registered on the source on first use); other keys cannot differ per instance of one material and
+         * stay the source's. Returns false when the source has no material yet (the caller retries on its material change).
+         */
+        static ApplyInstanceBlock(instance: BABYLON.InstancedMesh, block: any, sub?: number): boolean;
+        /** The clone of one material with a property block applied (null when the material is not a toolkit custom material). */
+        static CloneWithBlock(material: BABYLON.Material, block: any, meshId: number, loadTexture?: (info: any, done: (texture: BABYLON.BaseTexture) => void) => void): BABYLON.Material;
+        /** One warning for the missing classes, then one console.groupCollapsed per scene; clears the record. */
+        static FlushSceneSummary(scene: BABYLON.Scene): void;
+    }
+    /** @hidden */
+    interface ShaderGraphSceneRecord {
+        scene: BABYLON.Scene;
+        materials: Map<string, {
+            className: string;
+            deviations: string[];
+        }>;
+        lastResorts: Map<string, {
+            className: string;
+            error: string;
+        }>;
+        missing: Map<string, number>;
+        warned: Set<string>;
+        /** T32.1: the scene summary printed (later records print a follow-up group). */
+        flushed?: boolean;
+        /** T32.1: a (deferred or follow-up) flush is pending. */
+        scheduled?: boolean;
+        /** T32.1: the pending quiet-period timer and its latest flush time. */
+        timer?: any;
+        deadline?: number;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage X2: the ShadowDepthWrapper of a graph class that casts through its own shader
+     * (created by the generated sgEnableShadowDepth).
+     *
+     * Babylon's wrapper builds each depth effect under a fresh random token, and the engine caches effects by
+     * token + defines - so every sub-mesh compiled its OWN copy of an identical shadow shader, and every time the base material
+     * re-created an effect for a sub-mesh (texture arrivals during loading, one notification per render pass) the wrapper
+     * disposed that copy and compiled a new one. GardenScene measured 1326 shadow-shader compiles in a single frame (165 s).
+     * Here the token is derived from the base effect's own cache key (plus the wrapper's code options), so identical depth
+     * shaders are ONE cached effect shared by every sub-mesh, and a sub-mesh whose base effect is re-created only looks the
+     * depth effect up again. A retired depth effect keeps one reference until the material is disposed, so a sub-mesh that
+     * alternates between two base effects never recompiles either.
+     *
+     * Two further adjustments keep the shader compiling in every scene: the main-pass defines it inherits carry PREPASS /
+     * SCENE_MRT_COUNT whenever the scene has a prepass renderer (the shadow map is a single target, so they are dropped), and
+     * Babylon's WGSL normal-bias include reads a bare `vNormalW` (remapped to `vertexOutputs.vNormalW`). `standalone` compiles
+     * the material for the shadow pass itself, so a caster the camera never drew still casts.
+     *
+     * The defines a depth draw binds with (run fix): Babylon builds a sub-mesh's depth holder LAZILY, on its first shadow
+     * draw, and copies its defines from the sub-mesh's draw wrapper of the render pass that created the base effect. That
+     * wrapper can be gone by then - any `material.resetDrawCache()` (a material plugin added after the material first
+     * rendered, e.g. SgDepthPass's output plugin on the frame a caster first enters the depth renderer, which renders just
+     * before the cascaded shadow map) or a mesh material change removes it - or hold the stock depth path's string defines.
+     * The holder then gets `defines: null`, the standalone `baseMaterial.bindForSubMesh` returns at once (no material
+     * defines), nothing is bound into the holder's material context, and WebGPU's createBindGroup throws on the first
+     * caster ("Required member is undefined"), which stops the scene. So the wrapper records the defines object each base
+     * effect was created with, and a holder is only drawn with the defines of the base effect it was built from.
+     */
+    class SgShadowDepth {
+        /**
+         * Graph-owned shadow / depth casting (the graph's own vertex displacement and clip in the shadow map and depth pass).
+         * Off by default: every caster then draws with Babylon's stock depth shader, as before this feature. On OasisScene the
+         * graph-owned path cost ~16 ms per frame (292 vegetation materials x 4 cascades binding the full material per draw).
+         * Set `TOOLKIT.SgShadowDepth.Enabled = true` before the scene loads to cast displaced / clipped graph shadows.
+         */
+        static Enabled: boolean;
+        /** The wrapper for one graph material, with shared depth effects (null while Enabled is false: stock depth path). */
+        static Create(material: BABYLON.Material, scene: BABYLON.Scene): BABYLON.ShadowDepthWrapper;
+        /** The depth effect's cache token: the wrapper's code options and a hash of the base effect's own cache key. */
+        static Token(options: string, baseKey: string): string;
+        /** 53-bit string hash (cyrb53). */
+        static Hash(text: string): string;
+        /** True for a material defines OBJECT (the stock depth/shadow paths store their defines as a string). */
+        static IsDefinesObject(defines: any): boolean;
+        /**
+         * The material defines the sub-mesh's current base effect was created with: the recorded ones, else the entry pass's
+         * draw wrapper, else any of the sub-mesh's draw wrappers that holds that same effect. Null when none exists.
+         */
+        static BaseDefines(wrapper: any, subMesh: BABYLON.SubMesh): any;
+        /**
+         * Gives the sub-mesh's depth holder for this shadow generator the defines of the base effect it was built from, on its
+         * main draw wrapper and on every per-pass draw wrapper. False (the caster is not ready) when no such defines exist yet.
+         */
+        static ResolveHolderDefines(wrapper: any, subMesh: BABYLON.SubMesh, shadowGenerator: any): boolean;
+        /**
+         * T32.1 fix loop: true when the defines the sub-mesh's base effect was built from have been marked dirty since (lights,
+         * textures, attributes ... changed) - the camera pass rebuilds the effect from them before it is drawn again, so a depth
+         * draw of the old effect would bind the new state into the old layout.
+         */
+        static BaseDefinesStale(wrapper: any, subMesh: BABYLON.SubMesh): boolean;
+        /**
+         * T32.1 fix loop: true when every light slot the defines compiled (LIGHT<i>) is lit by the mesh's light i of the same
+         * type - what BindLights pairs (`Light<i>` UBO of lightSources[i]) when it binds with these defines.
+         */
+        static LightsMatch(defines: any, lights: BABYLON.Light[]): boolean;
+        /** Drops the prepass MRT defines (the shadow map is one target). */
+        static FilterDefines(defines: string): string;
+        /** Installs the shared-token effect creation and retire-instead-of-dispose on a Babylon ShadowDepthWrapper. */
+        static Share(wrapper: any, scene: BABYLON.Scene, options: string): void;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T8 (FR-B11): the depth pass of a graph class that casts through its own shader.
+     *
+     * Babylon 9.28's DepthRenderer never consults `material.shadowDepthWrapper` (only ShadowGenerator does): it draws every
+     * mesh with its stock `depth` shader, i.e. the UNDISPLACED, unclipped shape - while Unity's _CameraDepthTexture comes
+     * from the graph's own DepthOnly pass (vertex displacement and clip included). So for a sub-mesh whose material is a
+     * toolkit graph material that owns its shadow depth (a displaced or clipping graph: `shadowDepthWrapper` set), every
+     * DepthRenderer renders it with the material's OWN shader in the depth render pass: `SgDepthOutputPlugin` (added to the
+     * material on first use) turns that pass's output into exactly what the stock depth shader would have written
+     * (camera-space z / non-linear z / the linear metric). Other sub-meshes keep Babylon's stock path untouched. A packed
+     * (8-bit) or reverse-culling renderer keeps the stock path for everything.
+     */
+    class SgDepthPass {
+        private static _installed;
+        private static _passes;
+        /** Patches BABYLON.DepthRenderer once (idempotent; called by every generated graph material's constructor). */
+        static Install(): void;
+        /** True when the material is a live toolkit graph material that casts through its own shader. */
+        static Owns(material: BABYLON.Material): boolean;
+        /** The DepthRenderer whose depth map renders in this render pass, or null. */
+        static RendererForPass(passId: number): any;
+        private static Accepts;
+        private static Register;
+        private static EnsurePlugin;
+        private static IsReady;
+        /** Wraps the renderer's render function once: owned sub-meshes draw through their material, the rest stay stock. */
+        private static Patch;
+        /** The stock render-target draw (Mesh.render) in the depth pass: the material compiles its SG_DEPTH_OUT variant. */
+        private static RenderSubMesh;
+        /**
+         * The material's ShadowDepthWrapper rebuilds its shadow shader from whichever effect the material created LAST for a
+         * sub-mesh (onEffectCreatedObservable). The depth-pass variant must not become that source (it would dispose and
+         * recompile the shadow effects, from the SG_DEPTH_OUT code), so its observer is masked while the depth pass compiles.
+         */
+        private static MuteShadowWrapper;
+        private static UnmuteShadowWrapper;
+    }
+    /**
+     * The depth-pass output of a graph material (SgDepthPass): in a DepthRenderer's render pass the material's final colour
+     * becomes the value Babylon's stock depth shader writes, computed from the material's own (displaced) world position.
+     * Every other pass compiles it out (SG_DEPTH_OUT false), and the prepass MRT outputs are dropped in the depth pass (the
+     * depth map is a single target).
+     */
+    class SgDepthOutputPlugin extends BABYLON.MaterialPluginBase {
+        constructor(material: BABYLON.Material);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        prepareDefines(defines: any, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
     }
 }
 declare namespace TOOLKIT {
@@ -3802,211 +4930,494 @@ declare namespace TOOLKIT {
         static ValidateTransformMetadata(transform: BABYLON.TransformNode): void;
     }
 }
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage X10: the Unity sampler state a glTF sampler cannot carry, exported as the glTF
+     * texture's extras (GLTFMetaDataExporter.TextureSamplerExtras) and applied by the loader (CVTOOLS_unity_metadata._loadTextureAsync):
+     *
+     *   anisolevel - the anisotropic level Unity samples the texture with under the active quality level (a ForceEnable quality
+     *                level raises 1..8 to 9; anisoLevel 0 stays off). Babylon's default is 4 for every texture.
+     *   coverage   - the alpha-test reference of a texture whose importer preserves alpha-test coverage in its mips
+     *                (TextureImporter.mipMapsPreserveCoverage). A plain box mip chain averages cut-out leaves and blades toward
+     *                transparent, so they thin out and vanish with distance; Unity scales each mip level's alpha so the fraction
+     *                of texels passing the alpha test stays the level-0 fraction. The level-0 texels are read back from the GPU and
+     *                the chain is rebuilt on the CPU (box filter, sRGB colour averaged in linear) with that per-level alpha scale.
+     *
+     * @class TextureSampling - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class TextureSampling {
+        /** Applies a texture's exported sampler extras ({ anisolevel?, coverage? }). Safe on any texture; unknown fields are ignored. */
+        static ApplyExtras(texture: BABYLON.BaseTexture, extras: any): void;
+        /** Runs `done` once the texture's pixels are on the GPU. */
+        private static WhenLoaded;
+        /** Internal textures whose coverage chain is built or building (a glTF texture shared by several materials is done once). */
+        private static _done;
+        /**
+         * Rebuilds the mip chain of a loaded RGBA8 power-of-two texture with coverage-preserving alpha. Resolves false when the
+         * texture cannot take it (compressed, float, non power-of-two, no mips, already done).
+         */
+        static ApplyCoverageMips(texture: BABYLON.BaseTexture, cutoff: number): Promise<boolean>;
+        /** True for a loaded mipmapped RGBA8 power-of-two 2D texture not yet rebuilt, on an engine with per-level uploads. */
+        static CanTakeCoverage(internal: any, engine: any): boolean;
+        /** Builds (CoverageMipChain) and uploads levels 1..n of `internal` from its straight level-0 bytes. */
+        static UploadCoverageChain(internal: any, engine: any, base: Uint8Array, cutoff: number, srgb: boolean): boolean;
+        /**
+         * Levels 1..n (down to 1 x 1) of a straight RGBA8 image: each level a 2x2 box of the previous (colour averaged in linear
+         * when `srgb`), then its alpha scaled so that Coverage(level, cutoff) matches Coverage(level 0, cutoff) (Unity's
+         * mipMapsPreserveCoverage; the scale is found by bisection, as NVTT's scaleAlphaToCoverage). Pure.
+         */
+        static CoverageMipChain(base: Uint8Array, w: number, h: number, cutoff: number, srgb: boolean): Uint8Array[];
+        /** The fraction of texels whose alpha * scale passes the alpha test (>= cutoff). */
+        static Coverage(pixels: Uint8Array, count: number, cutoff: number, scale: number): number;
+        /** The alpha scale in [0, 4] whose coverage is closest to `target` (bisection, 16 steps). */
+        static CoverageScale(pixels: Uint8Array, count: number, cutoff: number, target: number): number;
+        private static _toLinear;
+        private static LinearTable;
+        private static _toSrgb;
+        /** linear [0, 1] -> sRGB byte through a 4096-entry table (a Math.pow per texel was the chain's main cost). */
+        private static ToSrgbByte;
+        /** 2x2 box downsample of a straight RGBA8 image (edge-clamped); sRGB colour is averaged in linear, alpha always linear. */
+        static Downsample(src: Uint8Array, sw: number, sh: number, dw: number, dh: number, srgb: boolean): Uint8Array;
+        /** Rows mirrored (an invertY texture's upload flips them back). */
+        static FlipRows(src: Uint8Array, w: number, h: number): Uint8Array;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity's camera matrices, in Unity's own conventions, for transpiled Shader Graph materials (unity-terrain-parity T12.5).
+     *
+     * A Transformation Matrix node set to Inverse Projection reads URP's UNITY_MATRIX_I_P: the inverse of the camera's GPU
+     * projection - right-handed view space looking down -z, and REVERSED-Z device depth (near = 1, far = 0), which is the
+     * device depth the transpiler's Raw Scene Depth returns (plan D36). The common depth-reconstruction pattern
+     * `I_P * (ndc.x, ndc.y, rawDepth, 1)` then gives Unity's view-space position, whose z / w is minus the eye depth.
+     *
+     * The matrix is packed for a GLSL / WGSL `M * v` (column-major upload, exactly how the class's `setMatrixValue` uploads
+     * a BABYLON.Matrix), built from the Babylon camera's own projection (field of view, aspect, off-centre terms) and near /
+     * far planes. Babylon's view space is left-handed (+z forward); Unity's view z is the negated Babylon z.
+     * @class UnityCameraMatrices - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class UnityCameraMatrices {
+        private static readonly Scratch;
+        /**
+         * Unity's GPU projection (reversed-Z), as the 16 numbers of a column-major `M * v` matrix, from a Babylon projection
+         * matrix's elements. Pure - the tests drive it with plain arrays.
+         * @param m The Babylon projection matrix elements (`matrix.m`, row-vector layout).
+         * @param near The camera near plane.
+         * @param far The camera far plane (0 or less = Babylon's infinite far plane; a large finite value is used).
+         */
+        static GpuProjection(m: ArrayLike<number>, near: number, far: number): number[];
+        /**
+         * shadergraph-transpiler-complete-coverage T15: Unity's unity_OrthoParams packed as the generated classes' g_sgCameraOrtho -
+         * (isOrtho 0/1, ortho half width, ortho half height, 1 = Babylon's non-reversed depth, the Z Buffer Sign). Unity writes
+         * (orthographicSize * aspect, orthographicSize, 0, isOrtho); the half extents are read back off the projection Babylon binds
+         * (an orthographic projection's m[0] = 2 / (right - left), m[5] = 2 / (top - bottom)), so a camera whose ortho bounds are
+         * left null (Babylon then uses the render size) answers the same numbers the shader sees. Pure.
+         * @param isOrtho The camera renders with an orthographic projection (camera.mode === ORTHOGRAPHIC_CAMERA).
+         * @param projection The projection matrix elements Babylon binds (`matrix.m`).
+         */
+        static OrthoParams(isOrtho: boolean, projection: ArrayLike<number>): number[];
+        /**
+         * T15: Unity's UNITY_MATRIX_V (right-handed view, -z forward) from Babylon's view: S * V with S = diag(1, 1, -1, 1), packed for
+         * a GLSL / WGSL `M * v` (the same packing as `matrix.m`): row 2 negated. Pure.
+         */
+        static UnityView(view: ArrayLike<number>): number[];
+        /**
+         * T15: Unity's UNITY_MATRIX_I_V = inverse(S * V) = V^-1 * S: the inverse of Babylon's view with column 2 negated - what a
+         * generated class's shader builds from its uploaded g_sgInvView (the plain inverse). Pure (allocates one matrix).
+         */
+        static UnityInverseView(view: ArrayLike<number>): number[];
+        /**
+         * T15: Unity's UNITY_MATRIX_I_VP - P_u * V_u = (P * S) * (S * V) = P * V, so it is the plain inverse of the view-projection
+         * Babylon binds (g_sgInvViewProjection). Pure (allocates one matrix).
+         */
+        static UnityInverseViewProjection(viewProjection: ArrayLike<number>): number[];
+        /**
+         * UNITY_MATRIX_I_P for a camera: the inverse of `GpuProjection`, packed the same way. Returns a shared scratch matrix
+         * (every generated material of a frame reads the same active camera); pass `result` to keep a private copy.
+         */
+        static InverseGpuProjection(camera: BABYLON.Camera, result?: BABYLON.Matrix): BABYLON.Matrix;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-      * Babylon universal terrain material pro class
-      * @class UniversalTerrainMaterial - All rights reserved (c) 2024 Mackey Kinard
-      */
-    class UniversalTerrainMaterial extends TOOLKIT.CustomShaderMaterial {
-        protected terrainInfo: any;
-        constructor(name: string, scene: BABYLON.Scene);
-        awake(): void;
-        update(): void;
-        getShaderName(): string;
-        getTerrainInfo(): any;
-    }
-    /**
-     * Custom Shader Material Plugin (BABYLON.MaterialPluginBase)
-     * @class UniversalTerrainMaterialPlugin
+     * unity-terrain-parity T12.8 - Unity's LOD selection and Unity's per-object light selection, for every scene.
+     *
+     * Two Unity rules the runtime did not have:
+     *
+     *  1. LOD BY COVERAGE. A LODGroup picks its level from the SCREEN-RELATIVE HEIGHT of the group, not from a
+     *     distance: `relativeHeight = worldSize * lodBias / (2 * tan(vfov / 2) * distance)` for a perspective
+     *     camera (`worldSize * lodBias / (2 * orthoSize)` for an orthographic one), where `distance` runs from
+     *     the camera to the group's world reference point. Level `i` is drawn while `relativeHeight >= coverage[i]`
+     *     (the first such level wins), and below the LAST coverage the group is culled. This is the formula of
+     *     Unity's LODGroup manager as published in Entities Graphics (`LODGroupExtensions.CalculateLODParams`:
+     *     `distanceScale = 2 * tan(fov / 2) / lodBias`, a level is in range while
+     *     `distance * distanceScale < worldSize / screenRelativeTransitionHeight`) and in `LODUtility.CalculateDistance`.
+     *     Headless exports write `coverages` but no `distances` (there is no scene-view camera), so without this
+     *     every level of every group rendered at once.
+     *
+     *  2. PER-OBJECT LIGHTS. URP Forward shades each renderer with the main light plus at most
+     *     `maxAdditionalLightsCount` ("Per Object Limit", 4 by default) additional lights, chosen per renderer by
+     *     Unity's native culling (`CullingResults` light indices, consumed in URP `ForwardLights.SetupPerObjectLightIndices`
+     *     and `UniversalRenderPipeline.GetMainLightIndex`). What the URP source CONFIRMS: the main light is the sun
+     *     or else the brightest directional (`GetBrightestDirectionalLightIndex`, by `light.intensity`) and is not
+     *     counted against the limit; every other directional, point and spot light is an additional light; a light
+     *     only reaches a renderer whose bounds its range (and, for a spot, its cone) touches. What is APPROXIMATED
+     *     (the native sort is not in the package source): additional lights are ranked by
+     *     `intensity * luminance(colour) / distance^2` to the renderer's bounds centre, directional additional
+     *     lights first, ties by scene order. Babylon instead handed every mesh the first `maxSimultaneousLights`
+     *     lights in SCENE order, so a trunk got three out-of-range ceiling spots and never its own lantern.
+     *
+     * The rules are pure statics over plain numbers and typed arrays (node-testable, no engine); `UnityLodGroups`
+     * and `UnityLightSelector` apply them to a scene with no per-frame allocation.
+     * @class UnityLodAndLights - All rights reserved (c) 2024 Mackey Kinard
      */
-    class UniversalTerrainMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
-        private colorName;
-        private splatmapSampler;
-        private detailsSampler;
-        private normalsSampler;
-        private GLSL_CustomFragment;
-        private GLSL_CustomVertex;
-        private GLSL_VertexMainEnd;
-        private GLSL_FragmentUpdateColor;
-        private WGSL_CustomFragment;
-        private WGSL_CustomVertex;
-        private WGSL_VertexMainEnd;
-        private WGSL_FragmentUpdateColor;
-        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
-        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
-        getClassName(): string;
-        /** This is used to create custom shader code
-         *
-         *  WGSL - To sample a texture in a shader, you need to use the `textureSample` function.
-         *  let customColor: vec4<f32> = textureSample(testTexture, testTextureSampler, fragmentInputs.vAlbedoUV);
-         *
-         *  GLSL - To sample a texture in a shader, you need to use the `texture2D` function.
-         *  vec4 customColor = texture2D(testTexture, vAlbedoUV);
-         *
-         */
-        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
-        /** This gets the uniforms used in the shader code */
-        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
-        /** This gets the samplers used in the shader code */
-        getSamplers(samplers: string[]): void;
-        /** This get the attributes used in the shader code */
-        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        /** This prepares the shader defines */
-        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        /** This is used to update the uniforms bound to a mesh */
-        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
-        private WGSL_FormatTerrainVertexDefintions;
-        private WGSL_FormatTerrainVertexMainEnd;
-        private WGSL_FormatTerrainFragmentDefintions;
-        private WGSL_FormatTerrainFragmentUpdateColor;
-        private GLSL_FormatTerrainVertexDefintions;
-        private GLSL_FormatTerrainVertexMainEnd;
-        private GLSL_FormatTerrainFragmentDefintions;
-        private GLSL_FormatTerrainFragmentUpdateColor;
-    }
-}
-declare namespace TOOLKIT {
-    /**
-     * Grass Standard Shader Material (BABYLON.StandardMaterial)
-     * Implements Unity-exact TerrainWaveGrass algorithm for rolling wave effect
-     * No billboard grass faces camera and waves with rolling bands effect
-     * @class GrassStandardMaterial
-     */
-    class GrassStandardMaterial extends TOOLKIT.StandardShaderMaterial {
-        private _windTimeAccum;
-        private _lastUpdateFrame;
-        constructor(name: string, scene: BABYLON.Scene);
-        awake(): void;
-        update(): void;
-        getShaderName(): string;
-        getMaxDistance(): number;
-        setMaxDistance(distance: number): void;
-        getFadeStart(): number;
-        setFadeStart(distance: number): void;
-        getWaveSpeed(): number;
-        setWaveSpeed(speed: number): void;
-        getWaveSize(): number;
-        setWaveSize(size: number): void;
-        getWindAmount(): number;
-        setWindAmount(amount: number): void;
-        getWindTint(): BABYLON.Vector4;
-        setWindTint(tint: BABYLON.Vector4): void;
-        getShadowIntensity(): number;
-        setShadowIntensity(intensity: number): void;
-    }
-    /**
-     * Grass Standard Shader Material Plugin (BABYLON.MaterialPluginBase)
-     * Implements Unity TerrainEngine.cginc TerrainWaveGrass algorithm exactly
-     * @class GrassStandardMaterialPlugin
-     */
-    class GrassStandardMaterialPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
-        constructor(customMaterial: TOOLKIT.StandardShaderMaterial, shaderName: string);
-        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
-        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
-        private getWGSLVertexMainEnd;
-        private getWGSLVaryingDefinitions;
-        private getWGSLVertexWorldPos;
-        private getGLSLVertexDefinitions;
-        private getGLSLVertexMainEnd;
-        private getGLSLVertexWorldPos;
-        private getWGSLFragmentCode;
-        private getGLSLFragmentCode;
-        private getGLSLFragmentDefinitions;
-        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
-        getSamplers(samplers: string[]): void;
-        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
-    }
-}
-declare namespace TOOLKIT {
-    /**
-     * Grass Billboard Shader Material (BABYLON.StandardMaterial)
-     * Implements Unity-exact TerrainWaveGrass algorithm for rolling wave effect
-     * No billboard grass faces camera and waves with rolling bands effect
-     * @class GrassBillboardMaterial
-     */
-    class GrassBillboardMaterial extends TOOLKIT.StandardShaderMaterial {
-        private _windTimeAccum;
-        private _lastUpdateFrame;
-        constructor(name: string, scene: BABYLON.Scene);
-        awake(): void;
-        update(): void;
-        getShaderName(): string;
-        getMaxDistance(): number;
-        setMaxDistance(distance: number): void;
-        getFadeStart(): number;
-        setFadeStart(distance: number): void;
-        getWaveSpeed(): number;
-        setWaveSpeed(speed: number): void;
-        getWaveSize(): number;
-        setWaveSize(size: number): void;
-        getWindAmount(): number;
-        setWindAmount(amount: number): void;
-        getWindTint(): BABYLON.Vector4;
-        setWindTint(tint: BABYLON.Vector4): void;
-        getShadowIntensity(): number;
-        setShadowIntensity(intensity: number): void;
-        getSphericalBillboardEnabled(): boolean;
-        setSphericalBillboardEnabled(enabled: boolean): void;
-    }
-    /**
-     * Grass Billboard Shader Material Plugin (BABYLON.MaterialPluginBase)
-     * Implements Unity TerrainEngine.cginc TerrainWaveGrass algorithm exactly
-     * @class GrassBillboardMaterialPlugin
-     */
-    class GrassBillboardMaterialPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
-        constructor(customMaterial: TOOLKIT.StandardShaderMaterial, shaderName: string);
-        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
-        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
-        private getWGSLVertexMainEnd;
-        private getWGSLVaryingDefinitions;
-        private getWGSLVertexWorldPos;
-        private getGLSLVertexDefinitions;
-        private getGLSLVertexMainEnd;
-        private getGLSLVertexWorldPos;
-        private getWGSLFragmentCode;
-        private getGLSLFragmentCode;
-        private getGLSLFragmentDefinitions;
-        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
-        getSamplers(samplers: string[]): void;
-        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
-    }
-}
-declare namespace TOOLKIT {
-    /**
-     * Tree Branch Shader Material (BABYLON.PBRMaterial)
-     * @class TreeBranchMaterial
-     */
-    class TreeBranchMaterial extends TOOLKIT.CustomShaderMaterial {
-        private _windTimeAccum;
-        constructor(name: string, scene: BABYLON.Scene);
-        awake(): void;
-        update(): void;
-        getShaderName(): string;
-        setWindDirection(x: number, y: number, z: number): void;
-        getWindDirection(): BABYLON.Vector4;
-    }
-    class TreeBranchMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
-        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
-        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
-        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
-        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
-        getSamplers(samplers: string[]): void;
-        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
-        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+    class UnityLodAndLights {
+        /** Light kinds in the selection table. */
+        static readonly KIND_AMBIENT: number;
+        static readonly KIND_DIRECTIONAL: number;
+        static readonly KIND_POINT: number;
+        static readonly KIND_SPOT: number;
+        static readonly KIND_OTHER: number;
+        /** Unity's default URP "Per Object Limit" (UniversalRenderPipelineAsset.maxAdditionalLightsCount default 4). */
+        static DefaultPerObjectLightLimit: number;
         /**
-         * Attempt to locate a serialized Unity WindZone payload for this terrain.
-         * The exporter may store WindZones outside of terrain.properties (e.g. terrain.windzones[]),
-         * so we probe a few likely metadata locations (properties, node.metadata, node.metadata.toolkit, etc).
-         *
-         * For now we return the "best" zone (prefer Directional and higher windMain).
+         * Light slots the toolkit's CustomShaderMaterial unrolls its per-light shadowmask/subtractive bodies for
+         * (LightingConversions.MaxLightSlots). A mesh never receives more lights than this.
          */
-        static ExtractWindZoneOverride(properties: any, terrainTransform: BABYLON.TransformNode, builderInstance?: any): any | null;
+        static get MaxLightSlots(): number;
+        /** Vertical field of view in radians from a Babylon fov + fovMode (0 vertical fixed, 1 horizontal fixed). */
+        static VerticalFov(fov: number, fovMode: number, aspect: number): number;
+        /**
+         * Unity's screen-relative height of a LOD group.
+         * @param worldSize the group's world size (LODGroup.size x largest absolute lossy scale)
+         * @param distance camera to the group's world reference point
+         * @param vfov vertical field of view, radians (ignored when orthoHalfHeight > 0)
+         * @param lodBias QualitySettings.lodBias (1 when unknown)
+         * @param orthoHalfHeight orthographic half height (Unity orthographicSize), 0 for a perspective camera
+         */
+        static RelativeHeight(worldSize: number, distance: number, vfov: number, lodBias: number, orthoHalfHeight?: number): number;
+        /**
+         * Unity's level for a screen-relative height: the first level whose transition height it reaches, or -1
+         * (culled) below the last one. `count` limits the levels considered (mismatched lods/coverages arrays).
+         */
+        static SelectCoverageLevel(relativeHeight: number, coverages: ArrayLike<number>, count: number): number;
+        /** The legacy distance rule: level i while distance < distances[i]; past the last band => -1 (culled). */
+        static SelectDistanceLevel(distance: number, distances: ArrayLike<number>, count: number): number;
+        /** Rec. 709 luminance of a linear colour. */
+        static Luminance(r: number, g: number, b: number): number;
+        /** True when a sphere (centre, radius) touches an axis-aligned box. */
+        static SphereTouchesBox(cx: number, cy: number, cz: number, radius: number, minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number): boolean;
+        /**
+         * True when a spot cone (apex, unit axis, half angle as cos/sin, range) touches a sphere. The standard
+         * cone-vs-sphere cull (closest distance from the sphere centre to the cone's lateral surface, plus the
+         * range cap and the back plane through the apex).
+         */
+        static ConeTouchesSphere(px: number, py: number, pz: number, ax: number, ay: number, az: number, cosHalf: number, sinHalf: number, range: number, sx: number, sy: number, sz: number, radius: number): boolean;
+        /** The additional-light rank: `intensity * luminance / distance^2` (distance floored at 1 cm). */
+        static Importance(weight: number, distanceSquared: number): number;
+        /**
+         * Picks and orders one renderer's lights. Pure: the light table is struct-of-arrays, `out` receives light
+         * indices, the return value is how many.
+         *
+         * Order written to `out`:
+         *   1. every KIND_AMBIENT light the renderer may receive, in table order (the toolkit's hemispheric fill must
+         *      stay in slot 0 - it carries the lightmap-shadows-only mode);
+         *   2. the main light (`mainLight`, a directional) if the renderer may receive it;
+         *   3. up to `limit` additional lights, the most important first when choosing, then written in the
+         *      CANONICAL order below;
+         *   4. lights with a NEGATIVE Babylon renderPriority (idle pooled particle lights) fill any slot left up to
+         *      `cap`, in table order.
+         * Additional candidates: other directionals and KIND_OTHER always (they have no range), lights with a
+         * POSITIVE renderPriority always and ranked above everything (Babylon's priority contract, AP-15), and
+         * point/spot lights with priority 0 only when their range (and cone) touches the renderer's bounds.
+         *
+         * The chosen additional lights are written spot-with-shadow, spot, point-with-shadow, point, other, then by
+         * rank inside each class: Unity's shader loop is order-independent, while Babylon compiles one effect per
+         * light-type sequence, so a canonical order keeps the number of shader variants down.
+         *
+         * @param table the scene light table (see UnityLightSelector.buildTable)
+         * @param lightCount rows in the table
+         * @param allowed per-light 1/0: the light is enabled and Babylon's canAffectMesh passes for this renderer
+         * @param bounds [minX, minY, minZ, maxX, maxY, maxZ, centreX, centreY, centreZ, radius] of the renderer
+         * @param limit additional lights allowed (Unity's per-object limit)
+         * @param cap total slots allowed
+         * @param scratchScore Float32Array(lightCount) scratch
+         * @param scratchIndex Int32Array(lightCount) scratch
+         * @param out Int32Array(lightCount) result
+         */
+        static SelectLights(table: TOOLKIT.UnityLightTable, lightCount: number, allowed: Uint8Array, bounds: ArrayLike<number>, limit: number, cap: number, scratchScore: Float32Array, scratchIndex: Int32Array, out: Int32Array): number;
+        /** 0 directional, 1 spot+shadow, 2 spot, 3 point+shadow, 4 point / other. */
+        static CanonicalClass(kind: number, shadow: number): number;
+        /** The brightest directional (by Unity intensity) in a table, or -1: URP GetBrightestDirectionalLightIndex. */
+        static MainLightIndex(kind: Uint8Array, unityIntensity: Float32Array, enabled: Uint8Array, lightCount: number): number;
+        /** Total slots for a renderer: ambient fills + main light + the per-object limit, clamped to MaxLightSlots. */
+        static SlotCap(ambientCount: number, hasMain: boolean, limit: number, maxSlots: number): number;
+    }
+    /**
+     * unity-terrain-parity T12.8: Unity light cookies. URP multiplies every additional light by its cookie texel
+     * (LightCookie.hlsl SampleAdditionalLightCookie). Once each renderer receives Unity's own lights, a cookie-less
+     * lantern or uplight is several times too bright, so the exported cookie is applied:
+     *  - SPOT (`type: "spot"`, `url`): Babylon's SpotLight.projectionTexture - a perspective(angle, 1) projection, the
+     *    same as URP's LightCookieManager `Matrix4x4.Perspective(spotAngle, 1, ...)` with its [-1,1] -> [0,1] remap. The
+     *    exporter writes the cookie LINEAR, so it is sampled raw. Its up axis is the light's own up (Unity projects in
+     *    light space), tracked when the light moves.
+     *  - POINT (`type: "point"`, `mean`): Babylon has no cube cookie; the intensity is scaled by the cookie's
+     *    solid-angle-weighted mean, which keeps the light's energy (not its pattern).
+     * @class UnityLightCookies - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class UnityLightCookies {
+        /** Applies an exported `cookie` block to a light. Returns true when anything was applied. */
+        static Apply(scene: BABYLON.Scene, light: BABYLON.Light, entity: BABYLON.TransformNode, cookie: any): boolean;
+        /** The projection's up axis = the light's world up (the rig's local +Y), so the cookie keeps Unity's orientation. Assigning it re-marks Babylon's projection view matrix. */
+        static UpdateUpDirection(spot: BABYLON.SpotLight, entity: BABYLON.TransformNode): void;
+        /**
+         * Babylon rebuilds a spot's projection view matrix only when its own position, direction or up is SET - never
+         * when its PARENT moves. A toolkit light hangs under its rig, so the first matrix is built before the rig's
+         * world matrix is final and would stay stale. One scene observer re-checks each cookie spot's world pose
+         * (cheap: a handful of lights) and re-marks it only when it changed.
+         */
+        static Track(scene: BABYLON.Scene, spot: BABYLON.SpotLight, entity: BABYLON.TransformNode): void;
+    }
+    /** Struct-of-arrays light table for UnityLodAndLights.SelectLights. */
+    class UnityLightTable {
+        capacity: number;
+        kind: Uint8Array;
+        shadow: Uint8Array;
+        enabled: Uint8Array;
+        priority: Float32Array;
+        px: Float32Array;
+        py: Float32Array;
+        pz: Float32Array;
+        dx: Float32Array;
+        dy: Float32Array;
+        dz: Float32Array;
+        range: Float32Array;
+        cosHalf: Float32Array;
+        sinHalf: Float32Array;
+        weight: Float32Array;
+        unityIntensity: Float32Array;
+        mainLight: number;
+        ensure(count: number): void;
+    }
+    /**
+     * One scene-level LOD switcher for every multi-renderer or coverage-based LOD group (one observer, not one per
+     * group). Each group shows exactly one level (or none when culled); meshes are toggled only on a level change.
+     * @class UnityLodGroups - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class UnityLodGroups {
+        static readonly MODE_DISTANCE: number;
+        static readonly MODE_COVERAGE: number;
+        /** Scene-wide QualitySettings.lodBias (the exported `lodbias`, 1 when absent). */
+        lodBias: number;
+        private _scene;
+        private _groups;
+        private _observer;
+        private _point;
+        /** The scene's switcher, created on first use. */
+        static Get(scene: BABYLON.Scene): TOOLKIT.UnityLodGroups;
+        constructor(scene: BABYLON.Scene);
+        get groupCount(): number;
+        /**
+         * Registers a group. `thresholds` are distances (MODE_DISTANCE) or Unity screen-relative transition heights
+         * (MODE_COVERAGE). `worldSize` and `localPoint` (the reference point in the root's local space) are only
+         * read in MODE_COVERAGE. Starts with level 0 shown; the next update() corrects it before anything renders.
+         */
+        addGroup(root: BABYLON.TransformNode, levels: BABYLON.AbstractMesh[][], mode: number, thresholds: number[], worldSize: number, localPoint: BABYLON.Vector3): TOOLKIT.IUnityLodGroup;
+        /** Evaluates every group against the active camera. No allocation. */
+        update(): void;
+        private static ShowLevel;
+        dispose(): void;
+    }
+    /** One registered LOD group. */
+    interface IUnityLodGroup {
+        root: BABYLON.TransformNode;
+        levels: BABYLON.AbstractMesh[][];
+        mode: number;
+        thresholds: number[];
+        worldSize: number;
+        localPoint: BABYLON.Vector3;
+        current: number;
+        disposed: boolean;
+        visibleOnly: BABYLON.AbstractMesh[];
+    }
+    /**
+     * Applies UnityLodAndLights.SelectLights to every mesh of a scene: owns `mesh.lightSources` for the meshes it
+     * manages (Babylon's own resync calls are routed here per mesh instance, so every Babylon trigger - light added,
+     * enabled, disposed, include/exclude lists, layer mask, a ParticleLights rank flush - still reaches it) and
+     * re-evaluates moving meshes and moving lights on a throttle. Static meshes are computed once.
+     * @class UnityLightSelector - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class UnityLightSelector {
+        /** Turns the Unity per-object light selection off for scenes loaded after this is set (Babylon's scene-order default). */
+        static Enabled: boolean;
+        /** Frames between two moving-mesh / moving-light checks. */
+        static MoveCheckInterval: number;
+        /** World distance a mesh or light must move before its selection is re-evaluated. */
+        static MoveEpsilon: number;
+        /** Unity's per-object limit for this scene (additional lights). */
+        perObjectLimit: number;
+        private _scene;
+        private _table;
+        private _lights;
+        private _lightCount;
+        private _ambientCount;
+        private _tableDirty;
+        private _managed;
+        private _dirty;
+        private _allowed;
+        private _score;
+        private _index;
+        private _out;
+        private _bounds;
+        private _lastPos;
+        private _frame;
+        private _observers;
+        private _tmp;
+        /** Installs the scene's selector once and routes every current and future mesh through it. */
+        static Install(scene: BABYLON.Scene, perObjectLimit?: number): TOOLKIT.UnityLightSelector;
+        /** The scene's selector, or null when none was installed. */
+        static Get(scene: BABYLON.Scene): TOOLKIT.UnityLightSelector;
+        constructor(scene: BABYLON.Scene);
+        private watch;
+        /** Takes over one mesh's light list. An InstancedMesh shares its source's list: its source is re-evaluated. */
+        manage(mesh: BABYLON.AbstractMesh): void;
+        markDirty(mesh: BABYLON.AbstractMesh): void;
+        /** Per frame: apply queued work; every MoveCheckInterval frames, look for moved meshes and lights. */
+        tick(): void;
+        /** Re-selects every queued mesh now. */
+        flush(): void;
+        /** Rebuilds the struct-of-arrays light table from scene.lights; true when anything but a pose changed. */
+        private buildTable;
+        /** World position and direction of light `i` into the table (and the move-check snapshot). */
+        private readPose;
+        /** World bounds of a mesh (and of all its instances) into this._bounds. */
+        private readBounds;
+        /** Computes and applies one mesh's list; touches Babylon only when the list really changed. */
+        private select;
+        /** A material draws at most maxSimultaneousLights of a mesh's list: make room for the Unity selection. */
+        private static RaiseMaterialLimit;
+        /** Throttled: queue meshes that moved, and meshes near lights that moved. */
+        private checkMoves;
+        /** Restores Babylon's own light-source handling on every managed mesh. */
+        dispose(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Procedural Sky Material (BABYLON.StandardMaterial) - a 1:1 port of Unity's built-in "Skybox/Procedural" shader
+     * (MIT, Unity Technologies): O'Neil atmospheric scattering evaluated per vertex exactly as Unity's vert() does, then
+     * Unity's frag() sky/ground blend and None / Simple / High Quality sun disk per pixel. Unity's soft, hazy horizon is
+     * the interpolation of those per-vertex colours across its own skybox mesh, so render it on CreateSkyMesh() (the
+     * loader does). Built by the scene loader for a Unity scene whose RenderSettings.skybox uses that shader
+     * (metadata skybox.procedural).
+     * Properties (Unity names in brackets): sunDisk [_SunDisk 0|1|2], sunSize [_SunSize], sunSizeConvergence
+     * [_SunSizeConvergence], atmosphereThickness [_AtmosphereThickness], skyTint [_SkyTint, sRGB inspector value],
+     * groundColor [_GroundColor, sRGB inspector value - uploaded linear], exposure [_Exposure].
+     * Sun: sunDirection / sunColor overrides win, then sunLight, then the light named sunName (+ ".Rig"), then the
+     * brightest enabled DirectionalLight, then a fixed default. Refreshed once per frame.
+     * Reflections: a baked skybox.environment (.env) wins when the export carries one; otherwise the loader calls
+     * createEnvironmentProbe() (128 px live probe, rendered once). Call refreshEnvironment() after moving the sun.
+     * @class ProceduralSkyMaterial - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ProceduralSkyMaterial extends TOOLKIT.StandardShaderMaterial {
+        /** Default "towards the sun" direction when no light is found (D6) = new Vector3(0.32, 0.77, 0.55).normalize(). */
+        static readonly DefaultSunDirection: BABYLON.Vector3;
+        private _sunName;
+        private _sunLight;
+        private _sunDirectionOverride;
+        private _sunColorOverride;
+        private _skyTintSrgb;
+        private _groundColorSrgb;
+        private _lastUpdateFrame;
+        private _probe;
+        private _sunDir;
+        constructor(name: string, scene: BABYLON.Scene);
+        /** Shader name */
+        getShaderName(): string;
+        awake(): void;
+        update(): void;
+        /** Unity _SunDisk: 0 None, 1 Simple, 2 High Quality */
+        get sunDisk(): number;
+        set sunDisk(v: number);
+        /** Unity _SunSize */
+        get sunSize(): number;
+        set sunSize(v: number);
+        /** Unity _SunSizeConvergence */
+        get sunSizeConvergence(): number;
+        set sunSizeConvergence(v: number);
+        /** Unity _AtmosphereThickness */
+        get atmosphereThickness(): number;
+        set atmosphereThickness(v: number);
+        /** Unity _Exposure */
+        get exposure(): number;
+        set exposure(v: number);
+        /** Unity _SkyTint - the sRGB inspector value, uploaded unchanged */
+        get skyTint(): BABYLON.Color3;
+        set skyTint(v: BABYLON.Color3);
+        /** Unity _GroundColor - the sRGB inspector value, uploaded linear */
+        get groundColor(): BABYLON.Color3;
+        set groundColor(v: BABYLON.Color3);
+        /** The scene name of the sun light (Unity RenderSettings.sun) */
+        get sunName(): string;
+        set sunName(v: string);
+        /** An explicit sun light that wins over the name lookup */
+        get sunLight(): BABYLON.DirectionalLight;
+        set sunLight(v: BABYLON.DirectionalLight);
+        /** Direction override (towards the sun) - null clears the override */
+        get sunDirection(): BABYLON.Vector3;
+        set sunDirection(v: BABYLON.Vector3);
+        /** Colour override (linear sun colour) - null clears the override */
+        get sunColor(): BABYLON.Color3;
+        set sunColor(v: BABYLON.Color3);
+        /** Resolves the scene sun light using the Unity fallback order */
+        static FindSunLight(scene: BABYLON.Scene, sunName: string, explicit: BABYLON.DirectionalLight): BABYLON.DirectionalLight;
+        /** Applies the exported unity skybox.procedural metadata block */
+        applyUnityProperties(block: any): void;
+        /** Creates the live fallback reflection probe for this sky (idempotent) */
+        createEnvironmentProbe(skyboxMesh: BABYLON.AbstractMesh, size?: number): BABYLON.ReflectionProbe;
+        /** Re-renders the live environment probe (call after moving the sun) */
+        refreshEnvironment(): void;
+        /** Locks the environment diffuse to the unity spherical harmonics */
+        private lockEnvironmentDiffuse;
+        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
+        /**
+         * Creates Unity's own skybox mesh (the 1680 triangle octahedron sphere Unity draws every skybox material on,
+         * finer toward the horizon) with the given size (diameter). Skybox/Procedural computes its colours per vertex,
+         * so the horizon haze band and its gentle bow only match Unity when the sky is drawn on this exact tessellation.
+         */
+        static CreateSkyMesh(name: string, scene: BABYLON.Scene, size?: number): BABYLON.Mesh;
+        /** Decodes a base64 string (no atob dependency) */
+        private static DecodeBase64;
+        /**
+         * Unity's skybox mesh, captured from the Unity 6.5 URP Editor with a probe skybox shader (vertex ids 0-5039, a
+         * non-indexed triangle list). Layout (little endian): uint16 vertex count, then int16 x/y/z per vertex (unit
+         * direction * 32767, Unity axes = toolkit axes), then uint16 triangle indices in Unity's draw order.
+         */
+        private static readonly UnitySkyMeshData;
+    }
+    /**
+     * Procedural Sky Material Plugin (BABYLON.MaterialPluginBase)
+     * Injects the Unity "Skybox/Procedural" atmospheric scattering into the standard material fragment stage.
+     * @class ProceduralSkyMaterialPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ProceduralSkyMaterialPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
+        constructor(customMaterial: TOOLKIT.StandardShaderMaterial, shaderName: string);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        private getGLSLVertexDefinitions;
+        private getGLSLVertexCode;
+        private getGLSLFragmentDefinitions;
+        private getGLSLFragmentCode;
+        private getWGSLVertexDefinitions;
+        private getWGSLVertexCode;
+        private getWGSLFragmentDefinitions;
+        private getWGSLFragmentCode;
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        getSamplers(samplers: string[]): void;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
     }
 }
 declare namespace TOOLKIT {
@@ -10058,18 +11469,8 @@ declare namespace PROJECT {
         playing: boolean;
         /** True when this group was built here rather than found on an exported kart. */
         placeholder: boolean;
-        /** Unity's `moveWithTransform` for this group: 0 Local, 1 World. See `applySimulationSpace`. */
+        /** Unity's `moveWithTransform` for this group: 0 Local, 1 World (the toolkit component applies it itself since the parity rewrite). */
         simulationSpace: number;
-        /**
-         * Whether `isLocal` has been pushed onto this group's systems yet.
-         *
-         * IT CANNOT BE DONE AT REGISTRATION, which is the whole reason this flag exists. A
-         * `ShurikenParticles` built here has not run its own `awake()` when `registerGroup` returns —
-         * `SceneManager.AttachScriptComponent` only enrols it in the lifecycle — so
-         * `getParticleSystem()` is still null and a write there silently does nothing. The first
-         * version of this did exactly that and reported success while changing not one system.
-         */
-        simulationSpaceApplied: boolean;
     }
     /**
      * Babylon standard kart effects — the particle driver for `PROJECT.StandardKartController`.
@@ -10278,7 +11679,7 @@ declare namespace PROJECT {
         /**
          * Sets a group's start colour through the toolkit component's own particle system.
          *
-         * `ShurikenParticles.configureMainModule` writes `color1` and `color2` from
+         * `ShurikenParticles.applyStartFamilies` writes `color1` and `color2` from
          * `main.startColor.color` for a `mode: 0` gradient, so writing both here is the same
          * assignment the export performs — not a bypass of the component.
          */
@@ -10286,86 +11687,11 @@ declare namespace PROJECT {
         /** Where placeholders hang: the model child if there is one, else this component's transform. */
         protected resolveMountNode(): BABYLON.TransformNode;
         /**
-         * Applies Unity's simulation space to a group's systems, because the toolkit does not.
-         *
-         * **THIS IS THE SINGLE BIGGEST VISUAL FIX IN THE FILE, and it was invisible until the bench
-         * was driven at speed.**
-         *
-         * Unity's `moveWithTransform: 0` is LOCAL simulation space: a particle, once born, keeps
-         * moving with the emitter. It is why Mario Kart's drift sparks sit glued to the wheels instead
-         * of smearing into a trail — and it is measured, not assumed. **Every** system in
-         * `WheelParticles.prefab` (12) and `ParticlesBoostBurst.prefab` (6) carries it.
-         *
-         * `ShurikenParticles.configureMainModule` reads `main.simulationSpace`, but only to decide
-         * what the EMITTER is:
-         *
-         *     if (main.simulationSpace === 1) ps.emitter = mesh.getAbsolutePosition().clone();
-         *     else                            ps.emitter = mesh;
-         *
-         * That makes the SPAWN POINT follow the kart. It never touches `ParticleSystem.isLocal`, which
-         * is Babylon's actual local-space simulation flag — the string does not appear anywhere in the
-         * component. So an authored "Local" system spawns at the right place and then simulates in
-         * world space, i.e. it behaves exactly like Unity's WORLD setting.
-         *
-         * At a standstill the difference is invisible. At 95 u/s with a 0.18 s lifetime the exhaust is
-         * left seventeen units behind the kart — behind and below a chase camera that sits nine units
-         * back — so the boost flames were reported alive, were genuinely being simulated, and could
-         * not be seen at all. That is how this was found, and it is why "the component says it is
-         * running" is not evidence that an effect works.
-         *
-         * COMPOSITION, NOT REPLACEMENT. This sets one documented Babylon property on the system the
-         * toolkit itself hands out through `getParticleSystem()` — the same accessor and the same kind
-         * of write as the tier recolour onto `color1`/`color2`. Nothing is reimplemented. **Delete
-         * this the moment `ShurikenParticles` maps `isLocal` itself**, and it is worth reporting
-         * upstream, because an exported kart hits the identical gap.
-         */
-        protected applySimulationSpace(group: IKartEmitterGroup): boolean;
-        /**
-         * Runs the deferred emitter fix-ups on any group whose systems have finished initialising.
-         *
-         * Two of them, both for the same reason — a `ShurikenParticles` is not configured until its
-         * own `awake()` runs, so neither can be done at registration.
-         */
-        protected ensureSimulationSpace(): void;
-        /**
-         * Undoes the toolkit's world-space application of Unity's SCREEN-space size clamp.
-         *
-         * THIS EXISTS FOR THE EXPORT PATH, and the placeholders' `RENDERER_MAX_PARTICLE_SIZE` is
-         * explicitly NOT enough to cover it. `configureRendererModule` ends with:
-         *
-         *     const maxSize = renderer.maxParticleSize ?? 0.5;
-         *     if (ps.maxSize > maxSize) ps.maxSize = maxSize;
-         *
-         * The placeholders here dodge it by authoring the field. **A Unity export cannot**: Unity
-         * serializes `m_MaxParticleSize` on every renderer, and its value is `0.5` on all twelve
-         * systems in `WheelParticles.prefab` and all six in `ParticlesBoostBurst.prefab` — because in
-         * Unity that field is a fraction of VIEWPORT HEIGHT, for which 0.5 is a perfectly ordinary
-         * setting. Applied as a world-space clamp it truncates the maximum alone, leaving
-         * `minSize > maxSize` on any emitter authored above half a unit.
-         *
-         * So the exported kart this port exists to run walks straight back into the bug the constant
-         * was added to escape, and it would look identical: emitters reporting alive, sizes reporting
-         * plausible, and the range quietly inverted.
-         *
-         * THE REPAIR IS DELIBERATELY THE NARROWEST ONE THAT IS DEFENSIBLE. It fires only when the
-         * range is actually inverted, and it restores the maximum to the minimum — which is where
-         * `configureMainModule` had both of them for a `mode: 0` start size before the clamp ran. It
-         * does not touch a genuine random range (`min < max`), and it does not second-guess an author
-         * who set a real world-space clamp, because such an author would not have produced an
-         * inversion in the first place.
-         *
-         * Delete this, and `applySimulationSpace`, when the toolkit stops converting a screen-space
-         * field into a world-space one. Both are worth the upstream report.
-         */
-        protected repairInvertedSizeRange(group: IKartEmitterGroup): void;
-        /**
          * The Unity simulation space a group's systems were authored with.
          *
          * For a group this component BUILT, it is the recipe's own value. For a group FOUND on an
-         * exported kart the authored bag lives in the toolkit component's private
-         * `m_systemProperties`, which is read here defensively rather than not at all: an exported
-         * Local system hits the same gap, and silently leaving it in world space would reintroduce
-         * exactly the bug documented above on the very kart this port exists to run.
+         * exported kart it is read defensively from the component's bag (0, Unity's default, when
+         * absent). Informational only: ShurikenParticles applies `main.simulationSpace` itself.
          */
         protected resolveSimulationSpace(group: IKartEmitterGroup, kind: string): number;
         /** Depth-first search for a descendant by exact name. */
@@ -10411,9 +11737,9 @@ declare namespace PROJECT {
          *
          * The wrong story was: the merge leaves `constantMax: 1.0` from the defaults, so the maximum
          * came from a leftover. It does leave it, but nothing reads it here.
-         * `ShurikenParticles.convertMinMaxCurve` consults `constantMin`/`constantMax` only in curve
+         * `TOOLKIT.ParticleCurves` consults `constantMin`/`constantMax` only in curve
          * modes 2 and 3; mode 0 — every curve in every recipe below — returns `{min, max, value}` all
-         * from `constant`, and `configureMainModule`'s `case 0` sets `minSize` AND `maxSize` from that
+         * from `constant`, and `applyStartFamilies`' mode-0 branch sets `minSize` AND `maxSize` from that
          * one value. Both ends left here at 0.75. The entire inversion was the renderer clamp knocking
          * the maximum alone down to 0.5, which is what `RENDERER_MAX_PARTICLE_SIZE` addresses.
          *
@@ -10566,6 +11892,8 @@ declare namespace PROJECT {
         private p3n;
         private i;
         private static _EventBus;
+        /** Live RaceTrackManager instances (a count, not references) - the shared EventBus is released with the last one. */
+        private static LiveManagers;
         static get EventBus(): TOOLKIT.LocalMessageBus;
         drawDebugLines: boolean;
         getTrackNodes(): PROJECT.ITrackNode[];
@@ -10786,6 +12114,7 @@ declare namespace PROJECT {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
         protected update(): void;
+        protected destroy(): void;
         static AddSkidMarkSegment(pos: BABYLON.Vector3, normal: BABYLON.Vector3, intensity: number, lastIndex: number): BABYLON.Nullable<number>;
         private static CreateSkidMarkManager;
         private static AddSkidMarkVertexData;
@@ -11645,7 +12974,6 @@ declare namespace PROJECT {
     /**
      * Babylon toolkit default camera system class
      * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
-     * https://doc.babylonjs.com/divingDeeper/postProcesses/defaultRenderingPipeline
      */
     class DefaultCameraSystem extends TOOLKIT.ScriptComponent {
         protected static PlayerOneCamera: BABYLON.FreeCamera;
@@ -11660,10 +12988,6 @@ declare namespace PROJECT {
         private static startupMode;
         private static cameraReady;
         private static cameraInstance;
-        private static renderingPipeline;
-        private static screenSpacePipeline;
-        static GetRenderingPipeline(): BABYLON.DefaultRenderingPipeline;
-        static GetScreenSpacePipeline(): BABYLON.SSAORenderingPipeline;
         static IsCameraSystemReady(): boolean;
         /** Register handler that is triggered when the webxr experience helper has been created */
         static OnXRExperienceHelperObservable: BABYLON.Observable<BABYLON.WebXRDefaultExperience>;
@@ -11680,7 +13004,6 @@ declare namespace PROJECT {
         private setPointerLock;
         private setCameraTarget;
         private setSpatialAudio;
-        private editorPostProcessing;
         protected m_cameraRig: BABYLON.TargetCamera;
         isMainCamera(): boolean;
         getCameraType(): number;
@@ -11697,8 +13020,6 @@ declare namespace PROJECT {
         protected updateCameraSystemState(): void;
         protected cleanCameraSystemState(): void;
         protected destroyCameraSystemState(): void;
-        /** The DefaultRenderingPipeline already attached to the active camera (or any scene camera), if any. */
-        static FindExistingRenderingPipeline(scene: BABYLON.Scene): BABYLON.DefaultRenderingPipeline;
         /*********************************************/
         /** Follow Target Camera Controller Helpers  */
         /*********************************************/
@@ -11769,113 +13090,6 @@ declare namespace PROJECT {
         beta: number;
         radius: number;
         target: TOOLKIT.IUnityVector3;
-    }
-    interface IEditorPostProcessing {
-        usePostProcessing: boolean;
-        highDynamicRange: boolean;
-        screenAntiAliasing: PROJECT.IEditorAntiAliasing;
-        focalDepthOfField: PROJECT.IEditorDepthOfField;
-        chromaticAberration: PROJECT.IEditorChromaticAberration;
-        glowLayerProperties: PROJECT.IEditorGlowLayer;
-        grainEffectProperties: PROJECT.IEditorGrainEffect;
-        sharpEffectProperties: PROJECT.IEditorSharpenEffect;
-        bloomEffectProperties: PROJECT.IEditorBloomProcessing;
-        imageProcessingConfig: PROJECT.IEditorImageProcessing;
-        screenSpaceRendering: PROJECT.IEditorScreenSpace;
-    }
-    interface IEditorScreenSpace {
-        SSAO: boolean;
-        SSAORatio: number;
-        combineRatio: number;
-        totalStrength: number;
-        radius: number;
-        area: number;
-        fallOff: number;
-        baseValue: number;
-    }
-    interface IEditorAntiAliasing {
-        msaaSamples: number;
-        fxaaEnabled: boolean;
-        fxaaScaling: boolean;
-        fxaaSamples: number;
-    }
-    interface IEditorDepthOfField {
-        depthOfField: boolean;
-        blurLevel: number;
-        focalStop: number;
-        focalLength: number;
-        focusDistance: number;
-        maxLensSize: number;
-    }
-    interface IEditorChromaticAberration {
-        aberrationEnabled: boolean;
-        aberrationAmount: number;
-        adaptScaleViewport: boolean;
-        alphaMode: number;
-        alwaysForcePOT: boolean;
-        pixelPerfectMode: boolean;
-        fullscreenViewport: boolean;
-    }
-    interface IEditorGlowLayer {
-        glowEnabled: boolean;
-        glowIntensity: number;
-        blurKernelSize: number;
-    }
-    interface IEditorGrainEffect {
-        grainEnabled: boolean;
-        grainAnimated: boolean;
-        grainIntensity: number;
-        adaptScaleViewport: boolean;
-    }
-    interface IEditorSharpenEffect {
-        sharpenEnabled: boolean;
-        sharpEdgeAmount: number;
-        sharpColorAmount: number;
-        adaptScaleViewport: boolean;
-    }
-    interface IEditorBloomProcessing {
-        bloomEnabled: boolean;
-        bloomKernel: number;
-        bloomScale: number;
-        bloomWeight: number;
-        bloomThreshold: number;
-    }
-    interface IEditorColorCurves {
-        curvesEnabled: boolean;
-        globalDen: number;
-        globalExp: number;
-        globalHue: number;
-        globalSat: number;
-        highlightsDen: number;
-        highlightsExp: number;
-        highlightsHue: number;
-        highlightsSat: number;
-        midtonesDen: number;
-        midtonesExp: number;
-        midtonesHue: number;
-        midtonesSat: number;
-        shadowsDen: number;
-        shadowsExp: number;
-        shadowsHue: number;
-        shadowsSat: number;
-    }
-    interface IEditorImageProcessing {
-        imageProcessing: boolean;
-        imageContrast: number;
-        imageExposure: number;
-        toneMapping: boolean;
-        toneMapType: number;
-        vignetteEnabled: boolean;
-        vignetteBlendMode: number;
-        vignetteCameraFov: number;
-        vignetteStretch: number;
-        vignetteCentreX: number;
-        vignetteCentreY: number;
-        vignetteWeight: number;
-        vignetteColor: TOOLKIT.IUnityColor;
-        useColorGrading: boolean;
-        setGradingTexture: any;
-        imagingColorCurves: PROJECT.IEditorColorCurves;
     }
 }
 declare namespace PROJECT {
@@ -13131,6 +14345,7 @@ declare namespace PROJECT {
         static get SFX(): PROJECT.SoundManager;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected start(): void;
+        protected destroy(): void;
     }
 }
 declare namespace PROJECT {
@@ -13333,6 +14548,13 @@ declare namespace TOOLKIT {
         static SetRightJoystickBuffer(rightStickX: number, rightStickY: number, invertY?: boolean): void;
         /** Disables user input state in the scene. */
         static DisableUserInput(scene: BABYLON.Scene, useCapture?: boolean): void;
+        /**
+         * Scene lifecycle: SceneManager.DisposeScene calls this once the engine has no scene left. The key / mouse / gamepad
+         * callback registries hold closures over the disposed scene's components, and the pointer-lock observer belongs to
+         * that scene, so both are dropped. The configured input state (DOM listeners attached, preventDefault) is kept, so
+         * the next scene's input works without calling ConfigureUserInput again.
+         */
+        static ResetForDisposedScenes(): void;
         /** Locks user pointer state in the scene. */
         static LockMousePointer(scene: BABYLON.Scene, lock: boolean): void;
         private static LastMousePosition;
@@ -13764,8 +14986,18 @@ declare namespace TOOLKIT {
          * conversion produced; the returned token is kept per scene so HideInspector can dispose it, and
          * `PostProcessor.InspectorState.available` is recorded. Without that global (Inspector v1, no Inspector) the call is
          * exactly the debug layer's own show with the same options object. Nothing is logged on either path.
+         * A page that never included the v2 script (the exported engine.html) gets it on demand: the first call loads
+         * `InspectorV2Url` once and continues down the v2 path, so the toolkit sections are in the Inspector the user opens.
+         * The debug layer (Inspector v1) is used only when that load fails or there is no document.
          */
         static ShowInspector(scene: BABYLON.Scene, options: BABYLON.IInspectorOptions): void;
+        /** The Inspector v2 UMD script ShowInspector loads on demand when the page did not include it (relative to the page; every export ships it in `scripts/`). Set to null to disable. */
+        static InspectorV2Url: string;
+        private static inspectorV2Load;
+        private static pendingShows;
+        /** Whether the Inspector v2 UMD global exposes the two exports ShowInspector needs. */
+        private static HasInspectorV2;
+        private static ShowInspectorV2;
         /** Closes the Inspector opened by ShowInspector for `scene` (disposes its Inspector v2 token), else `scene.debugLayer.hide()`. */
         static HideInspector(scene: BABYLON.Scene): void;
         /** Disposes the Inspector v2 token(s) kept for `scene`; returns whether there was one (no debug-layer fallback). */
@@ -14698,6 +15930,166 @@ declare namespace TOOLKIT {
         static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
     }
 }
+declare namespace TOOLKIT {
+    /** The public Unity-unit PPv2 AutoExposure settings (`postProcess.unity` on both auto-exposure passes), read every frame (auto-exposure-parity). */
+    interface IAutoExposureUnitySettings {
+        /** false = exposure 1 and no metering (the Inspector switch, D15); switching back on snaps (D8). */
+        enabled: boolean;
+        /** [low, high] percent as authored; sanitised every frame (D14). */
+        filtering: number[];
+        /** EV as authored; swapped every frame when inverted (D14). */
+        minLuminance: number;
+        maxLuminance: number;
+        /** PPv2 keyValue ("Exposure Compensation"). */
+        keyValue: number;
+        /** 0 Progressive, 1 Fixed. */
+        eyeAdaptation: number;
+        speedUp: number;
+        speedDown: number;
+    }
+    /** The last value read back from a camera's 1x1 state (Inspector read-outs and test tools only, D17). */
+    interface IAutoExposureReadout {
+        exposure: number;
+        /** Metered average luminance after the percentile filter and the min / max clamp; -1 when the histogram was empty. */
+        average: number;
+        target: number;
+        /** Scene frame id when the read was issued. */
+        frame: number;
+    }
+    /** Per-camera GPU state (hangs off both passes as `_toolkitAeState`). */
+    interface IAutoExposureCameraState {
+        scene: BABYLON.Scene;
+        engine: any;
+        camera: BABYLON.Camera;
+        unity: IAutoExposureUnitySettings;
+        meter: BABYLON.PostProcess;
+        apply: BABYLON.PostProcess;
+        /** Key into `AutoExposurePlugin.Variants` ("ppv2"). */
+        variant: string;
+        /** Type of every side / state target (D6). */
+        textureType: number;
+        renderer: BABYLON.EffectRenderer;
+        lumPass: BABYLON.EffectWrapper;
+        rowsPass: BABYLON.EffectWrapper;
+        binsPass: BABYLON.EffectWrapper;
+        adaptPass: BABYLON.EffectWrapper;
+        lum: BABYLON.RenderTargetWrapper;
+        rows: BABYLON.RenderTargetWrapper;
+        bins: BABYLON.RenderTargetWrapper;
+        /** Two 1x1 ping-pong targets; `states[pingpong]` is the CURRENT exposure. */
+        states: BABYLON.RenderTargetWrapper[];
+        pingpong: number;
+        /** The meter's input this frame (what the lum pass samples). */
+        source: BABYLON.RenderTargetWrapper;
+        dt: number;
+        reset: boolean;
+        wasEnabled: boolean;
+        /** True when metering ran for `lastFrameId`. */
+        metered: boolean;
+        lastFrameId: number;
+        frames: number;
+        resets: number;
+        waitFrames: number;
+        readout: IAutoExposureReadout;
+        reading: boolean;
+        readAt: number;
+        observer: BABYLON.Observer<BABYLON.Effect>;
+        released: boolean;
+    }
+    /**
+     * PPv2 automatic exposure for one camera (auto-exposure-parity). GPU-only: two owned head passes at
+     * `PostProcessor.HeadSlots.autoExposure` -- `aeMeter` (a copy) and `aeApply` (colour x exposure) -- plus four side passes
+     * drawn by a `BABYLON.EffectRenderer` from the meter's after-render, reading the meter's own input, so the frame that is
+     * metered is the frame that is exposed (spec D6):
+     *
+     * - `lum`: a GridSize x GridSize stratified subset of PPv2's half-resolution grid of bilinear corner taps, each texel
+     *   (bin, weight) with PPv2's integer vignette weight and log2 bin over -9..+9 EV (non-finite pixels weigh 0);
+     * - `rows` / `bins`: a two-stage gather histogram (4 bins per RGBA texel; sums in registers, fractions stored), so no
+     *   point-scatter, no float blending and no compute is needed (spec D3);
+     * - `adapt`: PPv2's percentile average (`GetAverageLuminance`, including its i/128 bin read), `keyValue / average`, and
+     *   the base-2 progressive easing (`speedUp` when darkening, `speedDown` when brightening), or a snap on a reset / Fixed,
+     *   into a 1x1 ping-pong state (float when the device renders float, else half float).
+     *
+     * The exposure multiplies the colour after motion blur and before lens distortion, chromatic aberration, bloom,
+     * vignette, grain and grading, as PPv2's Uber does; the bloom prefilter therefore sees exposed colour (one multiply
+     * equals PPv2's two). Resets: first render, re-apply, a frame the camera did not render, re-enable, and
+     * `PostProcessor.Instance.ResetHistory(camera?)` -- no motion heuristics. Nothing is read back to the CPU on the render
+     * path; `ReadState` (Inspector read-outs, test tools) reads one texel at most once per `minIntervalMs` (250 by default).
+     * Accepted deviations (auto-exposure-parity D19): metering runs before the toolkit's depth of field (it lives in the
+     * DefaultRenderingPipeline; PPv2 meters after DoF); non-finite pixels weigh 0 (PPv2 bins them at the top); frame time
+     * is unscaled; the histogram samples a GridSize x GridSize subset of PPv2's half-resolution grid; devices without
+     * float render keep a half-float state (progressive convergence then stops about 0.1% / (1 - 2^(-dt*speed)) short).
+     * Babylon private members used (upgrade risk): `effect._bindTexture`, `engine._readTexturePixels`,
+     * `postProcess._forcedOutputTexture`, `postProcess._shareOutputWithPostProcess`. Lifetime belongs to the orchestrator
+     * (`PostProcessor.trackPostProcess` / `releaseStacks` -> `AutoExposurePlugin.Release`).
+     */
+    class AutoExposurePlugin {
+        static readonly MeterName: string;
+        static readonly ApplyName: string;
+        static readonly ApplyShaderName: string;
+        static readonly LumShaderName: string;
+        static readonly RowsShaderName: string;
+        static readonly BinsShaderName: string;
+        static readonly AdaptShaderName: string;
+        static readonly Bins: number;
+        static readonly Columns: number;
+        static readonly GridSize: number;
+        static readonly MaxDeltaSeconds: number;
+        static readonly Epsilon: number;
+        static readonly ReadIntervalMs: number;
+        static readonly ShaderWaitFrames: number;
+        static readonly Variants: {
+            [variant: string]: {
+                minEV: number;
+                maxEV: number;
+            };
+        };
+        static StateTextureType(engine: any): number;
+        static IsSupported(engine: any): boolean;
+        static DefaultSettings(settings?: any): IAutoExposureUnitySettings;
+        static Sanitize(unity: IAutoExposureUnitySettings): {
+            low: number;
+            high: number;
+            minEV: number;
+            maxEV: number;
+        };
+        static ScaleOffset(minEV: number, maxEV: number): number[];
+        static Luminance(r: number, g: number, b: number): number;
+        static VignetteWeight(u: number, v: number): number;
+        static SampleOf(r: number, g: number, b: number, u: number, v: number, scale: number, offset: number): {
+            bin: number;
+            weight: number;
+        };
+        static GridPosition(cell: number, gridSize: number, resolution: number): number;
+        static Histogram(grid: ArrayLike<number>, gridSize: number): number[];
+        static AverageLuminance(bins: ArrayLike<number>, low01: number, high01: number, minLum: number, maxLum: number, scale: number, offset: number): number;
+        static ExposureFromAverage(average: number, keyValue: number): number;
+        static Adapt(previous: number, target: number, dt: number, speedUp: number, speedDown: number): number;
+        static ClampDelta(seconds: number): number;
+        static Step(previous: number, bins: ArrayLike<number>, unity: IAutoExposureUnitySettings, dt: number, snap: boolean, variant?: string): {
+            exposure: number;
+            average: number;
+            target: number;
+        };
+        static GetShaders(): {
+            [name: string]: string;
+        };
+        static RegisterShaders(): void;
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            textureType?: number;
+            settings?: any;
+            variant?: string;
+        }): BABYLON.PostProcess;
+        private static BindSidePasses;
+        static MeterSource(pass: any): BABYLON.RenderTargetWrapper;
+        static SidePassesReady(state: IAutoExposureCameraState): boolean;
+        static Meter(state: IAutoExposureCameraState): void;
+        static ResetHistory(apply: BABYLON.PostProcess): boolean;
+        static Release(apply: BABYLON.PostProcess): void;
+        static ReadState(apply: BABYLON.PostProcess, minIntervalMs?: number): IAutoExposureReadout;
+        static Describe(apply: BABYLON.PostProcess): string;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -15034,6 +16426,16 @@ declare namespace TOOLKIT {
         postExposure: number;
     }
     /**
+     * Unity terrain parity T12.3 (D47): the LIVE strip binding of one grading pass, exposed as `postProcess.toolkitGrading`
+     * and read by `onApply` every frame. `lut` is rebound when the Inspector switches the tone mapper to a variant strip
+     * baked for that mode; `bypass` passes the colour through (post exposure still applied) when the chosen mode has no
+     * baked strip and Babylon's native mapper renders it instead.
+     */
+    interface IColorGradingHdrBinding {
+        lut: BABYLON.BaseTexture;
+        bypass: boolean;
+    }
+    /**
      * Unity PPv2 HDR colour-grading pass (post-processing-spit-and-polish FR-7): the LogC-indexed LUT application.
      *
      * Unity's Uber.shader (`COLOR_GRADING_HDR_2D`) does `color *= _PostExposure; lutSpace = saturate(LinearToLogC(color));
@@ -15214,7 +16616,7 @@ declare namespace TOOLKIT {
      * Every texel size is the live size of the texture being sampled (`PostProcess.width / height`). Unsupported and recorded
      * as silent defaults (the truth table): `anamorphicRatio` (0: `tw = width / 2`), `clamp` (65472 in gamma space, i.e. above
      * `SafeHDR`'s half-float max, which the prefilter applies), `fastMode` (the 4-tap / box variants), `dirtTexture` /
-     * `dirtIntensity`, auto exposure (1). GLSL only, registered once under literal `ShaderStore` keys (Babylon transpiles it
+     * `dirtIntensity`. Auto exposure is applied upstream by `TOOLKIT.AutoExposurePlugin` (head slot 15), so the prefilter sees exposed colour as PPv2's does. GLSL only, registered once under literal `ShaderStore` keys (Babylon transpiles it
      * for WebGPU); every tap is uniform control flow. Lifetime belongs to the orchestrator (`PostProcessor.trackPostProcess` /
      * `releaseStacks`), which re-tracks the ladder through `options.onRebuild` when it is rebuilt.
      *
@@ -15358,11 +16760,14 @@ declare namespace TOOLKIT {
      * the luma pass and the FXAA pass alike and read by `onApply` every frame, so an edit reaches the next frame.
      */
     interface IFxaaUnitySettings {
-        /**
-         * PPv2 `PostProcessLayer.fastApproximateAntialiasing.fastMode`: FXAA 3.11 quality preset 12 with the FXAA_LOW
-         * thresholds instead of preset 28. A LAYER setting the camera export does not carry, so it defaults to false.
-         */
+        /** PPv2 `fastApproximateAntialiasing.fastMode` (preset 12 + FXAA_LOW thresholds); only the "ppv2" variant reads it. */
         fastMode: boolean;
+        /** PPv2 `keepAlpha`: green-as-luma and the source alpha kept; only the "ppv2" variant reads it. */
+        keepAlpha: boolean;
+        /** false = exact pass-through (D16). */
+        enabled: boolean;
+        /** "ppv2" | "urp" | "hdrp" (D15); fixed at creation. */
+        variant: string;
     }
     /**
      * Unity PPv2 FXAA 3.11 port (post-processing-final-verification F-6).
@@ -15394,6 +16799,16 @@ declare namespace TOOLKIT {
      * registered once under literal `ShaderStore` keys (Babylon transpiles it for WebGPU); the per-pixel search loop
      * samples inside non-uniform control flow, hence `#define DISABLE_UNIFORMITY_ANALYSIS`. Lifetime belongs to the
      * orchestrator (`PostProcessor.trackPostProcess` / `releaseStacks`).
+     *
+     * Each pipeline renders its own FXAA (camera-antialiasing-parity D15), selected at creation by `unity.variant` with the
+     * same two passes and names: `"ppv2"` is the port above (preset 28, or 12 under `fastMode`; `keepAlpha` switches the
+     * luma to Unity's green-as-luma and keeps the source alpha); `"urp"` is URP 17.5's FXAA 3.11 at preset 12 with
+     * `subpix 0.65 / edgeThreshold 0.15 / edgeThresholdMin 0.03` and the unsaturated `(0.299, 0.587, 0.114)` luma (URP has
+     * no fast mode); `"hdrp"` keeps the luma pass for the decode and renders HDRP's single-pass lite FXAA (`toolkitFxaaLite`:
+     * span 8, reduce 1/8 and 1/128, saturated taps, Rec. 709 luminance) in the pass still named `fxaa`. The TAA stand-in is
+     * `"ppv2"` preset 28 on every pipeline until TAA ships. `unity.enabled = false` neutralises both passes into exact
+     * pass-throughs (the luma pass copies its input, the FXAA pass returns the centre texel), so the switch never detaches
+     * a pass or moves the chain head (D16).
      */
     class FxaaPlugin {
         /** Post-process shader name of the FXAA pass (`BABYLON.PostProcess` resolves `ShaderName + "FragmentShader"`). */
@@ -15427,15 +16842,44 @@ declare namespace TOOLKIT {
         static readonly LumaCoefficients: number[];
         /** Babylon's `toGammaSpace` / `toLinearSpace` power approximation (the image-processing pass encodes with `1 / 2.2`). */
         static readonly GammaPower: number;
+        /** Post-process shader name of HDRP's single-pass lite FXAA (the `"hdrp"` variant's `fxaa` pass). */
+        static readonly LiteShaderName: string;
+        /** Shader store key of the lite FXAA fragment. */
+        static readonly LiteShaderKey: string;
+        /** D15: the FXAA variants, one per pipeline. */
+        static readonly Variants: string[];
+        /** URP 17.5 `Common.hlsl`: FXAA 3.11 preset 12 with `kSubpixelBlendAmount 0.65`, `kRelativeContrastThreshold 0.15`, `kAbsoluteContrastThreshold 0.03`. */
+        static readonly UrpSettings: {
+            subpix: number;
+            edgeThreshold: number;
+            edgeThresholdMin: number;
+        };
+        /** URP 17.5 `Common.hlsl` FXAA luma: `dot(linear rgb, (0.299, 0.587, 0.114))`, unsaturated. */
+        static readonly UrpLumaCoefficients: number[];
+        /** PPv2 `keepAlpha` (`FXAA_GREEN_AS_LUMA 1`): the green channel is the luma. */
+        static readonly GreenLumaCoefficients: number[];
+        /** HDRP `FXAA.hlsl`: `FXAA_SPAN_MAX 8`, `FXAA_REDUCE_MUL 1/8`, `FXAA_REDUCE_MIN 1/128`. */
+        static readonly LiteSpanMax: number;
+        static readonly LiteReduceMul: number;
+        static readonly LiteReduceMin: number;
+        /** D15: a variant name ("urp" / "hdrp" pass through, anything else "ppv2"). */
+        static Variant(value: any): string;
+        /** Whether the preset-12 search runs: always for URP (its only preset), else PPv2's `fastMode`. */
+        static EffectiveFast(fast: boolean, variant: string): boolean;
+        /** D15: the luma weights and whether the linear colour is saturated first, per variant (and PPv2 `keepAlpha`). */
+        static LumaSettings(variant: string, keepAlpha: boolean): {
+            weights: number[];
+            saturate: boolean;
+        };
         /** The preset number a `fastMode` value selects (12 fast, 28 quality). */
         static PresetNumber(fast: boolean): number;
         /** The P0..P(PS-1) search steps of the preset a `fastMode` value selects (a copy). */
         static PresetSteps(fast: boolean): number[];
         /**
          * Unity `FinalPass.shader` quality knobs packed as the `fxaaQuality` uniform: `(subpix, edgeThreshold, edgeThresholdMin)`
-         * of preset 28, or of preset 12 when `fast`. Pure.
+         * of preset 28, or of preset 12 when `fast`; URP's own preset-12 knobs for the `"urp"` variant (D15). Pure.
          */
-        static PackQuality(fast: boolean): {
+        static PackQuality(fast: boolean, variant?: string): {
             x: number;
             y: number;
             z: number;
@@ -15462,10 +16906,12 @@ declare namespace TOOLKIT {
          * `doneNP` declared by the caller. Public so a test can pin the generated structure against the table.
          */
         static GetSearchCode(steps: number[], indent?: string): string;
-        /** GLSL of the luma pass: gamma decode, Unity's luma into alpha, linear or gamma rgb by `fxaaLinear`. */
+        /** GLSL of the luma pass: gamma decode, the variant's luma into alpha, linear or gamma rgb by `fxaaLinear`; a pass-through when disabled. */
         static GetLumaShader(): string;
         /** GLSL port of Unity's `FxaaPixelShader` (FXAA_PC, luma in alpha), both presets, selected by the `fxaaFast` uniform. */
         static GetFragmentShader(): string;
+        /** D15: HDRP 17.5 `FXAA.hlsl` (the lite algorithm) as the `"hdrp"` variant's single `fxaa` pass; its input is the luma pass (decode only). */
+        static GetLiteShader(): string;
         /**
          * Creates the FXAA tail pair for `camera`: the luma pass first, then the FXAA pass (creation order is chain order
          * inside the tail slot). Returns the FXAA pass; the luma pass hangs off it as `postProcess._toolkitFxaaLumaPass`
@@ -15473,13 +16919,17 @@ declare namespace TOOLKIT {
          * `_toolkitPlugin = { name, uniforms }` mirror refreshed in `onApply`.
          * @param options.textureType Render-target type of both passes (the chain type, artifact-cleanup T5: HALF_FLOAT on
          *        the HDR chain); decides `fxaaLinear` (see the class comment). Babylon's 8-bit default when omitted.
-         * @param options.fastMode PPv2 `fastMode` (preset 12); default false.
+         * @param options.fastMode PPv2 `fastMode` (preset 12); default false. Only the "ppv2" variant reads it.
          * @param options.samplingMode Post-process sampling mode (bilinear by default, Unity's linear-clamp sampler).
+         * @param options.keepAlpha PPv2 `keepAlpha` (green-as-luma, source alpha kept); "ppv2" only, default false.
+         * @param options.variant "ppv2" (default) | "urp" | "hdrp" (D15); fixed for the life of the passes.
          */
         static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
             textureType?: number;
             fastMode?: boolean;
             samplingMode?: number;
+            keepAlpha?: boolean;
+            variant?: string;
         }): BABYLON.PostProcess;
         private static num;
     }
@@ -16185,6 +17635,121 @@ declare namespace TOOLKIT {
         }): any;
     }
 }
+declare namespace TOOLKIT {
+    /** One exported URP Light2D (shadergraph-transpiler-complete-coverage Data shapes › lights2d). */
+    interface ILight2DData {
+        type: string;
+        color: number[];
+        intensity: number;
+        position: number[];
+        rotation: number[];
+        innerRadius: number;
+        outerRadius: number;
+        innerAngle: number;
+        outerAngle: number;
+        falloff: number;
+        shape: number[][];
+        sprite: any;
+        sortingLayers: number[];
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T25 (D29): the URP 2D light texture - Unity's _ShapeLightTexture - as one per-camera
+     * render target. The scene's Global lights sum into the clear colour; every other light (Point: a radial-falloff disc with its
+     * inner / outer cone, Freeform: its shape path fanned from the first point, Sprite: its cookie quad) is a mesh on a hidden layer
+     * rendered ADDITIVELY by a private camera that copies the viewing camera each frame. The target is half resolution, RGBA16F when
+     * the engine can render half floats (else 8 bits), and is stored TOP-DOWN like every toolkit texture (the private camera's projection
+     * is flipped in Y), so a Sprite Lit graph reads it at sg_toBabylonUv(screen uv) (SgSprites). With no 2D light at all the texture is
+     * a 1x1 white; with only Global lights it is a 1x1 of their summed colour (no target). Rendered from the camera itself (like the
+     * opaque scene colour), a Sprite Lit graph reads it at the pixel's screen uv. A light's target sorting layers are not
+     * honoured (every sprite receives every light - one Polyfill deviation, D29).
+     * @class Light2DTexture - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class Light2DTexture {
+        /** The hidden layer the light meshes live on (outside every exported camera's mask). */
+        static readonly LightLayer: number;
+        private static _states;
+        /** Registers the scene's exported 2D lights (called by the loader with scene metadata `lights2d`). */
+        static Load(scene: BABYLON.Scene, lights: ILight2DData[]): void;
+        /**
+         * Makes the scene's 2D-light resources outside any draw: the light meshes (when the lights changed), the flat texture of the
+         * global colour, and a render target for `camera` (default: the scene's active cameras) when there is a shape light.
+         */
+        static Prepare(scene: BABYLON.Scene, camera?: BABYLON.Camera): void;
+        private static IsPrivateCamera;
+        /** The global light colour (linear rgb x intensity, summed) - white when the scene has no 2D light at all. */
+        static GlobalColor(lights: ILight2DData[]): BABYLON.Color3;
+        /** True when a light needs geometry (anything but Global). */
+        static IsShapeLight(light: ILight2DData): boolean;
+        /** The texture a Sprite Lit graph samples for `camera`: the render target, or a 1x1 of the global colour (white with no lights). */
+        static GetTexture(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.BaseTexture;
+        private static State;
+        /** Disposes every target, mesh and material of the scene (scene dispose). */
+        static Release(scene: BABYLON.Scene): void;
+        private static Flat;
+        private static CreateTarget;
+        /** The private camera takes the viewing camera's pose and projection (light colours are Unity's gamma values x intensity, as URP 2D uploads them). */
+        static FollowCamera(target: BABYLON.TargetCamera, source: BABYLON.Camera): void;
+        private static BuildMeshes;
+        /** The geometry of one light, in world space (a light lies in its transform's XY plane). */
+        static LightMesh(scene: BABYLON.Scene, light: ILight2DData): BABYLON.Mesh;
+        /** Additive, unlit, two-sided: colour x intensity x (point: radial falloff between inner / outer radius and the cone). */
+        private static LightMaterial;
+        static readonly VERTEX: string;
+        /** lightShape = (point?, inner radius / outer radius, cos(outer angle / 2), cos(inner angle / 2)). */
+        static readonly FRAGMENT: string;
+    }
+    /** @hidden */
+    interface Light2DTarget {
+        rtt: BABYLON.RenderTargetTexture;
+        camera: BABYLON.TargetCamera;
+        source: BABYLON.Camera;
+        observer: BABYLON.Observer<BABYLON.Scene>;
+    }
+    /** @hidden */
+    interface Light2DSceneState {
+        scene: BABYLON.Scene;
+        lights: ILight2DData[];
+        meshes: BABYLON.Mesh[];
+        materials: BABYLON.Material[];
+        targets: Map<number, Light2DTarget>;
+        flat: BABYLON.RawTexture;
+        flatKey: string;
+        dirty: boolean;
+        prepareObserver: BABYLON.Observer<BABYLON.Scene>;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Light probes in a scene whose Unity ambient is NOT the skybox (Environment Lighting Source = Gradient or Color)
+     * (unity-terrain-parity T12.5).
+     *
+     * Unity lights a probe-lit renderer from its interpolated light-probe SH whatever the ambient mode: the ambient
+     * gradient / colour is baked INTO the probes, and the ambient probe (here: the scene's hemispheric "Ambient Light")
+     * only lights renderers that use no probes. Babylon's PBR shader only compiles its spherical-harmonics irradiance path
+     * (USESPHERICALFROMREFLECTIONMAP, the vSphericalL.. uniforms the UnityStyleLightingPlugin overwrites per draw with the
+     * probe SH) when the material has a reflection texture carrying a spherical polynomial - which a skybox-ambient scene
+     * gives every material, and a gradient-ambient scene gives none. So a probe-lit mesh's material without one gets a
+     * CARRIER: a shared 1x1 black cube whose polynomial is zero. It adds no specular (black radiance - the same as no
+     * reflection texture) and no irradiance of its own; the probe SH written per draw is the irradiance. And the mesh is
+     * kept out of the hemispheric ambient light, which the probes already contain.
+     * @class LightProbeAmbient - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LightProbeAmbient {
+        private static readonly CarrierKey;
+        /** The scene's shared zero-SH black cube, created on first use. */
+        static GetCarrier(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        /**
+         * Gives a probe-lit mesh's material(s) the SH path: every PBR (sub-)material with no reflection texture gets the
+         * carrier. A material that already has one (a baked reflection probe) keeps it - its polynomial already compiles
+         * the path. Returns how many materials received the carrier.
+         */
+        static EnsureShPath(material: any, scene: BABYLON.Scene): number;
+        /** The scene's ambient hemispheric light (the exported Unity ambient gradient / colour), or null. */
+        static GetAmbientLight(scene: BABYLON.Scene): BABYLON.Light;
+        /** Keeps a probe-lit mesh out of (add) or returns it to (remove) the ambient hemispheric light. */
+        static ExcludeFromAmbient(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh, exclude: boolean): void;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -16273,6 +17838,8 @@ declare namespace TOOLKIT {
         private static SetRider;
         /** The network of a scene, or null (set in the constructor, cleared in destroy). */
         static Get(scene: BABYLON.Scene): TOOLKIT.LightProbeNetwork;
+        /** T12.5: the scene has no global ambient SH (Unity ambient Gradient / Color) - probe-lit meshes get the SH carrier. */
+        private _noEnvironment;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         /** The component's properties supply ONLY the preload url; every count, the scale and the layout come from the scene header in onDataLoaded. */
         private readProperties;
@@ -16316,6 +17883,12 @@ declare namespace TOOLKIT {
         private ensureCapacity;
         /** The node key the exporter wrote (plan lpn D24), or null. */
         private probeKeyOf;
+        /**
+         * X10 fix loop 2: interpolates at a world point into out[outOffset..+26] (Unity layout, scale applied), walking from
+         * `startTet` (the previous sample's cell for a spatially ordered batch, -1 for the nearest probe's cell). Returns the
+         * cell used, -1 while the network is inactive. Used for per-instance probes (terrain trees).
+         */
+        sampleInto(px: number, py: number, pz: number, startTet: number, out: Float32Array, outOffset: number): number;
         /** Interpolates at a world point into out[0..26] (Unity layout, scale applied). Returns the cell used. Test / tool helper. */
         evaluateAt(px: number, py: number, pz: number, out: Float32Array): number;
         /**
@@ -16346,6 +17919,10 @@ declare namespace TOOLKIT {
         static ANGULAR_SPEED_RATIO: number;
         static BRAKING_CUSHION_FACTOR: number;
         static GLOBAL_CROWD_INSTANCE: boolean;
+        static ENABLE_PATH_CORNER_STEERING: boolean;
+        static CORNER_ADVANCE_DISTANCE: number;
+        static MAX_PATH_POLYGONS: number;
+        static MAX_PATH_CORNERS: number;
         private crowd;
         private type;
         private baseOffset;
@@ -16375,6 +17952,9 @@ declare namespace TOOLKIT {
         private m_navAreasObserver;
         private m_areaCosts;
         private m_filterSlot;
+        private m_pathCorners;
+        private m_cornerIndex;
+        private m_finalDestination;
         private static CROWD_FILTER_SLOTS;
         private static CROWD_FILTER_WARNED;
         speed: number;
@@ -16440,6 +18020,14 @@ declare namespace TOOLKIT {
         private applyAgentUpdateFlags;
         private applyAgentFilter;
         private refreshAgentPolicy;
+        private static ToNumberArray;
+        private buildPathCorners;
+        private startNavigationRun;
+        private gotoPathCorner;
+        private getCornerAdvanceDistance;
+        private hasRemainingPathCorners;
+        private advancePathCorners;
+        private clearPathCorners;
         private getFilteredClosestPoint;
         private destroyNavigationAgent;
         /** Move agent relative to current position. */
@@ -16531,6 +18119,2509 @@ declare namespace TOOLKIT {
         Cancelled = "cancelled"
     }
 }
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    interface IParticleColor {
+        r: number;
+        g: number;
+        b: number;
+        a: number;
+    }
+    interface IParticleVector2 {
+        x: number;
+        y: number;
+    }
+    interface IParticleVector3 {
+        x: number;
+        y: number;
+        z: number;
+    }
+    /** One Unity Keyframe. weightedMode: None 0, In 1, Out 2, Both 3. Infinity tangents mark a step. */
+    interface IParticleKeyframe {
+        time: number;
+        value: number;
+        inTangent: number;
+        outTangent: number;
+        inWeight: number;
+        outWeight: number;
+        weightedMode: number;
+    }
+    interface IParticleAnimationCurve {
+        length: number;
+        preWrapMode: number;
+        postWrapMode: number;
+        keys: IParticleKeyframe[];
+    }
+    /** Unity MinMaxCurve. mode: Constant 0, Curve 1, TwoCurves 2, TwoConstants 3. `multiplier` is Unity's curveMultiplier (D10). */
+    interface IParticleMinMaxCurve {
+        mode: number;
+        constant: number;
+        constantMin: number;
+        constantMax: number;
+        multiplier: number;
+        curve?: IParticleAnimationCurve;
+        curveMin?: IParticleAnimationCurve;
+        curveMax?: IParticleAnimationCurve;
+    }
+    interface IParticleColorKey {
+        color: IParticleColor;
+        time: number;
+    }
+    interface IParticleAlphaKey {
+        alpha: number;
+        time: number;
+    }
+    /** Unity Gradient. mode: Blend 0, Fixed 1. colorSpace: Gamma 0, Linear 1 (D23; Unity's Evaluate lerps the stored keys in either space, T4). */
+    interface IParticleGradient {
+        mode: number;
+        colorSpace?: number;
+        colorKeys: IParticleColorKey[];
+        alphaKeys: IParticleAlphaKey[];
+    }
+    /** Unity MinMaxGradient. mode: Color 0, Gradient 1, TwoColors 2, TwoGradients 3, RandomColor 4. */
+    interface IParticleMinMaxGradient {
+        mode: number;
+        color: IParticleColor;
+        colorMin: IParticleColor;
+        colorMax: IParticleColor;
+        gradient?: IParticleGradient;
+        gradientMin?: IParticleGradient;
+        gradientMax?: IParticleGradient;
+    }
+    interface IParticleBurst {
+        time: number;
+        count: IParticleMinMaxCurve;
+        cycleCount: number;
+        repeatInterval: number;
+        probability: number;
+    }
+    /** Texture reference written next to the export (the post-processing shape, D28). */
+    interface IParticleTextureReference {
+        url?: string;
+        type?: string;
+        width?: number;
+        height?: number;
+        exported?: boolean;
+    }
+    interface IParticleMainModule {
+        duration: number;
+        loop: boolean;
+        prewarm: boolean;
+        startDelay: IParticleMinMaxCurve;
+        startLifetime: IParticleMinMaxCurve;
+        startSpeed: IParticleMinMaxCurve;
+        startSize3D: boolean;
+        startSize: IParticleMinMaxCurve;
+        startSizeX: IParticleMinMaxCurve;
+        startSizeY: IParticleMinMaxCurve;
+        startSizeZ: IParticleMinMaxCurve;
+        startRotation3D: boolean;
+        startRotation: IParticleMinMaxCurve;
+        startRotationX: IParticleMinMaxCurve;
+        startRotationY: IParticleMinMaxCurve;
+        startRotationZ: IParticleMinMaxCurve;
+        flipRotation: number;
+        startColor: IParticleMinMaxGradient;
+        gravityModifier: IParticleMinMaxCurve;
+        gravitySource: number;
+        simulationSpace: number;
+        customSimulationSpace: number;
+        customSimulationSpaceId: string;
+        customSimulationSpaceName: string;
+        simulationSpeed: number;
+        useUnscaledTime: boolean;
+        scalingMode: number;
+        playOnAwake: boolean;
+        emitterVelocityMode: number;
+        emitterVelocity: IParticleVector3;
+        maxParticles: number;
+        stopAction: number;
+        cullingMode: number;
+        ringBufferMode: number;
+        ringBufferLoopRange: IParticleVector2;
+    }
+    interface IParticleEmissionModule {
+        enabled: boolean;
+        rateOverTime: IParticleMinMaxCurve;
+        rateOverDistance: IParticleMinMaxCurve;
+        burstCount: number;
+        bursts: IParticleBurst[];
+    }
+    interface IParticleMeshRef {
+        nodeGuid?: string;
+        nodeId: number;
+        nodeName: string;
+    }
+    interface IParticleMeshData {
+        positions: number[];
+        normals: number[];
+        indices: number[];
+        uvs?: number[];
+        colors?: number[];
+        subMeshes?: {
+            start: number;
+            count: number;
+        }[];
+    }
+    /** One shape-module sprite rect / texture-sheet sprite rect, normalised, Unity's bottom-left origin (D26). */
+    interface IParticleSpriteRect {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+    }
+    interface IParticleShapeModule {
+        enabled: boolean;
+        shapeType: number;
+        angle: number;
+        radius: number;
+        radiusThickness: number;
+        radiusMode: number;
+        radiusSpread: number;
+        radiusSpeed: IParticleMinMaxCurve;
+        donutRadius: number;
+        position: IParticleVector3;
+        rotation: IParticleVector3;
+        scale: IParticleVector3;
+        alignToDirection: boolean;
+        randomDirectionAmount: number;
+        sphericalDirectionAmount: number;
+        randomPositionAmount: number;
+        biasOnTriangles: boolean;
+        useMeshMaterialIndex: boolean;
+        meshMaterialIndex: number;
+        useMeshColors: boolean;
+        normalOffset: number;
+        meshShapeType: number;
+        meshSpawnMode: number;
+        meshSpawnSpread: number;
+        meshSpawnSpeed: IParticleMinMaxCurve;
+        meshRef?: IParticleMeshRef;
+        meshData?: IParticleMeshData;
+        arc: number;
+        arcMode: number;
+        arcSpread: number;
+        arcSpeed: IParticleMinMaxCurve;
+        length: number;
+        boxThickness: IParticleVector3;
+        texture?: IParticleTextureReference;
+        textureClipChannel: number;
+        textureClipThreshold: number;
+        textureColorAffectsParticles: boolean;
+        textureAlphaAffectsParticles: boolean;
+        textureBilinearFiltering: boolean;
+        textureUVChannel: number;
+        spriteSize?: IParticleVector2;
+        spritePivot?: IParticleVector2;
+    }
+    /** The exporter's material block (FR-19, D28, D61). family / blendMode / colorMode are the classifier's strings. */
+    interface IParticleMaterialBlock {
+        shaderName: string;
+        family: string;
+        blendMode: string;
+        colorMode: string;
+        tint: IParticleColor;
+        tintLinear?: boolean;
+        cutoff: number;
+        softParticles: {
+            enabled: boolean;
+            nearFade: number;
+            farFade: number;
+        };
+        cameraFading: {
+            enabled: boolean;
+            nearFade: number;
+            farFade: number;
+        };
+        flipbookBlending: boolean;
+        mainTexture: IParticleTextureReference;
+        mainTextureST: {
+            tiling: IParticleVector2;
+            offset: IParticleVector2;
+        };
+        emission: {
+            color: IParticleColor;
+            texture: IParticleTextureReference;
+        };
+        renderQueue: number;
+        normalTexture?: IParticleTextureReference;
+        lit?: {
+            receiveShadows: boolean;
+            specularHighlights: boolean;
+        };
+        distortion?: IParticleDistortionBlock;
+        customMaterial?: string;
+    }
+    /** D17: a distortion material is classified fully but still reports `family: "unknown"`; this block carries the extra. */
+    interface IParticleDistortionBlock {
+        enabled: boolean;
+        family: string;
+        strength: number;
+        blend: number;
+        normalTexture?: IParticleTextureReference;
+    }
+    /** One entry of `renderer.meshes` (D21): the mesh's inline geometry, Unity values, no handedness conversion (D26). */
+    interface IParticleMeshGeometry {
+        positions: number[];
+        normals?: number[];
+        uvs?: number[];
+        colors?: number[];
+        indices: number[];
+    }
+    interface IParticleRendererMesh {
+        name: string;
+        vertexCount: number;
+        triangleCount: number;
+        weighting: number;
+        geometry?: IParticleMeshGeometry;
+    }
+    interface IParticleRendererModule {
+        enabled: boolean;
+        material?: IParticleMaterialBlock;
+        materials?: any[];
+        renderMode: number;
+        cameraVelocityScale: number;
+        velocityScale: number;
+        lengthScale: number;
+        normalDirection: number;
+        sortMode: number;
+        sortingFudge: number;
+        minParticleSize: number;
+        maxParticleSize: number;
+        alignment: number;
+        flip: IParticleVector2;
+        allowRoll: boolean;
+        pivot: IParticleVector3;
+        shadowCastingMode: number;
+        receiveShadows: boolean;
+        motionVectorGenerationMode: number;
+        lightProbeUsage: number;
+        reflectionProbeUsage: number;
+        enableGPUInstancing: boolean;
+        mesh?: any;
+        meshes?: IParticleRendererMesh[];
+        trailMaterial?: IParticleMaterialBlock;
+        sortingLayerID: number;
+        sortingOrder: number;
+        freeformStretching?: boolean;
+        maskInteraction?: number;
+        meshCount?: number;
+        meshDistribution?: number;
+        rotateWithStretchDirection?: boolean;
+        shadowBias?: number;
+        supportsMeshInstancing?: boolean;
+        activeVertexStreamsCount?: number;
+        activeTrailVertexStreamsCount?: number;
+        applyActiveColorSpace?: boolean;
+        activeVertexStreams?: string[];
+    }
+    interface IParticleVelocityOverLifetimeModule {
+        enabled: boolean;
+        space: number;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        orbitalX: IParticleMinMaxCurve;
+        orbitalY: IParticleMinMaxCurve;
+        orbitalZ: IParticleMinMaxCurve;
+        orbitalOffsetX: IParticleMinMaxCurve;
+        orbitalOffsetY: IParticleMinMaxCurve;
+        orbitalOffsetZ: IParticleMinMaxCurve;
+        radial: IParticleMinMaxCurve;
+        speedModifier: IParticleMinMaxCurve;
+    }
+    interface IParticleLimitVelocityOverLifetimeModule {
+        enabled: boolean;
+        limitX: IParticleMinMaxCurve;
+        limitY: IParticleMinMaxCurve;
+        limitZ: IParticleMinMaxCurve;
+        limit: IParticleMinMaxCurve;
+        dampen: number;
+        separateAxes: boolean;
+        space: number;
+        drag: IParticleMinMaxCurve;
+        multiplyDragByParticleSize: boolean;
+        multiplyDragByParticleVelocity: boolean;
+    }
+    interface IParticleInheritVelocityModule {
+        enabled: boolean;
+        mode: number;
+        curve: IParticleMinMaxCurve;
+    }
+    interface IParticleForceOverLifetimeModule {
+        enabled: boolean;
+        space: number;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        randomized: boolean;
+    }
+    interface IParticleLifetimeByEmitterSpeedModule {
+        enabled: boolean;
+        curve: IParticleMinMaxCurve;
+        range: IParticleVector2;
+    }
+    interface IParticleColorOverLifetimeModule {
+        enabled: boolean;
+        color: IParticleMinMaxGradient;
+    }
+    interface IParticleColorBySpeedModule {
+        enabled: boolean;
+        color: IParticleMinMaxGradient;
+        range: IParticleVector2;
+    }
+    interface IParticleSizeOverLifetimeModule {
+        enabled: boolean;
+        size: IParticleMinMaxCurve;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        separateAxes: boolean;
+    }
+    interface IParticleSizeBySpeedModule {
+        enabled: boolean;
+        size: IParticleMinMaxCurve;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        separateAxes: boolean;
+        range: IParticleVector2;
+    }
+    interface IParticleRotationOverLifetimeModule {
+        enabled: boolean;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        separateAxes: boolean;
+    }
+    interface IParticleRotationBySpeedModule {
+        enabled: boolean;
+        x: IParticleMinMaxCurve;
+        y: IParticleMinMaxCurve;
+        z: IParticleMinMaxCurve;
+        separateAxes: boolean;
+        range: IParticleVector2;
+    }
+    /**
+     * One ParticleSystemForceField the exporter resolved for this system (D24). `position` / `rotation` are the field's
+     * WORLD placement at export time, Unity values (D26): the fallback used when `nodeGuid` / `name` resolve to nothing.
+     * shape: 0 Sphere, 1 Hemisphere, 2 Cylinder, 3 Box. The runtime never re-filters the list.
+     */
+    interface IParticleForceField {
+        nodeGuid?: string;
+        name: string;
+        shape: number;
+        startRange: number;
+        endRange: number;
+        length: number;
+        position: IParticleVector3;
+        rotation: IParticleVector3;
+        directionX: IParticleMinMaxCurve;
+        directionY: IParticleMinMaxCurve;
+        directionZ: IParticleMinMaxCurve;
+        gravity: IParticleMinMaxCurve;
+        gravityFocus: number;
+        rotationSpeed: IParticleMinMaxCurve;
+        rotationAttraction: IParticleMinMaxCurve;
+        drag: IParticleMinMaxCurve;
+        multiplyDragByParticleSize: boolean;
+        multiplyDragByParticleVelocity: boolean;
+    }
+    interface IParticleExternalForcesModule {
+        enabled: boolean;
+        multiplier: number;
+        influenceFilter: number;
+        influenceMask: number;
+        fields: IParticleForceField[];
+        windZones: boolean;
+    }
+    interface IParticleNoiseModule {
+        enabled: boolean;
+        separateAxes: boolean;
+        strength: IParticleMinMaxCurve;
+        strengthX: IParticleMinMaxCurve;
+        strengthY: IParticleMinMaxCurve;
+        strengthZ: IParticleMinMaxCurve;
+        frequency: number;
+        damping: boolean;
+        octaveCount: number;
+        octaveMultiplier: number;
+        octaveScale: number;
+        quality: number;
+        scrollSpeed: IParticleMinMaxCurve;
+        remapEnabled: boolean;
+        remap: IParticleMinMaxCurve;
+        remapX: IParticleMinMaxCurve;
+        remapY: IParticleMinMaxCurve;
+        remapZ: IParticleMinMaxCurve;
+        positionAmount: IParticleMinMaxCurve;
+        rotationAmount: IParticleMinMaxCurve;
+        sizeAmount: IParticleMinMaxCurve;
+    }
+    interface IParticleCollisionPlane {
+        name: string;
+        nodeGuid?: string;
+        position: IParticleVector3;
+        normal: IParticleVector3;
+    }
+    interface IParticleCollisionModule {
+        enabled: boolean;
+        type: number;
+        mode: number;
+        dampen: IParticleMinMaxCurve;
+        bounce: IParticleMinMaxCurve;
+        lifetimeLoss: IParticleMinMaxCurve;
+        minKillSpeed: number;
+        maxKillSpeed: number;
+        radiusScale: number;
+        collidesWith: number;
+        quality: number;
+        voxelSize: number;
+        maxCollisionShapes: number;
+        enableDynamicColliders: boolean;
+        sendCollisionMessages: boolean;
+        colliderForce: number;
+        multiplyColliderForceByCollisionAngle: boolean;
+        multiplyColliderForceByParticleSpeed: boolean;
+        multiplyColliderForceByParticleSize: boolean;
+        planes: IParticleCollisionPlane[];
+    }
+    /** A trigger collider's primitive, in the collider's own local space, Unity values (D26). kind: box | sphere | capsule | mesh (mesh → the bounds). */
+    interface IParticleColliderShape {
+        kind: string;
+        center: IParticleVector3;
+        size: IParticleVector3;
+        radius: number;
+        height: number;
+        direction: number;
+        lossyScale: IParticleVector3;
+    }
+    interface IParticleTriggerCollider {
+        nodeGuid?: string;
+        transform: any;
+        type: string;
+        shape?: IParticleColliderShape;
+    }
+    interface IParticleTriggersModule {
+        enabled: boolean;
+        inside: number;
+        outside: number;
+        enter: number;
+        exit: number;
+        radiusScale: number;
+        colliderQueryMode: number;
+        colliders: IParticleTriggerCollider[];
+    }
+    interface IParticleSubEmitter {
+        type: number;
+        properties: number;
+        probability: number;
+        systemName?: string;
+        systemId?: number;
+    }
+    interface IParticleSubEmittersModule {
+        enabled: boolean;
+        subEmittersCount: number;
+        subEmitters: IParticleSubEmitter[];
+    }
+    interface IParticleTextureSheetAnimationModule {
+        enabled: boolean;
+        mode: number;
+        timeMode: number;
+        fps: number;
+        numTilesX: number;
+        numTilesY: number;
+        animation: number;
+        useRandomRow: boolean;
+        frameOverTime: IParticleMinMaxCurve;
+        startFrame: IParticleMinMaxCurve;
+        cycleCount: number;
+        rowIndex: number;
+        rowMode: number;
+        uvChannelMask: number;
+        flipU: number;
+        flipV: number;
+        speedRange: IParticleVector2;
+        sprites: IParticleSpriteRect[];
+        spriteTexture: IParticleTextureReference;
+    }
+    /** The Light prefab the lights module points at. Unity LightType: 0 Spot, 1 Directional, 2 Point, 3 Area. */
+    interface IParticleLightSource {
+        nodeGuid?: string;
+        name?: string;
+        type: number;
+        color: IParticleColor;
+        intensity: number;
+        range: number;
+        spotAngle: number;
+    }
+    interface IParticleLightsModule {
+        enabled: boolean;
+        ratio: number;
+        useRandomDistribution: boolean;
+        useParticleColor: boolean;
+        sizeAffectsRange: boolean;
+        alphaAffectsIntensity: boolean;
+        range: IParticleMinMaxCurve;
+        intensity: IParticleMinMaxCurve;
+        maxLights: number;
+        light: IParticleLightSource;
+    }
+    interface IParticleTrailsModule {
+        enabled: boolean;
+        mode: number;
+        ratio: number;
+        lifetime: IParticleMinMaxCurve;
+        minVertexDistance: number;
+        textureMode: number;
+        worldSpace: boolean;
+        dieWithParticles: boolean;
+        sizeAffectsWidth: boolean;
+        sizeAffectsLifetime: boolean;
+        inheritParticleColor: boolean;
+        colorOverLifetime: IParticleMinMaxGradient;
+        widthOverTrail: IParticleMinMaxCurve;
+        colorOverTrail: IParticleMinMaxGradient;
+        generateLightingData: boolean;
+        ribbonCount: number;
+        shadowBias: number;
+        splitSubEmitterRibbons: boolean;
+        attachRibbonsToTransform: boolean;
+        textureScale: IParticleVector2;
+    }
+    /** One custom-data stream. mode: 0 Disabled, 1 Vector (x / y / z / w up to vectorComponentCount), 2 Color. Two entries. */
+    interface IParticleCustomDataStream {
+        mode: number;
+        vectorComponentCount?: number;
+        x?: IParticleMinMaxCurve;
+        y?: IParticleMinMaxCurve;
+        z?: IParticleMinMaxCurve;
+        w?: IParticleMinMaxCurve;
+        color?: IParticleMinMaxGradient;
+    }
+    interface IParticleCustomDataModule {
+        enabled: boolean;
+        streams: IParticleCustomDataStream[];
+    }
+    /** The whole `properties` bag after `withDefaults`. Descriptive keys are the consumedElsewhere class (D22). */
+    interface IParticleSystemProperties {
+        isPlaying: boolean;
+        isPaused: boolean;
+        isStopped: boolean;
+        isEmitting: boolean;
+        particleCount: number;
+        time: number;
+        randomSeed: number;
+        useAutoRandomSeed: boolean;
+        name: string;
+        instanceId: number;
+        enabled: boolean;
+        transformPosition: IParticleVector3;
+        transformRotation: IParticleVector3;
+        transformScale: IParticleVector3;
+        materialName?: string;
+        materialId?: number;
+        mainTextureName?: string;
+        mainTextureId?: number;
+        main: IParticleMainModule;
+        emission: IParticleEmissionModule;
+        shape: IParticleShapeModule;
+        renderer: IParticleRendererModule;
+        velocityOverLifetime?: IParticleVelocityOverLifetimeModule;
+        limitVelocityOverLifetime?: IParticleLimitVelocityOverLifetimeModule;
+        inheritVelocity?: IParticleInheritVelocityModule;
+        forceOverLifetime?: IParticleForceOverLifetimeModule;
+        lifetimeByEmitterSpeed?: IParticleLifetimeByEmitterSpeedModule;
+        colorOverLifetime?: IParticleColorOverLifetimeModule;
+        colorBySpeed?: IParticleColorBySpeedModule;
+        sizeOverLifetime?: IParticleSizeOverLifetimeModule;
+        sizeBySpeed?: IParticleSizeBySpeedModule;
+        rotationOverLifetime?: IParticleRotationOverLifetimeModule;
+        rotationBySpeed?: IParticleRotationBySpeedModule;
+        externalForces?: IParticleExternalForcesModule;
+        noise?: IParticleNoiseModule;
+        collision?: IParticleCollisionModule;
+        triggers?: IParticleTriggersModule;
+        subEmitters?: IParticleSubEmittersModule;
+        textureSheetAnimation?: IParticleTextureSheetAnimationModule;
+        lights?: IParticleLightsModule;
+        trails?: IParticleTrailsModule;
+        customData?: IParticleCustomDataModule;
+    }
+    /**
+     * The particle metadata contract (spec FR-8): defaults = the minimal-serialisation contract, the known-field
+     * tables the audit in APP/tests/particles/contract.test.js enforces, and the TOOLKIT.Particles: warn-once vocabulary (D42).
+     *
+     * Coverage (plan Data shapes › Coverage table):
+     *
+     * | Unity module | status | notes |
+     * |---|---|---|
+     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); useUnscaledTime no-op (the toolkit has no time scale) |
+     * | Emission | implemented | rate over time / distance, bursts with cycles / interval / probability |
+     * | Shape | implemented | every shape type incl. mesh / mesh renderer / skinned (current pose at SkinnedShapeRefreshHz); shape texture (tint / clip; planar UV approximated on primitives); mesh colours, material index; sprite types → the sprite's rectangle + warning |
+     * | Velocity / Limit Velocity / Inherit Velocity / Force / Lifetime by Emitter Speed | implemented | unchanged |
+     * | Color / Size over Lifetime and by Speed | implemented | size Z on mesh particles |
+     * | Rotation over Lifetime / by Speed | implemented | Z on billboards (X / Y warned); X / Y / Z on mesh particles |
+     * | Noise | approximated | ported gradient noise |
+     * | Collision | implemented | Planes (following their nodes); World by budgeted ray casts (physics engine or mesh picking); collider-force / voxel / dynamic-collider keys mode-only |
+     * | Sub Emitters | implemented | Birth / Death / Collision / Trigger / Manual (triggerSubEmitter); InheritDuration |
+     * | Texture Sheet Animation | implemented | Grid; Sprites (uniform grids exactly, up to MaxSpriteRects arbitrary rects in the shader); flipU / flipV; rowMode MeshIndex |
+     * | Renderer | implemented | Billboard / Stretched / Horizontal / Vertical / Mesh (thin instances, 3-D rotation) / None; alignment View / World / Local / Facing / Velocity; sort modes; flip; allowRoll; min / max particle size; cameraVelocityScale; pivot x / y / z; material block: family, blend (alpha, additive, multiply, premultiply; subtractive approximated), colour modes, cutout, lit (per-vertex: ambient + directional + 4 point lights), soft particles, camera fading, flipbook blending, emission; Shader Graph / unknown families drawn with their classified look; distortion approximated (no refraction — and a system whose distortion blend is 1, wholly the grabbed scene in Unity, therefore draws nothing visible); freeformStretching / rotateWithStretchDirection mode-only |
+     * | Trails | implemented | Particles and Ribbon modes, all texture modes, trail material, trail-only systems; alpha-blended trails draw after the particle systems of their group |
+     * | Lights | implemented | pooled point lights under a scene cap; spot sources draw as points |
+     * | Triggers | implemented | box / sphere / capsule; mesh colliders by their bounds |
+     * | External Forces | implemented | force fields (shape falloff, direction, gravity, rotation, drag) and wind zones (main + pulse); turbulence, rotationRandomness and vector fields not reproduced |
+     * | Custom Data | implemented | evaluated on demand through getCustomData (no stock shader reads it, as in Unity) |
+     *
+     * No Babylon call lives here except BABYLON.Tools.Warn; nothing reads `auto__` keys (the exporter writes plain names).
+     * @class ParticleContract - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleContract {
+        /** Unity's true defaults for every module (the contract for a key the exporter omitted). `prewarm` is false (D10 / FR-17). */
+        static readonly Defaults: IParticleSystemProperties;
+        /** Defaults of the renderer material block (Data shapes › Defaults); `Defaults.renderer.material` itself is null (the D59 legacy signal). */
+        static readonly MaterialBlockDefaults: IParticleMaterialBlock;
+        /** Every key the exporter may write, per module (top-level module name → key list). Descriptive keys are under "root"; the nested renderer material block under "material". */
+        static readonly KnownFields: {
+            [module: string]: string[];
+        };
+        /**
+         * Known keys that only matter in a mode Babylon has no equivalent of: one grouped `<module>:mode-only-fields`
+         * warning per module (D43's silent list). The root descriptive keys are NOT here: they are ConsumedElsewhere
+         * (never warned, D22). `renderer.materials` (the old list) is mode-only, never consumed.
+         * T18 fields audit (the three classes are disjoint): a key an applier reads in SOME mode is consumed, not mode-only
+         * (`main.ringBufferLoopRange`, `shape.arcSpread / radiusSpread / meshSpawnSpread / meshSpawnSpeed`); a key whose only
+         * handling is a warning is ShurikenParticles.WarnedFields (`main.useUnscaledTime`); descriptive duplicates
+         * (`emission.burstCount`, `subEmitters.subEmittersCount`), `main.emitterVelocityMode` (every mode is measured the same
+         * way, D33), `collision.mode` (2D) and the billboards' size Z are mode-only.
+         */
+        static readonly ModeOnlyFields: {
+            [module: string]: string[];
+        };
+        /** Top-level descriptive keys the exporter writes for tooling: never warned, never applied (D22). The other five root keys are Consumes.root. */
+        static readonly ConsumedElsewhere: string[];
+        /** Keys already warned about (dedupe table of warnOnce). */
+        static Warned: {
+            [key: string]: boolean;
+        };
+        /** MinMaxCurve-shaped constant: `{mode:0, constant:v, constantMin:0, constantMax:v, multiplier:1}`. */
+        static constantCurve(value: number): IParticleMinMaxCurve;
+        /** MinMaxGradient-shaped constant colour (mode Color, the colour copied into color / colorMin / colorMax). */
+        static constantGradient(color: IParticleColor): IParticleMinMaxGradient;
+        /**
+         * Deep-merges an exported bag over a fresh copy of `Defaults`. A key whose default is an object and whose raw
+         * value is a plain object recurses, EXCEPT raw objects that look like a curve (`mode` + `constant`), a gradient
+         * (`mode` + `color`), a vector (`x`) or colour (`r`) whose own values are ALL numbers, or a texture reference
+         * (`url`), and arrays - those are taken
+         * whole from `raw`. A raw null / undefined keeps the default; a raw non-object where the default is an object keeps
+         * the default. Keys the defaults do not know are copied through (the audit reports them). Never throws: a
+         * non-object bag (or an internal failure) returns the defaults copy and warns `contract:empty:<nodeName>` once
+         * (D42's vocabulary needs the trailing `:<nodeName>`; "unnamed" when the caller passes none).
+         */
+        static withDefaults(raw: any, nodeName?: string): IParticleSystemProperties;
+        /**
+         * Keys of `bag[module]` (own, non-null) that are known (`KnownFields[module]`) but neither in `consumes` nor
+         * mode-only. For "root" the bag's top-level non-module keys are read and ConsumedElsewhere is excluded; for
+         * "material" the renderer's material block is read. Unknown keys are reported by `unknownKeys` instead.
+         */
+        static unconsumedKeys(module: string, bag: any, consumes: string[]): string[];
+        /**
+         * Keys of `bag[module]` (own, non-null) that are not in `KnownFields[module]` (each fires `contract:unknown:<module>.<key>` once).
+         * Toolkit-internal keys are never the exporter's and are skipped: a leading underscore (the MetadataParser writes
+         * `_scriptComponentAlias` / `_registerComponentAlias` into every component bag, measured on the T18 smoke) and `auto__` (D22).
+         */
+        static unknownKeys(module: string, bag: any): string[];
+        /** `{url, type:"texture", …}` → the reference, or null unless `url` is a non-empty string (PostProcessingContract.parseTexture's rule). */
+        static parseTextureReference(raw: any): IParticleTextureReference;
+        /**
+         * One `TOOLKIT.Particles: [key] message` console warning per key (D42); deduped in `Warned`.
+         *
+         * D28 warning vocabulary: only the prefixes `deferred:`, `material:`, `renderer:`, `main:`, `shape:`,
+         * `subemitter:`, `contract:`, `texture:` and `export:`, always through this method. The `deferred:` keys that
+         * REMAIN after the parity work (a module that is implemented deletes its own `deferred:<module>:<node>` line):
+         *
+         *   deferred:lights:spot            a Spot light source draws as a point light
+         *   deferred:lights:cap             the scene particle-light budget is spent; this system lights nothing
+         *   deferred:lights:pool            the system's own light pool is full; further particles carry no light
+         *   deferred:lights:slots           AP-15c: the materials have no free light slot for this system's lights
+         *   deferred:<module>:pool          a module's per-particle pool is exhausted (trails, lights)
+         *   deferred:triggers              an export older than this runtime lists colliders with no shapes: nothing is tested
+         *   deferred:triggers:meshcollider  a trigger collider is a mesh; its bounds are used
+         *   deferred:triggers:pool          more than 31 trigger colliders on one system; the rest are ignored
+         *   deferred:textureSheetAnimation:sprites:toomany   more sprite rectangles than the shader can address
+         *   deferred:textureSheetAnimation:meshIndex   rowMode MeshIndex on a BILLBOARD system; row 0 is used
+         *   deferred:startRotation3D:xy / rotationOverLifetime:xy / rotationBySpeed:xy   (billboards only)
+         *   deferred:renderMode:mesh        an old export or a null mesh falls back to a billboard
+         *   deferred:pivot:stretched        renderer pivot X / Z on a STRETCHED billboard (only its Y reaches the anchor shift)
+         *   deferred:distortion:fullrefraction   a distortion material with blend 1 (AP-12): 100 % grabbed scene, 0 % albedo, and
+         *                                   with no scene grab in the particle pass (D17) its alpha resolves to 0 - it draws nothing
+         *
+         * D28's own inventory named neither `deferred:lights:slots` (AP-15c), `deferred:pivot:stretched`,
+         * `deferred:textureSheetAnimation:meshIndex` (all three legitimate deviations introduced by T15 / T18 / T19) nor
+         * `deferred:distortion:fullrefraction` (T25 / AP-12). The list above is the one T25's warnings audit checks every Pack
+         * and Shapes bag against, and the one T27's SPEC write-back reads.
+         */
+        static warnOnce(key: string, message: string): void;
+        /** True when a key has already been warned about. Test and diagnostics helper. */
+        static hasWarned(key: string): boolean;
+        /** Forget every warned key. Used by the tests and by a scene reload. */
+        static resetWarnings(): void;
+        private static isPlainObject;
+        /** Raw objects taken whole instead of merged key by key (curve, gradient, texture reference, and a vector / colour whose own values are all numbers). */
+        private static isLeafObject;
+        private static allNumbers;
+        private static clone;
+        private static merge;
+        /** The own, non-null keys of the module's object (root: the top-level keys that are not module names; material: renderer.material). */
+        private static moduleKeys;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Unity -> Babylon particle value conversions (spec FR-1 / FR-14 / FR-16, SPEC.md Conventions). Every conversion is a
+     * pure static function, one per parameter family, with the Unity range, the Babylon range and the rationale in its
+     * doc comment; the appliers in TOOLKIT.ShurikenParticles call these and never re-derive them. Every quantity here is a
+     * closed form: no tuned constant lives in this file (plan D30 names the only place one may ever enter, with a marker).
+     * @class ParticleConversions - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleConversions {
+        /** Babylon's animation ratio is 60 x the frame's seconds (scene.getAnimationRatio() === 1 at 60 fps). */
+        static readonly FramesPerSecond: number;
+        /** simulate() advances in fixed steps of one 60 Hz frame (D35). */
+        static readonly FixedStep: number;
+        /** Unity Physics.gravity magnitude (m/s^2, the default project setting the exporter never overrides). */
+        static readonly GravityMagnitude: number;
+        /** Emitter displacement above this many world units in one frame is a teleport (D33 / D53): emitter velocity 0 that frame. */
+        static readonly TeleportDistance: number;
+        /** Smallest sizeY the stretched-billboard divide uses (D55): a zero-size particle never divides by zero. */
+        static readonly MinStretchSize: number;
+        /**
+         * Unity main.simulationSpeed (a multiplier of real time, 0..100, default 1) -> Babylon ParticleSystem.updateSpeed
+         * (particle-time units per animation-ratio unit). Babylon advances ages by updateSpeed x scene.getAnimationRatio()
+         * and the ratio is 60 x the frame's seconds, so speed / 60 makes one particle-time unit exactly one second x speed
+         * (D4 / D21): lifetime, rate, speed, gravity, angular speed and drag are then all literal. Non-finite -> 1.
+         */
+        static updateSpeedFromSimulationSpeed(simulationSpeed: number): number;
+        /** scene.getAnimationRatio() (1 = one 60 Hz frame) -> the seconds elapsed this frame (D21): ratio / 60. Non-finite -> one frame. */
+        static frameSeconds(animationRatio: number): number;
+        /** Unity Physics.gravity x main.gravityModifier (unitless multiplier, may be negative) -> Babylon gravity vector (world, m/s^2): (0, -9.81 x modifier, 0). gravitySource 2D uses the same vector. */
+        static gravityFromModifier(modifier: number, out: BABYLON.Vector3): BABYLON.Vector3;
+        /**
+         * Unity billboard rotation (radians, positive = clockwise on screen) -> Babylon particle angle (radians, the vertex
+         * shader rotates counter-clockwise): -rad (D65). Pinned by the OrientationProbe fixture (T32); if the probe shows the
+         * sign is wrong the fix loop flips THIS function (never a caller) and records it here.
+         */
+        static angleFromUnity(radians: number): number;
+        /** Unity angular speed (rad/s, clockwise positive) -> Babylon angular speed (rad per particle-time second, counter-clockwise): the same sign rule as angleFromUnity (D65). */
+        static angularSpeedFromUnity(radiansPerSecond: number): number;
+        /**
+         * Renderer pivot (Unity: multiples of the particle size, x right / y up) -> Babylon translationPivot: (-pivot.x, -pivot.y).
+         * Unity draws the quad corner at R(angle) ((offset - 0.5 + pivot) x size) about the particle - the quad moves pivot x size and
+         * rotates about the particle. Babylon's billboard corner is R(angle) ((offset - 0.5 - translationPivot) x size) + translationPivot
+         * (particles.vertex), so translationPivot = -pivot gives Unity's rotated, displaced quad plus a leftover -pivot (world units,
+         * not scaled by the size) that the per-frame quad shift cancels (ParticleSimulation.visual moves the particle by
+         * -translationPivot in the camera plane). Pinned by the OrientationProbe, F-S.43: the D65 default (+pivot here, + pivot x size
+         * in the shift) drew Probe_Pivot 0.5 m above Probe_Orient0 where Unity draws it 1 m (= 0.5 x size 2) above.
+         */
+        static pivotToTranslationPivot(pivot: TOOLKIT.IParticleVector3, out: BABYLON.Vector2): BABYLON.Vector2;
+        /**
+         * Stretched billboard (D55). Unity draws the quad size x lengthScale + speed x velocityScale long along the velocity;
+         * Babylon's stretched shader draws it scale.y x size long along `direction` with no speed term. So the per-frame
+         * scale.y multiplier is lengthScale + velocityScale x speed / sizeY (sizeY floored at 1e-6).
+         */
+        static stretchScale(lengthScale: number, velocityScale: number, speed: number, sizeY: number): number;
+        /** Material family (D61) -> the vertex-colour multiplier the Unity shader bakes in, in Unity's LINEAR shader space: the legacy Particles/* and Mobile/Particles/* fragment shaders compute 2 x vertexColor x tint x texture, so 2 for builtin-legacy / builtin-mobile; every other family 1 (D9). */
+        static vertexColorScale(family: string): number;
+        /**
+         * Phase 9 carry-over 6: true when the material is a SURFACE shader that never reads the vertex colour - URP `Lit` / `Complex Lit`
+         * / `Simple Lit` / `Baked Lit` / `Unlit` (not the `Particles/...` shaders) and HDRP `Lit` / `Unlit`. Unity then draws a
+         * trail or a mesh particle with its material colour alone: colour over lifetime / trail / the particle colour change nothing
+         * (URP LitForwardPass and UnlitForwardPass never read input.color).
+         */
+        static IgnoresVertexColor(block: any): boolean;
+        /** Babylon's shader gamma exponent: `helperFunctions` LinearEncodePowerApprox - `toLinearSpace(c) = pow(c, 2.2)`, `toGammaSpace(c) = pow(c, 1/2.2)`. */
+        static readonly ShaderGamma: number;
+        /**
+         * The same D9 multiplier as it must be folded into Babylon's GAMMA-encoded particle colour (T35, F-S.64). Measured on both
+         * sides: Unity (Linear colour space) uploads the particle colour already converted (an authored grey 0.5 arrives as 0.2157
+         * in `ParticleSystemRenderer.BakeMesh` vertex colours) and its legacy fragment multiplies in linear space
+         * (`2 x vertexColor x _TintColor x tex`, every factor linear, the texture decoded by the sRGB sampler); Babylon's
+         * `particles.fragment` multiplies the RAW sRGB texel by `vColor` and raises the PRODUCT to 2.2 (`toLinearSpace`, the
+         * texture is created with `gammaSpace` metadata only - no sRGB buffer, so no double conversion). A constant folded into
+         * `vColor` is therefore gamma-expanded by the shader: the x2 would land as 2^2.2 = 4.59 in linear.
+         * `pow(2, 1/2.2) = 1.3703509847` is the closed form that reproduces Unity exactly: `(1.3703509847 x c)^2.2 = 2 x c^2.2`.
+         * Alpha is never gamma-encoded (no shader conversion on the alpha channel), so the alpha multiplier stays the linear one.
+         */
+        static vertexColorScaleGamma(family: string): number;
+        /**
+         * One Unity particle colour channel -> the value Babylon's particle shader needs (T34 Run 3, F-S.67; D30's `particleColorFromUnity`).
+         * `renderer.applyActiveColorSpace` (the exporter writes the EFFECTIVE flag: false only in a Linear project whose renderer has
+         * "Apply Active Color Space" off - 127 of the 164 ShurikenParticles components in the exported Particle Pack scene) decides what
+         * Unity does with the particle's Color32:
+         *   true  - converted gamma -> linear before upload (a 0.5 grey reaches a Linear target as 0.2157). Babylon's fragment raises the
+         *           PRODUCT texel x vColor to 2.2, which is the same per-factor conversion, so the colour is used as authored (D30).
+         *   false - uploaded UNCONVERTED and read by the shader as a LINEAR value (measured: a 24 / 255 grey particle reaches a Linear
+         *           float target as 0.0941, not 0.0093 - the RocketTrail smoke drew mid grey in Unity and black in the browser). Babylon
+         *           gamma-expands whatever it is given, so the closed form is the inverse of its own exponent: `pow(c, 1 / 2.2)` lands
+         *           as c in the linear target (and IS the display value of linear c where no image processing runs at all).
+         * No tuned constant: the exponent is Babylon's `ShaderGamma`. Alpha is never converted on either side - do not pass it.
+         */
+        static particleColorFromUnity(channel: number, applyActiveColorSpace: boolean): number;
+        /**
+         * Material blendMode string (the exporter's classifier) -> { blendMode, forceDepthWrite, warning, premultiply } (D16 / D29 / D31).
+         * alpha -> STANDARD; additive -> ADD (SrcAlpha, One = Unity's Blend SrcAlpha One); multiply -> MULTIPLY;
+         * opaque -> STANDARD + depth write; cutout -> STANDARD + depth write (T11: the shader's CUTOUT bit alpha-tests, so the
+         * old `material:cutout` warning is gone); anything else -> STANDARD + warning.
+         *
+         * T11 / D16 - the two blend modes Babylon has no BLENDMODE_ name for. `ParticleSystem._setEngineBasedOnBlendMode` maps its
+         * six named values and passes ANY OTHER NUMBER straight to `engine.setAlphaMode`, so `BABYLON.Constants.ALPHA_PREMULTIPLIED`
+         * (7) reaches Unity's `One, OneMinusSrcAlpha` exactly: `premultiply` therefore returns that value and asks for the shader's
+         * PREMUL bit (`rgb *= a` before the emission add), never a warning. `subtractive` takes `BLENDMODE_SUBTRACT` (-1,
+         * `Zero, OneMinusSrcColor`) + PREMUL, which draws `dst x (1 - src.a)`; Unity's reverse-subtract is not reachable through a
+         * Babylon particle blend mode at all, so that row keeps its `material:subtractive` warning.
+         * `warning` is the warn key WITHOUT the node suffix (the caller appends it) or null. Returns a fresh object (awake only).
+         */
+        static blendModeFromMaterial(blendMode: string): {
+            blendMode: number;
+            forceDepthWrite: boolean;
+            warning: string;
+            premultiply: boolean;
+        };
+        /**
+         * Unity renderer.renderMode (Billboard 0, Stretch 1, HorizontalBillboard 2, VerticalBillboard 3, Mesh 4, None 5) +
+         * renderer.alignment (View 0, World 1, Local 2, Facing 3, Velocity 4; consulted for Billboard only) -> the Babylon
+         * billboard setup (D32): Billboard / Facing -> BILLBOARDMODE_ALL; Velocity -> STRETCHED with velocityAligned (the
+         * caller keeps stretchScale 1); Local -> a non-billboard quad whose normal is the emitter's +Z; World -> ALL + warning;
+         * Stretch -> STRETCHED; HorizontalBillboard -> non-billboard, normal +Y; VerticalBillboard -> BILLBOARDMODE_Y;
+         * Mesh -> ALL + deferred warning; None -> hidden (animated, never drawn); an unknown renderMode -> the Billboard row.
+         * Returns a fresh object (called once at awake).
+         */
+        static renderModeFromUnity(renderMode: number, alignment: number): {
+            isBillboardBased: boolean;
+            billboardMode: number;
+            quadNormal: BABYLON.Vector3;
+            stretched: boolean;
+            velocityAligned: boolean;
+            hidden: boolean;
+            warning: string;
+        };
+        /** Texture pixels x tile counts -> Babylon spriteCellWidth / spriteCellHeight in PIXELS (D34): [floor(w / numTilesX), floor(h / numTilesY)]; tile counts below 1 read as 1. */
+        static spriteCellSize(textureWidth: number, textureHeight: number, numTilesX: number, numTilesY: number, out: number[]): number[];
+        /**
+         * Unity main.scalingMode (Hierarchy 0, Local 1, Shape 2) + the node's world / local scale -> the shape scale vector
+         * (outScale) and the returned speed multiplier (D33): Hierarchy -> world scale, mean(|world|); Local -> local scale,
+         * mean(|local|); Shape -> the world scale on the SHAPE only and speed 1 - measured against Unity 6000.5 (T30,
+         * T30's shape and scale probes on Unity 6000.5: a node at scale 2, SphereShell radius 1 -> world birth radius 2,
+         * world speed 1, under a World AND a Local simulation; the plan's D33 `(1,1,1)` left the start positions unscaled).
+         * Unknown -> Local (Unity's default mode).
+         */
+        static scalingFromMode(scalingMode: number, worldScale: BABYLON.Vector3, localScale: BABYLON.Vector3, outScale: BABYLON.Vector3): number;
+        /**
+         * The transform scale Unity applies to the DRAWN particle size, by scalingMode (T34, F-S.49): Hierarchy (0) = the world
+         * (lossy) scale, Local (1) = the node's local scale, Shape (2) = none. Measured on the baked renderer mesh (Unity 6000.5,
+         * URP_Samples, node local scale 2 under a parent at 3, startSize 1, World and Local simulation alike): Hierarchy draws a
+         * 6-unit quad, Local 2, Shape 1. Babylon adds the billboard corner in view space, so the node scale never reaches the size
+         * by itself. x scales the quad width, y its height (a non-uniform scale is unmeasured, T41). Writes `out`, returns it.
+         */
+        static sizeScaleFromMode(scalingMode: number, worldScale: BABYLON.Vector3, localScale: BABYLON.Vector3, out: BABYLON.Vector2): BABYLON.Vector2;
+        /** Culling sphere radius in world units (D39): shapeExtent + maxStartSpeed x maxLifetime + maxStartSize (the farthest a particle can travel plus its size). */
+        static cullingRadius(shapeExtent: number, maxStartSpeed: number, maxLifetime: number, maxStartSize: number): number;
+        /** Unity's (row, column) sprite frame on a numTilesX-wide sheet -> the 0-based cell index Babylon expects: row x numTilesX + column (both number cells row-major from the top-left with invertY = false). */
+        static cellIndexFromRowColumn(row: number, column: number, numTilesX: number): number;
+        /** Unity renderer sortingLayerID / sortingOrder (-32768..32767) -> one ascending sort key: layer x 65536 + (order + 32768), so the layer always outranks the order. */
+        static sortKey(sortingLayerID: number, sortingOrder: number): number;
+        /**
+         * The pre-parity default particle texture (a 64 px soft white radial gradient, Unity's Default-ParticleSystem look)
+         * used when an export carries no material block (D59). Cached per scene on `(scene as any)._particleFallbackTexture`
+         * and never disposed by a component (scene lifetime).
+         */
+        static CreateFallbackTexture(scene: BABYLON.Scene): BABYLON.Texture;
+        /**
+         * Trails `textureMode` -> the U texture coordinate of point `index` of a strip of `count` points (Algorithms > Strip vertices):
+         * 0 Stretch = `u x textureScale.x` (the whole texture spans the trail), 1 Tile = the CUMULATIVE LENGTH from the head
+         * x `textureScale.x` (one texture per world unit), 2 DistributePerSegment = `index / (count - 1) x textureScale.x`
+         * (the texture spans the trail evenly, ignoring segment lengths), 3 RepeatPerSegment = `index x textureScale.x`
+         * (one whole texture per segment). An unknown mode takes the Stretch row.
+         */
+        static trailTextureCoordinate(mode: number, u: number, cumulativeLength: number, index: number, count: number, scaleX: number): number;
+        /** A finite number, or the fallback (null / undefined / NaN / +-Infinity / non-numbers). */
+        static num(value: any, fallback: number): number;
+        /** `value` limited to [min, max] (min wins when min > max); NaN passes through, so callers clamp a num()-sanitised value. */
+        static clamp(value: number, min: number, max: number): number;
+    }
+    /**
+     * xorshift32 (D57): the RNG of the shape emitter, the modules and the noise permutation. Deterministic per seed so
+     * tests (seed 12345) and `useAutoRandomSeed = false` reproduce; next() is uniform in [0, 1).
+     * @class ParticleRandom - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleRandom {
+        /** The non-zero state a zero seed maps to (xorshift's state must never be 0): the 32-bit golden ratio. */
+        static readonly ZeroSeed: number;
+        private _s;
+        constructor(seed?: number);
+        seed(value: number): void;
+        /** Uniform in [0, 1). */
+        next(): number;
+        range(min: number, max: number): number;
+        /** Uniform on the unit sphere (Marsaglia 1972: rejection-sample the unit disc, then map). */
+        unitVector(out: BABYLON.Vector3): BABYLON.Vector3;
+        /** (a ^ (b x 2654435761)) >>> 0 with a 32-bit multiply (Knuth's multiplicative hash), never 0 (D57's auto seed). */
+        static hashSeed(a: number, b: number): number;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Exact Unity curve and gradient evaluation (spec FR-6 / FR-7, D23). Pure; no Babylon types except Color4 writes.
+     *
+     * AnimationCurve: cubic Hermite between keys (outTangent of the left key, inTangent of the right key), a weighted
+     * side switching the segment to Unity's Bezier form (default weight 1/3 on an unweighted side), an infinite tangent
+     * making the segment a step, clamped to the first / last key outside the key range (Unity's particle curves are
+     * always clamped, so preWrapMode / postWrapMode are consumed mode-only). Gradient: Blend lerps colour and alpha keys
+     * independently (a plain lerp of the stored values in either colorSpace, as Unity does), Fixed shows the first key at or after `time` (Unity's rule, T4 oracle). Colours are never
+     * clamped: HDR keys pass through. No randomness here -- the caller supplies every lerp factor.
+     * @class ParticleCurves - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleCurves {
+        /** Unity AnimationCurve.Evaluate: Hermite / weighted Bezier / step segments, clamped outside the key range (Algorithms > Curve). */
+        static evaluateCurve(curve: TOOLKIT.IParticleAnimationCurve, time: number): number;
+        /**
+         * Unity MinMaxCurve.Evaluate(time, lerpFactor): Constant -> constant; Curve -> curve(t) x multiplier;
+         * TwoCurves -> lerp(curveMin(t), curveMax(t), lerp) x multiplier; TwoConstants -> lerp(constantMin, constantMax, lerp).
+         * `time` is the normalised time (0..1), `lerp` the particle's fixed random factor (D57) or the frame's draw.
+         * A missing curve falls back to the constant.
+         */
+        static sampleMinMaxCurve(curve: TOOLKIT.IParticleMinMaxCurve, time: number, lerp: number): number;
+        /** The range a start family spans at `time`: [min, max] for TwoCurves / TwoConstants, [v, v] otherwise (D24). TwoConstants is swapped when min > max so Babylon's uniform draw is valid. */
+        static minMaxRange(curve: TOOLKIT.IParticleMinMaxCurve, time: number, out: number[]): number[];
+        /** An upper bound of |curve| over 0..1 (max over keys x multiplier), used by the culling radius (D39). */
+        static minMaxCurveMax(curve: TOOLKIT.IParticleMinMaxCurve): number;
+        /** Unity Gradient.Evaluate into `out` (r,g,b,a in the gradient's authored space; Blend / Fixed; colorSpace never changes the lerp - T4 oracle). No colour keys -> white; no alpha keys -> 1. */
+        static evaluateGradient(gradient: TOOLKIT.IParticleGradient, time: number, out: BABYLON.Color4): BABYLON.Color4;
+        /** Unity MinMaxGradient.Evaluate(time, lerpFactor) into `out`: Color; Gradient(t); TwoColors lerp; TwoGradients lerp(gMin(t), gMax(t)); RandomColor -> gradient(lerp). */
+        static sampleMinMaxGradient(gradient: TOOLKIT.IParticleMinMaxGradient, time: number, lerp: number, out: BABYLON.Color4): BABYLON.Color4;
+        /** sRGB transfer -> linear: c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ^ 2.4 */
+        static srgbToLinear(c: number): number;
+        /** linear -> sRGB transfer: c <= 0.0031308 ? c * 12.92 : 1.055 * c ^ (1/2.4) - 0.055 */
+        static linearToSrgb(c: number): number;
+        private static scratchColor;
+        private static readonly NoKeys;
+        private static bez;
+        private static dbez;
+        private static clamp;
+        private static lerp;
+        private static num;
+        private static writeColor;
+        private static maxAbsKey;
+        /** Index of the last key whose time is <= `time` (0 when `time` precedes every key). Keys are sorted. */
+        private static segment;
+        /** Unity's Fixed mode (GradientMode.Fixed, measured against Gradient.Evaluate in T4): the FIRST key whose time is >= `time` shows, the last key past the end. Keys are sorted. */
+        private static fixedKey;
+        private static finite;
+        /**
+         * Cache validity for a filtered / sorted key list (SPEC.md Inspector truth, T38): the cached copy is still the
+         * source's when the key ARRAY is the same object, holds the same number of elements, the same element objects in
+         * the same order, and every one of them still carries the time it was cached with. An in-place Inspector edit -
+         * re-timing `keys[i].time`, adding, removing or replacing a key inside the same array - therefore invalidates it.
+         * A key's VALUE / COLOUR needs no stamp: the lists hold the key objects themselves, so an edited value is read
+         * through the cache. O(n) numeric, no allocation, over the two to eight keys a Unity curve carries.
+         */
+        private static keysUnchanged;
+        /** The stamp of one source element: its `time` when it is an object with a numeric one, else NaN (a malformed key, filtered out either way). */
+        private static timeOf;
+        /** `===` that also matches NaN to NaN (the malformed-key stamp), without Object.is. */
+        private static sameTime;
+        /** Records the source elements and their times beside a freshly built cache. */
+        private static stampKeys;
+        /** The curve's well-formed keys (non-null objects with a finite time), cached on the curve as `_keys` (invalidated by any in-place key edit, keysUnchanged); a mangled curve (AC-16 fuzz) evaluates to 0, never a throw. */
+        private static curveKeys;
+        /** The colour keys sorted by time, cached once on the gradient object as `_sorted` (invalidated by any in-place key edit, keysUnchanged). */
+        private static sortedColorKeys;
+        /** The alpha keys sorted by time, cached as `_sortedAlpha` (same rule as the colour keys). */
+        private static sortedAlphaKeys;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Unity's External Forces module (spec FR-24 / FR-25, plan T24): the `ParticleSystemForceField`s this system is
+     * influenced by, plus the scene's `WindZone`s, as one world-space acceleration per particle per step.
+     *
+     * The exporter has already decided WHICH fields influence this system (`influenceFilter` / `influenceMask` /
+     * the influence list are resolved at export time and the chosen fields written out), so nothing is re-filtered by
+     * layer here - the runtime has no Unity layers to filter by. A List-filtered system is written with
+     * `windZones: false`, which is the only wind switch this class reads.
+     *
+     * A field FOLLOWS its Unity transform when the reference resolves (D24: by GUID at scene level, then by name inside
+     * the emitter's own root hierarchy); otherwise it keeps the WORLD placement the exporter wrote beside it
+     * (`position` plus `rotation`, euler DEGREES - `transform.eulerAngles`). No handedness conversion anywhere (D26).
+     * `refresh()` re-reads those frames once per frame, from the component's `refreshFrame`, so a moving field costs one
+     * matrix per field per frame rather than one per particle.
+     *
+     * Documented deviations (Unity has them, this does not): turbulence (`windTurbulence`, `ParticleSystemForceField`'s
+     * noise), `rotationRandomness` and vector-field textures. Everything else of Unity's force-field model is here:
+     * the four falloff shapes, the start / end range plateau, the directional / gravity / rotation-speed /
+     * rotation-attraction / drag terms and the module multiplier.
+     * @class ParticleForceFields - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleForceFields {
+        private static readonly Q;
+        private static readonly Term;
+        private static readonly Dir;
+        private static readonly Radial;
+        private static readonly Focus;
+        private static readonly Tmp;
+        private _module;
+        private _multiplier;
+        /** One entry per influencing field: the exported record, its resolved node, this frame's world frame and its inverse. */
+        private _fields;
+        /** The scene's wind zones, read ONCE at construction (`scene.metadata.toolkit.windzones`). */
+        private _zones;
+        constructor(scene: BABYLON.Scene, owner: BABYLON.Node, module: TOOLKIT.IParticleExternalForcesModule);
+        /** One component of an exported `[x, y, z]` array (the wind-zone shape) or of an `{x, y, z}` object. */
+        private static At;
+        /** The WORLD frame the exporter wrote for a field: `transform.position` + `transform.eulerAngles` (DEGREES, Unity values). */
+        private static FrameOf;
+        /** Once per frame (the component's `refreshFrame`): every field's and wind zone's world frame. */
+        refresh(): void;
+        /**
+         * Algorithms › Force field acceleration. Returns the WORLD-space acceleration (m/s²) at `worldPos` into `out`;
+         * the caller maps it into the simulation space. `t` is the particle's normalised age, `lerp` its fixed force
+         * random (`b.r[5]`), `size` its drawn size and `time` the system clock (the wind pulse phase).
+         */
+        accelerationAt(worldPos: BABYLON.Vector3, velocity: BABYLON.Vector3, t: number, lerp: number, size: number, time: number, out: BABYLON.Vector3): BABYLON.Vector3;
+        dispose(): void;
+        /** The influencing fields and the wind zones this system actually reads (a test / Inspector read-back). */
+        getFieldCount(): number;
+        getWindZoneCount(): number;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Unity's Lights module (spec FR-21, D19): a FIXED pool of `BABYLON.PointLight`s created once at awake and never
+     * created, destroyed or toggled again while the system lives.
+     *
+     * Three runtime facts shape the design. (1) `light.setEnabled()` re-syncs EVERY mesh of the scene, so toggling a
+     * light per particle would walk the whole scene several times a frame - an idle slot therefore carries
+     * `intensity = 0` and stays enabled. (2) A Babylon material takes a bounded number of lights per mesh
+     * (`maxSimultaneousLights`, 4 by default) and the list is ordered by `renderPriority`, DESCENDING. A pooled light
+     * therefore carries TWO ranks (AP-15, amending D19): `IdlePriority` (-1, below every exported light) while it is
+     * dark, and `LitPriority` (+1, above them) for as long as it is actually lighting a particle - together with
+     * `shadowEnabled`, which `Light.CompareLightsPriority` weighs BEFORE the priority. D19's flat `-1` was
+     * measured to make the whole module a no-op in any scene that already has `maxSimultaneousLights` exported lights:
+     * on the Pack the three exported lights plus ONE arbitrary idle pooled light filled every slot, and a pooled light
+     * of intensity 20000 sitting inside the fire changed not a single pixel. An IDLE pooled light still never competes,
+     * which is what D19 set out to protect, and the number of LIT ones that may rank up is arbitrated scene-wide
+     * (`arbitrate`): the slots a material has left once every exported light has taken one, handed to the lit particle
+     * lights nearest the camera. Measured on the Pack: letting all six lit pooled lights rank up evicted all three
+     * exported lights from the walls and changed 129598 of 129600 pixels by up to 126 levels - the level re-lit by its
+     * particles. Handing out only the free slot changes 94278 pixels by up to 36 and leaves every exported light in place. (3) Lights are a scene-wide resource, so the pool obeys a scene cap
+     * (`ShurikenParticles.MaxSceneParticleLights`) counted on `scene._prtParticleLights` - eleven Pack systems asking
+     * for ten lights each would otherwise recompile every material in the level.
+     *
+     * Unity's intensity is a point-light intensity in candela-like units, so the pool uses
+     * `INTENSITYMODE_LUMINOUSINTENSITY` and `intensity = unity x PI` (Babylon divides a luminous intensity by PI when
+     * it builds the diffuse term). Particle colours are authored gamma, a light's diffuse is linear: the particle
+     * colour is raised by `ShaderGamma` before it multiplies the source colour.
+     *
+     * Nothing here is hidden from the Inspector (D27): each light is a normal scene light named `<node>_Light<i>`
+     * tagged `metadata._prtInternal`.
+     * @class ParticleLightPool - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleLightPool {
+        /**
+         * AP-15 - the two ranks a pooled light moves between. `LitPriority` must beat the `renderPriority` of the project's
+         * exported lights (0 unless a project raises it) and `IdlePriority` must lose to them; neither may be 0, because
+         * Babylon only turns `scene.requireLightSorting` on for a NON-ZERO priority.
+         */
+        static LitPriority: number;
+        static IdlePriority: number;
+        /** The Error-policy default source: a white point light, range 10, intensity 1 (`lights.light` absent in an old export). */
+        private static readonly DefaultSource;
+        private static readonly Scratch;
+        private static readonly Eye;
+        /** The arbitration claimants, reused - no allocation per frame (one entry per POOL, not per light). */
+        private static readonly Claimants;
+        /**
+         * AP-15c - how many frames a system keeps its claim on a material light slot after its last LIT frame. A Unity
+         * "fire light" owns ONE pooled light whose intensity follows its particle's alpha, so it fades through zero every
+         * couple of seconds. Measured on the Pack without this: on 73 of 150 frames the single free slot was handed to a
+         * FireFlies light 40 units away and off screen while the two fires 6 and 9 units from the camera were mid-fade,
+         * and 25 of those frames had a LIT near fire losing the slot outright. The claim is only a right to the slot: a
+         * system that holds one while dark ranks NOTHING up, so the slot simply goes unused rather than to a light that
+         * cannot reach anything on screen.
+         */
+        static ClaimHoldFrames: number;
+        protected scene: BABYLON.Scene;
+        protected name: string;
+        protected module: TOOLKIT.IParticleLightsModule;
+        private _ratio;
+        private _randomDistribution;
+        private _useParticleColor;
+        private _sizeAffectsRange;
+        private _alphaAffectsIntensity;
+        /** The exported source light's own values (D19 needs the VALUES, never the node - the Pack's source is a prefab asset with no GUID). */
+        private _srcRange;
+        private _srcIntensity;
+        private readonly _srcColor;
+        private _capacity;
+        private _lights;
+        private _owners;
+        private _seen;
+        /** 1 = this slot currently carries `LitPriority` (AP-15); the rank is driven by `arbitrate`, never by a birth or a death. */
+        private _ranked;
+        /** The rank `arbitrate` decided for each slot this frame. */
+        private _want;
+        private _slotWarned;
+        /** AP-15c: the arbiter tick of this pool's last LIT frame, and the distance^2 of its nearest light to the camera. */
+        private _lastLit;
+        private _claimDist;
+        private _free;
+        private _active;
+        /** The even-distribution accumulator (Algorithms > Light per particle): `acc += ratio; if (acc >= 1) { acc -= 1; take; }`. */
+        private _acc;
+        private _poolWarned;
+        private _enabled;
+        private _disposed;
+        /**
+         * D19: the pool computes its own capacity - `min(maxLights, MaxLightsPerSystem, MaxSceneParticleLights - already taken)`.
+         * A capacity of zero (the scene cap is spent) warns `deferred:lights:cap:<name>` once and the pool stays inert:
+         * `attach` takes nothing, `step` does nothing and the system draws exactly as it would with the module off.
+         */
+        constructor(scene: BABYLON.Scene, name: string, module: TOOLKIT.IParticleLightsModule);
+        /** Every module value the step reads, re-read each frame so an Inspector edit shows immediately (the trails convention). */
+        private refresh;
+        /**
+         * AP-15 - move one slot between the two ranks. Cheap and idempotent: the priority is only written when the rank
+         * actually changes, and the expensive half (rebuilding every mesh's light list) is deferred to `flushRanks`, which
+         * runs at most once per `step` and only when something changed. Nothing here is per particle: `step` drives it from
+         * the same pass that writes the intensities, so a slot that is taken and released inside one frame never ranks up.
+         */
+        private rank;
+        /**
+         * Every ranked slot that is dark goes back to the idle rank, immediately. This is the guard for every path that
+         * stops the pool stepping while a slot is ranked - a held or paused system (`s.dt === 0`), a prewarm, a system
+         * whose last particle died on the frame the clock stopped. Without it a DARK pooled light keeps material slot 0
+         * ahead of every exported light, which is exactly the "scene lighting pops" half of AC-5 that AP-15 protects.
+         */
+        private demoteDark;
+        /**
+         * AP-15b - decide, for the WHOLE scene, which lit pooled lights may carry `LitPriority` this frame.
+         *
+         * A material draws at most `maxSimultaneousLights` lights (4 unless the project raises it) and takes them in
+         * `mesh.lightSources` order. Once the scene's own exported lights have taken theirs, what is left is
+         * `MaterialLightSlots - exported lights`, floored at one so the module is never a no-op. Those slots go to the lit
+         * particle lights NEAREST the active camera, which are the ones a viewer can actually see doing something. Everything
+         * else ranks back down, so no exported light is ever pushed out by a particle. A system whose lights lost the
+         * arbitration says so once (`deferred:lights:slots:<node>`) instead of leaving the user wondering.
+         */
+        private static arbitrate;
+        /** Marks this pool's nearest not-yet-chosen LIT light as wanted; false when it has none to give. */
+        private static takeNearestLit;
+        /** Error policy: a system whose lit lights lost the scene arbitration says so once, with the way out. */
+        private warnSlots;
+        /**
+         * AP-15 - Babylon's `renderPriority` setter re-sorts `scene.lights`, but a mesh's own `lightSources` list keeps the
+         * order it was built with, and THAT list is what `PrepareDefinesForLights` walks. Measured on the Pack: raising a
+         * pooled light to priority 1 alone changed 0 of 129600 pixels; the same change followed by one resync of every mesh
+         * changed 95871 of them. The resync costs 0.58 ms for the Pack's 298 meshes and runs only on a rank change.
+         */
+        private static flushRanks;
+        /** How many times this scene has rebuilt its mesh light lists for a particle-light rank change (AP-15 cost read-back). */
+        static getRankFlushCount(scene: BABYLON.Scene): number;
+        /** D25: a culled system darkens its pool and keeps every slot (never `light.setEnabled`). */
+        setEnabled(on: boolean): void;
+        /**
+         * Birth (D25 / Algorithms > Light per particle): `useRandomDistribution` rolls `random.next() < ratio`, otherwise the
+         * even accumulator takes every `1 / ratio`-th particle. The roll runs only when `0 < ratio < 1`, so a full-ratio or
+         * zero-ratio system draws exactly the random stream it did before the module existed.
+         */
+        attach(b: TOOLKIT.IParticleBirth, random: TOOLKIT.ParticleRandom): void;
+        /** Death (D25): the slot goes dark at once and returns to the free list. */
+        release(b: TOOLKIT.IParticleBirth): void;
+        /**
+         * The `_update` tail hook, after trails (Module boundaries): one pass over `ps.particles` writing each lit slot's
+         * position / range / intensity / colour, then every slot no live particle claimed is darkened (a particle can leave
+         * without `kill()` - `ps.reset()`, a ring-buffer replacement - and an orphaned slot must not stay lit).
+         * A prewarm (`s.simulating`) runs no lights at all: it would leave the pool lit at the end of a 6000-step simulate.
+         */
+        step(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /** Every slot dark AND back to the idle rank; the free list and the owners are left alone (a cull keeps its slots, D25). */
+        private darkenAll;
+        /** D25: particles removed without `kill()` (`ps.reset()`, `clear()`, a restarting `simulate()`) free every slot here. */
+        reset(): void;
+        /** D27: every light this pool made goes back, and the scene budget it reserved with them. */
+        dispose(): void;
+        /** FR-39: the pooled lights of this system, in slot order. */
+        getLights(): BABYLON.PointLight[];
+        /** The slots a live particle holds this frame. */
+        getActiveCount(): number;
+        /** The pool size D19 computed at awake (0 = the scene cap was spent). */
+        getCapacity(): number;
+        isEnabled(): boolean;
+        /** AP-15 read-back: true while slot `i` carries `LitPriority` (it is lighting a particle and may win a material slot). */
+        isRanked(slot: number): boolean;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Unity's Mesh render mode (spec FR-22, D21): every particle of the system draws one of the renderer's meshes instead of a
+     * camera-facing quad. The geometry arrives INLINE on the exported bag (`renderer.meshes[i].geometry`, Unity values - no
+     * handedness conversion, D26), so nothing is fetched and nothing is shared with the scene's own meshes.
+     *
+     * The mechanism is THIN INSTANCES, never a `SolidParticleSystem` and never real `InstancedMesh`es (D21): one
+     * `BABYLON.Mesh` per exported mesh (at most `MaxMeshes`), each carrying a `"matrix"` buffer (stride 16) and a `"color"`
+     * buffer (stride 4) sized to the system's particle capacity. `staticBuffer` is false on both - the matrices are rewritten
+     * every frame - and `thinInstanceCount` is the number of particles that chose that mesh this frame, never above the
+     * buffer (Babylon silently ignores a larger count). A mesh with no instances this frame is disabled rather than drawn empty.
+     *
+     * The quad system is NOT stopped: the component hides it with `layerMask = 0` and it keeps simulating, so every module that
+     * reads a particle (collision, sub-emitters, trails, lights) behaves exactly as it does for a billboard system.
+     *
+     * Bounding info (AP-13). A mesh whose instances live in world space has local bounds that say nothing about where it draws:
+     * `doNotSyncBoundingInfo = true` (D27) stops Babylon recomputing them from the matrix buffer every frame, so this class
+     * maintains them itself - each step grows a box over the instance positions inflated by that instance's drawn radius, then
+     * `reConstruct`s the ONE `BoundingInfo` the mesh and its (global) sub-mesh share and `update`s it with the mesh world
+     * matrix. Transparent sorting reads a real, non-null `BoundingInfo` centred on the particles, and `alwaysSelectAsActiveMesh`
+     * keeps the mesh drawn whatever the frustum test would have said.
+     *
+     * Nothing is hidden from the Inspector (D27): each mesh is a normal scene mesh named `<node>_Mesh<i>` tagged
+     * `metadata._prtInternal`, wearing one stock `BABYLON.StandardMaterial` built by `ParticleTrailRenderer.MaterialFromBlock`
+     * (shared with the trail renderer, T14). As there, the material tint is NOT written into the material: it is folded into the
+     * per-instance colour, where an HDR value is not clipped by the standard shader's emissive clamp and is never applied twice.
+     * @class ParticleMeshRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleMeshRenderer {
+        /** D21 - the most exported meshes one system draws; Unity's own renderer takes four. */
+        static MaxMeshes: number;
+        private scene;
+        private name;
+        private renderer;
+        private host;
+        private _capacity;
+        private _meshes;
+        private _matrices;
+        private _colors;
+        private _counts;
+        private _drawn;
+        private _radii;
+        private _weights;
+        private _weightTotal;
+        private _material;
+        /** T24 (D38): the system draws through its Shader Graph class (null = the stock StandardMaterial path). */
+        private _graph;
+        private _graphMaterial;
+        private _graphPlugin;
+        private _layout;
+        private _texBuffers;
+        private _scaleBuffers;
+        private _quad;
+        /** Phase 9 carry-over 6: the stock material is a URP / HDRP surface shader that never reads the vertex colour. */
+        private _ignoreVertexColor;
+        private _renderMode;
+        private static readonly Pack;
+        private static readonly Rect;
+        private static readonly Rect2;
+        private static readonly Custom;
+        private static readonly Axis;
+        private static readonly AxisB;
+        private static readonly AxisC;
+        private _entry;
+        private _enabled;
+        private _tint;
+        private _boundsMin;
+        private _boundsMax;
+        private static readonly Scale;
+        private static readonly Pos;
+        private static readonly Dir;
+        private static readonly Up;
+        private static readonly Local;
+        private static readonly Frame;
+        private static readonly Spin;
+        private static readonly Ident;
+        private static readonly Mat;
+        private static readonly MatB;
+        private static readonly Col;
+        /**
+         * @param capacity the system's particle capacity (`main.maxParticles`): the instance buffers ARE this size, so
+         *        `thinInstanceCount` can never exceed them (D21).
+         */
+        constructor(scene: BABYLON.Scene, name: string, renderer: TOOLKIT.IParticleRendererModule, capacity: number, host: TOOLKIT.IParticleAuxHost, graph?: TOOLKIT.IParticleGraphOptions);
+        /** True when at least one exported mesh carried drawable geometry; false = the component keeps the billboard fallback. */
+        hasGeometry(): boolean;
+        /** An exported geometry with enough data to draw one triangle (Error policy: an old export or a null mesh has none). */
+        static Drawable(geometry: TOOLKIT.IParticleMeshGeometry): boolean;
+        private buildMaterial;
+        /**
+         * T24 (D38): the system's own instance of its graph class, with TOOLKIT.ParticleGraphPlugin attached before its first compile
+         * (SG_PARTICLES: the class reads Unity's packed particle streams instead of mesh UVs, and the instance colour as its vertex
+         * colour). `metadata.sgParticles` marks it for the Inspector and for a class that wants to know.
+         */
+        private buildGraphMaterial;
+        /**
+         * T24 (D38): the render state of a particle graph material, from the exporter's classification of the Unity material (a glTF
+         * material would have carried it as its alpha mode): opaque; cutout = alpha test at the block's cutoff; alpha / premultiply /
+         * additive / multiply / subtractive = alpha blending with Babylon's matching mode and no depth write (Unity's transparent
+         * particle passes are ZWrite Off).
+         */
+        static ApplyGraphRenderState(material: BABYLON.Material, block: TOOLKIT.IParticleMaterialBlock): void;
+        /** The material the meshes wear: the graph class (T24) or the stock StandardMaterial. */
+        private drawMaterial;
+        /**
+         * T24 (D38): Unity's ParticleSystemVertexStream component counts. Position / Normal / Tangent / Color have their own vertex
+         * semantics (0 here); everything else packs into TEXCOORD0..3 end to end in the renderer's order - a stream may straddle two
+         * TEXCOORDs, exactly as Unity's renderer module lists it ("Custom1.xyzw (TEXCOORD1.yzw|TEXCOORD2.x)").
+         */
+        static StreamSize(name: string): number;
+        /** T24: the packed layout of a stream list - each stream's first component, the TEXCOORD count, the UV / UV2 components (-1 = absent). */
+        static StreamLayout(streams: string[]): TOOLKIT.IParticleStreamLayout;
+        /**
+         * T24: the Unity-convention UV rectangle [u0, v0, width, height] of sheet cell `cell` (the whole texture when the sheet is off
+         * or the fallback is drawing): grid cell (col = cell % numTilesX, row = cell / numTilesX, row 0 at the TOP), or the sprite
+         * rectangle (top-left origin, normalised) of a non-grid Sprites sheet. Unity's grid, whatever texture the hidden quads have.
+         */
+        static CellRect(cell: number, s: TOOLKIT.IParticleSystemState, out: number[]): number[];
+        /** A unit quad in the XY plane facing -Z (the camera, in View alignment), Unity-convention UVs (0, 0) bottom-left. */
+        private buildQuad;
+        /**
+         * One `BABYLON.Mesh` per drawable exported geometry (D21 / D27). Normals are computed when the export carries none
+         * (the material is unlit today, but a project may relight the mesh from the Inspector) and UVs default to zeros so a
+         * textured material samples texel (0, 0) instead of failing its attribute lookup.
+         */
+        private buildMeshes;
+        /** The per-mesh half of buildMeshes: flags, bounds, the instance buffers (T24: + the packed stream buffers of a graph system). */
+        private finishMesh;
+        /**
+         * D51 / T17 step 3: `reapplyMaterial()` rebuilds the MATERIAL only. The meshes, their instance buffers and this frame's
+         * counts are untouched - rebuilding them would drop every live particle's instance and re-upload the geometry.
+         */
+        applyMaterial(block: TOOLKIT.IParticleMaterialBlock): void;
+        /** D25: a culled system hides its meshes and keeps every count; the next step re-enables whatever still has instances. */
+        setEnabled(on: boolean): void;
+        /**
+         * The mesh this particle draws, chosen once at birth (Algorithms > Mesh instance matrix): `meshDistribution`
+         * 0 Uniform = `floor(random.next() x meshCount)`, 1 NonUniformRandom = weighted by each entry's `weighting`.
+         * A single-mesh system takes NO random draw: the answer is 0 either way and the particle stream of the nine
+         * single-mesh Pack systems stays exactly what it was (the D22 rule for zero flip fractions, applied here).
+         */
+        pick(b: TOOLKIT.IParticleBirth, random: TOOLKIT.ParticleRandom): void;
+        /**
+         * One pass over the live particles: each writes its world matrix and its instance colour into its own mesh's next slot
+         * (Algorithms > Mesh instance matrix). The frame-constant parts of the rotation - the camera basis and the emitter's
+         * absolute rotation - are computed ONCE here, not per particle.
+         *
+         * A prewarm / `simulate()` never uploads (Module boundaries): `SimulateFamily` calls this once at its end with
+         * `s.simulating` cleared.
+         */
+        step(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /**
+         * T24 (D38): the rotation of a graph billboard quad (its -Z face toward the viewer). Billboard (0) / Stretched (1, the stretch
+         * turns it afterwards): the alignment frame (View / Facing = the camera, Local = the emitter, World = none, Velocity = the
+         * motion direction) then the particle's angle about the quad normal; Horizontal (2): flat on the XZ plane facing up, turned
+         * about Y; Vertical (3): the camera's yaw only, upright.
+         */
+        private billboardRotation;
+        private static readonly MatQ;
+        /**
+         * T24 (D38): Unity's Stretched Billboard - the quad's Y axis along the particle's velocity, its face turned to the camera,
+         * length = size x lengthScale + speed x velocityScale (the camera-relative velocity when cameraVelocityScale is set).
+         */
+        private stretch;
+        /**
+         * T24 (D38): one particle's Unity vertex streams, packed end to end into TEXCOORD0..3 (StreamLayout) and written into the
+         * mesh's per-instance buffers, plus the UV / UV2 cell size the vertex stage multiplies the quad (or mesh) UV by.
+         */
+        private packStreams;
+        /** Hands this frame's counts, buffers and bounds to Babylon; a mesh with no instances is disabled, never drawn empty (D21). */
+        private upload;
+        /** Every instance dropped (a clear / restart / stop, D25); the meshes and their buffers stay. */
+        reset(): void;
+        /** D27: every mesh, the material and its texture-cache entry go before the particle system does. */
+        dispose(): void;
+        /** FR-39 read-backs. */
+        getMeshes(): BABYLON.Mesh[];
+        getMaterial(): BABYLON.StandardMaterial;
+        /** T24 (D38): the system's Shader Graph class instance (null on the stock path). */
+        getGraphMaterial(): BABYLON.Material;
+        /** T24: the packed stream layout of a graph system (null on the stock path). */
+        getStreamLayout(): TOOLKIT.IParticleStreamLayout;
+        /** T24: the packed TEXCOORD buffers of mesh `index` (graph systems). */
+        getStreamBuffers(index: number): Float32Array[];
+        /** T24: the UV / UV2 cell-size buffer of mesh `index` (graph systems). */
+        getScaleBuffer(index: number): Float32Array;
+        /** T24: true when a graph billboard system draws unit quads. */
+        isQuad(): boolean;
+        getTextureEntry(): TOOLKIT.IParticleTextureEntry;
+        getMeshCount(): number;
+        /** The instances drawn this frame across every mesh. */
+        getInstanceCount(): number;
+        /** The instances mesh `index` drew this frame. */
+        getMeshInstanceCount(index: number): number;
+    }
+    /** T24 (D38): what a Shuriken system drawn through its Shader Graph class hands ParticleMeshRenderer. */
+    interface IParticleGraphOptions {
+        /** Builds the system's OWN instance of the class (construction and applyMaterial). */
+        create: () => BABYLON.Material;
+        /** Unity's active vertex streams in order (renderer.activeVertexStreams; absent = Position, Normal, Color, UV). */
+        streams: string[];
+        /** Custom Data stream 0 / 1 of a particle (ShurikenParticles.getCustomData). */
+        customData?: (particle: BABYLON.Particle, stream: number, out: BABYLON.Vector4) => BABYLON.Vector4;
+        /** Unity's applyActiveColorSpace: the vertex colour is linearised (default true). */
+        linearColor?: boolean;
+    }
+    /** T24: one stream's first packed component (TEXCOORD offset / 4 = its TEXCOORD). */
+    interface IParticleStreamSlot {
+        name: string;
+        offset: number;
+        size: number;
+    }
+    /** T24: a packed stream list - the slots, the component total, the TEXCOORDs used, the UV / UV2 first components (-1 = absent). */
+    interface IParticleStreamLayout {
+        slots: IParticleStreamSlot[];
+        components: number;
+        texcoords: number;
+        uv: number;
+        uv2: number;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T24 (D38): the particle half of a generated Shader Graph class. Attached by
+     * ParticleMeshRenderer to the system's own class instance before its first compile, it raises SG_PARTICLES and gives the vertex
+     * stage Unity's particle TEXCOORD0..3 as the locals sg_pT0..3 at CUSTOM_VERTEX_MAIN_BEGIN: the per-instance packed streams
+     * (thin-instance buffers sgPTex0..3, SG_PTEX0..3 raised only for the buffers the mesh carries) plus, at the UV / UV2 stream
+     * components (uniform sg_pUv.xy; -8 = absent), the vertex's own UV (the quad corner or the particle mesh UV, Unity convention)
+     * times the cell size (sgPScale). A generated class reads sg_pT under SG_PARTICLES for its UV channels (SgVertexFeatures) and
+     * Babylon's instance colour as its vertex colour. Priority 90: its declarations precede the class's (100).
+     * @class ParticleGraphPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleGraphPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PRIORITY: number;
+        /** x = the UV stream's first packed component, y = UV2's (-8 = absent). */
+        uvAt: BABYLON.Vector4;
+        constructor(material: BABYLON.Material);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** True when the mesh carries the thin-instance buffer `kind`. */
+        static HasBuffer(mesh: BABYLON.AbstractMesh, kind: string): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** The vertex code, one language: attributes + sg_pAdd at DEFINITIONS, the sg_pT locals at MAIN_BEGIN. */
+        private static Code;
+        static readonly VERTEX_GLSL: any;
+        static readonly VERTEX_WGSL: any;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** Per-particle birth record (D25), stored on BABYLON.Particle.metadata. One object per live particle, reused (a pool of dead records). */
+    interface IParticleBirth {
+        r: Float32Array;
+        startColor: BABYLON.Color4;
+        startSizeX: number;
+        startSizeY: number;
+        startAngle: number;
+        speed0: number;
+        emitterVelocity: BABYLON.Vector3;
+        simPos: BABYLON.Vector3;
+        color?: BABYLON.Color4;
+        cell: number;
+        cellRow: number;
+        startFrame: number;
+        spawnFrame: number;
+        birthPos: BABYLON.Vector3;
+        birthDir: BABYLON.Vector3;
+        gravityScale: number;
+        birthAcc: number;
+        birthAccs?: number[];
+        born: boolean;
+        request: TOOLKIT.ISpawnRequest;
+        collided: boolean;
+        dead: boolean;
+        fromRequest: boolean;
+        /** The particle's PERSISTENT velocity (simulation space): start velocity + inherit Initial + integrated forces / gravity, limited / dragged / bounced.
+         *  Velocity-over-lifetime, inherit Current and noise are per-frame ANIMATED terms added on top and never accumulated (Unity's velocity + animatedVelocity; run-log Decision, T10). */
+        velocity: BABYLON.Vector3;
+        /** T13 / D25 - every sibling module's per-particle slot lives here, reset in `record()` and released in `kill()`. */
+        trail: TOOLKIT.IParticleTrail;
+        lightSlot: number;
+        trigInside: number;
+        spawnIndex: number;
+        parentSerial: number;
+        /** T17 / D21 - mesh render mode only (every one is inert while `s.meshMode` is false). */
+        /** T18 / D22 - the CPU renderer flags (no shader bits). */
+        flipX: boolean;
+        flipY: boolean;
+        rollApplied: number;
+        meshIndex: number;
+        rot3: BABYLON.Vector3;
+        sizeZ: number;
+        drawSizeZ: number;
+        /** T22 - born dead by a shape-texture clip: kill() raises no death event (and so no Death sub-emitter) for it. */
+        silent: boolean;
+    }
+    /** Effective, read-only module state the component builds once at awake and hands to every step (D51 getState()). */
+    interface IParticleSystemState {
+        props: TOOLKIT.IParticleSystemProperties;
+        dt: number;
+        time: number;
+        normalizedTime: number;
+        frame: number;
+        isLocal: boolean;
+        emitterWorld: BABYLON.Matrix;
+        emitterInverse: BABYLON.Matrix;
+        emitterVelocity: BABYLON.Vector3;
+        gravity: BABYLON.Vector3;
+        speedScale: number;
+        sizeScale?: BABYLON.Vector2;
+        camRight: BABYLON.Vector3;
+        camUp: BABYLON.Vector3;
+        camView: BABYLON.Matrix;
+        planes: {
+            position: BABYLON.Vector3;
+            normal: BABYLON.Vector3;
+        }[];
+        stretched: boolean;
+        quadNormal: BABYLON.Vector3;
+        pivotShift: boolean;
+        pivot: BABYLON.Vector2;
+        /** whole: the texture is the fallback (no atlas) -> cell 0 = the whole texture (D59); blend: flipbook blending is drawing (T43) -> cellIndex carries the sub-frame fraction.
+         *  T21 - Sprites mode (`textureSheetAnimation.mode === 1`): `frames` = the sprite count; `cells` = frame -> grid cell when the
+         *  sprite rectangles ARE a uniform grid (no shader needed, `numTilesX / numTilesY` were overridden to that grid); `rects` = the
+         *  flat `x, y, w, h` x MaxSpriteRects uniform array (TOP-LEFT origin, normalised) bound as `prtRects` when they are not. */
+        sheet: {
+            enabled: boolean;
+            ready: boolean;
+            numTilesX: number;
+            numTilesY: number;
+            whole?: boolean;
+            blend?: boolean;
+            rects?: number[];
+            cells?: number[];
+            frames?: number;
+            wholeSprites?: boolean;
+        };
+        noise: TOOLKIT.ParticleNoise;
+        random: TOOLKIT.ParticleRandom;
+        ringBuffer: number;
+        spawned: number;
+        deathLog: {
+            position: BABYLON.Vector3;
+            velocity: BABYLON.Vector3;
+            color: BABYLON.Color4;
+            size: number;
+            angle: number;
+            time: number;
+        }[];
+        cullRadius: number;
+        family: string;
+        tint: BABYLON.Color4;
+        tintInShader?: boolean;
+        deaths: TOOLKIT.IParticleEvent[];
+        collisions: TOOLKIT.IParticleEvent[];
+        births: TOOLKIT.IParticleEvent[];
+        trails: TOOLKIT.ParticleTrailRenderer;
+        lights: TOOLKIT.ParticleLightPool;
+        meshes: TOOLKIT.ParticleMeshRenderer;
+        triggers: TOOLKIT.ParticleTriggers;
+        forces: TOOLKIT.ParticleForceFields;
+        meshMode: boolean;
+        graph?: boolean;
+        rayBudget: number;
+        raySkip: number;
+        rayCursor: number;
+        raySkipLeft: number;
+        rayUsed: number;
+        castRay: (from: BABYLON.Vector3, to: BABYLON.Vector3, out: {
+            point: BABYLON.Vector3;
+            normal: BABYLON.Vector3;
+        }) => boolean;
+        simulating: boolean;
+        birthSerial: number;
+        cameraPosition: BABYLON.Vector3;
+        cameraForward: BABYLON.Vector3;
+        cameraVelocity: BABYLON.Vector3;
+        pivotZ: number;
+        cameraRoll: number;
+        clampMin: number;
+        clampMax: number;
+        clampK: number;
+        clampOrtho: boolean;
+        flipU: number;
+        flipV: number;
+        customDelta: BABYLON.Matrix;
+        preAge: number[];
+        preAgeCount: number;
+        preAgeNext: number;
+    }
+    /**
+     * The event shape `s.deaths` / `s.collisions` / `s.births` already carry, named so the public observables can use it
+     * (T16). Everything is WORLD space. `remaining` = `1 - age / lifeTime` at the event (the InheritLifetime fraction of a
+     * Death / Collision sub-emitter spawn); `normal` is the surface normal of a collision, absent on a death or a birth.
+     */
+    interface IParticleEvent {
+        position: BABYLON.Vector3;
+        velocity: BABYLON.Vector3;
+        color: BABYLON.Color4;
+        size: number;
+        angle: number;
+        remaining?: number;
+        normal?: BABYLON.Vector3;
+        time?: number;
+        lifeTime?: number;
+    }
+    /** What a sibling renderer needs from its system (D25): passed by the component, never the component itself. */
+    interface IParticleAuxHost {
+        emitter: BABYLON.TransformNode;
+        renderingGroupId: number;
+        layerMask: number;
+        local: boolean;
+    }
+    /**
+     * The per-particle simulation (spec FR-11 / FR-12 / FR-15, D5, D25): pure functions over a Babylon particle,
+     * its birth record and the system state. Installed by the component as `ps.updateFunction = (ps) => ParticleSimulation.step(...)`,
+     * which REPLACES Babylon's default update queue: the step ages particles with `s.dt` (never `_scaledUpdateSpeed`; D21 makes them
+     * equal), owns death and recycling (D25) and integrates Unity's velocity model:
+     *   persistent velocity (birth.velocity) += (force + gravity x gravityScale) x dt, then limit / drag, then plane bounce;
+     *   total = (persistent + velocityOverLifetime + inheritVelocity Current + noise) x speedModifier;  position += total x dt.
+     * Everything is in the SIMULATION space: world when `!isLocal`, emitter-local (`_properties.localPosition`) when `isLocal`
+     * (D33; the world position is rewritten from the emitter matrix every step). No allocation after construction (D58):
+     * scratch vectors are private statics, birth records are pooled; only event objects (deaths / collisions / births) allocate.
+     * @class ParticleSimulation - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleSimulation {
+        private static readonly Total;
+        private static readonly Anim;
+        /** Unity normalises Limit Velocity's dampen to a 30 Hz step: excess x= pow(1 - dampen, 30 x dt) (measured at 1/60, 1/30 and simulationSpeed 2; F-S.68). */
+        static readonly LimitDampenRate: number;
+        private static readonly LimAnim;
+        private static readonly Accel;
+        private static readonly Term;
+        private static readonly TmpA;
+        private static readonly TmpB;
+        private static readonly LocalQuadNormal;
+        private static readonly Col;
+        private static readonly ColB;
+        private static readonly Size;
+        private static readonly SpeedMod;
+        private static readonly RotOut;
+        private static readonly SizeOut;
+        private static readonly SizeZOut;
+        private static readonly Rot3;
+        /** T18 - the sort keys, grown on demand and reused; never one array per frame. */
+        private static SortKeys;
+        /** Dead birth records, reused by the next birth (D58). */
+        private static readonly Pool;
+        private static readonly RayFrom;
+        private static readonly RayTo;
+        private static readonly RayDir;
+        private static readonly RayOffset;
+        private static readonly RayNormal;
+        private static readonly RayHit;
+        /** A fresh (or pooled) record with every field reset. */
+        private static record;
+        /** Creates or resets the birth record of a particle seen for the first time (age === 0, metadata == null or a bare `{request}`). */
+        static birth(p: BABYLON.Particle, ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState, out: TOOLKIT.IParticleBirth): TOOLKIT.IParticleBirth;
+        /** The whole update of one system for one step; iterates `ps.particles`, recycles the dead (D25), fills `s.deaths` / `s.collisions`. */
+        static step(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /**
+         * The particles Babylon created in THIS animate() (appended after the update function ran, so they carry no born record):
+         * born now and given their age-0 visual channels (colour / size / sheet cell / pivot shift at t = 0, speed = the start speed),
+         * so their first drawn frame is Unity's age-0 look instead of the raw start colour / size (T31 / F-S.42: Unity's age-0 particle
+         * already shows colour-by-speed (0.502, 0, 0.502) and size-by-speed 0.18; the browser drew white and 0.3 for one frame - a
+         * fade-in gradient flashed at full alpha on every new particle). Called from the component's wrap of Babylon's `_update`
+         * (Babylon 9.25 ThinParticleSystem._update: updateFunction, then the creation queue; animate() uploads the vertices after
+         * it). New particles are the tail of `ps.particles`, so the walk stops at the first born record.
+         */
+        static newborns(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /** Colour, size (x size noise, stretch), sheet cell and pivot shift of one particle at normalised age t and speed (shared by step and newborns). */
+        private static visual;
+        /**
+         * Unity's sprite cell rule (TextureSheetAnimationModule, Algorithms > Sprite cell) -> the Babylon cell index (D34).
+         * frames = WholeSheet (0) ? numTilesX x numTilesY : numTilesX (SingleRow); progress by timeMode: Lifetime (0) frameOverTime(age / life)
+         * x cycleCount, Speed (1) clamp((speed - speedRange.x) / (speedRange.y - speedRange.x), 0, 1), FPS (2) age x fps / frames;
+         * frame = floor(frac(progress + birth.startFrame) x frames); SingleRow -> cellIndexFromRowColumn(birth.cellRow, frame, numTilesX).
+         * T43: while `s.sheet.blend` is on (the flipbook-blending shader is the one drawing), the SUB-FRAME fraction is added to the
+         * returned index - Unity's `AnimBlend` vertex stream, the factor its `BlendTexture` lerps the next cell in with. It costs one
+         * subtract on a value the frame already computed and is never written while the stock shader draws.
+         */
+        static cellIndex(b: TOOLKIT.IParticleBirth, age: number, lifeTime: number, speed: number, s: TOOLKIT.IParticleSystemState): number;
+        /** Normalised age helper: age / lifeTime clamped to [0, 1] (1 when lifeTime <= 0). */
+        static ratio(p: BABYLON.Particle): number;
+        /**
+         * Velocity over lifetime for THIS frame into outVel (simulation space, m/s) and the speed modifier into outSpeedModifier[0].
+         * linear x/y/z (space 0 Local: through the emitter matrix when the simulation is world; space 1 World: through the inverse when
+         * the simulation is local) + orbital (rad/s about the emitter centre + orbitalOffset, emitter axes; the chord velocity of the
+         * exact rotation over dt, so the radius is kept) + radial (m/s away from that centre).
+         */
+        static velocityOverLifetime(m: TOOLKIT.IParticleVelocityOverLifetimeModule, b: TOOLKIT.IParticleBirth, t: number, pos: BABYLON.Vector3, s: TOOLKIT.IParticleSystemState, outVel: BABYLON.Vector3, outSpeedModifier: number[]): void;
+        /**
+         * Limit velocity over lifetime + drag, written back to the persistent velocity. Unity clamps the particle's TOTAL velocity
+         * (`velocity + animatedVelocity`; `anim` = this step's velocity-over-lifetime + inherit-Current terms, null / zero without them) and
+         * stores the result as `velocity = clamped total - animated` (measured, F-S.68: VOL (10, 0, 0), limit 2, dampen 1 -> velocity
+         * (-8, 0, 0), total 2; BigExplosion/Debris flew 50 m/s in the browser and 11.3 m/s in Unity). `dampen` is normalised to a 30 Hz
+         * step: the excess over the limit keeps `pow(1 - dampen, 30 x dt)` of itself per step (measured: dampen 0.5 takes 10 -> 7.6569 ->
+         * 6 -> 4.8284 at 1/60 s and 10 -> 6 -> 4 at 1/30 s or at simulationSpeed 2; dampen 1 clamps in one step). separateAxes: each
+         * axis of the total above its limit, the axes being those of `space` (0 Local: the emitter's rotation, 1 World) - the velocity is
+         * taken into that space, clamped and brought back when it differs from the simulation space (T18 fields audit); otherwise the
+         * speed above limit(t). Drag (on the persistent velocity):
+         * v x= max(0, 1 - drag(t) x (multiplyDragByParticleSize ? pi (size / 2)^2 : 1) x (multiplyDragByParticleVelocity ? speed : 1) x dt) -
+         * the particle's cross-section AREA, as Unity measures it (Mod_Limit trajectory: 0.0344 / s at size 0.3, speed 0.97, drag 0.5; F-S.42).
+         */
+        static limitVelocity(m: TOOLKIT.IParticleLimitVelocityOverLifetimeModule, b: TOOLKIT.IParticleBirth, t: number, size: number, s: TOOLKIT.IParticleSystemState, vel: BABYLON.Vector3, anim?: BABYLON.Vector3): void;
+        /** Force over lifetime for THIS frame (m/s^2, simulation space); randomized -> a fresh lerp every frame, else the particle's r[5]. */
+        static forceOverLifetime(m: TOOLKIT.IParticleForceOverLifetimeModule, b: TOOLKIT.IParticleBirth, t: number, s: TOOLKIT.IParticleSystemState, outAccel: BABYLON.Vector3): void;
+        /** Inherit velocity for THIS frame (D53): Current (1) -> curve(t) x the emitter velocity now (simulation space; a sub-emitter spawn: its parent particle's velocity at the event); Initial (0) was applied once at birth -> 0. */
+        static inheritVelocity(m: TOOLKIT.IParticleInheritVelocityModule, b: TOOLKIT.IParticleBirth, t: number, s: TOOLKIT.IParticleSystemState, outVel: BABYLON.Vector3): void;
+        /**
+         * Noise (D41, Algorithms > Noise, re-measured against Unity by T31 / F-S.42) for THIS frame. n = s.noise.sample(pos x frequency
+         * (+ scroll x time on y)) - ONE field shared by every particle of the system (Unity: particles at the same point get the same
+         * noise; no per-particle offset) - optionally remapped per axis through the remap curve ((n + 1) / 2 -> curve -> x 2 - 1), then
+         * rescaled to Unity's field statistics (ParticleNoise.fieldGain). Unity's amplitude = field x strength(t) (per axis when
+         * separateAxes) x (damping ? 1 : frequency): an undamped field grows with the frequency, damping cancels it (measured).
+         * Outputs: outVel = field x amplitude x positionAmount(t) (m/s, added to the position each frame, never accumulated);
+         * outRot[0] = field.x x amplitude.x x rotationAmount(t) in rad/s (Unity's Rotation Amount is degrees per second, converted
+         * here; Unity sign); outSize[0] = field.x x amplitude.x x sizeAmount(t) (added to the size multiplier 1). Allocation-free.
+         */
+        static noise(m: TOOLKIT.IParticleNoiseModule, b: TOOLKIT.IParticleBirth, t: number, pos: BABYLON.Vector3, s: TOOLKIT.IParticleSystemState, outVel: BABYLON.Vector3, outRot: number[], outSize: number[]): void;
+        /**
+         * Plane collision (D40) against s.planes (already in the simulation space), Unity's CONTINUOUS response (measured, F-S.42:
+         * T31's Unity 6000.5 collision probe). The step's move `total x dt` is cut where the particle's radius touches a plane
+         * (d = dot(pos - P, n) - radius; a particle already inside is pushed out to the surface first); at the contact the persistent
+         * velocity becomes (v_t - n (v.n) x bounce) x (1 - dampen) - dampen scales the tangential AND the bounced normal part - and
+         * `total` is rebuilt from it (+ this frame's animated terms, x speedModifier); age += lifetimeLoss x lifeTime; a post-collision
+         * speed below minKillSpeed or above maxKillSpeed (or an age past the lifetime) marks the particle dead. Pushes s.collisions at the
+         * contact. `pos` is left AT the contact and the return value is the part of dt still to travel with `total` (dt when nothing hit);
+         * `b.collided` says whether it hit.
+         */
+        static collidePlanes(m: TOOLKIT.IParticleCollisionModule, b: TOOLKIT.IParticleBirth, t: number, radius: number, s: TOOLKIT.IParticleSystemState, pos: BABYLON.Vector3, vel: BABYLON.Vector3, anim: BABYLON.Vector3, speedModifier: number, total: BABYLON.Vector3, p: BABYLON.Particle): number;
+        /**
+         * The response half of a collision, shared by the plane path and the world-ray path (T16): at the contact the persistent
+         * velocity becomes `(v_t - n (v.n) x bounce) x (1 - dampen)`, `total` is rebuilt from it (+ this frame's animated terms,
+         * x speedModifier), `age += lifetimeLoss x lifeTime`, and a post-collision speed outside [minKillSpeed, maxKillSpeed] (or
+         * an age past the lifetime) marks the particle dead. `nx / ny / nz` are the UNIT contact normal in the SIMULATION space;
+         * the event carries it in world space, like every other field of an event.
+         */
+        private static respond;
+        /**
+         * World collision (spec FR-22, D20): ONE ray per particle per frame, budgeted by the caller. The ray runs from the
+         * particle's WORLD position along its world travel direction for `|total| x dt + radius`; a hit inside that length is a
+         * contact, the particle is moved to it (the offset mapped back with `toSimulation`, so an emitter scale cannot double it)
+         * and `respond` bounces it against the surface normal. A particle that starts INSIDE geometry (the hit is nearer than its
+         * own radius) is pushed out along the normal by its radius instead of moved forward. Returns the part of `dt` still to
+         * travel with `total` (the whole step when nothing was hit). Never casts while `s.simulating`: a 6000-step prewarm would
+         * otherwise fire 6000 rays per particle (and Unity's own prewarm does not collide either).
+         */
+        static collideWorld(m: TOOLKIT.IParticleCollisionModule, b: TOOLKIT.IParticleBirth, t: number, radius: number, s: TOOLKIT.IParticleSystemState, pos: BABYLON.Vector3, vel: BABYLON.Vector3, anim: BABYLON.Vector3, speedModifier: number, total: BABYLON.Vector3, p: BABYLON.Particle, cast: (from: BABYLON.Vector3, to: BABYLON.Vector3, out: {
+            point: BABYLON.Vector3;
+            normal: BABYLON.Vector3;
+        }) => boolean): number;
+        /**
+         * The DRAWN colour: startColor x colorOverLifetime(t) x colorBySpeed(speed fraction) (the particle's Unity colour, kept on
+         * `b.color` - what a sub-emitter child inherits), then `ParticleConversions.particleColorFromUnity` per rgb channel (only a
+         * renderer with `applyActiveColorSpace` false converts - Unity hands that colour to the shader unconverted, F-S.67; otherwise
+         * colours are used as authored, D30), then x s.tint per channel including alpha. The tint is a per-frame multiplier so an
+         * Inspector-edited tint shows immediately (never folded in at birth); the flag is read from the props every call for the same
+         * reason. The particle's r[3] is the lerp of TwoColors / TwoGradients.
+         */
+        static colorAt(props: TOOLKIT.IParticleSystemProperties, b: TOOLKIT.IParticleBirth, t: number, speed: number, s: TOOLKIT.IParticleSystemState, out: BABYLON.Color4): BABYLON.Color4;
+        /**
+         * (x, y) multipliers of the start size: sizeOverLifetime(t) (uniform `size`, or x / y with separateAxes) x sizeBySpeed(speed
+         * fraction). Lerp r[1]. T17: `outZ` (optional, mesh render mode only) takes the same product for Z - the separate-axes `z`
+         * curve, or the uniform value again. A billboard passes null and the z curves stay mode-only.
+         */
+        static sizeAt(props: TOOLKIT.IParticleSystemProperties, b: TOOLKIT.IParticleBirth, t: number, speed: number, out: BABYLON.Vector2, outZ?: number[]): BABYLON.Vector2;
+        /**
+         * Unity angular velocity in rad/s (before angularSpeedFromUnity): rotationOverLifetime.z(t) + rotationBySpeed.z(speed fraction).
+         * A billboard only turns about its view axis, so only z is used whether or not separateAxes is set (Unity's non-separate curve IS z;
+         * x / y are D43 deferred). The exporter reads the API, which is in radians per second. Lerp r[2].
+         */
+        static rotationRate(props: TOOLKIT.IParticleSystemProperties, b: TOOLKIT.IParticleBirth, t: number, speed: number): number;
+        /**
+         * T17 / D26 - the THREE-axis Unity angular velocity of a mesh particle (rad/s, Unity values, never sign-flipped):
+         * `rotationOverLifetime` + `rotationBySpeed`, x / y / z when `separateAxes`, otherwise the single curve on z alone
+         * (Unity's non-separate curve IS z). A billboard keeps `rotationRate`, which is this function's z.
+         */
+        static rotationRate3(props: TOOLKIT.IParticleSystemProperties, b: TOOLKIT.IParticleBirth, t: number, speed: number, out: BABYLON.Vector3): BABYLON.Vector3;
+        /**
+         * D22 / Algorithms > Screen-size clamp. Unity's `minParticleSize` / `maxParticleSize` are SCREEN fractions, never world
+         * units: a particle of world size `w` at camera distance `d` covers `w / (clampK x d)` of the viewport height, with
+         * `clampK = 2 tan(fov / 2)` (an orthographic camera covers a fixed height, so `d = 1` and `clampK` IS that height).
+         * Both axes take the same factor, so the aspect of a non-square particle survives the clamp. The comparison is done on
+         * SQUARES - the square root runs only on the particles a bound actually catches.
+         */
+        private static clampScreenSize;
+        /**
+         * D22 / Algorithms > Sort keys - Unity's renderer sort modes, applied to the draw order of `ps.particles` itself
+         * (Babylon uploads the vertices in array order, so the LAST particle composites on top). Skipped for a sort mode of
+         * None, for an additive blend (the sum commutes: sorting it costs time and changes nothing) and for a system above
+         * `ShurikenParticles.SortMaxParticles` live particles. The sort is an in-place INSERTION sort: frame to frame the array
+         * is already nearly ordered, so it costs about one pass, and it is stable, which keeps emission order as the tie-break.
+         */
+        static sortParticles(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /** Lifetime multiplier: curve sampled at clamp((emitterSpeed - range.x) / (range.y - range.x), 0, 1) with the particle's lerp. */
+        static lifetimeByEmitterSpeed(m: TOOLKIT.IParticleLifetimeByEmitterSpeedModule, emitterSpeed: number, lerp: number): number;
+        /** Algorithms > Clock: a by-speed module samples at clamp((speed - range.x) / max(range.y - range.x, 1e-6), 0, 1). */
+        protected static speedFraction(speed: number, range: TOOLKIT.IParticleVector2): number;
+        /**
+         * Sheet state chosen once at birth (Algorithms > Sprite cell): startFrame = startFrame(normalizedTime, r[7]) / frames (Unity's start
+         * frame is in frames); SingleRow row = rowMode Custom (0) ? rowIndex : Random (1) ? floor(r[7] x numTilesY) : MeshIndex (2) -> 0 +
+         * `deferred:textureSheetAnimation:meshIndex` (a legacy bag without rowMode reads useRandomRow as Random).
+         */
+        protected static birthSheet(b: TOOLKIT.IParticleBirth, s: TOOLKIT.IParticleSystemState): void;
+        /** The particle's position in the simulation space: `_properties.localPosition` when local (Babylon allocates it in `_isLocalCreation`), else `position`. */
+        private static simPosition;
+        /** Local simulation: position = TransformCoordinates(localPosition, emitterWorld) (D33). World: the position IS the simulated one. */
+        private static writeWorld;
+        /** A world-space vector (gravity, emitter velocity) into the simulation space: the inverse emitter matrix when local. */
+        static toSimulation(v: BABYLON.Vector3, s: TOOLKIT.IParticleSystemState, out: BABYLON.Vector3): BABYLON.Vector3;
+        /** A module vector authored in `space` (0 Local / 1 World) into the simulation space, in place. */
+        private static spaceToSimulation;
+        /** Rotates v in place by the rotation part of an affine matrix (each basis row normalised, so the node's scale does not scale the vector). */
+        private static rotateOnly;
+        /** The inverse of rotateOnly: v in place into the axes of an affine matrix's rotation part (dot with each normalised basis row). */
+        private static unrotateOnly;
+        /** The particle's Unity colour (before the colour-space conversion and the material tint): what Unity's InheritColor hands a sub-emitter child. Falls back to the drawn colour before the first visual pass. */
+        static unityColorOf(p: BABYLON.Particle): BABYLON.Color4;
+        /** One event object (world position / velocity) - the only allocation of the step, on rare events (D58). */
+        private static event;
+        /**
+         * The WORLD position of a particle for an event (the sub-emitter contract, run-log Decision 41): a local simulation maps its
+         * simulated position (`_properties.localPosition`) through THIS step's emitter matrix (p.position may still carry last step's
+         * matrix, or a pivot shift); a world simulation takes the simulated position (`b.simPos` while a pivot shift is applied).
+         */
+        static eventWorldPosition(p: BABYLON.Particle, s: TOOLKIT.IParticleSystemState, out: BABYLON.Vector3): BABYLON.Vector3;
+        /** Death (D25): event, recycle with Babylon's swap, re-attach the moved particle's record, pool the dead one. The caller re-processes index i. */
+        private static kill;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Resolves the exported node references the particle modules carry (plan D24): a custom simulation space, a shape
+     * mesh, a collision plane, a trigger collider, a force field, a wind zone and the light-module light source each
+     * ship a `nodeGuid` plus a `name`.
+     *
+     * Two runtime facts decide the rule. (1) The loader moves `metadata.toolkit.guid` into `node.id` and deletes the
+     * metadata key (`SystemUtilities.ts` ValidateTransformGuid), so a SCENE-level node still answers to its exported
+     * GUID. (2) `SceneManager.InstantiatePrefabFromContainer` gives every instantiated transform a fresh
+     * `id = CreateGuid()` while keeping its name, so inside a prefab instance the GUID can never match and the NAME
+     * inside that instance's OWN hierarchy is the only handle left. Hence: id first, then the name among the
+     * descendants of the owner's top-most ancestor - never a scene-wide name search (names such as "Plane" repeat,
+     * and with seventeen Embers instances a scene-wide search would hand every instance the same node).
+     * @class ParticleNodeRef - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleNodeRef {
+        /**
+         * The node an exported reference points at, or null when nothing matches (each caller has its own fallback:
+         * World space, the emitter's own frame, the exported world position...).
+         * @param scene the host scene
+         * @param owner the particle system's own transform (the hierarchy the name search is confined to)
+         * @param guid the exported `nodeGuid` (the node's id at scene level)
+         * @param name the exported node name (the only handle inside a prefab instance)
+         */
+        static resolve(scene: BABYLON.Scene, owner: BABYLON.Node, guid: string, name: string): BABYLON.TransformNode;
+        /**
+         * The Unity layer mask of a node: the exporter writes `metadata.toolkit.layermask` on the transform that owns the
+         * component, so a child mesh of an exported hierarchy inherits its nearest ancestor's mask. Default 1 (layer 0),
+         * which is what `SceneManager.GetTransformLayerMask` answers for an un-exported node as well.
+         */
+        static layerMaskOf(node: BABYLON.Node): number;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * 3-D gradient noise + fbm for the noise module (spec FR-11, D13 / D41). Ken Perlin's improved noise (2002): a
+     * 256-entry permutation (a Fisher-Yates shuffle of 0..255 drawn from TOOLKIT.ParticleRandom, duplicated to 512 so the
+     * lattice hash never wraps), the 12 cube-edge gradient directions, the quintic fade t^3 (t (6t - 15) + 10) and a
+     * trilinear blend, so noise3 lies in about [-1, 1]. Unity's own permutation is not public, so the module is gated on
+     * statistics, not per-particle equality (D13). noise3 / fbm / sample allocate nothing (scalars only).
+     * @class ParticleNoise - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleNoise {
+        /** The y / z axis lattices are the x lattice shifted by these offsets (D41), so the three axes decorrelate. */
+        static readonly OffsetY: number;
+        static readonly OffsetZ: number;
+        private readonly perm;
+        /** Builds the permutation from `random` (seeded by the component, D57); the global RNG is never used. */
+        constructor(random: TOOLKIT.ParticleRandom);
+        /** Improved Perlin gradient noise at (x, y, z): about [-1, 1], zero at every lattice point, C2-continuous. */
+        noise3(x: number, y: number, z: number): number;
+        /** Σ octaveMultiplier^i x noise3(p x octaveScale^i) / Σ octaveMultiplier^i for i < octaveCount (octaveCount < 1 reads as 1); the weight-sum normalisation keeps the range of noise3. */
+        fbm(x: number, y: number, z: number, octaveCount: number, octaveMultiplier: number, octaveScale: number): number;
+        /**
+         * One noise vector (D41): the x axis samples the lattice as is, y at + (0, 31.7, 0), z at + (0, 0, 57.3). `quality`
+         * picks the dimensions of the INPUT: Low (0) evaluates (x, 0, 0), Medium (1) (x, y, 0), High (2) (x, y, z); the
+         * per-axis lattice offset is added after that reduction so the three axes stay distinct at every quality.
+         */
+        sample(x: number, y: number, z: number, quality: number, octaveCount: number, octaveMultiplier: number, octaveScale: number, out: BABYLON.Vector3): BABYLON.Vector3;
+        /**
+         * The measured per-axis standard deviation of `sample` (one octave, 1,000,000 uniform points over [0, 256)^3, seeds 7 / 12345
+         * / 99 / 5 / 77) per quality [Low, Medium, High] x [x, y, z]: a property of this implementation (the lower-dimension qualities
+         * sample lattice planes, so their axes differ).
+         */
+        static readonly SampleStd: number[][];
+        /**
+         * Unity's noise FIELD standard deviation per unit strength per quality [Low, Medium, High], measured in Unity 6000.5 on
+         * 4,000 field samples each (F-S.42, T31's Unity 6000.5 noise-field probe): Unity's noise
+         * velocity = field x strength x (damping ? 1 : frequency) - an undamped field grows with the frequency (a derivative-like
+         * field), damping cancels it - and the field is SHARED by every particle (two particles at one point move alike).
+         */
+        static readonly UnityFieldStd: number[];
+        /**
+         * `sample` rescaled per axis to Unity's field statistics: sample x UnityFieldStd[q] / SampleStd[q][axis] (q = quality clamped
+         * to 0..2). Unity's own permutation is not public, so the field matches Unity in distribution (D13), not per point.
+         */
+        static fieldGain(quality: number, axis: number): number;
+        /** Quintic fade t^3 (t (6t - 15) + 10) (Perlin 2002): zero first and second derivatives at 0 and 1. */
+        private static fade;
+        private static lerp;
+        /** Dot product with one of the 12 cube-edge gradients (Perlin's 16-case hash; 4 cases repeat edges). */
+        private static grad;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** A spawn requested by a sub-emitter parent (D27, run-log Decision 41). Positions / velocities are WORLD space: `position` is where the child's
+     *  shape frame is placed (the parent particle's event position), `velocity` the parent particle's velocity (reaches the child only through its InheritVelocity module). */
+    interface ISpawnRequest {
+        position: BABYLON.Vector3;
+        velocity: BABYLON.Vector3;
+        inherit: number;
+        color: BABYLON.Color4;
+        size: number;
+        angle: number;
+        lifetimeFraction: number;
+        parentSerial?: number;
+        duration?: number;
+    }
+    /**
+     * Unity ShapeModule as a Babylon emitter type (spec FR-9, D6). Emits along Unity's local +Z; positions and
+     * directions are produced in emitter space then transformed by `shapeMatrix` (world) or `localMatrix` (D33).
+     *
+     * Emitter space here is the shape's own space INCLUDING `shape.scale`: Box / BoxShell / BoxEdge / Rectangle take
+     * their size from `shape.scale` (Unity's box is the unit cube scaled by the shape scale), and every other primitive
+     * is sampled unscaled and then multiplied component-wise by `shape.scale` (directions by the same linear map, then
+     * normalised). So `shapeMatrix` carries the node transform and the shape's position / rotation only - never
+     * S(shape.scale), which would scale a box twice (run-log Decision, T8).
+     *
+     * Babylon calls startPositionFunction then startDirectionFunction once per new particle, in order, inside
+     * ParticleSystem._update; the pair shares `last`. Babylon's `worldMatrix` argument is never read (D33). The
+     * sampling allocates nothing (scratch vectors are private statics, D58); `speedScale` is folded into
+     * min / maxEmitPower by the component and multiplies nothing here.
+     * @class ShurikenShapeEmitter - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShurikenShapeEmitter implements BABYLON.IParticleEmitterType {
+        shape: TOOLKIT.IParticleShapeModule;
+        /** inverse(node world matrix), written by the component every frame; transforms world-space spawn requests into local space when the system is local (D27). */
+        nodeInverse: BABYLON.Matrix;
+        /** Emitter space -> world (D33): T(nodeWorldPos) x R(nodeWorldRot) x S(scaleVector) x T(shape.position) x R(shape.rotation). Written by the component every frame; identity by default. */
+        shapeMatrix: BABYLON.Matrix;
+        /** Emitter space -> the node's local space (D33): inverse(node world matrix) x shapeMatrix - used only when the system is local. Identity by default. */
+        localMatrix: BABYLON.Matrix;
+        /** mean(scaleVector) for Hierarchy / Local, 1 for Shape (D33). The component folds it into min / maxEmitPower; nothing here reads it. */
+        speedScale: number;
+        /** The component's system time in seconds, for arcMode / radiusMode Loop / PingPong (D64). */
+        time: number;
+        /** The system's normalised time (0..1) at which arcSpeed / radiusSpeed curves are sampled (Algorithms › arcValue). Written by the component with `time`. */
+        normalizedTime: number;
+        /** BurstSpread (D64): the component writes burstIndex = 0 and burstCount = n before a frame that emits n; the emitter advances burstIndex after every shape sample (Babylon calls the start functions n times inside one animate). */
+        burstIndex: number;
+        burstCount: number;
+        /** World position of the node's origin, written by the component with shapeMatrix: a spawn request moves the shape frame from here to the request's position (Decision 41). */
+        nodePosition: BABYLON.Vector3;
+        /** Spawn requests (FIFO): each new particle consumes one when present; it is still a sample of THIS shape, with the shape frame placed at the request's position (Decision 41). */
+        requests: TOOLKIT.ISpawnRequest[];
+        /** The last sample (emitter space): position (before randomPositionAmount), direction (after the D63 modifiers once startDirectionFunction ran), radial (unit vector from the shape centre). */
+        readonly last: {
+            position: BABYLON.Vector3;
+            direction: BABYLON.Vector3;
+            radial: BABYLON.Vector3;
+        };
+        private nodeName;
+        private random;
+        private pendingRequest;
+        protected meshPositions: Float32Array | number[];
+        protected meshNormals: Float32Array | number[];
+        protected meshIndices: Uint32Array | Uint16Array | number[];
+        protected meshWorld: BABYLON.Matrix;
+        protected meshUVs: ArrayLike<number>;
+        protected meshColors: ArrayLike<number>;
+        /** The index sub-range in use (useMeshMaterialIndex): `indexBase` into `meshIndices`, `indexLen` entries. Whole mesh = 0 / -1. */
+        protected indexBase: number;
+        protected indexLen: number;
+        /** Vertex mode with a sub-range: the distinct vertices those indices touch (null = every vertex). */
+        protected vertexList: Uint32Array;
+        /** T22 - the vertices the LAST sample sat on and their barycentric weights (-1 = unused slot). */
+        protected readonly lastVerts: Int32Array;
+        protected readonly lastWeights: Float64Array;
+        protected shapePixels: Uint8Array;
+        protected shapeWidth: number;
+        protected shapeHeight: number;
+        /** Cumulative edge lengths over every triangle's three edges (v0->v1, v1->v2, v2->v0), 3 x triangles entries. */
+        protected edgePrefix: Float64Array;
+        /** Cumulative triangle areas, one entry per triangle. */
+        protected triPrefix: Float64Array;
+        /** Largest |vertex| of the source in its own space (the mesh bbox radius, for extent()). */
+        protected meshExtent: number;
+        /** The source's axis-aligned bounds in its own space (min xyz, max xyz): extent() maps the 8 corners into emitter space. */
+        protected readonly meshBounds: Float64Array;
+        /** Vertex Loop / PingPong walk one vertex per spawn (Unity oracle, F-S.13); reset by setMeshSource. */
+        protected meshSpawnCounter: number;
+        private meshAdopted;
+        private readonly shapeInverse;
+        private readonly shapeInverseOf;
+        private shapeInverseValid;
+        private static readonly TmpA;
+        private static readonly TmpB;
+        constructor(shape: TOOLKIT.IParticleShapeModule, random: TOOLKIT.ParticleRandom, nodeName: string);
+        /**
+         * Mesh sampling source resolved by the component (D26): positions / normals / indices in the SOURCE mesh's local space
+         * plus its world matrix. T22 adds the per-vertex uv / colour channels the spawn colour reads and an optional INDEX
+         * SUB-RANGE (`useMeshMaterialIndex`): the triangle / edge tables are then built over that range only, and vertex mode
+         * walks just the vertices those indices touch. A range outside the index buffer is ignored (the whole mesh is used).
+         */
+        setMeshSource(positions: Float32Array | number[], normals: Float32Array | number[], indices: Uint32Array | Uint16Array | number[], sourceWorld: BABYLON.Matrix, uvs?: ArrayLike<number>, colors?: ArrayLike<number>, indexStart?: number, indexCount?: number): void;
+        /**
+         * FR-32 - a SKINNED shape re-sampled at the animated pose: new positions / normals for the SAME topology. The index
+         * buffer has not changed, so the area / length prefix tables and the sub-range vertex list are deliberately NOT rebuilt
+         * (that is the whole point of a separate entry point: rebuilding them at 10 Hz on a character mesh is the cost this
+         * avoids). The sampling weights drift a little from the true animated areas - a documented approximation.
+         */
+        refreshMeshPositions(positions: Float32Array | number[], normals: Float32Array | number[]): void;
+        /** T22 - true when a spawn carries a per-particle colour: a shape texture whose pixels have arrived, or mesh vertex colours. */
+        get hasSpawnColor(): boolean;
+        /** T22 - the shape texture's pixels, read ONCE by the component (RGBA rows from the texture's own origin). */
+        setShapeTexture(pixels: Uint8Array, width: number, height: number): void;
+        /**
+         * T22 / Algorithms > Shape texture - the per-particle spawn colour of the sample `sampleShape()` has just taken.
+         * Babylon creates EVERY one of a frame's particles before any `birth()` runs, so this is written onto that particle's
+         * own provisional metadata by `startPositionFunction`, never kept on the emitter.
+         *
+         * Mesh vertex colours (`useMeshColors`) interpolate over the sampled triangle / edge / vertex. The shape texture is
+         * sampled at the mesh UV of the same sample when the source has UVs, and otherwise at the PLANAR approximation of the
+         * unit-shape sample (`u = 0.5 + x / 2|scale.x|`, `v = 0.5 + y / 2|scale.y|`) - listed in the coverage table. The clip
+         * channel below `textureClipThreshold` marks the particle born dead and silent.
+         */
+        spawnColor(out: {
+            color: BABYLON.Color4;
+            clip: boolean;
+        }): void;
+        private static readonly Texel;
+        /**
+         * One texel of the shape texture, 0..1. The pixel rows come from `texture.readPixels()`, whose row 0 is the texture's
+         * TOP row (the toolkit loads its textures with invertY false), while the shape uv has v = 1 at the top - hence `1 - v`.
+         * Nearest by default, bilinear under `textureBilinearFiltering`; uv outside [0, 1] is clamped.
+         */
+        private sampleShapeTexel;
+        /** Largest distance from the shape origin a spawn can have, in emitter units (for the culling radius, D39), including randomPositionAmount. */
+        extent(): number;
+        /** Samples (p, d) in emitter space (Algorithms › Shapes), writes positionToUpdate = TransformCoordinates(p, isLocal ? localMatrix : shapeMatrix) + randomPositionAmount (D63). A queued spawn request places the shape frame at its position (Decision 41). */
+        startPositionFunction(worldMatrix: BABYLON.Matrix, positionToUpdate: BABYLON.Vector3, particle: BABYLON.Particle, isLocal: boolean): void;
+        /** Applies D63's randomDirectionAmount / sphericalDirectionAmount to `last.direction`, then directionToUpdate = normalize(TransformNormal(d, isLocal ? localMatrix : shapeMatrix)). A request spawn uses the same shape direction (Decision 41). */
+        startDirectionFunction(worldMatrix: BABYLON.Matrix, directionToUpdate: BABYLON.Vector3, particle: BABYLON.Particle, isLocal: boolean, inverseWorldMatrix: BABYLON.Matrix): void;
+        clone(): BABYLON.IParticleEmitterType;
+        /** CPU particles only (D7): nothing to upload. */
+        applyToShader(uboOrEffect: any): void;
+        buildUniformLayout(ubo: any): void;
+        getEffectDefines(): string;
+        getClassName(): string;
+        serialize(): any;
+        parse(serializationObject: any, scene: BABYLON.Scene): void;
+        /** One shape sample into last.position / last.direction / last.radial (emitter space, shape.scale applied). */
+        private sampleShape;
+        /**
+         * Mesh / MeshRenderer / SkinnedMeshRenderer (D26, Algorithms › Shapes › Mesh) into last.position / last.direction.
+         * Element choice, measured against Unity 6000.5 (a mesh-spawn probe, F-S.13):
+         *   Vertex   - Random: uniform vertex index; Loop: one vertex per SPAWN in buffer order (meshSpawnSpeed / Spread do not
+         *              move it); PingPong: the same counter bounced 0..n-1, n-1..0; BurstSpread: floor(n x burstIndex / burstCount).
+         *   Edge     - Random: a triangle chosen by AREA (triPrefix), one of its three edges uniformly, a uniform point on it (T30
+         *              oracle); Loop: f = frac(time x meshSpawnSpeed(t)) walks the edge list (every triangle's v0->v1, v1->v2,
+         *              v2->v0) at index floor(f x E), the point at the fraction frac(f x E) along it; PingPong: f = tri(time x
+         *              speed), its peak at the end of the last edge; BurstSpread: f = burstIndex / burstCount; meshSpawnSpread > 0
+         *              snaps f DOWN to multiples of the spread (T30 oracle).
+         *   Triangle - always a triangle chosen by AREA (triPrefix) and a uniform barycentric point (Unity ignores the spawn
+         *              mode for triangles); direction = the face normal (oriented by the vertex normals when present).
+         * The direction is the vertex normal / the two vertices' mean normal / the face normal; p += d x normalOffset. A source with
+         * a world matrix (meshRef) is sampled in its local space -> world (sourceWorld) -> emitter space (inverse(shapeMatrix)), so
+         * shape.scale is NOT applied again (returns true); an inline meshData source (no world matrix) is emitter space and gets
+         * shape.scale like every other primitive (returns false). No source -> a point (p = 0, d = +Z) + `shape:mesh-missing`;
+         * no indices -> Vertex sampling + `shape:mesh-noindices`. Allocation-free (prefix sums are built in setMeshSource).
+         */
+        private sampleMesh;
+        /** The Loop / PingPong / BurstSpread fraction for Edge sampling (Algorithms › Shapes › Mesh): frac(time x speed), tri(time x speed), burstIndex / burstCount. */
+        private meshModeFraction;
+        /** inverse(shapeMatrix), recomputed only when shapeMatrix's values changed (the component writes it per frame). */
+        private inverseShapeMatrix;
+        /** The first index whose cumulative value exceeds `x` (binary search over a non-decreasing prefix array). */
+        private static searchPrefix;
+        /** The largest axis scale of an affine matrix (the length of its longest basis row). */
+        private static maxAxisScale;
+        private rectangle;
+        /** BoxShell: a face chosen by area, uniform on it, pulled inward along the face's axis by boxThickness_axis x rnd (never past the centre). */
+        private boxShell;
+        /** BoxEdge: an edge chosen by length, uniform along it, its two fixed coordinates pulled inward by boxThickness x rnd each. */
+        private boxEdge;
+        /** One fixed coordinate of a BoxEdge sample: +-half, pulled inward by boxThickness_axis x rnd (never past the centre). */
+        private edgeCoord;
+        private static thickness;
+        /**
+         * Ball radius: radius x cbrt(lerp((1 - thick)^3, 1, rnd)) - uniform in the shell's volume. Unity reads radiusMode / radiusSpread
+         * / radiusSpeed ONLY for the SingleSidedEdge (measured on Unity 6000.5, T30's two shape probes:
+         * Sphere / Circle / Cone / Donut with radiusMode Loop or radiusSpread 0.3 emit the same random radii as Random), so a
+         * volume's radius is always the warped random draw (supersedes F-S.12's linear radiusValue(), deleted).
+         */
+        private ballRadius;
+        /** Disc radius: radius x sqrt(lerp((1 - thick)^2, 1, rnd)) - uniform in the ring's area; radius modes never apply (see ballRadius, T30). */
+        private discRadius;
+        /** radius x sqrt(lerp((1 - thick)^2, 1, u)): uniform in the ring's area (also the donut tube). */
+        private static discWarp;
+        /**
+         * Unity's Spread: the mode fraction snaps DOWN to a multiple of the spread (floor, not round - measured on Unity 6000.5 for
+         * arcSpread, radiusSpread on the Edge and meshSpawnSpread on mesh edges, T30 probes: Loop speed 1 spread 0.25 at t 0.2 -> 0,
+         * at t 0.3 -> 0.25). The 1e-9 guards a fraction that is an exact multiple in decimal but not in binary (0.3 / 0.1).
+         */
+        private static snapDown;
+        /** arcValue() in degrees, [0, arc] (D64): Random / Loop / PingPong / BurstSpread, then arcSpread snapping (down, T30). */
+        private arcValue;
+        /** The SingleSidedEdge position fraction, [0, 1] (D64): the radiusMode mirror of arcValue with radiusSpeed / radiusSpread (snapped down, T30) - the only shape Unity reads the radius mode for. */
+        private radiusFraction;
+        /** Random 0 -> rnd; Loop 1 -> frac(time x speed); PingPong 2 -> tri(time x speed); BurstSpread 3 -> (burstIndex mod n) / n. */
+        private modeFraction;
+        /** Normalises in place; false (vector untouched) when its length is 0. */
+        private static normalizeInPlace;
+        /** d = normalize(slerp(d, (bx, by, bz), t)) for unit vectors (D63); antipodal inputs rotate through a perpendicular. */
+        private static slerpInPlace;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * One live trail (D18): a ring of `MaxPointsPerTrail` points (x, y, z, time) in the trail's own space, the newest at `head`.
+     * `count` includes the moving HEAD point, which is the particle's current position and is rewritten every step; every other
+     * point is committed and never moves again. `dead` marks a trail whose particle is gone while `dieWithParticles` is false
+     * (it keeps drawing until its points expire). `ribbon` is -1 for a particle trail.
+     */
+    interface IParticleTrail {
+        points: Float32Array;
+        head: number;
+        count: number;
+        lifetime: number;
+        dead: boolean;
+        ribbon: number;
+        owner: TOOLKIT.IParticleBirth;
+        width: number;
+        color: BABYLON.Color4;
+        slot: number;
+        used: boolean;
+        lerp: number;
+        last: BABYLON.Vector3;
+    }
+    /**
+     * Unity's Trails module (spec FR-20, D18): ONE dynamic mesh and ONE stock `BABYLON.StandardMaterial` per system, fixed
+     * topology `MaxTrails` x `MaxPointsPerTrail`, a static index buffer and `subMesh.indexCount` covering the live trails only.
+     * Nothing custom is authored - no `BABYLON.TrailMesh`, no Solid Particle System. The one material plugin is
+     * `ParticleEmissionPlugin`, attached only when the block carries a non-black emission colour (StandardMaterial's own
+     * emissive term is clamped to [0, 1] and scaled by alpha, so it cannot carry Unity's HDR `albedo + emission`).
+     *
+     * Two modes share one strip builder:
+     *   Particles (0) - a slot per particle (rolled against `ratio` at birth). The head point follows the particle and is
+     *                   committed whenever it has travelled `minVertexDistance`; committed points expire by `lifetime`.
+     *   Ribbon (1)    - no slots: ribbon `k` is rebuilt every frame from the live particles with `spawnIndex % ribbonCount === k`
+     *                   (or, with `splitSubEmitterRibbons`, one ribbon per parent particle), one point per particle.
+     *
+     * The strip faces the camera: `S = normalize(cross(T, P - eye))` with `T` the trail tangent (Algorithms > Strip vertices).
+     * Points live in the SIMULATION space when the system is local and `worldSpace` is false (the mesh is then parented to the
+     * emitter, T14); otherwise in world space. No allocation per step: every scratch is a private static or a pre-sized array.
+     * @class ParticleTrailRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleTrailRenderer {
+        /** D18: the fixed topology. The pool is `min(MaxTrails, capacity)` slots, so a 50-particle system does not allocate 1024 trails. */
+        static MaxTrails: number;
+        static MaxPointsPerTrail: number;
+        private static readonly Scratch;
+        private static readonly ScratchB;
+        private static readonly Tangent;
+        private static readonly Side;
+        private static readonly View;
+        private static readonly Eye;
+        private static readonly Col;
+        private static readonly ColB;
+        protected scene: BABYLON.Scene;
+        protected name: string;
+        protected module: TOOLKIT.IParticleTrailsModule;
+        protected host: TOOLKIT.IParticleAuxHost;
+        /** The block the material is built from: the trail block, else the system's own block, else null (the fallback texture, additive). */
+        protected block: TOOLKIT.IParticleMaterialBlock;
+        private _mode;
+        private _ratio;
+        private _minDistance;
+        private _textureMode;
+        private _textureScaleX;
+        private _worldSpace;
+        private _dieWithParticles;
+        private _sizeAffectsWidth;
+        private _sizeAffectsLifetime;
+        private _inheritParticleColor;
+        private _ribbonCount;
+        private _splitSubEmitterRibbons;
+        private _attachRibbonsToTransform;
+        /** The trail material's tint, already LINEAR (StandardMaterial vertex colours are linear); alpha is never converted. */
+        private _tint;
+        /** Phase 9 carry-over 6: the trail material is a surface shader that ignores vertex colour (ParticleConversions.IgnoresVertexColor). */
+        private _ignoreVertexColor;
+        private _capacity;
+        private _trails;
+        private _free;
+        private _live;
+        private _pointCount;
+        private _poolWarned;
+        private _positions;
+        private _uvs;
+        private _colors;
+        private _normals;
+        private _liveIndexCount;
+        private _liveVertexCount;
+        private _boundsMin;
+        private _boundsMax;
+        private _strip;
+        private _cum;
+        private _order;
+        private _ribbonKeys;
+        private _ribbonLen;
+        private _ribbonPts;
+        private _ribbons;
+        private _ps;
+        private _enabled;
+        private _disposed;
+        private _mesh;
+        private _material;
+        private _entry;
+        private _meshEnabled;
+        private _subCount;
+        private _subPositions;
+        private _subUVs;
+        private _subColors;
+        private _subNormals;
+        /**
+         * @param capacity the most trails this system can need (its particle capacity); clamped to [1, MaxTrails]. Omitted = MaxTrails.
+         *        D18 fixes the TOPOLOGY, not the allocation: a 50-particle system never needs 1024 x 32 x 2 vertices, and the
+         *        strip buffers are 3 MB at the full cap.
+         */
+        constructor(scene: BABYLON.Scene, name: string, module: TOOLKIT.IParticleTrailsModule, material: TOOLKIT.IParticleMaterialBlock, fallback: TOOLKIT.IParticleMaterialBlock, host: TOOLKIT.IParticleAuxHost, capacity?: number);
+        /**
+         * The one mesh (D18 / D27): updatable position / uv / colour / normal buffers at full capacity, a STATIC index buffer
+         * (two triangles per segment of every slot) and a stock `StandardMaterial`. `subMesh.indexCount` then covers the live
+         * trails only, and the unused points of a live slot repeat the last vertex pair, so every triangle past a trail's end
+         * has zero area. The mesh is tagged internal, never picked, never collides and is always an active mesh (its own
+         * bounding info is meaningless: the component's culling is what disables it).
+         */
+        private buildMesh;
+        /** Lit trails (FR-20): the trail block's family is a lit one AND the module asks for lighting data. */
+        private litTrail;
+        /**
+         * A stock `BABYLON.StandardMaterial` from a particle material block (API usage > StandardMaterial from a block), shared
+         * with the mesh renderer (T17). `onEntry` hands back the texture-cache entry so the OWNER releases it. The tint is NOT
+         * written here: both callers carry it in their vertex / instance colours, where an HDR value is not clipped by the
+         * standard shader's emissive clamp. A null block = the fallback texture with additive blending (Error policy).
+         */
+        static MaterialFromBlock(scene: BABYLON.Scene, name: string, block: TOOLKIT.IParticleMaterialBlock, onEntry: (entry: TOOLKIT.IParticleTextureEntry) => void, forceWrap?: boolean, lit?: boolean): BABYLON.StandardMaterial;
+        /** The block chain (Error policy): the trail block when it carries a `family` (the NEW shape), else the system's own block, else null. */
+        static BlockOf(material: TOOLKIT.IParticleMaterialBlock, fallback: TOOLKIT.IParticleMaterialBlock): TOOLKIT.IParticleMaterialBlock;
+        /** Re-reads the module's editable values (Inspector truth, D52): called by the constructor and by every step. */
+        private refresh;
+        /** True while the points of this system live in the EMITTER's space (a local simulation whose trails are not world space). */
+        isLocalSpace(): boolean;
+        setEnabled(on: boolean): void;
+        /**
+         * Birth (D25): rolls `ratio` and takes a slot. Ribbon mode owns no slots, so it never takes one and `b.trail` stays null.
+         * The roll runs only when `ratio < 1`, so a full-ratio system draws the same random stream it did before trails existed.
+         */
+        attach(b: TOOLKIT.IParticleBirth, random: TOOLKIT.ParticleRandom, particleLifetime: number, startSize: number): void;
+        /** Death (D25): `dieWithParticles` frees the slot at once, otherwise the trail is orphaned and kept until its points expire. */
+        release(b: TOOLKIT.IParticleBirth): void;
+        private freeTrail;
+        /**
+         * The `_update` tail hook (Module boundaries): the head points follow their particles, expired points are dropped and the
+         * strip buffers are rebuilt - unless `s.simulating`, when a prewarm accumulates points and uploads nothing (`flush` does).
+         */
+        step(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState): void;
+        /** The one upload a `simulate()` / prewarm run does, at its end (Module boundaries). */
+        flush(s: TOOLKIT.IParticleSystemState): void;
+        /** Every head point moved to its particle, and committed when it has travelled `minVertexDistance` (Algorithms > Trail point rule). */
+        private advance;
+        /** Committed points older than the trail's lifetime are dropped from the tail; an orphaned trail with nothing left frees its slot. */
+        private expire;
+        /**
+         * Ribbon mode (Algorithms > Ribbon mode): the live particles are walked NEWEST first, so the newest `MaxPointsPerTrail`
+         * particles of a ribbon and (past the cap) the newest parents win; each ribbon's point list is then read back ascending.
+         */
+        private groupRibbons;
+        /** The particle's position in the trail's own space (simulation space when the mesh is parented to the emitter, else world). */
+        private pointOf;
+        /** The birth position of a particle in the trail's own space (the first, committed, point of its trail). */
+        private birthPointOf;
+        /** The camera position in the trail's own space (the strip faces it). */
+        private eyeOf;
+        /** Writes every live trail's strip into the CPU buffers, contiguously, and records the live index / vertex counts. */
+        private build;
+        /** One ribbon point = one particle: its position, its drawn size and its own colour-over-lifetime sample. */
+        private writeStripPoint;
+        /** `attachRibbonsToTransform`: one extra last point at the emitter, carrying the previous point's size and colour. */
+        private writeEmitterPoint;
+        /**
+         * One camera-facing strip (Algorithms > Strip vertices): `T = normalize(P[i+1] - P[i-1])` (one-sided at the ends),
+         * `S = normalize(cross(T, P - eye))`, `w = 0.5 x widthOverTrail(u) x size`, vertices `P +- S x w`, `v` 0 / 1 across
+         * the strip and `u` by `textureMode`. The unused points of the slot repeat the last vertex pair: zero-area triangles,
+         * so the static index buffer can cover every live trail with one `indexCount`.
+         */
+        private emitStrip;
+        /**
+         * The one upload of a build (API usage > Dynamic mesh): only the live prefix of each buffer is sent (a cached subarray
+         * view, rebuilt only when the live count changes), `subMesh.indexCount` is narrowed to the live trails and the mesh is
+         * disabled when nothing is live. `updateExtends` is false: the bounding info is meaningless on an always-active mesh.
+         */
+        protected upload(liveTrails: number): void;
+        /** Frees every slot (a clear / restart, D25). */
+        reset(): void;
+        dispose(): void;
+        /** The one mesh this renderer owns. */
+        getMesh(): BABYLON.Mesh;
+        /** The stock StandardMaterial the mesh draws with. */
+        getMaterial(): BABYLON.StandardMaterial;
+        /** The texture-cache entry the material holds (null when the fallback texture is drawn). */
+        getTextureEntry(): TOOLKIT.IParticleTextureEntry;
+        /** Live trails (Particles mode) or live ribbons (Ribbon mode). */
+        getLiveTrailCount(): number;
+        /** Live points across every trail / ribbon. */
+        getPointCount(): number;
+        /** The slot capacity of the pool (`min(MaxTrails, the system's particle capacity)`). */
+        getCapacity(): number;
+        /** The index count the live trails cover (D18: `subMesh.indexCount`). */
+        getLiveIndexCount(): number;
+        getLiveVertexCount(): number;
+        /** The strip buffers, for the tests and the Inspector. */
+        getPositions(): Float32Array;
+        getUVs(): Float32Array;
+        getColors(): Float32Array;
+        getNormals(): Float32Array;
+        getTrails(): TOOLKIT.IParticleTrail[];
+        isEnabled(): boolean;
+    }
+    /**
+     * Material emission for the stock `StandardMaterial` a trail or a mesh-mode particle draws with (sparks fix; the billboard
+     * twin is ShurikenParticles.applyEmission, T34). Unity's URP / Built-in particle and Lit shaders with `_EMISSION` output
+     * `albedo + emissionMap(uv) x _EmissionColor` summed in LINEAR space, the emission NOT multiplied by alpha in premultiply mode
+     * (URP `AlphaModulate` scales the albedo only) - the blend state scales it for alpha / additive blends. StandardMaterial's own
+     * emissive term cannot carry that: it is clamped to [0, 1] and lands before `PREMULTIPLYALPHA`. The sum is therefore added at
+     * CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR, after the premultiply: in linear space when the camera pipeline does the image processing
+     * (IMAGEPROCESSINGPOSTPROCESS - the colour was just linearised), otherwise through a linear round trip of the gamma output.
+     * The colour is the exported value as Unity feeds its shader (the same contract as the billboard path); the map is sampled
+     * with the main texture's UVs (Unity samples `_EmissionMap` with the `_BaseMap` transform) and linearised; no map = white.
+     * The map is held through ParticleTextureCache and released when the material (and so this plugin) is disposed.
+     * @class ParticleEmissionPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleEmissionPlugin extends BABYLON.MaterialPluginBase {
+        /** After the toolkit's other StandardMaterial plugins: the emission is the last term before the fragment output. */
+        static readonly PRIORITY: number;
+        /** The emission colour (Unity units, linear, HDR - never clamped). Black = no emission (the define turns off). */
+        color: BABYLON.Color3;
+        /** The emission map (null = white). */
+        map: BABYLON.Texture;
+        private _entry;
+        private _disposed;
+        constructor(material: BABYLON.Material);
+        /** True when the block carries a non-black emission colour. */
+        static Active(block: any): boolean;
+        /**
+         * Attaches the plugin to a NEW (never drawn) material when the block has an active emission; requests the map through the
+         * texture cache. Returns the plugin, or null when the block has no emission (the material is left exactly as it was).
+         */
+        static Attach(material: BABYLON.StandardMaterial, block: any): ParticleEmissionPlugin;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        isReadyForSubMesh(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getSamplers(samplers: string[]): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        dispose(forceDisposeTextures?: boolean): void;
+        /** GLSL (WebGL2): the sampler is declared only when the map define is on. */
+        static readonly FRAGMENT_GLSL: any;
+        /** WGSL (WebGPU): the same sum; uniforms read through `uniforms.`, varyings through `fragmentInputs.`. */
+        static readonly FRAGMENT_WGSL: any;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Unity's Triggers module (spec FR-36, plan T23): a pure query over the collider nodes the exporter listed, plus one
+     * "inside" bit per collider carried on the particle's birth record.
+     *
+     * Four actions (`inside`, `outside`, `enter`, `exit`) each select 0 Ignore, 1 Kill or 2 Callback. `inside` / `outside`
+     * fire EVERY step the particle is in / out of every collider; `enter` / `exit` fire on the bit FLIP only, so a particle
+     * that crosses the boundary twice inside one step is seen at the step's END position alone (documented deviation - the
+     * runtime has no swept trigger test).
+     *
+     * A Kill marks the record dead: `ParticleSimulation.step` recycles it at the TOP of the next step, raising the normal
+     * death event (so a Death sub-emitter still fires). Its trail and its pooled light, however, are released HERE, in the
+     * same frame - that is exactly why the component runs this hook FIRST in the tail, before the sort, the trails and the
+     * lights: a trail left attached for one more frame would keep writing points from a particle that is already gone, and a
+     * light slot held for one more frame is a scene-wide resource lost for nothing. Mesh instances need no such call: the
+     * mesh renderer rebuilds its buffer from the live records every step and already skips a dead one.
+     *
+     * A collider follows its Unity transform when the reference resolves (D24: by GUID at scene level, then by name inside
+     * the emitter's own root hierarchy - never a scene-wide name search); an unresolved reference falls back to the WORLD
+     * placement the exporter wrote beside it. No handedness conversion anywhere (D26): `center`, `size`, `radius`, `height`
+     * and `direction` are Unity values, and the test runs in the collider's own local space.
+     * @class ParticleTriggers - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleTriggers {
+        /** The inside bits live in one number on the birth record, so at most 31 colliders are tested (D25). */
+        static readonly MaxColliders: number;
+        private static readonly TmpInverse;
+        private static readonly TmpPoint;
+        private static readonly TmpLocal;
+        private _scene;
+        private _module;
+        private _name;
+        /** One entry per tested collider: its shape, the resolved node (null = use the exported snapshot), the exported
+         *  frame and this step's world matrix / inverse. */
+        private _colliders;
+        /** An export older than this plan lists colliders without a `shape`: the module does nothing at all for that system. */
+        private _inert;
+        constructor(scene: BABYLON.Scene, owner: BABYLON.Node, module: TOOLKIT.IParticleTriggersModule, nodeName: string);
+        /** The WORLD placement the exporter wrote beside a collider (position, euler DEGREES, scale; Unity values, D26). */
+        private static FrameOf;
+        /**
+         * Algorithms › Trigger inside test. `world` is the collider's world matrix, `point` a WORLD position and `radius` the
+         * particle's world radius (already multiplied by `triggers.radiusScale`). The test runs in the collider's own local
+         * space, so the world radius is divided per axis by the collider's Unity lossy scale before it widens the primitive.
+         */
+        static inside(shape: TOOLKIT.IParticleColliderShape, world: BABYLON.Matrix, point: BABYLON.Vector3, radius: number): boolean;
+        /** The inside test with the collider's inverse world matrix already in hand (what `step` uses: one inversion per collider per step). */
+        private static insideLocal;
+        /**
+         * One step: every live particle against every collider. `onEvent(type, particle)` is raised for CALLBACK actions only
+         * (0 inside, 1 outside, 2 enter, 3 exit); a Kill action is applied here and raises no callback.
+         * Skipped while the system is simulating (prewarm / `simulate()`): nothing outside the system exists on that clock.
+         */
+        step(ps: BABYLON.ParticleSystem, s: TOOLKIT.IParticleSystemState, onEvent: (type: number, p: BABYLON.Particle) => void): void;
+        /** 0 Ignore · 1 Kill (the record dies now; its trail and its light go back this frame) · 2 Callback. */
+        private act;
+        /** The colliders are re-resolved on the next step from the nodes they already hold; nothing per-particle lives here. */
+        reset(): void;
+        dispose(): void;
+        /** The colliders this module actually tests (a test / Inspector read-back). */
+        getColliderCount(): number;
+    }
+}
 declare namespace TOOLKIT {
     /** What the colour grading applier wrote for one camera (FR-19 .. FR-25), for read-backs and the drift check. */
     interface IPostProcessColorGradingState {
@@ -16601,7 +20692,12 @@ declare namespace TOOLKIT {
         key: string;
         /** The Unity field name as shown. */
         label: string;
-        kind: "number" | "switch" | "text";
+        kind: "number" | "switch" | "text" | "dropdown";
+        /** D18: the choices of a "dropdown" field (value = the number `get()` returns and `set()` receives). */
+        options?: {
+            label: string;
+            value: number;
+        }[];
         unit?: string;
         min?: number;
         max?: number;
@@ -16629,6 +20725,76 @@ declare namespace TOOLKIT {
         /** The `SetEffectEnabled` state (true until toggled off). */
         enabled: boolean;
         fields: IPostProcessInspectorField[];
+    }
+    /**
+     * Unity terrain parity T12.3 (D47): the tone mapper of one camera's URP LogC grading stack -- what the frame renders
+     * with, where it comes from, and why. Written by `applyHdrColorGrading`, switched live by `SetToneMapper` (the
+     * Inspector's tone-mapper dropdown), read back by `GetToneMappers`.
+     */
+    interface IPostProcessToneMapperRecord {
+        camera: BABYLON.Camera;
+        volumetype: string;
+        /** The mode baked into the exported strip (SRP `Tonemapping.mode`: 0 None, 1 Neutral, 2 ACES). */
+        baked: number;
+        /** False when the strip was baked WITHOUT its mapper (F-9.22): the native mapper then renders after the strip. */
+        stripHasMapper: boolean;
+        /** The mode the frame renders with now. */
+        mode: number;
+        /** "pending" (strip loading, native mapper meanwhile), "strip" (exported strip), "variant" (strip baked for the switched mode), "native" (Babylon's mapper). */
+        source: string;
+        /** Why Babylon's mapper renders instead of the exported strip (the never-silent fallback), null otherwise. */
+        fallback: string;
+        /** URP asset colorGradingMode the strip was baked for ("LowDynamicRange" / "HighDynamicRange"), undefined on older exports. */
+        gradingmode: string;
+        /** "ldr" (tone map, then grade) or "hdr" (grade, then tone map: LutBuilderHdr's LogC order). */
+        order: string;
+        /** True once the Inspector switched the mode (a late strip arrival then honours the edit instead of the export). */
+        edited: boolean;
+        lut: TOOLKIT.IPostProcessLutReference;
+        state: TOOLKIT.IPostProcessColorGradingState;
+        imaging: BABYLON.ImageProcessingConfiguration;
+        postProcess: BABYLON.PostProcess;
+        /** The exported strip's texture once loaded (rebound when the Inspector switches back to the baked mode). */
+        texture: BABYLON.BaseTexture;
+        /** The LUT failed to load, or the pass never became ready once the scene was ready. */
+        failed: boolean;
+    }
+    /** camera-antialiasing-parity D26: one camera's anti-aliasing as applied (read-backs, Inspector, live edits). */
+    interface IPostProcessAntialiasingRecord {
+        /** The camera's pipeline (owned, reused, or null for a canvas-MSAA camera). */
+        pipeline: BABYLON.DefaultRenderingPipeline;
+        camera: BABYLON.Camera;
+        /** Effective mode 0..4 (live: `SetAntialiasingMode` rewrites it). */
+        mode: number;
+        /** An FXAA pair is live and enabled. */
+        fxaa: boolean;
+        /** MSAA sample count, or null when the metadata carried none. */
+        samples: number;
+        /** The pass holding the MSAA samples, or null. */
+        firstPass: BABYLON.PostProcess;
+        prePassSamples?: number;
+        fxaaPass?: BABYLON.PostProcess;
+        lumaPass?: BABYLON.PostProcess;
+        fast?: boolean;
+        /** The resolved conversion (authored, gated, pipeline, variant, quality). */
+        settings?: TOOLKIT.IPostProcessAntialiasing;
+        /** The conversion as exported (Unity's own gating), never rewritten by a live switch: the Inspector's "authored" line reads it. */
+        exported?: TOOLKIT.IPostProcessAntialiasing;
+        /** SMAA blend (last) pass and all three passes in chain order. */
+        smaaPass?: BABYLON.PostProcess;
+        smaaPasses?: BABYLON.PostProcess[];
+        /** This record took one `SmaaTextures` reference (released by `disposeAntialiasingPasses` / `releaseStacks`). */
+        smaaTextures?: boolean;
+        /** camera-antialiasing-taa: the TAA resolve pass (head), its history copy pass, and the RCAS tail pass (URP / HDRP). */
+        taaPass?: BABYLON.PostProcess;
+        taaPasses?: BABYLON.PostProcess[];
+        taaSharpenPass?: BABYLON.PostProcess;
+        /** Render-target type the AA passes were created with. */
+        textureType?: number;
+        /** `allowhdr` of the camera (for a pipeline created by a live switch). */
+        hdr?: boolean;
+        /** "chain" | "prepass" | "canvas" | "none". */
+        msaaTarget?: string;
     }
     /**
      * Post-processing volume component (Unity PostProcessVolume / Volume). One instance is attached per
@@ -16723,13 +20889,17 @@ declare namespace TOOLKIT {
             registered: boolean;
         };
         /**
-         * Chain slots of the owned plugin passes, Unity's order (lower renders first, spit-and-polish FR-2): motion blur
+         * Chain slots of the owned plugin passes, Unity's order (lower renders first, spit-and-polish FR-2): TAA (camera-antialiasing-taa, first like Unity), motion blur, auto exposure (auto-exposure-parity: PPv2 meters after motion blur and exposes before the Uber effects)
          * and lens distortion (Unity's separate passes before Uber), then the Uber order chromatic aberration, the tinted
          * bloom chain, vignette, grain, and the HDR grading pass or the LDR colour filter. Every owned pass registers its
          * slot when created (`registerPass`); the whole group precedes the DefaultRenderingPipeline passes.
          */
         static readonly HeadSlots: {
+            graphBeforePost: number;
+            taa: number;
+            smaa: number;
             motionBlur: number;
+            autoExposure: number;
             lensDistortion: number;
             chromaticAberration: number;
             bloom: number;
@@ -16745,8 +20915,16 @@ declare namespace TOOLKIT {
          * always last. A slot at or above `TailSlotBase` is a tail slot; everything below is a `HeadSlots` slot.
          */
         static readonly TailSlotBase: number;
+        /**
+         * shadergraph-transpiler-complete-coverage D30 (T28): a Shader Graph fullscreen pass at URP AfterRenderingPostProcessing / HDRP
+         * AfterPostProcess registers in `graphAfterPost` (100), after the post stack and BEFORE the final pass that applies FXAA / SMAA /
+         * TAA sharpening (101, their order to each other unchanged); a BeforeRenderingPostProcessing pass is `HeadSlots.graphBeforePost` (2).
+         */
         static readonly TailSlots: {
+            graphAfterPost: number;
             fxaa: number;
+            smaa: number;
+            taaSharpen: number;
         };
         /** Whether `slot` belongs to the tail group (`TailSlots`) rather than the head group (`HeadSlots`). */
         static IsTailSlot(slot: number): boolean;
@@ -16772,6 +20950,7 @@ declare namespace TOOLKIT {
         private orchestrator;
         private applied;
         private readyCalled;
+        private cameraOwner;
         private stacks;
         private defaultRenderPipeline;
         private screenSpaceAOPipeline;
@@ -16814,10 +20993,15 @@ declare namespace TOOLKIT {
         private chromaticAberrations;
         private grains;
         private hdrGradings;
+        /** T12.3 (D47): the tone mapper per URP LogC grading camera (see IPostProcessToneMapperRecord). */
+        private toneMappers;
         private pluginTextures;
         private depthOfFields;
         private motionBlurs;
         private lensDistortions;
+        /** auto-exposure-parity: one record per camera whose PPv2 AutoExposure renders, and the gate outcome of every camera that carried one (listing reasons). */
+        private autoExposures;
+        private autoExposureGates;
         /** Inspector-truth T3: the Unity lens-distortion settings object SHARED per camera by the lens pass and the vignette pass (built once per apply). */
         private lensUnitySettings;
         private antialiasings;
@@ -16969,6 +21153,55 @@ declare namespace TOOLKIT {
         };
         private applyStack;
         /**
+         * shadergraph-transpiler-complete-coverage D30 (T28): the scene's Shader Graph fullscreen passes (scene metadata renderfeatures) on
+         * `camera`: BeforeRenderingPostProcessing -> `HeadSlots.graphBeforePost`, AfterRenderingPostProcessing -> `TailSlots.graphAfterPost`,
+         * ties in Unity's feature order. Any pass the runtime attached before this component took the camera over is released first.
+         */
+        protected applyGraphPasses(camera: BABYLON.Camera, textureType: number): void;
+        /** Attaches every queued plugin pass (after all pipeline properties of the stack were written). */
+        private drainPendingPlugins;
+        /**
+         * Camera anti-aliasing (camera-antialiasing-parity Phase 1 + camera-antialiasing-taa). Every mode belongs to the Unity
+         * CAMERA and runs whether or not a volume renders:
+         * - Modes (exported as the mode Unity renders, the authored one beside it): 0 None, 1 FXAA, 2 SMAA, 3 TAA, 4 MSAA only.
+         *   Unity's gating is applied by the exporter (PPv2 layer enabled; URP post-processing, overlay-inherits-base, TAA off
+         *   under MSAA / stacking / dynamic resolution; HDRP Postprocess frame setting, TAAU); an authored TAA that Unity turns
+         *   off warns once and nothing substitutes for it.
+         * - FXAA: PPv2 = FXAA 3.11 preset 28 (12 in fastMode, keepAlpha honoured); URP = FXAA 3.11 preset 12 (subpix 0.65,
+         *   thresholds 0.15 / 0.03); HDRP = the single-pass lite FXAA (span 8). Always the tail of the chain.
+         * - SMAA: Unity's SMAA 1x (Low / Medium / High presets as uniforms) with its AreaTex / SearchTex shipped in the
+         *   runtime. PPv2: tail, edges and blending on linear colour. URP / HDRP: head (before motion blur, bloom and
+         *   grading), HDR linear colour, gamma (1/2.2) edge detection; on an 8-bit chain (every HDRP export today) the passes
+         *   see tonemapped, display-encoded colour, so edges run on it directly and blending decodes to linear.
+         * - TAA (TOOLKIT.TaaPlugin): per-camera projection jitter (PPv2 8-sample Halton x jitterSpread, URP / HDRP 1024-sample
+         *   Halton x jitterScale, never off while moving, re-applied after every projection rebuild inside the camera render),
+         *   prepass velocity (always the 8-bit velocity texture object motion blur also uses, plus depth; saturated texels
+         *   resolve as static) with closest-depth dilation where the quality row enables it, a half-float history per
+         *   camera (float, else 8-bit, where half-float targets are unsupported). Head of the chain (after SSAO2 /
+         *   SSR, before motion blur). Resolve per pipeline: PPv2 = its knobs on the URP High resolve (reduced scope, D29);
+         *   URP = the authored quality (VeryLow..VeryHigh: neighbourhood, variance clip, motion dilation, bicubic
+         *   history, central filter, YCoCg / perceptual weighting by frameInfluence) + RCAS tail pass for contrast-adaptive
+         *   sharpening; HDRP = the closest URP-equivalent resolve, current weight 1 - baseBlendFactor, sharpenStrength.
+         *   History resets on camera cuts / teleports, re-enable, resize and PostProcessor.Instance.ResetHistory(camera?).
+         * - MSAA: from each pipeline's real source (HDRP frame settings, URP asset / renderer / target texture, Built-in
+         *   quality level); on the chain head and the prepass, or on the canvas (engine antialias) for a camera with no chain.
+         * - Placement: a camera with AA but no volume stack renders through its existing pipeline or an owned one whose only
+         *   other pass is image processing; the Inspector row switches None / FXAA / SMAA / TAA live and edits every TAA knob,
+         *   and neutralises (never detaches) on the effect switch.
+         * Accepted deviations: image processing moves into the post chain on AA-only cameras; the dither runs ahead of the
+         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; HDRP exports keep allowhdr false (an HDR chain
+         * renders HDRP's physical-unit exposure black until pre-exposure lands), so HDRP anti-aliasing runs on the 8-bit
+         * display-encoded chain; a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
+         * the canvas MSAA of the project's Antialias Mode; URP's HDR-display FXAA branch and HDRP's alpha / dynamic-resolution
+         * FXAA paths are not ported; TAA: URP runs DoF after TAA, URP mipBias is not applied (no sampler LOD bias), HDRP
+         * anti-flicker / motion-vector rejection / anti-ringing / ringing reduction / post-DoF TAA are not expressed, velocity
+         * misses bone-texture skinning, morph and VAT deformation (warned once), additive surfaces with partial alpha can
+         * write bogus velocity (only fully saturated texels are caught), screen-space in-scene GUI goes through the post chain
+         * (TAA + motion blur) and can trail 2-3 px while moving (Unity's overlay canvas does not), PPv2 sharpness /
+         * motionBlending have no effect under the reduced scope, RCAS runs on display-encoded tail colour.
+         */
+        private applyCameraAntialiasing;
+        /**
          * Artifact-cleanup T5: the texture type of the passes a camera stack creates. HALF_FLOAT when `HalfFloatChain` is set,
          * the camera allows HDR (`allowhdr`, default true, the same flag that makes the DefaultRenderingPipeline HDR) and the
          * engine renders to half float; FLOAT when only full float is renderable; otherwise Babylon's 8-bit default.
@@ -16986,16 +21219,54 @@ declare namespace TOOLKIT {
          */
         static DeriveStackFlags(model: TOOLKIT.IPostProcessModel, metadata: TOOLKIT.IPostProcessCameraMetadata): TOOLKIT.IPostProcessStackFlags;
         /**
-         * FR-16 / final-verification F-6: antialiasing from the camera metadata (the HDR flag was consumed when the pipeline
-         * was created). Without an `antialiasing` key (legacy export) nothing is written; otherwise `samples` follows
-         * `msaasamples`, and FXAA / SMAA / TAA render through the toolkit's Unity FXAA 3.11 port (`FxaaPlugin`: Unity's
-         * FinalPass, quality preset 28, or the fast preset 12 when `fastMode` is set -- a layer setting the export does not
-         * carry, so false) as the ONE tail pass group of the chain (`TailSlots.fxaa`, queued through `pendingPlugins` at the
-         * chain texture type like every plugin pass). The pipeline's own `fxaaEnabled` is written FALSE whenever that pass
-         * renders. When the plugin class is absent (a sandbox without it) the pipeline's Babylon FXAA is enabled instead, as
-         * before F-6. `None` enables nothing.
+         * Camera anti-aliasing (camera-antialiasing-parity Phase 1 + camera-antialiasing-taa). Every mode belongs to the Unity
+         * CAMERA and runs whether or not a volume renders:
+         * - Modes (exported as the mode Unity renders, the authored one beside it): 0 None, 1 FXAA, 2 SMAA, 3 TAA, 4 MSAA only.
+         *   Unity's gating is applied by the exporter (PPv2 layer enabled; URP post-processing, overlay-inherits-base, TAA off
+         *   under MSAA / stacking / dynamic resolution; HDRP Postprocess frame setting, TAAU); an authored TAA that Unity turns
+         *   off warns once and nothing substitutes for it.
+         * - FXAA: PPv2 = FXAA 3.11 preset 28 (12 in fastMode, keepAlpha honoured); URP = FXAA 3.11 preset 12 (subpix 0.65,
+         *   thresholds 0.15 / 0.03); HDRP = the single-pass lite FXAA (span 8). Always the tail of the chain.
+         * - SMAA: Unity's SMAA 1x (Low / Medium / High presets as uniforms) with its AreaTex / SearchTex shipped in the
+         *   runtime. PPv2: tail, edges and blending on linear colour. URP / HDRP: head (before motion blur, bloom and
+         *   grading), HDR linear colour, gamma (1/2.2) edge detection; on an 8-bit chain (every HDRP export today) the passes
+         *   see tonemapped, display-encoded colour, so edges run on it directly and blending decodes to linear.
+         * - TAA (TOOLKIT.TaaPlugin): per-camera projection jitter (PPv2 8-sample Halton x jitterSpread, URP / HDRP 1024-sample
+         *   Halton x jitterScale, never off while moving, re-applied after every projection rebuild inside the camera render),
+         *   prepass velocity (always the 8-bit velocity texture object motion blur also uses, plus depth; saturated texels
+         *   resolve as static) with closest-depth dilation where the quality row enables it, a half-float history per
+         *   camera (float, else 8-bit, where half-float targets are unsupported). Head of the chain (after SSAO2 /
+         *   SSR, before motion blur). Resolve per pipeline: PPv2 = its knobs on the URP High resolve (reduced scope, D29);
+         *   URP = the authored quality (VeryLow..VeryHigh: neighbourhood, variance clip, motion dilation, bicubic
+         *   history, central filter, YCoCg / perceptual weighting by frameInfluence) + RCAS tail pass for contrast-adaptive
+         *   sharpening; HDRP = the closest URP-equivalent resolve, current weight 1 - baseBlendFactor, sharpenStrength.
+         *   History resets on camera cuts / teleports, re-enable, resize and PostProcessor.Instance.ResetHistory(camera?).
+         * - MSAA: from each pipeline's real source (HDRP frame settings, URP asset / renderer / target texture, Built-in
+         *   quality level); on the chain head and the prepass, or on the canvas (engine antialias) for a camera with no chain.
+         * - Placement: a camera with AA but no volume stack renders through its existing pipeline or an owned one whose only
+         *   other pass is image processing; the Inspector row switches None / FXAA / SMAA / TAA live and edits every TAA knob,
+         *   and neutralises (never detaches) on the effect switch.
+         * Accepted deviations: image processing moves into the post chain on AA-only cameras; the dither runs ahead of the
+         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; HDRP exports keep allowhdr false (an HDR chain
+         * renders HDRP's physical-unit exposure black until pre-exposure lands), so HDRP anti-aliasing runs on the 8-bit
+         * display-encoded chain; a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
+         * the canvas MSAA of the project's Antialias Mode; URP's HDR-display FXAA branch and HDRP's alpha / dynamic-resolution
+         * FXAA paths are not ported; TAA: URP runs DoF after TAA, URP mipBias is not applied (no sampler LOD bias), HDRP
+         * anti-flicker / motion-vector rejection / anti-ringing / ringing reduction / post-DoF TAA are not expressed, velocity
+         * misses bone-texture skinning, morph and VAT deformation (warned once), additive surfaces with partial alpha can
+         * write bogus velocity (only fully saturated texels are caught), screen-space in-scene GUI goes through the post chain
+         * (TAA + motion blur) and can trail 2-3 px while moving (Unity's overlay canvas does not), PPv2 sharpness /
+         * motionBlending have no effect under the reduced scope, RCAS runs on display-encoded tail colour.
          */
-        protected applyAntialiasing(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, metadata: TOOLKIT.IPostProcessCameraMetadata, textureType?: number): void;
+        protected applyAntialiasing(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, metadata: TOOLKIT.IPostProcessCameraMetadata, textureType?: number, fallbackPipeline?: string): void;
+        private attachAntialiasingPasses;
+        private disposeAntialiasingPasses;
+        private antialiasingRecordOf;
+        private static AntialiasingUnity;
+        /** DEC-6: the chain's HDR flag -- a pipeline's own `_hdr` (it may be reused, built by someone else) wins over the camera's `allowhdr`. */
+        static ChainHdr(pipeline: BABYLON.DefaultRenderingPipeline, hdr: boolean): boolean;
+        /** The canvas's own MSAA (engine creation option `antialias`); null when the engine does not say. */
+        static CanvasAntialias(scene: BABYLON.Scene): boolean;
         /**
          * FR-1: `DefaultRenderingPipeline.samples` only reaches the passes the pipeline itself owns, and only the pass that
          * LEADS a camera's chain renders into a multisampled target at all (every later pass reads an already resolved
@@ -17019,18 +21290,7 @@ declare namespace TOOLKIT {
          */
         static StripLacksToneMapper(lut: TOOLKIT.IPostProcessLutReference): boolean;
         /** Antialiasing flags written per camera (read-backs / tests). */
-        GetAntialiasings(): {
-            pipeline: BABYLON.DefaultRenderingPipeline;
-            camera: BABYLON.Camera;
-            mode: number;
-            fxaa: boolean;
-            samples: number;
-            firstPass: BABYLON.PostProcess;
-            prePassSamples?: number;
-            fxaaPass?: BABYLON.PostProcess;
-            lumaPass?: BABYLON.PostProcess;
-            fast?: boolean;
-        }[];
+        GetAntialiasings(): TOOLKIT.IPostProcessAntialiasingRecord[];
         /**
          * FR-19 .. FR-25 / FR-9: colour grading. Only OVERRIDDEN fields are written, to the pipeline's shared image
          * processing configuration (`scene.imageProcessingConfiguration`, which materials and the pipeline's
@@ -17056,6 +21316,62 @@ declare namespace TOOLKIT {
          * URP still neutralise to 1: their post exposure rides the `2^postExposure` uniform on the grading pass instead.
          */
         protected applyHdrColorGrading(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, imaging: BABYLON.ImageProcessingConfiguration, textureType: number): void;
+        /** SRP `Tonemapping.mode` names in enum order (the three the Inspector switches between come first). */
+        static readonly SrpToneMapperNames: string[];
+        /**
+         * How long (ms) after the scene is ready a URP grading pass may stay absent or not ready before Babylon's native
+         * mapper takes over for good (with one warning). The native mapper already renders during that window.
+         */
+        static ToneMapperFallbackDelay: number;
+        /** Clock (ms) of the fallback check (replaceable by tests). */
+        static ToneMapperClock: () => number;
+        /**
+         * The tone-mapper mode baked into a strip: the `tonemapper:<mode>` entry of `lut.operators`, else (an older export
+         * without a list, or a strip baked without its mapper) the family's authored `tonemapper`. Pure.
+         */
+        static BakedToneMapperMode(lut: TOOLKIT.IPostProcessLutReference, family: TOOLKIT.IPostProcessEffectModel): number;
+        /** The tone mappers of the URP LogC grading stacks (read-backs / tests / Inspector, T12.3). */
+        GetToneMappers(): TOOLKIT.IPostProcessToneMapperRecord[];
+        /**
+         * The record of a URP LogC grading stack (null for Built-in and HDRP, which keep their paths unchanged). While the
+         * strip loads, Babylon's native mapper for the baked mode renders, so the frame is never left un-tone-mapped; the
+         * check armed here keeps it for good (one warning) when the pass is not active once the scene is ready.
+         */
+        protected createToneMapperRecord(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, lut: TOOLKIT.IPostProcessLutReference, state: TOOLKIT.IPostProcessColorGradingState, imaging: BABYLON.ImageProcessingConfiguration): TOOLKIT.IPostProcessToneMapperRecord;
+        /** Babylon's native mapper for `mode` (SRP enum through `toneMapperFromSRP`) on the stack's image processing; state.expected follows. */
+        protected writeNativeToneMapper(record: TOOLKIT.IPostProcessToneMapperRecord, mode: number): void;
+        /** The strip renders the mapper: native tone mapping off (kept on only for a strip baked without its mapper). */
+        protected writeStripToneMapper(record: TOOLKIT.IPostProcessToneMapperRecord, mode: number): void;
+        /** The grading pass arrived: bind the exported strip (or honour an Inspector edit made while it loaded). */
+        protected bindToneMapperPass(record: TOOLKIT.IPostProcessToneMapperRecord, post: BABYLON.PostProcess, texture: BABYLON.BaseTexture): void;
+        /**
+         * The never-silent fallback (D47): the LUT failed, or the pass is still absent / not ready `ToneMapperFallbackDelay`
+         * ms after the scene became ready. Babylon's native mapper for the same mode renders (it already stood in while
+         * loading), a pass that never became ready is detached, and ONE warning names the cause.
+         */
+        protected failToneMapper(record: TOOLKIT.IPostProcessToneMapperRecord, reason: string): void;
+        /** Babylon's ImageProcessingConfiguration tone-mapping type as a name. Pure. */
+        static NativeToneMapperName(type: number): string;
+        /**
+         * Arms the fallback check: once the scene is ready, each frame asks `CheckToneMapper` until the pass is ready or the
+         * delay ran out. The observer removes itself; a released stack marks its records failed, which ends the check too.
+         */
+        protected armToneMapperFallback(record: TOOLKIT.IPostProcessToneMapperRecord): void;
+        /**
+         * One fallback check (true = done, stop checking): the pass is ready, or the record is finished (failed, released),
+         * or -- `readyAt` ms being the moment the scene became ready (-1 = not yet) -- the delay ran out, which falls back.
+         */
+        CheckToneMapper(record: TOOLKIT.IPostProcessToneMapperRecord, readyAt: number): boolean;
+        /**
+         * Inspector (D47): switches the tone mapper of `camera`'s URP grading stack live -- 0 None, 1 Neutral, 2 ACES. The baked
+         * mode rebinds the exported strip; another mode rebinds the strip the exporter baked for it (`lut.variants`) or, when
+         * there is none, bypasses the strip and lets Babylon's native mapper for that mode render. False when the camera has
+         * no URP grading stack. Nothing re-asserts the exported mode afterwards.
+         */
+        SetToneMapper(camera: BABYLON.Camera, mode: number): boolean;
+        protected applyToneMapperMode(record: TOOLKIT.IPostProcessToneMapperRecord, mode: number): void;
+        /** The Inspector's one-line account of a tone-mapper record (mode, what renders it, and the grading order). Pure. */
+        static ToneMapperLabel(record: TOOLKIT.IPostProcessToneMapperRecord): string;
         /**
          * Artifact-cleanup T3: final-pass dithering on every stack. Writes `ditheringEnabled` (`PostProcessor.Dithering`) and
          * `ditheringIntensity` (`PostProcessingConversions.DitheringIntensity`) through the shared image processing
@@ -17063,7 +21379,9 @@ declare namespace TOOLKIT {
          * camera's colour-grading state so `verifyColorGrading` guards them like every other grading value; a stack without a
          * colour-grading family gets a minimal state record (no LUT, LDR) for that purpose.
          */
-        protected applyDithering(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline): void;
+        protected applyDithering(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, metadata?: TOOLKIT.IPostProcessCameraMetadata): void;
+        /** T12.3 (D47): whether a camera's final pass dithers -- `PostProcessor.Dithering` AND the camera's exported URP flag (absent = on). Pure. */
+        static DitheringEnabledFor(metadata: TOOLKIT.IPostProcessCameraMetadata): boolean;
         /** The dither values written per camera (read-backs / tests, artifact-cleanup T3). */
         GetDitherings(): {
             camera: BABYLON.Camera;
@@ -17119,7 +21437,7 @@ declare namespace TOOLKIT {
          * strip layout (it calls textureSample(texture_2d, sampler, vec3, vec2), a WGSL parse error), and a volume
          * gives the same hardware trilinear filtering Unity uses. The strip itself is bound only as the fallback.
          */
-        protected requestLutTexture(lut: TOOLKIT.IPostProcessLutReference, apply: (texture: BABYLON.BaseTexture) => void): void;
+        protected requestLutTexture(lut: TOOLKIT.IPostProcessLutReference, apply: (texture: BABYLON.BaseTexture) => void, failed?: () => void): void;
         /**
          * Loads (once per url per instance) a plugin texture, for example the exported chromatic-aberration spectral LUT,
          * with the documented settings (no mipmaps, invertY false, bilinear, clamp, linear) and hands it to `apply` once
@@ -17321,6 +21639,13 @@ declare namespace TOOLKIT {
          */
         protected applyLensDistortion(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
         /**
+         * auto-exposure-parity: PPv2 `AutoExposure` (Built-in only). Two owned head passes at `HeadSlots.autoExposure` -- the
+         * meter (a copy whose after-render runs the GPU histogram, average and adaptation) and the apply (colour x exposure) --
+         * so the frame is exposed after motion blur and before lens distortion, chromatic aberration, bloom, vignette, grain
+         * and grading, as PPv2's Uber does. `PostProcessingConversions.autoExposureGate` decides first (FR-9, FR-13).
+         */
+        protected applyAutoExposure(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /**
          * The LensDistortionPlugin options of a lens-distortion family (pure per model): null when the family is missing,
          * inactive or resolves to a zero intensity (no pass). Shared by the lens applier and the vignette (which follows
          * Unity's uvDistorted, spit-and-polish T18).
@@ -17459,6 +21784,7 @@ declare namespace TOOLKIT {
         private numberField;
         private switchField;
         private textField;
+        private dropdownField;
         /** Three sRGB 0..1 number rows (r, g, b) on a colour array plus a read-only hex text row. */
         private colorFields;
         /** The Unity enum name of a field value (`{ value, name }` envelopes) or its number as text. */
@@ -17474,12 +21800,26 @@ declare namespace TOOLKIT {
         private listDepthOfField;
         private listMotionBlur;
         private listLensDistortion;
+        private listAutoExposure;
         private listAmbientOcclusion;
         private listScreenSpaceReflections;
         private listSharpen;
         private listAntialiasing;
         /** The families `SetEffectEnabled` understands (the listing's families plus the camera-level antialiasing row). */
         static readonly ToggleFamilies: string[];
+        /**
+         * camera-antialiasing-parity D17: switches a camera's anti-aliasing live -- 0 None (neutralises the current passes),
+         * 1 FXAA, 2 SMAA (the pipeline's own variant and placement), 3 TAA (camera-antialiasing-taa D20: the exported
+         * `taaSettings`, else the pipeline's Unity defaults). Returns false for an unknown camera or mode, and for TAA when
+         * `TaaPlugin.IsSupported` is false.
+         */
+        SetAntialiasingMode(camera: BABYLON.Camera, mode: number): boolean;
+        /**
+         * PPv2 `PostProcessLayer.ResetHistory()` (camera-antialiasing-taa FR-10, auto-exposure-parity FR-6): the next frame of
+         * `camera` (every camera when omitted) starts a new TAA history and snaps its auto exposure to the target -- for cuts the
+         * toolkit cannot detect (a scripted cut, a teleport). Returns how many TAA and auto-exposure records were reset.
+         */
+        ResetHistory(camera?: BABYLON.Camera): number;
         /**
          * Enables / disables one effect family on `camera` without a re-export (FR-11). Returns true when the family had
          * something to toggle on that camera (an owned pass, a pipeline flag or a screen-space pipeline); false otherwise.
@@ -17627,6 +21967,26 @@ declare namespace TOOLKIT {
          * the list, which is exactly how the runtime tells "this value was baked" from "this export never baked it".
          */
         operators?: string[];
+        /**
+         * Unity terrain parity T12.3 (D47): the URP asset's `colorGradingMode` the strip was baked for
+         * ("LowDynamicRange" / "HighDynamicRange"). ABSENT on HDRP / PPv2 strips and on older exports, which keep
+         * today's HDR reading exactly.
+         */
+        gradingmode?: string;
+        /**
+         * T12.3 (D47): the order the strip carries -- "ldr" = URP's LDR grading order (tone map first, then the LDR
+         * grade, `Common.hlsl` ApplyColorGrading `#else` branch) composited into the LogC-indexed strip; "hdr" = the
+         * LogC order of `LutBuilderHdr` (grade, then tone map). Absent on older exports (HDR order).
+         */
+        lutorder?: string;
+        /**
+         * T12.3 (D47): the same grade baked with each OTHER tone mapper the Inspector can switch to, keyed by the SRP
+         * mode name ("None" / "Neutral" / "ACES"), each a strip reference of its own (no nested variants). Absent on
+         * older exports: the Inspector switch then falls back to Babylon's native mapper for the chosen mode.
+         */
+        variants?: {
+            [mode: string]: IPostProcessLutReference;
+        };
     }
     /** One effect of a volume profile (FR-3). `parameters` keys are the Unity field names lowercased. */
     interface IPostProcessEffect {
@@ -17686,6 +22046,62 @@ declare namespace TOOLKIT {
          */
         physicalaperture?: number;
         physicalfocallength?: number;
+        /** camera-antialiasing-parity D6 (absent on older exports). */
+        antialiasingsettings?: IPostProcessAntialiasingSettings;
+        /**
+         * Unity terrain parity T12.3 (D47): URP's per-camera `UniversalAdditionalCameraData.dithering` (the Uber / final
+         * pass `_DITHERING` keyword). Written for URP cameras only; absent (PPv2 / HDRP / older exports) keeps the
+         * always-on final-pass dither.
+         */
+        dithering?: boolean;
+    }
+    /**
+     * camera-antialiasing-parity D6: the per-mode anti-aliasing settings the exporter writes next to `antialiasing` /
+     * `msaasamples`, values exactly as authored in Unity. Absent on older exports (Unity defaults apply, D6).
+     */
+    interface IPostProcessAntialiasingSettings {
+        /** "BuiltIn" | "URP" | "HDRP"; normalised through `PostProcessingContract.volumeType` at use (fails closed to Built-in). */
+        pipeline?: string;
+        /** The camera's own mode before Unity's gating (0 None, 1 FXAA, 2 SMAA, 3 TAA). */
+        authored?: IPostProcessEnumValue;
+        /** D8 reason code when Unity's gating changed the mode ("postprocessing-off", "msaa", "stacked", "dynamic-resolution", "overlay-base", "renderer-no-aa", "taau"); null otherwise. */
+        gated?: string;
+        /** PPv2 `fastApproximateAntialiasing.fastMode`. */
+        fxaafastmode?: boolean;
+        /** PPv2 `fastApproximateAntialiasing.keepAlpha`. */
+        fxaakeepalpha?: boolean;
+        /** SMAA quality: 0 Low, 1 Medium, 2 High (PPv2 `quality`, URP `antialiasingQuality`, HDRP `SMAAQuality`). */
+        smaaquality?: number;
+        /** camera-antialiasing-taa D15 (only when the authored mode is TAA). */
+        taa?: IPostProcessTaaSettings;
+    }
+    /**
+     * camera-antialiasing-taa D15: the camera's TAA settings as authored in Unity -- only the exported pipeline's keys.
+     * Absent on older exports and on cameras not authored TAA (Unity defaults apply).
+     */
+    interface IPostProcessTaaSettings {
+        /** PPv2 temporalAntialiasing. */
+        jitterspread?: number;
+        sharpness?: number;
+        stationaryblending?: number;
+        motionblending?: number;
+        /** URP 0 VeryLow..4 VeryHigh / HDRP 0 Low..2 High. */
+        quality?: number;
+        /** URP taaSettings (jitterscale also HDRP taaJitterScale). */
+        frameinfluence?: number;
+        jitterscale?: number;
+        mipbias?: number;
+        varianceclampscale?: number;
+        contrastadaptivesharpening?: number;
+        /** HDRP HDAdditionalCameraData. */
+        sharpenstrength?: number;
+        sharpenmode?: number;
+        historysharpening?: number;
+        antiflicker?: number;
+        motionvectorrejection?: number;
+        antihistoryringing?: boolean;
+        baseblendfactor?: number;
+        ringingreduction?: number;
     }
     /**
      * The PPv2 SSR rendering-path gate of one camera (spit-and-polish FR-8, read-backs / tests): `renderingpath` as exported
@@ -17885,6 +22301,11 @@ declare namespace TOOLKIT {
         private static createFamily;
         private static parseLut;
         /**
+         * T12.3 (D47): the URP colour-grading mode a (blended) model's strip was baked for -- "LowDynamicRange" or
+         * "HighDynamicRange" -- or undefined when the export does not say (PPv2, HDRP, older exports).
+         */
+        static srpGradingMode(model: IPostProcessModel): string;
+        /**
          * A texture parameter exported to the assets folder (`{ url, type, width, height, exported }`), e.g. the
          * chromatic-aberration `spectrallut` (spit-and-polish FR-4). Returns null for `null` / non-objects / entries
          * without a url (an un-authored texture parameter is exported as null).
@@ -17944,6 +22365,14 @@ declare namespace TOOLKIT {
          * all are false, nothing (Unity semantics) with a warning.
          */
         static selectCameras(cameras: IPostProcessCameraCandidate[]): IPostProcessCameraSelection;
+        /** camera-antialiasing-parity D10: a PostProcessor component the exporter wrote to own a camera's anti-aliasing (not a volume). */
+        static isCameraOwner(props: any): boolean;
+        /**
+         * camera-antialiasing-parity D11: cameras outside the volume selection that still carry anti-aliasing work -- their
+         * metadata says `postprocessing: false` (Unity renders no post stack) with `msaasamples > 1` (MSAA only). They get
+         * a listing row and canvas MSAA, never a volume stack.
+         */
+        static selectAntialiasingCameras(cameras: IPostProcessCameraCandidate[], selection: IPostProcessCameraSelection): IPostProcessCameraCandidate[];
         static isNumber(v: any): boolean;
         static clone(v: any): any;
         /** Convenience: the field value of a family, or the family default when the family is absent. */
@@ -18012,14 +22441,49 @@ declare namespace TOOLKIT {
         blurDispersionStrength?: number;
         enableSmoothReflections?: boolean;
     }
-    /** Antialiasing flags derived from the camera metadata (FR-16). */
+    /** Antialiasing derived from the camera metadata (FR-16; camera-antialiasing-parity D6, D7, D12, D15, D20). */
     interface IPostProcessAntialiasing {
-        /** FXAA / SMAA / TAA: the toolkit's Unity FXAA 3.11 tail pass renders (final-verification F-6). */
+        /** Mode 1: an FXAA pair renders. */
         fxaa: boolean;
-        /** PPv2 `PostProcessLayer.fastMode` (FXAA quality preset 12 instead of 28): a layer setting the camera export does not carry, so always false. */
+        /** PPv2 `fastMode` (preset 12); only for the `ppv2` variant of mode 1. */
         fast: boolean;
+        /** MSAA sample count (>= 1). */
         samples: number;
+        /** Effective mode 0 None, 1 FXAA, 2 SMAA, 3 TAA, 4 MSAA only. */
         mode: number;
+        /** Mode 2: the toolkit SMAA renders. */
+        smaa: boolean;
+        /** PPv2 `keepAlpha`; only for the `ppv2` variant of mode 1. */
+        keepAlpha: boolean;
+        /** SMAA quality 0 Low, 1 Medium, 2 High (default 2). */
+        smaaQuality: number;
+        /** The camera's own mode before Unity's gating (defaults to `mode`). */
+        authoredMode: number;
+        /** D8 reason code or null. */
+        gated: string;
+        /** Normalised "BuiltIn" | "URP" | "HDRP" (D20). */
+        pipeline: string;
+        /** "ppv2" | "urp" | "hdrp" when an FXAA pair renders, else null. */
+        fxaaVariant: string;
+        /** camera-antialiasing-taa D16: mode 3 renders TAA. */
+        taa: boolean;
+        /** Resolved TAA settings (Unity defaults filled, clamped) for mode 3, else null. */
+        taaSettings: any;
+    }
+    /** Where and how the anti-aliasing passes of one camera render (D12). */
+    interface IPostProcessAntialiasingPlan {
+        /** "none" | "fxaa" | "smaa" | "taa". */
+        plugin: string;
+        /** "head" | "tail" | null. */
+        slot: string;
+        /** URP / HDRP rules (SMAA gamma edge taps). */
+        srp: boolean;
+        /** The pass input is display-encoded (after image processing): true for every tail pass. */
+        inputEncoded: boolean;
+        /** FXAA variant or null. */
+        fxaaVariant: string;
+        /** "ppv2" | "urp" | "hdrp" when TAA renders, else null. */
+        taaVariant: string;
     }
     /**
      * Unity -> Babylon post-processing value conversions (FR-18). Every conversion is a pure static
@@ -18445,16 +22909,53 @@ declare namespace TOOLKIT {
          * ssrRoughnessBlur), with the blur itself enabled like every other SSR pipeline the volume creates.
          */
         static ssrFromHdrp(rayMaxIterations: number, minSmoothness: number, screenFadeDistance: number): IPostProcessSsr;
+        /** Mode names by effective mode index (0..4). */
+        static readonly AntialiasingModeNames: string[];
+        /** D8 reason code -> the words the warning and the Inspector use. */
+        static readonly AntialiasingGateReasons: {
+            [code: string]: string;
+        };
         /**
-         * Camera antialiasing metadata (PPv2 / URP enum: None=0, FXAA=1, SMAA=2, TAA=3) and MSAA sample count ->
-         * `{ fxaa, fast, samples, mode }`. FXAA / SMAA / TAA -> `fxaa` true: rendered by the toolkit's Unity FXAA 3.11 tail
-         * pass (`FxaaPlugin`, final-verification F-6; SMAA / TAA have no screen-space counterpart and are an accepted
-         * deviation, `mode` is preserved so the listing can name them). `fast` is PPv2's `PostProcessLayer.fastMode`
-         * (quality preset 12 with the FXAA_LOW thresholds instead of preset 28) -- a LAYER setting the camera export does
-         * not carry (`FastApproximateAntialiasing.cs` lives on the layer, not the camera), so it is always false and nothing
-         * is warned. `samples` always follows msaasamples (>= 1). None enables nothing.
+         * Camera anti-aliasing metadata -> what renders (camera-antialiasing-parity D6, D7, D12, D15, D20). `mode` is the
+         * EFFECTIVE mode the exporter wrote (0 None, 1 FXAA, 2 SMAA, 3 TAA, 4 MSAA only; anything else -> 0). Mode 2 is real
+         * SMAA; mode 3 renders TAA (camera-antialiasing-taa; its settings from `settings.taa`, else Unity's defaults). `settings` (absent on older exports)
+         * carries the authored mode, Unity's gating reason and the per-mode values; missing values are Unity's defaults
+         * (SMAA High, fastMode / keepAlpha off). The pipeline is `settings.pipeline`, else `fallbackPipeline` (the camera's
+         * stack volumetype), normalised through the firewall (fails closed to "BuiltIn").
          */
-        static antialiasingFromMetadata(mode: number, msaaSamples: number): IPostProcessAntialiasing;
+        static antialiasingFromMetadata(mode: number, msaaSamples: number, settings?: TOOLKIT.IPostProcessAntialiasingSettings, fallbackPipeline?: string): IPostProcessAntialiasing;
+        /** D15: the FXAA variant a normalised pipeline renders. */
+        static fxaaVariantOf(pipeline: string): string;
+        /** camera-antialiasing-taa D6/D15: the TAA variant of a normalised pipeline. */
+        static taaVariantOf(pipeline: string): string;
+        /** camera-antialiasing-taa D15/FR-12: the exported TAA settings resolved to Unity's defaults and ranges (every knob of every pipeline present). */
+        static taaSettingsFromMetadata(pipeline: string, raw?: any): any;
+        /** camera-antialiasing-taa D19: the TAA line of the Inspector's algorithm row. */
+        static taaAlgorithmLabel(settings: any): string;
+        /**
+         * D12 (+ DEC-6): where the passes go and how their input is encoded. `hdr` (default true) is the camera chain's HDR:
+         * on an 8-bit chain (`hdr` false) Babylon applies image processing in the MATERIALS, so every AA pass -- head or
+         * tail -- receives tonemapped, display-encoded colour (`inputEncoded = slot === "tail" || !hdr`).
+         */
+        static antialiasingPlan(aa: IPostProcessAntialiasing, hdr?: boolean): IPostProcessAntialiasingPlan;
+        /** FR-14: the Inspector's mode label ("MSAA" for MSAA only, "TAA" for mode 3). */
+        static antialiasingModeLabel(aa: IPostProcessAntialiasing): string;
+        /** FR-14: "<authored> in Unity -> <effective>: <reason>" when Unity's gating changed the mode, else null. */
+        static antialiasingAuthoredLabel(aa: IPostProcessAntialiasing): string;
+        /** D8 reason code -> words ("Unity disabled it for this camera" for null / unknown codes). */
+        static antialiasingGateText(code: string): string;
+        /** D19: the one browser warning when Unity turned an authored TAA off; null otherwise. */
+        static antialiasingGateWarning(aa: IPostProcessAntialiasing, cameraName: string): string;
+        /** FR-14: the Inspector's "algorithm" line. */
+        static antialiasingAlgorithmLabel(aa: IPostProcessAntialiasing, plan: IPostProcessAntialiasingPlan): string;
+        /**
+         * auto-exposure-parity D13: whether a PPv2 AutoExposure family renders on a camera -- "" (apply), "foreign" (a URP- or
+         * HDRP-stamped stack: the effect is not theirs, FR-13), "unsupported" (no WebGL2 / WebGPU float render target, FR-9)
+         * or "ldr" (an 8-bit chain, FR-9). Pure; the orchestrator warns once per outcome.
+         */
+        static autoExposureGate(srp: boolean, textureType: number, supported: boolean): string;
+        /** auto-exposure-parity D14: the Unity-unit settings of a PPv2 AutoExposure family, as authored, Unity's defaults for anything missing. */
+        static autoExposureFromUnity(value: (name: string) => any): TOOLKIT.IAutoExposureUnitySettings;
         /** Finite number or the fallback (exporter values arrive as JSON and may be null). */
         static num(value: any, fallback: number): number;
         static clamp(value: number, min: number, max: number): number;
@@ -18510,7 +23011,7 @@ declare namespace TOOLKIT {
      *
      * The runtime owns the row model (`PostProcessor.GetEffectListing(camera)`, T6); this module only renders it, by
      * composing the plain-function property lines the Inspector exports on its UMD global (`INSPECTOR.NumberInputPropertyLine`,
-     * `SwitchPropertyLine`, `TextPropertyLine`, `MessageBar`) inside row components the Inspector mounts itself. No React is
+     * `SwitchPropertyLine`, `TextPropertyLine`, `NumberDropdownPropertyLine`, `MessageBar`) inside row components the Inspector mounts itself. No React is
      * shipped or referenced: a component must return exactly one element, so the section is ONE `addSectionContent`
      * registration per catalogue row and line kind (`RowRegistrations`), each row calling exactly one property line of its
      * kind; whether a row is present for the selected entity is its registration PREDICATE (`IsRowPresent`), never a null
@@ -18577,18 +23078,28 @@ declare namespace TOOLKIT {
          * (FR-12). A global that lacks one warns ONCE (`inspector:section`, naming the export) and returns false; an absent
          * global returns false silently (Inspector v1 / no Inspector, FR-5). Records `PostProcessor.InspectorState.available`.
          */
+        /**
+         * camera-antialiasing-parity T6: an Inspector export the section can call -- a plain function component, or a
+         * `React.forwardRef` object (`NumberDropdownPropertyLine` ships as one in babylonjs-inspector 9.27.1) whose
+         * `render(props, ref)` is called the same way (`CallLine`).
+         */
+        static IsCallableExport(value: any): boolean;
+        /** Calls a property line of either shape (`IsCallableExport`) with `props`. */
+        static CallLine(line: any, props: any): any;
         static IsAvailable(inspector?: any): boolean;
         /**
          * The service definitions the toolkit's show path passes to `INSPECTOR.ShowInspector` (FR-6): `[]` when
          * `PostProcessor.InspectorSection` is false or the Inspector is unavailable, else the one section service.
          */
         static GetServiceDefinitions(inspector?: any): IInspectorServiceDefinition[];
-        /** Whether an entity gets the section: a DefaultRenderingPipeline this toolkit owns, or any object carrying `_toolkitPlugin`. */
+        /** Whether an entity gets the section: a DefaultRenderingPipeline this toolkit owns, or any object carrying `_toolkitPlugin`, or a camera with a listing. */
         static IsInspectable(entity: any): boolean;
         /** A `DefaultRenderingPipeline` whose name starts with `PostProcessor.PipelinePrefix`. */
         static IsOwnedPipeline(entity: any): boolean;
         /** A post-process carrying the toolkit's `_toolkitPlugin` marker. */
         static IsToolkitPass(entity: any): boolean;
+        /** camera-antialiasing-parity D18: a camera the runtime lists (its anti-aliasing row at least). */
+        static IsListedCamera(entity: any): boolean;
         /**
          * The camera listing an entity resolves to: a pipeline -> its first camera with a listing (every row); a toolkit
          * pass -> its camera and the family of `_toolkitPlugin.name` (that family's rows only). Null when nothing applies.
@@ -18897,6 +23408,16 @@ declare namespace TOOLKIT {
         static CachedPhysicsShapeCount: number;
         static DebugPhysicsViewer: any;
         static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
+        private static PhysicsShapeScene;
+        /**
+         * Scene lifecycle: the shape cache and the debug viewer are static but belong to the scene physics was configured
+         * for. On that scene's dispose the cache is reset (the next ConfigurePhysicsEngine resets it anyway) and a viewer
+         * drawing into that scene is disposed. A cache configured for another, still-live scene is left alone.
+         */
+        private static WatchPhysicsScene;
+        private static ReleasePhysicsScene;
+        /** globalThis.HKP keeps the plugin's body map (and so the scene) alive after Scene.dispose - drop it when the plugin dies. */
+        private static ReleasePluginOnDispose;
         static ConfigurePhysicsEngine(scene: BABYLON.Scene, fixedTimeStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
         static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.TransformNode): void;
         protected static GetPhysicsMaterialCombine(unity: number): number;
@@ -19170,639 +23691,1447 @@ declare namespace TOOLKIT {
         ignoreBody?: BABYLON.PhysicsBody;
     }
 }
-/** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
-     * Babylon shuriken particle system pro class (Unity Style Shuriken Particle System)
+     * shadergraph-transpiler-complete-coverage T25 / T25.1 (D28): the renderers Unity draws without a mesh asset - sprites, tilemaps,
+     * lines and trails. Each exported carrier holds its own geometry and material block; the runtime builds a Babylon mesh and a material
+     * (the generated graph class - ShaderGraphRuntime.CreateMaterialFromBlock - or, for any other material, an unlit StandardMaterial
+     * with vertex colour and the material's colour / texture). Sprites, tilemaps, lines and trails draw in rendering group 1 with
+     * alphaIndex = sortingLayerIndex x 32768 + clamp(sortingOrder + 16384, 0, 32767) (Unity's sorting layer + order).
+     * UVs are written in Babylon's convention (u, 1 - v), exactly as the glTF exporter flips every mesh UV, so a generated class
+     * (which flips them back) and a toolkit texture (top-down) both read Unity's layout.
+     * @class CarrierGeometry - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class CarrierGeometry {
+        /** D28: the carrier's rendering group. */
+        static readonly RenderingGroup: number;
+        /** D28 / Algorithms: alphaIndex = sortingLayerIndex x 32768 + clamp(sortingOrder + 16384, 0, 32767). */
+        static AlphaIndex(sortingLayerIndex: number, sortingOrder: number): number;
+        /** The material of a carrier: its generated graph class, else an unlit vertex-coloured StandardMaterial of the block's colour / texture. */
+        static CreateMaterial(scene: BABYLON.Scene, block: any, name: string, texture: BABYLON.Texture): BABYLON.Material;
+        /**
+         * The unlit StandardMaterial fallback shows its emissive texture as stored (gamma bytes on the gamma framebuffer, as Unity's
+         * sprite shader in the default pipeline path): a colour texture loaded into an sRGB hardware buffer (LoadBlockTexture, for the
+         * graph classes that compute in linear) samples decoded - darker - so the fallback gets a plain copy of the same image.
+         */
+        static GammaTexture(scene: BABYLON.Scene, texture: BABYLON.Texture): BABYLON.Texture;
+        /** A portable texture reference (the sprite / tilemap texture), or null. */
+        static LoadTexture(scene: BABYLON.Scene, info: any): BABYLON.Texture;
+        /**
+         * A sprite's geometry (Unity units, local space) for its draw mode:
+         *   simple - the sprite mesh (vertices / uvs / triangles);
+         *   sliced - nine quads over `size`: the corners keep their border size (border / pixelsPerUnit, scaled down when size is smaller),
+         *            the edges and centre stretch; uvs from the sprite's rect / border in texels of the texture;
+         *   tiled  - the sprite's rect repeated to cover `size` (the last row / column cut, uvs cut with it).
+         * Flip mirrors x / y about the pivot (the winding is kept by reversing each triangle). Returns Unity-convention uvs.
+         */
+        static SpriteGeometry(props: any): {
+            positions: number[];
+            uvs: number[];
+            indices: number[];
+        };
+        /** Unity uvs -> Babylon uvs (u, 1 - v), in place. */
+        static FlipUvs(uvs: number[]): number[];
+        /** A per-vertex colour array of `count` vertices, one colour. */
+        static Colors(count: number, color: number[]): number[];
+        /** Builds (or rebuilds) a carrier mesh from Unity-convention geometry. */
+        static ApplyGeometry(mesh: BABYLON.Mesh, positions: number[], unityUvs: number[], colors: number[], indices: number[], updatable: boolean): void;
+        /** An exported AnimationCurve at t (Hermite between keys, clamped outside). */
+        static EvaluateCurve(curve: any, t: number): number;
+        /** An exported Gradient at t -> [r, g, b, a] (blend: linear between keys; fixed: the key at or after t). */
+        static EvaluateGradient(gradient: any, t: number): number[];
+        /**
+         * T25.1: the ribbon of a polyline (2 vertices per point; the cap / corner vertex fans are Polyfill - not generated): width =
+         * widthMultiplier x widthCurve(t), colour = gradient(t), t = cumulative distance / total; the side vector faces the camera (View:
+         * cross(tangent, toEye)) or the transform's Z (TransformZ: cross(tangent, zAxis)). UVs per texture mode: Stretch u = t,
+         * Tile u = distance x textureScale.x, DistributePerSegment u = i / (n - 1), RepeatPerSegment u = i; v 0 / 1 across.
+         */
+        static Ribbon(points: BABYLON.Vector3[], props: any, eye: BABYLON.Vector3, zAxis: BABYLON.Vector3, ages?: number[]): {
+            positions: number[];
+            uvs: number[];
+            colors: number[];
+            indices: number[];
+        };
+        /** The exact sRGB -> linear transfer (Unity's Color.linear). */
+        static SrgbToLinear(c: number): number;
+        /** T25.1: the ribbon u of point i (Unity LineTextureMode). */
+        static RibbonU(mode: string, t: number, distance: number, i: number, n: number, scaleU: number): number;
+    }
+    /**
+     * T25 (D28): Unity's SpriteRenderer. The sprite mesh (simple / 9-slice / tiled) with the renderer colour as vertex colour, the graph
+     * class (or an unlit material) with the sprite texture, rendering group 1, alphaIndex from the sorting layer + order. Mask
+     * interaction (SpriteMask stencil) is not drawn (logged once).
+     * @class SpriteRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class SpriteRenderer extends TOOLKIT.ScriptComponent {
+        private _mesh;
+        private _material;
+        private _texture;
+        private static _maskWarned;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMesh(): BABYLON.Mesh;
+        getMaterial(): BABYLON.Material;
+        protected awake(): void;
+        protected destroy(): void;
+    }
+    /**
+     * T25 (D28): Unity's TilemapRenderer - the exported merged mesh (every painted cell's sprite quad, the cell colour as vertex colour
+     * times the tilemap colour), one texture per renderer.
+     * @class TilemapRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class TilemapRenderer extends TOOLKIT.ScriptComponent {
+        private _mesh;
+        private _material;
+        private _texture;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMesh(): BABYLON.Mesh;
+        protected awake(): void;
+        protected destroy(): void;
+    }
+    /**
+     * T25.1 (D28): Unity's LineRenderer - a ribbon through the exported points (world or local space), rebuilt when the camera moves
+     * (View alignment) or the points change.
+     * @class LineRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LineRenderer extends TOOLKIT.ScriptComponent {
+        private _mesh;
+        private _material;
+        private _points;
+        private _eye;
+        private _dirty;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMesh(): BABYLON.Mesh;
+        /** Unity's SetPositions: replaces the points (world or local, as exported) and rebuilds on the next frame. */
+        setPositions(points: BABYLON.Vector3[]): void;
+        getPositions(): BABYLON.Vector3[];
+        protected awake(): void;
+        protected update(): void;
+        private rebuild;
+        protected destroy(): void;
+    }
+    /**
+     * T25.1 (D28): Unity's TrailRenderer - emits a world point whenever the transform moved minVertexDistance, drops points older than
+     * `time`, and draws the ribbon from the newest (t = 0) to the oldest (t = age / time).
+     * @class TrailRenderer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class TrailRenderer extends TOOLKIT.ScriptComponent {
+        private _mesh;
+        private _material;
+        private _points;
+        private _times;
+        private _clock;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMesh(): BABYLON.Mesh;
+        getPointCount(): number;
+        protected awake(): void;
+        protected update(): void;
+        /** One step: age the points, drop the expired, emit the current position when it moved minVertexDistance (and emitting). */
+        advance(position: BABYLON.Vector3, dt: number): void;
+        private draw;
+        protected destroy(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T27 (D32, FR-E3): Unity's URP / HDRP DecalProjector as a projected MESH decal. Every opaque
+     * receiver the projector box overlaps (enabled, visible, not alpha blended, rendering-layer mask match when decal layers are on) has its
+     * triangles clipped to the box; the clipped polygon becomes the decal mesh in Unity's DECAL SPACE (the unit cube of the projector, so a
+     * graph's Object-space Position reads what Unity's does), UV = Unity's decal UV (x uvScale + uvBias), normals the receiver's. The decal
+     * graph class draws it alpha blended (zOffset -2, the receiver's rendering group) with two per-projector uniforms: sg_decalParams
+     * (fade factor x distance fade, angle fade a, b, 0) and sg_decalNormal (-projector forward). The geometry is rebuilt when the projector
+     * or a receiver moves (world-matrix update flags, checked once per frame). A scene whose renderer has no decal feature draws none
+     * (scene metadata renderfeatures.decal === false) - one warning.
+     * @class DecalProjector - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class DecalProjector extends TOOLKIT.ScriptComponent {
+        /** URP's DecalSettings.maxDrawDistance default: the draw distance is min(projector, this). */
+        static MaxDrawDistance: number;
+        private static _noFeatureWarned;
+        private _props;
+        private _material;
+        private _meshes;
+        private _receivers;
+        private _flags;
+        private _projectorMatrix;
+        private _center;
+        private _radius;
+        private _angle;
+        private _normal;
+        private _disabled;
+        /** How many times the geometry was built (tests / diagnostics). */
+        buildCount: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMeshes(): BABYLON.Mesh[];
+        getMaterial(): BABYLON.Material;
+        getReceivers(): BABYLON.AbstractMesh[];
+        /** Unity's angle-fade constants (URP DecalEntityManager): fade = saturate(a + b d (d - 2)); (0, 0) = disabled. */
+        static AngleFade(startAngleFade: number, endAngleFade: number): number[];
+        /** Unity's distance fade (DecalCreateDrawCallSystem): fadeFactor x clamp((cull - d) / (cull x (1 - fadeScale))), -1 = culled. */
+        static DistanceFade(fadeFactor: number, drawDistance: number, fadeScale: number, distance: number, radius: number): number;
+        /** The receiver's Unity rendering layer mask (exported renderer.renderinglayermask), all bits when absent. */
+        static RenderingLayerMask(mesh: BABYLON.AbstractMesh): number;
+        /**
+         * A decal receiver: an enabled, visible mesh with indexed triangles and a material that is not alpha blended (Unity projects onto the
+         * opaque depth / DBuffer only), not a decal itself, not skinned, and - with decal layers on - sharing a rendering layer with the projector.
+         */
+        static IsReceiver(mesh: BABYLON.AbstractMesh, projectorMask: number, decalLayers: boolean): boolean;
+        /**
+         * Projector local space -> Unity decal space (the unit cube): q = ((l.x - px) / sx, (pz - l.z) / sz, (l.y - py) / sy), as a Babylon
+         * matrix M with worldFromDecal = M x projectorWorld (row vectors). `projectorWorld` is the projector's world matrix with its scale
+         * removed for Unity's ScaleInvariant mode.
+         */
+        static DecalToWorld(projectorWorld: BABYLON.Matrix, size: number[], pivot: number[]): BABYLON.Matrix;
+        /** The projector's world matrix, scale removed per axis (sign kept) for Unity's ScaleInvariant mode. */
+        static ProjectorWorld(node: BABYLON.TransformNode, scaleInvariant: boolean): BABYLON.Matrix;
+        /**
+         * Clip one receiver's triangles to the decal cube. Positions / normals in WORLD space come in, decal-space positions, object-space
+         * normals (for the decal mesh's world matrix `decalToWorld`) and Unity decal UVs (glTF V-down, as the classes read them) go out.
+         */
+        static ClipReceiver(positions: ArrayLike<number>, normals: ArrayLike<number>, indices: ArrayLike<number>, receiverWorld: BABYLON.Matrix, decalToWorld: BABYLON.Matrix, uvScale: number[], uvBias: number[], into: {
+            positions: number[];
+            normals: number[];
+            uvs: number[];
+            indices: number[];
+        }): void;
+        private scenesFeatures;
+        protected start(): void;
+        protected update(): void;
+        protected destroy(): void;
+        /** The decal material: the graph class of the exported block, in the decal render state. */
+        createMaterial(): BABYLON.Material;
+        private disposeMeshes;
+        /** True when `m` equals the stored copy (1e-5). */
+        static SameMatrix(m: BABYLON.Matrix, copy: Float32Array): boolean;
+        /** Rebuild when the projector or a receiver moved since the last build (world-matrix update flags); true when it rebuilt. */
+        checkRebuild(): boolean;
+        /** Build the decal meshes against every receiver the projector box overlaps. */
+        rebuild(): void;
+        /** Per frame: the distance fade (culled past the draw distance) into sg_decalParams, the projector direction into sg_decalNormal. */
+        updateFade(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T12 (D26): the additional-light table a COMPILED Shader Graph custom function reads
+     * through the ShaderLibrary polyfill (GetAdditionalLightsCount / GetAdditionalLight). CustomShaderMaterial has no array API for
+     * non-textures, so the table is 8 slots of four flat vec4 uniforms:
+     *   g_sgLight<i>A = (position for point/spot, or the direction TO the light for a directional; type 0 dir / 1 point / 2 spot)
+     *   g_sgLight<i>B = (Unity-unit linear colour rgb; 1 / range^2)
+     *   g_sgLight<i>C = (spot direction toward the light xyz; cos(outer angle / 2))
+     *   g_sgLight<i>D = (cos(inner angle / 2), 0, 0, 0)
+     * plus g_sgLightCount = (count, 0, 0, 0). The slots are this mesh's lightSources in order (already Unity-ordered by the
+     * loader), minus the MAIN light - the first enabled DirectionalLight of the scene, the rule every generated class uses - and
+     * minus hemispheric fills (Unity's additional lights are directional / point / spot only). The colour is converted exactly
+     * as the AdditionalLightSSS slot colours are (sgUpdateAddLightSlots): the authored colour linearised, times the Unity
+     * intensity, the exporter's destination PI divided back out (1 for HDRP).
+     */
+    class ShaderGraphLightTable {
+        static readonly SLOTS: number;
+        /** Pack up to 8 of `mesh.lightSources` (main light excluded) into the material's light-table uniforms. */
+        static Bind(material: TOOLKIT.CustomShaderMaterial, mesh: BABYLON.AbstractMesh): void;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T21 (D25): HDRP's Hair, Eye, Fabric and StackLit lighting models on a transpiled Shader
+     * Graph class. The per-LIGHT lobes (Kajiya-Kay hair, the StackLit second GGX lobe, the eye caustic, the subsurface wrap) are
+     * emitted by the class itself into its per-light regex hook, where preInfo / info / shadow and the slot's captured light colour
+     * are live; this extension owns what is per MATERIAL: the awake()-time Babylon feature setup of the mode and the environment
+     * lobes at CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION. Attached by the class's awake() through `any` (D49).
      *
-     * GLTF-STYLE MINIMAL SERIALIZATION:
+     *  - hair: HDRP's hair F0 is DEFAULT_HAIR_SPECULAR_VALUE (0.0465), not Babylon's dielectric 0.04 - the environment term is
+     *    rescaled; hair is lit on both faces (HDRP hair cards are double sided).
+     *  - eye: the cornea is Babylon's clear coat (the class enables it); the iris base carries no specular of its own (F0 0).
+     *  - fabric: Cotton / Wool = Babylon sheen (Charlie), Silk = Babylon anisotropy, both from the class's feature setup.
+     *  - stacklit: the base response is Babylon's; the second lobe is per light (the environment keeps the first lobe, a Polyfill).
+     */
+    class GraphLightingExtension extends TOOLKIT.CustomShaderMaterialPlugin {
+        static readonly PRIORITY: number;
+        static readonly MODES: string[];
+        /** HDRP Hair.hlsl DEFAULT_HAIR_SPECULAR_VALUE over Babylon's dielectric F0. */
+        static readonly HAIR_F0_RATIO: number;
+        mode: string;
+        constructor(material: BABYLON.Material, mode: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        static NormalizeMode(mode: string): string;
+        /** Installs the extension once per material (metadata.tkGraphLightExt) and applies the mode's material setup. */
+        static Attach(material: BABYLON.Material, mode: string): TOOLKIT.GraphLightingExtension;
+        /** The mode's per-material Babylon setup. */
+        static Setup(material: BABYLON.Material, mode: string): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /** The environment lobes of a mode (empty where Babylon's own environment term is the model's). */
+        static EnvironmentCode(mode: string, wgsl: boolean): string;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T29 (D34, FR-E6): Unity's Custom Render Textures on the GPU. Each scene-metadata
+     * `customrendertextures` entry becomes a BABYLON.RenderTargetTexture of the CRT's size / format rendered by its graph class (a Pass
+     * host, TOOLKIT.ShaderGraphPass.RenderToTexture): initialised on load (clear colour or texture), updated OnLoad (once), Realtime (every
+     * frame, or every `updatePeriod` seconds) or OnDemand (`ShaderGraphRenderTexture.Update(scene, name, count)`), double buffered by two
+     * targets ping-ponged through one published texture when the graph reads Self. Materials sampling the CRT receive the published
+     * texture through WhenReady (texture reference `{ kind: "crt", crt: id }`).
+     * @class ShaderGraphRenderTexture - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderGraphRenderTexture {
+        /** The render call (tests replace it): draws `pass` into `target` with `self` as the previous buffer. */
+        static Renderer: (pass: any, target: BABYLON.RenderTargetTexture, self: BABYLON.BaseTexture) => void;
+        private static _scenes;
+        private static Store;
+        private static TextureType;
+        private static MakeTarget;
+        /** Creates every CRT of the scene block and starts their updates. */
+        static Load(scene: BABYLON.Scene, list: any[]): void;
+        /** Resolves the published texture of CRT `id` (now, or when Load creates it). */
+        static WhenReady(scene: BABYLON.Scene, id: string): Promise<BABYLON.BaseTexture>;
+        /** The published texture of a CRT by id or name, or null. */
+        static Get(scene: BABYLON.Scene, idOrName: string): BABYLON.BaseTexture;
+        private static Find;
+        /** Unity's CustomRenderTexture.Update(count): queues `count` updates of an OnDemand (or any) CRT. */
+        static Update(scene: BABYLON.Scene, name: string, count?: number): boolean;
+        /** Unity's CustomRenderTexture.Initialize(): re-applies the initialisation content. */
+        static Initialize(scene: BABYLON.Scene, name: string): boolean;
+        /** One frame: initialise, then run the updates the mode asks for (exposed for tests). */
+        static Tick(scene: BABYLON.Scene, deltaSeconds?: number): void;
+        private static Initialize_;
+        /** One update: render into the back target reading the front (double buffered), then swap the published texture. */
+        private static RunUpdate;
+        /** Keeps the published texture (the object materials hold) pointing at the current front target. */
+        private static Publish;
+        private static DisposeEntry;
+        /** Diagnostics: the update count and the current front target of a CRT. */
+        static Info(scene: BABYLON.Scene, idOrName: string): {
+            updates: number;
+            front: BABYLON.RenderTargetTexture;
+            back: BABYLON.RenderTargetTexture;
+            published: BABYLON.BaseTexture;
+        };
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T29 (D33, FR-E5): a Shader Graph SKY - the generated class of the skybox material drawn
+     * on the loader's skybox mesh (Unity's own skybox sphere when ProceduralSkyMaterial provides it; infinite distance, no depth write,
+     * both faces, rendering group of the skybox), and - when the scene has no baked environment - a render-once reflection probe of the
+     * sky mesh only as the scene environment (ProceduralSkyMaterial.createEnvironmentProbe's pattern, diffuse locked to Unity's ambient SH).
+     * HDRP PBR Sky graphs take the same path.
+     * @class ShaderGraphSky - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderGraphSky {
+        /** Creates the sky mesh with the graph class of `block` ({ customMaterial, …bags }); null when the class is missing. */
+        static CreateGraphSkybox(scene: BABYLON.Scene, block: any, options?: {
+            size?: number;
+            rendergroup?: number;
+            skyfog?: boolean;
+            tags?: string;
+            environment?: boolean;
+        }): BABYLON.Mesh;
+        /** Babylon alpha mode of a Unity surface blend (alpha / premultiply / additive / multiply). */
+        static BlendAlphaMode(blend: string): number;
+        /** Unity's skybox scale for a camera: 10 x its far plane (a far plane of 0 = infinite: the Babylon default far 10000 stands in). */
+        static SkyScale(camera: BABYLON.Camera): number;
+        /** D33: a render-once reflection probe of the sky mesh only, as scene.environmentTexture (diffuse locked to Unity's ambient SH). */
+        static CreateEnvironmentProbe(scene: BABYLON.Scene, skyMesh: BABYLON.AbstractMesh, size?: number): BABYLON.ReflectionProbe;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T29: keeps a graph skybox at the far plane like Unity's skybox draw (its mesh is scaled to
+     * 10 x the far plane - the object / world positions the graph reads - which lies beyond the clip range): clip z = w x (1 - 1e-6).
+     * @class SgSkyFarDepthPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class SgSkyFarDepthPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PRIORITY: number;
+        constructor(material: BABYLON.Material);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T29 (D33, FR-E5): HDRP Local Volumetric Fog with a Fog Volume graph. A box of the volume's
+     * size at the node, drawn with the generated Volume-host class (SgVolume: a front-face raymarch of 24 steps with a per-pixel jittered
+     * start through the graph's density / albedo, stopped at the opaque depth, lit by the main light + ambient - no volumetric shadows),
+     * blended over the scene per the volume's blend mode.
+     * @class ShaderGraphFogVolume - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderGraphFogVolume extends TOOLKIT.ScriptComponent {
+        private _mesh;
+        private _material;
+        private _pass;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMesh(): BABYLON.Mesh;
+        getMaterial(): BABYLON.ShaderMaterial;
+        /** The Babylon alpha mode of an HDRP LocalVolumetricFogBlendingMode (additive / multiply / overwrite / min / max). */
+        static AlphaMode(blend: string): number;
+        protected start(): void;
+        /** Builds the box and its raymarch material from the generated class of props.material. */
+        build(props: any): BABYLON.Mesh;
+        protected destroy(): void;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** The material the component applied (D51 getMaterialState): what the Inspector shows as the system's look. */
+    interface IParticleMaterialState {
+        family: string;
+        blendMode: number;
+        forceDepthWrite: boolean;
+        textureUrl: string;
+        textureReady: boolean;
+        tint: BABYLON.Color4;
+        fallback: boolean;
+        hidden: boolean;
+        /** the material's emission colour (Unity `_EmissionColor` when `_EMISSION` is on; black = none), in Unity units, editable (T34) */
+        emission?: BABYLON.Color4;
+        emissionTextureUrl?: string;
+        emissionTextureReady?: boolean;
+        /** T43 shading: the four per-material shader features (the exporter's flags, editable - an edit reaches the next effect refresh). */
+        lit?: boolean;
+        softParticles?: boolean;
+        softNearFade?: number;
+        softFarFade?: number;
+        cameraFading?: boolean;
+        cameraNearFade?: number;
+        cameraFarFade?: number;
+        flipbookBlending?: boolean;
+        /** T11 (D16 / D17): the alpha test, the premultiplied blend and the distortion weight - every one editable and read on every bind. */
+        cutout?: boolean;
+        cutoff?: number;
+        premultiply?: boolean;
+        distortionBlend?: number;
+        /** T12 (D16): the material's colour mode by name (Multiply, Additive, Subtractive, Overlay, Color, Difference); anything but Multiply combines in the shader. */
+        colorMode?: string;
+    }
+    /** The scene's particle lighting solve for one frame (T43): Unity's main light + the ambient probe, in LINEAR units. */
+    interface IParticleLighting {
+        frame: number;
+        hasLight: boolean;
+        dirX: number;
+        dirY: number;
+        dirZ: number;
+        lr: number;
+        lg: number;
+        lb: number;
+        skyR: number;
+        skyG: number;
+        skyB: number;
+        groundR: number;
+        groundG: number;
+        groundB: number;
+    }
+    /** One ref-counted particle texture load (D28): the entry `ParticleTextureCache.request` hands back and `release` takes. */
+    interface IParticleTextureEntry {
+        url: string;
+        resolved: string;
+        texture: BABYLON.Texture;
+        ready: boolean;
+        failed: boolean;
+        width: number;
+        height: number;
+        refs: number;
+        waiting: ((texture: BABYLON.Texture, entry: IParticleTextureEntry) => void)[];
+        wrap?: boolean;
+        key?: string;
+    }
+    /**
+     * Per-scene, ref-counted particle texture loads (D28). Entries live on `(scene as any)._particleTextures: { [resolved]: entry }`,
+     * so every system of a scene that names the same url shares one BABYLON.Texture (Embers x 17 -> one load); a system whose tiling needs
+     * WRAP gets its own entry (key `resolved + "#wrap"`), so an address mode never leaks between systems. Textures load with
+     * the toolkit convention (PostProcessing.ts requestPluginTexture): mipmaps ON, invertY = false, TRILINEAR, hasAlpha, CLAMP (a
+     * system whose mainTextureST tiling is not (1,1) switches to WRAP), gammaSpace = true (the particle shader linearises, D30).
+     * One `texture:load:<url>` warning per failed url; the texture is disposed when the last system using it releases it.
+     * @class ParticleTextureCache - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ParticleTextureCache {
+        /** `url` -> loadable url: (1) null -> null; (2) absolute (`/`), `http(s):`, `data:`, `blob:` -> unchanged; (3) root null / "" / "/" -> `url`; (4) else root (one trailing slash added when missing) + url. */
+        static resolve(scene: BABYLON.Scene, url: string): string;
+        /** Loads once per resolved url (and address mode) per scene, increments `refs`, calls `apply` when ready (synchronously when already loaded) or with `null` when failed. */
+        static request(scene: BABYLON.Scene, url: string, apply: (texture: BABYLON.Texture, entry: TOOLKIT.IParticleTextureEntry) => void, wrap?: boolean): TOOLKIT.IParticleTextureEntry;
+        /** Decrements `refs`; at 0 disposes the texture and deletes the entry. Null-safe. */
+        static release(scene: BABYLON.Scene, entry: TOOLKIT.IParticleTextureEntry): void;
+        /** Marks the entry ready (size from the loaded texture) or failed (one warning per url), then runs every waiting apply once. */
+        private static complete;
+    }
+    /**
+     * Unity Shuriken particle system (spec shuriken-particle-parity). A CPU BABYLON.ParticleSystem driven by this component:
+     * the component owns the clock, emission, the per-particle update, sort order, flipbook fractions, trails, mesh
+     * instances and particle lights; Babylon owns billboarding, sprite-cell UVs and the blend state. The per-particle
+     * simulation is TOOLKIT.ParticleSimulation installed as the system's updateFunction; spawn shapes are
+     * TOOLKIT.ShurikenShapeEmitter. The emitter is the component's own node.
      *
-     * This class implements a GLTF-style approach to particle system data serialization.
-     * The Unity C# exporter (UnityParticleSystemExporter.cs) handles minimal serialization
-     * at export time, only including properties that differ from defaults in GLTF extras.
-     * This dramatically reduces file sizes for typical particle systems.
+     * | Unity module | status | notes |
+     * |---|---|---|
+     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); useUnscaledTime no-op (the toolkit has no time scale) |
+     * | Emission | implemented | rate over time / distance, bursts with cycles / interval / probability |
+     * | Shape | implemented | every shape type incl. mesh / mesh renderer / skinned (current pose at SkinnedShapeRefreshHz); shape texture (tint / clip; planar UV approximated on primitives); mesh colours, material index; sprite types → the sprite's rectangle + warning |
+     * | Velocity / Limit Velocity / Inherit Velocity / Force / Lifetime by Emitter Speed | implemented | unchanged |
+     * | Color / Size over Lifetime and by Speed | implemented | size Z on mesh particles |
+     * | Rotation over Lifetime / by Speed | implemented | Z on billboards (X / Y warned); X / Y / Z on mesh particles |
+     * | Noise | approximated | ported gradient noise |
+     * | Collision | implemented | Planes (following their nodes); World by budgeted ray casts (physics engine or mesh picking); collider-force / voxel / dynamic-collider keys mode-only |
+     * | Sub Emitters | implemented | Birth / Death / Collision / Trigger / Manual (triggerSubEmitter); InheritDuration |
+     * | Texture Sheet Animation | implemented | Grid; Sprites (uniform grids exactly, up to MaxSpriteRects arbitrary rects in the shader); flipU / flipV; rowMode MeshIndex |
+     * | Renderer | implemented | Billboard / Stretched / Horizontal / Vertical / Mesh (thin instances, 3-D rotation) / None; alignment View / World / Local / Facing / Velocity; sort modes; flip; allowRoll; min / max particle size; cameraVelocityScale; pivot x / y / z; material block: family, blend (alpha, additive, multiply, premultiply; subtractive approximated), colour modes, cutout, lit (per-vertex: ambient + directional + 4 point lights), soft particles, camera fading, flipbook blending, emission; Shader Graph / unknown families drawn with their classified look; distortion approximated (no refraction — and a system whose distortion blend is 1, wholly the grabbed scene in Unity, therefore draws nothing visible); freeformStretching / rotateWithStretchDirection mode-only |
+     * | Trails | implemented | Particles and Ribbon modes, all texture modes, trail material, trail-only systems; alpha-blended trails draw after the particle systems of their group |
+     * | Lights | implemented | pooled point lights under a scene cap; spot sources draw as points |
+     * | Triggers | implemented | box / sphere / capsule; mesh colliders by their bounds |
+     * | External Forces | implemented | force fields (shape falloff, direction, gravity, rotation, drag) and wind zones (main + pulse); turbulence, rotationRandomness and vector fields not reproduced |
+     * | Custom Data | implemented | evaluated on demand through getCustomData (no stock shader reads it, as in Unity) |
      *
-     * UNITY C# EXPORTER INTEGRATION:
+     * DEVIATIONS (everything that does not reproduce Unity exactly): noise approximated; billboard X / Y rotation;
+     * particle shadows, light probes, specular and normal maps on lit particles; wind turbulence and vector fields;
+     * collider-force keys; `gravitySource` 2D; spot particle lights drawn as points; distortion refraction; the
+     * subtractive blend equation; alpha-blended trail ordering; a trigger crossed inside one step; the no-roll offset
+     * carried by an event's angle; `freeformStretching` / `rotateWithStretchDirection`; `useUnscaledTime`.
      *
-     * The Unity exporter now handles minimal serialization automatically:
+     * COLOUR SPACE. A particle colour is used AS AUTHORED except where the exporter declares that Unity's own upload was not converted
+     * either: `renderer.applyActiveColorSpace: false` (a Linear project with Unity's "Apply Active Color Space" box off — the Color32 is
+     * uploaded unconverted and the shader reads it as linear) and `material.tintLinear: true` (a Linear project whose tint property carries
+     * no `[Gamma]` flag, so Unity stores the tint linear). Each takes the same closed form `pow(c, 1 / ShaderGamma)` — the inverse of
+     * Babylon's own particle-fragment exponent, never a tuned constant — applied per rgb channel and NEVER to alpha. A missing key means
+     * "as authored", so every export written before these keys is unchanged (D30, run-log Decision 151; F-S.67 / F-S.70). The legacy and
+     * mobile families' ×2 vertex-colour multiplier is a LINEAR multiplier, so it is folded into the gamma-encoded rgb as `pow(2, 1 / 2.2)`
+     * while alpha keeps the linear ×2 (F-S.64).
      *
-     * // In Unity C# - automatic minimal serialization
-     * var minimalData = UnityParticleSystemExporter.ExportParticleSystem(particleSystem);
-     * gltfExtras.particleSystem = minimalData; // Already minimized!
+     * READ-BACK PROTOCOL (how a capture freezes one system time on both sides). `ShurikenParticles.SimulateAll(scene, t)` steps every
+     * component in lockstep in fixed 1/60 s steps through Babylon's `animate(true)`, and `ShurikenParticles.SetHold(scene, true)` freezes
+     * the rendered state — `manualEmitCount` goes to 0 and `updateSpeed` to 0 — so the frame a capture reads is the frame `t` produced.
+     * The Unity oracle takes its frame after `ParticleSystem.Simulate(t)`, so both sides freeze the same system time.
      *
-     * // Analysis of size savings
-     * UnityParticleSystemExporter.AnalyzeSerializationSavings(particleSystem);
-     *
-     * RUNTIME USAGE:
-     *
-     * The runtime automatically merges user properties with defaults, so you always
-     * get a complete particle system configuration regardless of how minimal the
-     * serialized data is. No additional work needed!
-     *
-     * SIZE REDUCTION BENEFITS:
-     * • 70-90% smaller GLTF files for typical particle systems
-     * • Only changed properties stored in GLTF extras
-     * • Runtime merges with defaults seamlessly
-     * • Follows GLTF 2.0 specification patterns
-     *
-     * ENHANCED UNITY SUPPORT (2025):
-     * Added comprehensive support for Unity Main Module properties:
-     * • customSimulationSpace - Custom transform coordinate space
-     * • emitterVelocity - Tracks emitter movement for velocity inheritance
-     * • gravitySource - 2D vs 3D physics gravity modes
-     * • useUnscaledTime - Unscaled time for consistent behavior
-     *
+     * Babylon fields written every frame by this component (read-only in the Inspector): manualEmitCount, updateSpeed (hold / culling),
+     * the curve-mode start-family ranges (D24), gravity when gravityModifier is a curve, spriteCellWidth/Height on texture load.
+     * Everything else is written once at awake and stays editable (D52).
+     * THE SOURCE RULE (a grep rule over this folder, token by token, exercised by the suite in APP/tests/particles/): the particle runtime never uses
+     * the deleted Unity-to-Babylon scale constants, the GPU particle class, a proxy box mesh, rendering groups, timers or the unseeded
+     * JavaScript RNG (every draw is the seeded ParticleRandom); warnings go through ParticleContract.warnOnce only; no hand-tuned constants.
      * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
      */
     class ShurikenParticles extends TOOLKIT.ScriptComponent {
-        private static DefaultParticleTexture;
-        private static readonly DEFAULT_PARTICLE_PROPERTIES;
-        private m_particleSystem;
-        private m_emitterMesh;
-        private m_systemProperties;
-        private m_isInitialized;
-        private m_playOnAwake;
-        private m_autoStart;
-        private m_systemTime;
-        private m_isLooping;
-        private m_duration;
-        private m_emissionTimer;
-        private m_burstTimers;
-        private m_prewarm;
-        private m_startDelay;
-        private m_simulationSpeed;
-        private m_scalingMode;
-        private m_emitterVelocityMode;
-        private m_customSimulationSpace;
-        private m_emitterVelocity;
-        private m_gravitySource;
-        private m_useUnscaledTime;
-        private m_reportedDeltaTime;
-        private m_isSystemRunning;
-        private m_cullingMode;
-        private m_isVisible;
-        private m_pausedTime;
-        private m_lastVisibilityCheck;
-        private static readonly UNITY_TO_BABYLON_SIZE_RATIO;
-        private static readonly UNITY_TO_BABYLON_GRAVITY_RATIO;
-        private static readonly UNITY_TO_BABYLON_EMIT_RATE_RATIO;
-        private static readonly UNITY_TO_BABYLON_EMIT_POWER_RATIO;
-        private static readonly UNITY_TO_BABYLON_CONE_SCALE_RATIO;
-        private static readonly UNITY_TO_BABYLON_LIFETIME_RATIO;
-        private static readonly UNITY_TO_BABYLON_DEATH_FADE_ALPHA;
-        static EMITTER_POSITION_OFFSET: BABYLON.Vector3;
-        static EMITTER_ROTATION_OFFSET: BABYLON.Vector3;
-        private m_animationCurves;
-        private m_gradients;
+        /** The parity rewrite. */
+        static readonly Version: string;
+        /**
+         * D19 - the particle-light budget. `MaxLightsPerSystem` bounds one system's FIXED pool (Unity's `maxLights` is clamped
+         * into it) and `MaxSceneParticleLights` bounds the whole scene through `scene._prtParticleLights`: the Pack asks for
+         * eleven pools at once and an unbounded answer would recompile every material in the level. A system that finds the
+         * scene budget spent warns `deferred:lights:cap:<node>` once and lights nothing.
+         */
+        static MaxLightsPerSystem: number;
+        static MaxSceneParticleLights: number;
+        /**
+         * AP-15b - how many lights a project's materials draw at once (`BABYLON.Material.maxSimultaneousLights`, 4 by default).
+         * The toolkit never edits a project's materials; it reads this number to work out how many slots are left once the
+         * scene's own exported lights have taken theirs, and hands exactly those to the nearest lit particle lights. Raise it
+         * here AND on the materials together if a project wants more particle lights on screen at once.
+         */
+        static MaterialLightSlots: number;
+        /**
+         * D20 - the world-collision ray budget of the WHOLE scene, per frame. Every system that stepped last frame takes an equal
+         * share of it (x 1 / 0.5 / 0.25 by `collision.quality`), and a rotating start makes sure the particles a frame could not
+         * afford are the ones the next frame serves first. Thirteen Pack systems with thousands of live particles therefore cost
+         * 256 rays a frame between them, not one per particle.
+         */
+        static MaxCollisionRaysPerFrame: number;
+        /**
+         * D22 - the live-particle ceiling above which a renderer sort mode is skipped. Unity sorts on the GPU; this runtime
+         * reorders `ps.particles` on the CPU, and an insertion sort over a nearly-ordered array is close to linear - but a
+         * system holding tens of thousands of particles would still pay for it every frame, so it keeps emission order and
+         * warns `renderer:sortMode:toomany:<node>` once.
+         */
+        static SortMaxParticles: number;
+        /** FR-39: every world / plane collision of this system, once per hit, when `collision.sendCollisionMessages` is true (D20). */
+        onParticleCollisionObservable: BABYLON.Observable<TOOLKIT.IParticleEvent>;
+        /**
+         * FR-36 / T23: every trigger event whose action is Callback (2). `type`: 0 inside, 1 outside, 2 enter, 3 exit.
+         * A Kill action raises nothing (the particle simply dies); the name `onTriggerEnterObservable` belongs to
+         * `ScriptComponent` and is deliberately NOT reused.
+         */
+        onParticleTriggerObservable: BABYLON.Observable<{
+            type: number;
+            particle: BABYLON.Particle;
+            system: TOOLKIT.ShurikenParticles;
+        }>;
+        /** Fired once per stop when `main.stopAction` is Callback (3), D37. */
+        onSystemStoppedObservable: BABYLON.Observable<TOOLKIT.ShurikenParticles>;
+        /**
+         * Every key an applier reads, per module (D22 / T18). The fields audit (APP/tests/particles/contract.test.js) holds, for every
+         * module: ParticleContract.KnownFields[m] = Consumes[m] + ParticleContract.ModeOnlyFields[m] + WarnedFields[m] (root: + the
+         * descriptive ParticleContract.ConsumedElsewhere), the classes disjoint, and proves each consumed main / emission / shape /
+         * renderer key reaches a Babylon write. A new exporter key goes into exactly one of the three tables.
+         */
+        static readonly Consumes: {
+            [module: string]: string[];
+        };
+        /**
+         * Keys whose ONLY handling is a one-time warning (the D43 warned list, per module): a deferred module's every key, and the
+         * main / renderer / material / rotation keys that select a mode Babylon cannot draw. Setting one fires its warning and nothing else.
+         */
+        static readonly WarnedFields: {
+            [module: string]: string[];
+        };
+        /** Float tolerance of the clock comparisons: 1/60 summed n times lands a few ulps off n/60. */
+        private static readonly TimeEpsilon;
+        private static readonly Alias;
+        private _prtProps;
+        private _prtSystem;
+        private _prtEmitter;
+        private _prtCustomSpace;
+        private _prtCustomResolved;
+        private _prtCustomNode;
+        private _prtCustomPrev;
+        private _prtCustomDelta;
+        private _prtCustomInv;
+        private _prtShapeTexture;
+        private _prtShapeToken;
+        private _prtSkinMesh;
+        private _prtSkinLast;
+        private _prtState;
+        private _prtRandom;
+        private _prtMaterial;
+        private _prtTime;
+        private _prtDelay;
+        private _prtPlaying;
+        private _prtPaused;
+        private _prtEmitting;
+        private _prtStopped;
+        private _prtEmitRequests;
+        private _prtRateAccumulator;
+        private _prtDistanceAccumulator;
+        private _prtBurstNext;
+        private _prtBurstCycles;
+        private _prtLastWorldPos;
+        private _prtWorldPos;
+        private _prtDistanceMoved;
+        private _prtFirstFrame;
+        private _prtChildren;
+        private _prtCullSphere;
+        private _prtHeld;
+        private _prtHeldUpdateSpeed;
+        private _prtOnceApplied;
+        private _prtSimulating;
+        private readonly _prtRange;
+        private _prtTexture;
+        private _prtEmissionEntry;
+        private _prtEmissionMap;
+        private _prtEmissionToken;
+        private _prtEmissionEffect;
+        private _prtEmissionDefines;
+        private _prtEmissionBlend;
+        private _prtEmissionCheck;
+        private _prtEmissionObserver;
+        private _prtEmissionPending;
+        private _prtEmissionPendingDefines;
+        private _prtEmissionPendingBlend;
+        private _prtEmissionMask;
+        private _prtEmissionPendingMask;
+        private _prtEmissionStall;
+        private _prtSoftDepth;
+        private _prtDepthCounted;
+        private _prtPointLights;
+        private _prtPointTick;
+        private readonly _prtPointPos;
+        private readonly _prtPointColor;
+        private _prtFailedMasks;
+        private _prtNoDerive;
+        private _prtVertexName;
+        private _prtEmissionPendingVertex;
+        private _prtTextureToken;
+        private _prtLayerMask;
+        /** T24 (D38): the renderer material names a generated Shader Graph class that the bundle registers (decided before applyRenderer). */
+        private _prtGraphClass;
+        /** T19 / D22 - last frame's camera world position and the first-frame guard (the camera velocity is a finite difference). */
+        private _prtCamPrev;
+        private _prtCamFirst;
+        private _prtSheetHidden;
+        private readonly _prtCell;
+        private _prtSubEmitters;
+        private _prtSubResolved;
+        /**
+         * T23 - the one trigger callback the tail hands `ParticleTriggers.step`, built once (a closure per step would
+         * allocate every frame). It notifies the public observable and fires this system's Trigger (type 3) sub-emitters.
+         */
+        private readonly _prtTriggerEvent;
+        /**
+         * T23 / FR-35 InheritDuration (sub-emitter flag 16): the duration THIS system runs on until the next play(), handed
+         * to it by the parent particle that spawned into it (its remaining lifetime). 0 = its own `main.duration`.
+         */
+        private _prtDurationOverride;
+        private _prtIsSubEmitter;
+        private readonly _prtReqPool;
+        private readonly _prtReqFifo;
+        private _prtReqSafe;
+        private _prtInherit;
+        private _prtDeathLogNext;
+        private _prtCulled;
+        private _prtPausedSeconds;
+        private _prtCullUpdateSpeed;
+        private _prtPlaneSources;
+        private _prtPlaneNodes;
+        private _prtRay;
+        private _prtRayResult;
+        private _prtRayQuery;
+        private _prtRayPredicate;
+        private _prtWorldMeanScale;
+        private readonly _prtScratch;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        /** Get the underlying Babylon particle system */
-        getParticleSystem(): BABYLON.ParticleSystem | BABYLON.GPUParticleSystem;
-        /** Get the emitter mesh */
-        getEmitterMesh(): BABYLON.AbstractMesh;
-        /** Start the particle system */
-        private internalPlay;
-        /** Start the particle system */
-        play(): void;
-        /** Stop the particle system */
-        stop(): void;
-        /** Pause the particle system */
-        pause(): void;
-        /** Reset the particle system */
-        reset(): void;
-        /** Check if the system is playing */
-        isPlaying(): boolean;
-        /** Get current particle count */
-        getParticleCount(): number;
-        /** Get custom simulation space transform ID */
-        getCustomSimulationSpace(): number;
-        /** Get emitter velocity vector */
-        getEmitterVelocity(): BABYLON.Vector3;
-        /** Get gravity source mode (0=3D Physics, 1=2D Physics) */
-        getGravitySource(): number;
-        /** Get whether unscaled time is used */
-        getUseUnscaledTime(): boolean;
-        /** Get Unity's reported simulation delta time (read-only timing information) */
-        getCustomDeltaTime(): number;
-        /** Get Unity's reported simulation delta time (read-only timing information) */
-        getReportedDeltaTime(): number;
-        /**
-         * Get the effective delta time that would be used for particle simulation this frame
-         * This applies all Unity timing configurations: custom deltaTime, useUnscaledTime, and simulationSpeed
-         */
-        getEffectiveDeltaTime(): number;
-        /**
-         * Calculate Unity start delay value based on curve mode and multiplier
-         * Unity startDelay supports only TWO modes:
-         * - Mode 0 (Constant): Use curve.constant directly
-         * - Mode 2 (TwoConstants): Use curve.constantMin/constantMax directly
-         *
-         * IMPORTANT: Note: Unity's startDelayMultiplier is NOT USED For startDelay mode 0 = constant or mode 2 = two constants
-         * - Do NOT multiply by startDelayMultiplier ever!
-         */
-        private calculateStartDelay;
+        /** Builds everything (Control flow › Awake); never starts emission. */
         protected awake(): void;
+        /** playOnAwake → play(). */
         protected start(): void;
-        protected ready(): void;
+        /** Control flow › Frame. Babylon's animate() later in the same render consumes manualEmitCount and runs the update function. */
         protected update(): void;
-        /**
-         * Determine if particle system should simulate this frame based on culling mode
-         */
-        private shouldSimulateThisFrame;
-        protected late(): void;
-        protected step(): void;
-        protected fixed(): void;
-        protected after(): void;
+        /** D39: the effective culling mode - Automatic (0) = PauseAndCatchup (1) for looping systems, AlwaysSimulate (3) otherwise. */
+        private cullingMode;
+        /** True when the system is culled this frame: a Pause mode, an active camera, and the re-centred world sphere outside its frustum. */
+        private cullTest;
+        /** D39 radius = cullingRadius(shape extent, max start speed x speedScale, max lifetime, max start size); at awake and on play(). */
+        private refreshCullRadius;
+        /** Control flow › Destroy. A second call is a no-op. */
         protected destroy(): void;
+        /** Resumes a paused system, restarts a stopped one from time 0, does nothing to one already playing; then the children. */
+        play(withChildren?: boolean): void;
+        /** StopEmitting (0) ends emission and lets the particles finish; StopEmittingAndClear (1) also clears (D37). */
+        stop(withChildren?: boolean, stopBehavior?: number): void;
         /**
-         * Merges user properties with defaults to create complete particle system configuration.
-         * Only non-default values need to be serialized in GLTF extras.
-         * @param userProperties Properties from GLTF export (only changed values)
-         * @returns Complete particle system properties with defaults filled in
+         * stop() / reset(): StopEmittingAndClear leaves the system stopped and empty, so it runs the stop action (Unity fires it
+         * whenever the system becomes stopped and empty) - except on reset(), which must never disable / destroy (Decision 27).
          */
-        private static mergeWithDefaults;
+        private stopWith;
+        /** Freezes the system and its clock (Unity Pause); play() resumes. No-op before play(). */
+        pause(withChildren?: boolean): void;
+        /** Drops every live particle (Babylon reset). */
+        clear(withChildren?: boolean): void;
+        /** Emits `count` particles on the next step, through the same shape and start families (D37). */
+        emit(count: number): void;
         /**
-         * Deep merge two objects, with source overriding target values
-         * @param target Default values object
-         * @param source User-provided values object
-         * @returns Merged object
+         * Control flow › Simulate (D35): `restart` clears and rewinds to time 0 (the delay re-rolled, a fixed seed re-seeded, a looping
+         * prewarm system prewarmed over one duration first - Unity's Simulate restart, T33); then round(seconds x 60)
+         * fixed steps of { _stepClock(1/60 x simulationSpeed); ps.animate(true) } - Babylon's preWarm path, so no vertex upload
+         * until the next rendered frame. A never-played system may be simulated (it is started, not played). The hold state is
+         * re-applied afterwards; stop actions wait for the next rendered frame.
          */
-        private static deepMerge;
+        simulate(seconds: number, withChildren?: boolean, restart?: boolean): void;
         /**
-         * Gets a property value with fallback to default
-         * @param path Property path (e.g., "main.startLifetime.constant")
-         * @param userProps User properties
-         * @returns Property value or default
+         * simulate() of a system and its descendants IN LOCKSTEP (T34, F-S.52): every fixed step runs each member's
+         * { _stepClock; animate(true) } in family order (the parent before its descendants), as Unity's Simulate(t, withChildren)
+         * does. Simulating the parent's whole run and then each child's (the pre-T34 order) left a sub-emitter child's spawn requests
+         * queued until the child's own run, which then created them all at ITS time 0 and aged them the full t: the Pack's impact
+         * dust (lifetime 0.2 - 0.5) was 5 alive at t = 0.5 instead of Unity's 60. A member that prewarms (restart, loop, prewarm) starts
+         * its prewarm steps earlier so that every timeline ends at the same moment; a sub-emitter child steps whenever any member does
+         * (its own clock never emits, D37 - it only has to take its parent's requests in the frame they were made).
          */
-        private static getPropertyWithDefault;
+        private static SimulateFamily;
+        /** Emitting, or holding live particles, or (withChildren) any child alive (D37). */
+        isAlive(withChildren?: boolean): boolean;
+        isPlaying(): boolean;
+        isPaused(): boolean;
+        isEmitting(): boolean;
+        /** Kept for compatibility: stop(true, StopEmittingAndClear) then play(). */
+        reset(): void;
+        /** System time in seconds since play (after the start delay). */
+        get time(): number;
+        get particleCount(): number;
+        get duration(): number;
+        get loop(): boolean;
+        getParticleSystem(): BABYLON.ParticleSystem;
+        /** The emitter is the component's own node since the parity rewrite (D50). */
+        getEmitterMesh(): BABYLON.TransformNode;
+        getParticleCount(): number;
+        /** Read-only effective module state for read-backs (D51). */
+        getState(): TOOLKIT.IParticleSystemState;
+        /** The applied material (D51): family, blend, depth write, texture url / readiness, tint (rgb x vertexColorScaleGamma, alpha x vertexColorScale), fallback, hidden. */
+        getMaterialState(): TOOLKIT.IParticleMaterialState;
+        getShapeEmitter(): TOOLKIT.ShurikenShapeEmitter;
+        /** Drops the memoised child list of every ancestor component (called when this component awakes or is destroyed). */
+        private invalidateAncestors;
+        /** Every descendant node carrying the component, in scene-graph order (memoised; refreshed when a descendant component awakes or is destroyed, and on play()). */
+        getChildSystems(): TOOLKIT.ShurikenParticles[];
         /**
-         * Utility for Unity C# exporters: Compare particle system properties against defaults
-         * to determine which properties need to be serialized in GLTF extras.
-         * @param fullProperties Complete particle system properties
-         * @returns Object containing only properties that differ from defaults
+         * simulate(seconds, true, restart) on every ROOT component of the scene (no ShurikenParticles on any ancestor), D35.
+         * `alive` counts the roots still alive, `particles` sums the live particles of every component.
          */
-        static getMinimalSerializationData(fullProperties: any): any;
+        static SimulateAll(scene: BABYLON.Scene, seconds: number, restart?: boolean): {
+            systems: number;
+            alive: number;
+            particles: number;
+        };
+        /** Holds every system of the scene for a capture: nothing emits and nothing moves while held (D35). */
+        static SetHold(scene: BABYLON.Scene, hold: boolean): void;
+        static IsHeld(scene: BABYLON.Scene): boolean;
+        /** The component whose bag carries `instanceId` (the exporter's sub-emitter reference), or null. */
+        static FindByInstanceId(scene: BABYLON.Scene, instanceId: number): TOOLKIT.ShurikenParticles;
         /**
-         * Recursively extracts differences between two objects
-         * @param source Full properties object
-         * @param defaults Default values object
-         * @returns Object containing only differing properties
+         * Stable draw-order sort of `scene.particleSystems` in place by `(_prtSortKey, original index)` (D16 / D60): the key is
+         * ParticleConversions.sortKey(sortingLayerID, sortingOrder) stamped by applyRenderer; systems without one sort as key 0.
+         * Called once per dirty flag (every awake sets it) from the first update() that sees it; the rendering group is never set from particle metadata.
          */
-        private static extractDifferences;
-        /**
-         * Deep array equality comparison
-         * @param arr1 First array
-         * @param arr2 Second array
-         * @returns True if arrays are deeply equal
-         */
-        private static arraysEqual;
-        /**
-         * Gets the default particle system properties (for reference by Unity exporters)
-         * @returns Complete default properties object
-         */
+        static SortScene(scene: BABYLON.Scene): void;
+        /** A fresh copy of ParticleContract.Defaults (Karting compatibility, D50). */
         static getDefaultProperties(): TOOLKIT.IParticleSystemProperties;
-        private initializeParticleSystem;
-        private shouldUseGPUParticles;
-        private createEmitterMesh;
-        private createDefaultParticleTexture;
-        private createCPUParticleSystem;
-        private createGPUParticleSystem;
-        private configureMainModule;
-        private configureEmissionModule;
-        private configureShapeModule;
-        private configureRendererModule;
-        private implementStretchRendering;
-        private implementConstrainedBillboarding;
-        private implementMeshRendering;
-        private implementParticleSorting;
-        private implementParticleAlignment;
-        private implementParticleFlipping;
-        private implementParticlePivot;
-        private implementParticleRoll;
-        private implementVelocityScaling;
-        private implementNormalDirection;
-        private implementFreeformStretching;
-        private implementMaskInteraction;
-        private implementStretchRotation;
-        private implementShadowBias;
-        private implementMultiMeshRendering;
-        private implementCustomVertexStreams;
-        private implementTrailMaterial;
-        private implementMaterialConfiguration;
-        private implementShadowConfiguration;
-        private implementProbeConfiguration;
-        private implementGPUInstancing;
-        private implementSortingLayer;
-        private configureVelocityOverLifetimeModule;
-        private configureLimitVelocityOverLifetimeModule;
-        private configureColorOverLifetimeModule;
-        private configureSizeOverLifetimeModule;
-        private configureRotationOverLifetimeModule;
-        private configureTextureSheetAnimationModule;
-        private ensureBasicConfiguration;
-        private convertMinMaxCurve;
-        private convertMinMaxGradient;
-        private convertColor;
-        private colorsEqual;
+        /** ParticleContract.withDefaults (D50). */
+        static mergeWithDefaults(raw: any): TOOLKIT.IParticleSystemProperties;
+        /** True when no ancestor of the component's node carries a ShurikenParticles. */
+        protected static IsRoot(component: TOOLKIT.ShurikenParticles): boolean;
+        /** Every component of the scene (transform nodes and meshes), in scene order. */
+        protected static FindAll(scene: BABYLON.Scene): TOOLKIT.ShurikenParticles[];
+        /** play()'s reset: time 0, accumulators, first frame, emitting. */
+        private resetClock;
         /**
-         * Convert Unity gradient to BabylonJS color gradients
-         * @param gradient Unity gradient data
-         * @param particleSystem BabylonJS particle system to add gradients to
-         * @returns True if gradient was successfully applied
+         * How long a looping prewarm system prewarms: whole loops, as many as the longest start lifetime needs (T34, F-S.53; Unity
+         * 6000.5 prewarm probe (T34): duration 2 / lifetime 5 / rate 10 -> 50 particles, oldest 4.9 at t 0.1;
+         * duration 5 / lifetime 10 / rate 20 -> 200, oldest 9.955 - the steady state, not one loop's 102; duration 3 / lifetime 1 -> 10).
+         * D35's single loop left the Pack's long-lived fog / dust younger and sparser (GroundFog 110 vs Unity 182 at t = 0.5).
          */
-        private applyUnityGradientToBabylon;
-        private convertVector3;
-        private evaluateCurveAtTime;
-        private setupBursts;
-        private resetBurstTimers;
-        private updateSystem;
-        private updateEmission;
-        private updateAnimationProperties;
-        private updateBursts;
-        private triggerBurst;
-        private configureEmissionShape;
-        private setupVelocityOverLifetime;
-        private setupLimitVelocity;
-        private createColorGradient;
-        private setupSpriteAnimation;
-        private createBoxShapeEmitter;
-        private createSphereShapeEmitter;
-        private createConeShapeEmitter;
-        private configureNoiseModule;
-        private configureCollisionModule;
-        private configureTrailsModule;
-        private configureSubEmittersModule;
+        prewarmSeconds(): number;
+        /** The most fixed 1/60 steps one prewarm runs FINE (60 simulated seconds; T35, verifier D-c). The rest runs coarse (D29). */
+        static MaxPrewarmSteps: number;
+        /** D29 - the step the excess beyond MaxPrewarmSteps fine steps is simulated with, and how many such steps at most. */
+        static CoarsePrewarmStep: number;
+        static MaxCoarsePrewarmSteps: number;
         /**
-         * Apply emitter velocity inheritance to newly spawned particles
-         * Unity: When emitter moves, particles can inherit velocity from the movement
+         * D29 - how one prewarm is run: the EXCESS beyond `MaxPrewarmSteps` fine 1/60 steps is simulated FIRST in coarse steps
+         * of `CoarsePrewarmStep` (at most `MaxCoarsePrewarmSteps` of them; beyond that the coarse step grows), then the fine
+         * steps bring the system to its real steady state. Nothing is truncated: `fineSeconds + coarseSteps x coarseDt` is the
+         * whole `prewarmSeconds()`. Both entry points - `play()` and `SimulateFamily`'s restart path - use this one plan.
          */
-        private updateEmitterVelocityInheritance;
+        private prewarmPlan;
+        /** D29 - the coarse half of a prewarm plan, run exactly as SimulateFamily runs one member (paused / updateSpeed saved and restored). */
+        private runCoarsePrewarm;
+        /** main.startDelay sampled once per play (D36); 0 with a warning on a looping prewarm system (Unity disables the delay there). */
+        private rollDelay;
+        /** D37: once per stop - None 0 / Disable 1 / Destroy 2 / Callback 3. */
+        private _runStopAction;
         /**
-         * Handle custom simulation space coordinate transformation
-         * Unity: Particles can be simulated relative to a custom transform's coordinate space
+         * T23 / FR-35: the duration this system's clock runs on - `main.duration`, unless a parent particle handed it its own
+         * remaining lifetime through an InheritDuration (flag 16) sub-emitter spawn. Overlapping spawns share the LATEST
+         * override (documented): one child system has one clock.
          */
-        private updateCustomSimulationSpace;
+        private effectiveDuration;
+        /** One step of the component clock (Control flow › _stepClock), shared by update() and simulate(). */
+        private _stepClock;
         /**
-         * Handle ring buffer mode particle lifetime looping
-         * Unity: Particles can loop their lifetime instead of dying when exceeding maxLifetime
+         * D38 oldest-kill: when `active + n` exceeds the capacity, marks the `(n - free)` born, live records with the smallest
+         * `spawnFrame` dead; the next ParticleSimulation.step recycles them at the top of its loop, before Babylon creates the n new
+         * particles in the same animate(). Records already marked dead count as free. Allocation-free (D58).
          */
-        private updateRingBufferMode;
+        private _ringBufferKill;
+        private anyChildAlive;
         /**
-         * Handle Unity stop action when particle system completes
-         * Unity: Defines what happens when system stops and all particles die
+         * Algorithms › Emission: the integer count of this step. Rate over time and over distance accumulate their fractional
+         * part (never floored before accumulating); bursts fire when their next time falls in (loopTime - dt, loopTime], re-armed
+         * at every loop boundary; emit(count) and the shape emitter's queued spawn requests are added on top. `emitDt` is the part
+         * of this frame inside [0, duration] (a non-looping system's last frame; `dt` otherwise) - rate and distance use it.
          */
-        private handleStopAction;
+        private _emissionCount;
+        /** Fires every armed burst whose next time lies in (prev, now] (clock tolerance EPS, cycleCount / repeatInterval / probability); returns the particle count. */
+        private fireBursts;
+        /** Every burst re-armed at its own time with no cycle fired (play, restart, loop boundary; D36). */
+        private resetBursts;
+        /** _stepClock step 1: world / inverse matrices, the camera basis, dt, the emitter velocity and the distance moved (D53). */
+        private refreshFrame;
         /**
-         * Set up visibility checking for camera frustum culling
-         * Monitors whether particle system is visible to determine simulation behavior
+         * T20 / D23 - Custom simulation space. The particles are stored in WORLD space (`ps.isLocal` is false) and every step
+         * they are carried by `M_prev⁻¹ x M_now` of the referenced node, so they follow that node - its translation, its
+         * rotation and its scale - while ignoring the emitter's own motion. The node is resolved lazily on the first frame
+         * (D24: by GUID at scene level, else by name inside the owner's own hierarchy, so each prefab instance takes its own
+         * node); a reference that never resolves, or a node disposed at runtime, falls back to plain World with one
+         * `main:simulationSpace:custom:<node>` warning. The delta of the first frame is the identity by construction.
          */
-        private setupCullingVisibilityCheck;
+        private refreshCustomSpace;
         /**
-         * Check if particle system emitter is visible to any active camera
+         * FR-32 (T22) - a SkinnedMeshRenderer shape emits from the ANIMATED pose, not the bind pose: at most
+         * `SkinnedShapeRefreshHz` times a second the skin's current positions / normals replace the emitter's, WITHOUT
+         * rebuilding its area / length prefix tables (the topology has not changed - `refreshMeshPositions`). A held, paused,
+         * culled or prewarming system does not pay for it, and `SkinnedShapeRefreshHz = 0` keeps the bind pose exactly as before.
          */
-        private isEmitterVisible;
+        private refreshSkinnedShape;
         /**
-         * Handle visibility state changes for different culling modes
+         * T19 / D22 - the camera's world velocity as a finite difference of its position, in the same shape the emitter
+         * velocity already uses: zero on the first frame this component sees, zero on a held / paused clock (`dt === 0`) and
+         * zero across a teleport (`Conv.TeleportDistance`), so a scene cut never fires a frame of enormous stretch.
          */
-        private handleVisibilityChange;
-        private disposeParticleSystem;
-    }
-    interface IParticleSystemMinMaxCurve {
-        mode: number;
-        constant: number;
-        constantMin: number;
-        constantMax: number;
-        multiplier: number;
-        curve?: IParticleSystemAnimationCurve;
-        curveMin?: IParticleSystemAnimationCurve;
-        curveMax?: IParticleSystemAnimationCurve;
-    }
-    interface IParticleSystemMinMaxGradient {
-        mode: number;
-        color: IParticleSystemColor;
-        colorMin: IParticleSystemColor;
-        colorMax: IParticleSystemColor;
-        gradient?: IParticleSystemGradient;
-        gradientMin?: IParticleSystemGradient;
-        gradientMax?: IParticleSystemGradient;
-    }
-    interface IParticleSystemAnimationCurve {
-        length: number;
-        preWrapMode: number;
-        postWrapMode: number;
-        keys: IParticleSystemKeyframe[];
-    }
-    interface IParticleSystemKeyframe {
-        time: number;
-        value: number;
-        inTangent: number;
-        outTangent: number;
-        inWeight: number;
-        outWeight: number;
-        weightedMode: number;
-    }
-    interface IParticleSystemGradient {
-        mode: number;
-        colorKeys: IParticleSystemColorKey[];
-        alphaKeys: IParticleSystemAlphaKey[];
-    }
-    interface IParticleSystemColorKey {
-        color: IParticleSystemColor;
-        time: number;
-    }
-    interface IParticleSystemAlphaKey {
-        alpha: number;
-        time: number;
-    }
-    interface IParticleSystemColor {
-        r: number;
-        g: number;
-        b: number;
-        a: number;
-    }
-    interface IParticleSystemVector2 {
-        x: number;
-        y: number;
-    }
-    interface IParticleSystemVector3 {
-        x: number;
-        y: number;
-        z: number;
-    }
-    interface IParticleSystemTransform {
-        name: string;
-        instanceId: number;
-        position: IParticleSystemVector3;
-        rotation: IParticleSystemVector3;
-        scale: IParticleSystemVector3;
-    }
-    interface IParticleSystemBurst {
-        time: number;
-        count: IParticleSystemMinMaxCurve;
-        cycleCount: number;
-        repeatInterval: number;
-        probability: number;
-    }
-    interface IParticleSystemMainModule {
-        duration: number;
-        loop: boolean;
-        prewarm: boolean;
-        startDelay: IParticleSystemMinMaxCurve;
-        startDelayMultiplier: number;
-        startLifetime: IParticleSystemMinMaxCurve;
-        startLifetimeMultiplier: number;
-        startSpeed: IParticleSystemMinMaxCurve;
-        startSpeedMultiplier: number;
-        startSize3D: boolean;
-        startSize: IParticleSystemMinMaxCurve;
-        startSizeMultiplier: number;
-        startSizeX: IParticleSystemMinMaxCurve;
-        startSizeXMultiplier: number;
-        startSizeY: IParticleSystemMinMaxCurve;
-        startSizeYMultiplier: number;
-        startSizeZ: IParticleSystemMinMaxCurve;
-        startSizeZMultiplier: number;
-        startRotation3D: boolean;
-        startRotation: IParticleSystemMinMaxCurve;
-        startRotationMultiplier: number;
-        startRotationX: IParticleSystemMinMaxCurve;
-        startRotationXMultiplier: number;
-        startRotationY: IParticleSystemMinMaxCurve;
-        startRotationYMultiplier: number;
-        startRotationZ: IParticleSystemMinMaxCurve;
-        startRotationZMultiplier: number;
-        flipRotation: number;
-        startColor: IParticleSystemMinMaxGradient;
-        gravityModifier: IParticleSystemMinMaxCurve;
-        gravityModifierMultiplier: number;
-        simulationSpace: number;
-        simulationSpeed: number;
-        deltaTime: number;
-        scalingMode: number;
-        playOnAwake: boolean;
-        emitterVelocityMode: number;
-        maxParticles: number;
-        stopAction: number;
-        cullingMode: number;
-        ringBufferMode: number;
-        ringBufferLoopRange: IParticleSystemVector2;
-        customSimulationSpace?: number;
-        emitterVelocity?: IParticleSystemVector3;
-        gravitySource?: number;
-        useUnscaledTime?: boolean;
-    }
-    interface IParticleSystemEmissionModule {
-        enabled: boolean;
-        rateOverTime: IParticleSystemMinMaxCurve;
-        rateOverTimeMultiplier: number;
-        rateOverDistance: IParticleSystemMinMaxCurve;
-        rateOverDistanceMultiplier: number;
-        burstCount: number;
-        bursts: IParticleSystemBurst[];
-    }
-    interface IParticleSystemShapeModule {
-        enabled: boolean;
-        shapeType: number;
-        angle: number;
-        radius: number;
-        radiusMode: number;
-        radiusSpread: number;
-        radiusSpeed: IParticleSystemMinMaxCurve;
-        radiusSpeedMultiplier: number;
-        donutRadius: number;
-        position: IParticleSystemVector3;
-        rotation: IParticleSystemVector3;
-        scale: IParticleSystemVector3;
-        alignToDirection: boolean;
-        randomDirectionAmount: number;
-        sphericalDirectionAmount: number;
-        randomPositionAmount: number;
-        biasOnTriangles: boolean;
-        useMeshMaterialIndex: boolean;
-        meshMaterialIndex: number;
-        useMeshColors: boolean;
-        normalOffset: number;
-        meshSpawnMode: number;
-        meshSpawnSpread: number;
-        meshSpawnSpeed: IParticleSystemMinMaxCurve;
-        meshSpawnSpeedMultiplier: number;
-        arc: number;
-        arcMode: number;
-        arcSpread: number;
-        arcSpeed: IParticleSystemMinMaxCurve;
-        arcSpeedMultiplier: number;
-        length: number;
-        boxThickness: IParticleSystemVector3;
-    }
-    interface IParticleSystemRendererModule {
-        enabled: boolean;
-        materials: any[];
-        renderMode: number;
-        cameraVelocityScale: number;
-        velocityScale: number;
-        lengthScale: number;
-        normalDirection: number;
-        sortMode: number;
-        sortingFudge: number;
-        minParticleSize: number;
-        maxParticleSize: number;
-        alignment: number;
-        flip: IParticleSystemVector2;
-        allowRoll: boolean;
-        pivot: IParticleSystemVector3;
-        shadowCastingMode: number;
-        receiveShadows: boolean;
-        motionVectorGenerationMode: number;
-        lightProbeUsage: number;
-        reflectionProbeUsage: number;
-        enableGPUInstancing: boolean;
-        mesh?: any;
-        sortingLayerID: number;
-        sortingOrder: number;
-        freeformStretching?: boolean;
-        maskInteraction?: number;
-        meshCount?: number;
-        meshDistribution?: number;
-        rotateWithStretchDirection?: boolean;
-        shadowBias?: number;
-        supportsMeshInstancing?: boolean;
-        activeVertexStreamsCount?: number;
-        activeTrailVertexStreamsCount?: number;
-        meshes?: any[];
-        trailMaterial?: any;
-    }
-    interface IParticleSystemVelocityOverLifetimeModule {
-        enabled: boolean;
-        space: number;
-        x: IParticleSystemMinMaxCurve;
-        y: IParticleSystemMinMaxCurve;
-        z: IParticleSystemMinMaxCurve;
-        xMultiplier: number;
-        yMultiplier: number;
-        zMultiplier: number;
-        orbitalX: IParticleSystemMinMaxCurve;
-        orbitalY: IParticleSystemMinMaxCurve;
-        orbitalZ: IParticleSystemMinMaxCurve;
-        orbitalXMultiplier: number;
-        orbitalYMultiplier: number;
-        orbitalZMultiplier: number;
-        orbitalOffsetX: IParticleSystemMinMaxCurve;
-        orbitalOffsetY: IParticleSystemMinMaxCurve;
-        orbitalOffsetZ: IParticleSystemMinMaxCurve;
-        orbitalOffsetXMultiplier: number;
-        orbitalOffsetYMultiplier: number;
-        orbitalOffsetZMultiplier: number;
-        radial: IParticleSystemMinMaxCurve;
-        radialMultiplier: number;
-        speedModifier: IParticleSystemMinMaxCurve;
-        speedModifierMultiplier: number;
-    }
-    interface IParticleSystemLimitVelocityOverLifetimeModule {
-        enabled: boolean;
-        limitX: IParticleSystemMinMaxCurve;
-        limitY: IParticleSystemMinMaxCurve;
-        limitZ: IParticleSystemMinMaxCurve;
-        limitXMultiplier: number;
-        limitYMultiplier: number;
-        limitZMultiplier: number;
-        limit: IParticleSystemMinMaxCurve;
-        limitMultiplier: number;
-        dampen: number;
-        separateAxes: boolean;
-        space: number;
-        drag: IParticleSystemMinMaxCurve;
-        dragMultiplier: number;
-        multiplyDragByParticleSize: boolean;
-        multiplyDragByParticleVelocity: boolean;
-    }
-    interface IParticleSystemColorOverLifetimeModule {
-        enabled: boolean;
-        color: IParticleSystemMinMaxGradient;
-    }
-    interface IParticleSystemSizeOverLifetimeModule {
-        enabled: boolean;
-        size: IParticleSystemMinMaxCurve;
-        sizeMultiplier: number;
-        x: IParticleSystemMinMaxCurve;
-        xMultiplier: number;
-        y: IParticleSystemMinMaxCurve;
-        yMultiplier: number;
-        z: IParticleSystemMinMaxCurve;
-        zMultiplier: number;
-        separateAxes: boolean;
-    }
-    interface IParticleSystemRotationOverLifetimeModule {
-        enabled: boolean;
-        x: IParticleSystemMinMaxCurve;
-        xMultiplier: number;
-        y: IParticleSystemMinMaxCurve;
-        yMultiplier: number;
-        z: IParticleSystemMinMaxCurve;
-        zMultiplier: number;
-        separateAxes: boolean;
-    }
-    interface IParticleSystemTextureSheetAnimationModule {
-        enabled: boolean;
-        mode: number;
-        timeMode: number;
-        fps: number;
-        numTilesX: number;
-        numTilesY: number;
-        animation: number;
-        useRandomRow: boolean;
-        frameOverTime: IParticleSystemMinMaxCurve;
-        frameOverTimeMultiplier: number;
-        startFrame: IParticleSystemMinMaxCurve;
-        startFrameMultiplier: number;
-        cycleCount: number;
-        rowIndex: number;
-        rowMode: number;
-        uvChannelMask: number;
-        flipU: number;
-        flipV: number;
-        speedRange: IParticleSystemVector2;
-    }
-    interface IParticleSystemProperties {
-        isPlaying: boolean;
-        isPaused: boolean;
-        isStopped: boolean;
-        isEmitting: boolean;
-        particleCount: number;
-        time: number;
-        randomSeed: number;
-        useAutoRandomSeed: boolean;
-        name: string;
-        instanceId: number;
-        enabled: boolean;
-        transformPosition: IParticleSystemVector3;
-        transformRotation: IParticleSystemVector3;
-        transformScale: IParticleSystemVector3;
-        materialName?: string;
-        materialId?: number;
-        mainTextureName?: string;
-        mainTextureId?: number;
-        main: IParticleSystemMainModule;
-        emission: IParticleSystemEmissionModule;
-        shape: IParticleSystemShapeModule;
-        renderer: IParticleSystemRendererModule;
-        velocityOverLifetime: IParticleSystemVelocityOverLifetimeModule;
-        limitVelocityOverLifetime: IParticleSystemLimitVelocityOverLifetimeModule;
-        colorOverLifetime: IParticleSystemColorOverLifetimeModule;
-        sizeOverLifetime: IParticleSystemSizeOverLifetimeModule;
-        rotationOverLifetime: IParticleSystemRotationOverLifetimeModule;
-        textureSheetAnimation: IParticleSystemTextureSheetAnimationModule;
-        inheritVelocity?: any;
-        forceOverLifetime?: any;
-        colorBySpeed?: any;
-        sizeBySpeed?: any;
-        rotationBySpeed?: any;
-        externalForces?: any;
-        noise?: any;
-        collision?: any;
-        triggers?: any;
-        subEmitters?: any;
-        lights?: any;
-        trails?: any;
-        customData?: any;
+        private refreshCameraVelocity;
+        /**
+         * T18 / D22 - this frame's CPU renderer-flag frame. Every one of these is EDITABLE (Inspector truth, D52): the renderer
+         * module is re-read here on every frame, so a change to `allowRoll`, `minParticleSize`, `maxParticleSize` or the sheet's
+         * `flipU` / `flipV` shows on the next one without a rebuild.
+         *
+         * `allowRoll = false` is Unity's "billboards ignore the camera's roll": the camera's roll about its own forward axis is
+         * `atan2(right.y, up.y)`, and `visual()` folds only the CHANGE of it into `p.angle`, so the angle INTEGRATION (rotation
+         * over lifetime, rotation by speed, noise) is untouched.
+         *
+         * The screen-size clamps are SCREEN fractions. Unity's default `maxParticleSize` is 0.5 (half the viewport height), so
+         * the clamp is normally live; a project that means "no clamp" writes >= 100, which switches the whole closed form off.
+         */
+        private refreshFlags;
+        /**
+         * D20 - this frame's share of the scene ray budget. The census on `scene._prtRays` counts the world-collision systems that
+         * stepped LAST frame (`systems`), so every one of them gets an equal share of `MaxCollisionRaysPerFrame` this frame; the
+         * quality setting takes a half (1) or a quarter (2) of that share. A prewarm / `simulate()` gets none and is not counted:
+         * its thousands of fine steps all fall inside one scene frame and would otherwise inflate the census for the next one.
+         */
+        private refreshRayBudget;
+        /**
+         * _stepClock step 1 / 5 (D33): the node's world matrix decomposed -> scaleVector by scalingMode (world scale for Hierarchy,
+         * local for Local, world scale on the shape only for Shape, T30) and speedScale = mean(scaleVector) (1 for Shape);
+         * shapeMatrix = T(nodeWorldPos) x R(nodeWorldRot) x S(scaleVector) x T(shape.position) x R(shape.rotation) - never S(shape.scale),
+         * which the emitter applies itself (run-log Decision 12); localMatrix = inverse(node world) x shapeMatrix; nodeInverse for the
+         * request path. Unity's shape rotation is Euler degrees applied Z, X, Y = Babylon's RotationYawPitchRoll(y, x, z). No allocation.
+         */
+        private refreshShapeFrame;
+        /**
+         * The factor folded into min / maxEmitPower (D24 / D33): speedScale for a World simulation; for a Local one the render matrix
+         * (Babylon's `_emitterWorldMatrix`) already carries the node's world scale, so speedScale / mean(world scale) keeps the world
+         * speed = startSpeed x speedScale without scaling it twice.
+         */
+        private emitPowerScale;
+        /** D40: one state slot per exported plane (world position + normal), allocated once at awake. */
+        private buildPlanes;
+        /**
+         * D20 - the one ray cast closure this system uses, built at awake when `collision.type === 1` (World). Havok is gated
+         * FIRST and re-checked on every call (physics may arrive after awake, and `RigidbodyPhysics.RaycastToRef` warns on EVERY
+         * call without the plugin); without it the ray is a scene pick filtered by `isPickable`, the internal tag and the Unity
+         * layer mask of the mesh's nearest exported ancestor. Nothing is allocated per cast.
+         */
+        private buildRayCaster;
+        /** D40: this step's planes in the simulation space (world; the inverse emitter matrix when local). No allocation. */
+        private refreshPlanes;
+        /** Algorithms › Clock. */
+        private static normalizedTimeOf;
+        /**
+         * Algorithms › Start families. `once` writes the Constant (0) / TwoConstants (3) families (awake only - an Inspector
+         * edit sticks, D52); otherwise the Curve (1) / TwoCurves (2) families are re-sampled at the system's normalised time.
+         */
+        protected applyStartFamilies(once: boolean): void;
+        /** Constant (0) / TwoConstants (3) families: written once, at awake (D24 / D52). */
+        private static dueOnce;
+        /** Curve (1) / TwoCurves (2) families: re-sampled every step (D11 / D24). */
+        private static duePerFrame;
+        /** A contract colour (or white) into one or two Babylon colours. */
+        private static writeColor;
+        /**
+         * Queues `count` spawns at a WORLD position / velocity (D27): each becomes one particle of this system on its next step, through
+         * the shape emitter's request queue (the position replaces the shape sample, the velocity replaces the start velocity, the
+         * inherit flags of `inherit` apply at birth). Request objects come from a per-component pool (D58). A system that is not playing
+         * is started (a sub-emitter child spawns only on its parent's events).
+         */
+        emitFrom(position: BABYLON.Vector3, velocity: BABYLON.Vector3, count: number, inherit?: TOOLKIT.ISpawnRequest): void;
+        /**
+         * Right after this system's creation pass (the `_update` wrap): spawn requests still queued while the system is FULL could not be
+         * created and are dropped, as Unity drops a sub-emitter emission beyond maxParticles (T37, F-S.59: the Pack's MistTrail child sat
+         * at its 1,000 capacity while its queue grew by ~75 requests a frame - 60,000 pending after 20 s, O(queue) work per frame and
+         * minutes-old spawns replayed once room appeared). A culled or paused child keeps its capped queue (emitFrom). Allocation-free.
+         */
+        private _dropUnservedRequests;
+        /**
+         * Returns spawn requests to the pool once their particle's birth has read them: a request consumed by animate() k is read by
+         * the birth in animate() k + 1, so the requests counted as consumed at one step are free at the next (the queue is the tail
+         * of the FIFO of pushed requests). Allocation-free.
+         */
+        private recycleRequests;
+        /**
+         * D27 (once, at the first step): every `subEmitters.subEmitters[i]` resolved by `systemId` through FindByInstanceId (never by
+         * name); a missing id -> `subemitter:missing:<node>`, itself or an ancestor -> `subemitter:cycle:<node>`; each resolved child is
+         * marked a sub-emitter. T23: Birth (0), Collision (1), Death (2), Trigger (3) and Manual (4) all resolve the same way - a Trigger
+         * child bursts from `_fireTriggerSubs` on a Callback trigger event, a Manual one only through `triggerSubEmitter(index)`.
+         * This system also learns whether another system names it (then its own emission never runs, even when its step precedes its
+         * parent's). The ORIGINAL list index is kept on each entry: that is what `triggerSubEmitter(int)` addresses.
+         */
+        private _resolveSubEmitters;
+        /** True when `node` is this component's node's parent, grandparent, ... */
+        private isAncestorNode;
+        /** Sub-emitter child rate (particles / s) for burst-less Death / Collision children: rateOverTime at t 0, lerp 0.5. */
+        private static childRate;
+        /**
+         * A Birth child's emission from ONE parent particle over the parent-age interval (age - dt, age] (T34, F-S.51; Unity 6000.5
+         * probe (T34, sub-emitter birth): the child runs its own clock from the parent's birth - a NON-looping child evaluates
+         * rateOverTime at age / child duration and stops emitting at age >= duration (rate 100 x (1 - t), duration 5, parent lifetime 2
+         * -> 158 children = the integral 160; duration 1 -> 49 = 50), a LOOPING child evaluates it at t = 0 (duration 1 looping -> 198
+         * over 2 s = 100 / s); rateOverDistance counts the parent's travel (10 / m at 3 m/s -> 59 over 2 s). The rate integral is
+         * the midpoint rule over the step. The runtime used rateOverTime at t 0 for every child: the Pack's impact debris
+         * (500 x a curve that is 0 after 4.6 % of its duration) emitted 500 / s per parent forever (1,000 = capacity vs Unity's 32) and
+         * the rocket / debris smoke trails (rateOverDistance only) emitted nothing.
+         */
+        static BirthChildCount(child: TOOLKIT.ShurikenParticles, age: number, dt: number, distance: number, random?: TOOLKIT.ParticleRandom): number;
+        /** Death / Collision spawn count: the child's first burst count (Unity uses its burst at time 0), else one frame of its rate (at least 1). */
+        private burstCountOf;
+        /**
+         * T23 / FR-35: the Trigger (type 3) sub-emitters of this system burst from ONE particle, on a Callback trigger event.
+         * The child is emitted at the particle's world position with its world velocity, under the entry's `probability`
+         * roll, exactly as a Death / Collision child is. Called from `_prtTriggerEvent`, so only a Callback action reaches it.
+         */
+        private _fireTriggerSubs;
+        /**
+         * FR-39 / Unity's `ParticleSystem.TriggerSubEmitter(int)`: fires the MANUAL (type 4) sub-emitter at `index` of this
+         * system's exported sub-emitter list - for EVERY live particle, as Unity's parameterless overload does. An index that
+         * names no entry, or one whose type is not Manual, or whose child is gone, is a no-op.
+         * @param index the index INTO THE EXPORTED LIST (the order the Unity inspector shows), not into the resolved entries.
+         */
+        triggerSubEmitter(index: number): void;
+        /** The inheritance fields of a spawn request (D27) from a live particle, into the per-component scratch request. */
+        private inheritOf;
+        /** The inheritance fields of a spawn request from a death / collision event. */
+        private inheritOfEvent;
+        private inheritScratch;
+        /**
+         * _stepClock step 8 (D27): Birth children emit continuously from every live parent particle on the child's own clock = the
+         * parent's age (BirthChildCount: rate over time + rate over distance, T34), accumulated per particle and per Birth child, the
+         * integer part spawned at the particle's world position with its world velocity.
+         * Deaths / collisions drain right after the step (_drainDeaths, F-S.43).
+         */
+        private _drainEvents;
+        /**
+         * Right after this system's step (the component's wrap of Babylon's `_update`, F-S.43): this step's deaths / collisions spawn
+         * the child's burst count when `random < probability` (D27, run-log Decision 41) and are copied into the 256-entry death log
+         * (the AC-6 read-back); the sinks are cleared. Draining here - not at the next _stepClock - puts the children in the SAME frame
+         * as the death, as Unity does (prt-ac6-oracle.cs: a parent last seen at step 32 has its 5 children at step 33, age 0);
+         * emitFrom also raises the child's manualEmitCount, so a child that animates later in this frame creates them now.
+         */
+        private _drainDeaths;
+        /**
+         * Awake step 6 (D26): a mesh shape (6 / 13 / 14) samples `meshRef` (GetTransformNodeByID(String(nodeId)), then GetMesh(nodeName);
+         * a node without vertex data falls back to its `<name>.Detail` / first child mesh, and a name without vertex data to the
+         * `<name>.Skin` / `<name>.Detail` meshes - the loader keeps a skinned renderer's geometry on a separate `.Skin` mesh while the
+         * node name is a TransformNode, so the name path alone found no geometry for the Pack's Embers / Flakes (T30, F-S.33
+         * follow-up)), or the inline `meshData`; neither -> `shape:mesh-missing:<node>` and the emitter samples a point.
+         * MeshRenderer (13) / SkinnedMeshRenderer (14) sample the renderer in its WORLD space (Unity emits from the renderer where it
+         * stands). Mesh (6) samples the mesh ASSET in the emitter's own space: the resolved node's vertex data with no world matrix,
+         * so the shape transform (position / rotation / scale) applies like every primitive - measured on ParticleShapes.unity (T30):
+         * Unity's Shape_MeshVertex / MeshEdge / MeshTriangle emit around their own node, not at PRT_Cube, which meshRef names only
+         * because the exporter points a Mesh asset at the first scene MeshFilter that carries it.
+         */
+        private resolveMeshSource;
+        /**
+         * T22 / Algorithms > Shape texture - the shape module's texture is loaded through the shared cache and its pixels are
+         * read exactly ONCE per texture (`readPixels` is a Promise; until it resolves the particles are untinted, which is the
+         * look an export without a shape texture has anyway). The emitter keeps the buffer and samples it per spawn.
+         */
+        private requestShapeTexture;
+        /**
+         * Awake step 8 (D43): every deferred module / key present and enabled -> its `deferred:*` warning once per system; every
+         * module's mode-only keys present in the exported bag -> one grouped `<module>:mode-only-fields` line per page load.
+         * (Render mode Mesh, pivot z, alignment World, sort mode, flip, blend / colour modes warn from applyRenderer; Trigger / Manual
+         * sub-emitters from the sub-emitter resolution; startRotation3D X / Y from the start families.) customData is silent.
+         */
+        private _warnDeferred;
+        /** D51: re-runs the material / renderer mapping on the live system (the texture is re-requested through the cache). */
+        reapplyMaterial(): void;
+        /**
+         * Control flow > Renderer (once at awake; reapplyMaterial() re-runs it). Maps the exporter's material block and the renderer
+         * module onto the Babylon system: family (unknown / shadergraph hide), blend mode (D29 / D31), tint x vertexColorScale (D9 / D61,
+         * never clamped, HDR passes), render mode / alignment (D32), pivot (translationPivot + the per-frame quad shift), the texture
+         * through ParticleTextureCache (fallback when the block or its url is missing, D59), the sheet cell sizes on load (D34) and the
+         * draw-order key (D60). Every Babylon field written here is written once and stays editable (D52).
+         */
+        protected applyRenderer(): void;
+        /** The cache's apply callback: the loaded texture (or the fallback on failure), sheet cell sizes (D34), the sheet's hidden mask restored. */
+        /**
+         * Material emission (T34, F-S.47). Unity's URP / Standard particle shaders with `_EMISSION` output
+         * `albedo + emissionMap(uv) x _EmissionColor` (URP ParticlesUnlitForwardPass: `result = albedo.rgb + emission`, alpha = albedo.a),
+         * summed in LINEAR space. The exporter writes `material.emission { color, texture }` only when the keyword is on; the runtime
+         * used to ignore it (the Pack's fires / explosions / dust lost their emissive colour: 57 of 164 systems). The system draws with
+         * the emission variant of Babylon's own particle fragment shader (RegisterEmissionShader) through the public custom-effect
+         * API: the shader linearises the base colour (D30), adds the emission colour as the LINEAR value Unity feeds its shader
+         * (RegisterEmissionShader: measured), and re-encodes, so the rest of Babylon's path (image processing) is unchanged. A missing
+         * map samples white (Unity's `_EmissionMap` default).
+         */
+        private applyEmission;
+        /** True when the material state carries a non-black emission colour (an Inspector edit to black switches the stock shader back). */
+        static EmissionActive(mat: TOOLKIT.IParticleMaterialState): boolean;
+        /** Binds the custom effect's uniforms on this system's draw (and runs the effect bookkeeping, effectTick). */
+        private onBeforeDraw;
+        /**
+         * T9 / D14 - the point lights this system's particles are lit by: the <= 4 enabled `BABYLON.PointLight`s of the scene
+         * NEAREST the emitter whose `range` still reaches it. A particle billboard has one normal, so the per-vertex solve can
+         * afford a handful of exact point terms; picking them per SYSTEM (not per particle) is what keeps that true, and the
+         * emitter is the right proxy because a system's particles live around it.
+         *
+         * Re-selected every 30 ticks, the same cadence the feature mask is re-checked at: a light that moves, brightens or is
+         * switched off reaches the particles within half a second, and a scene with hundreds of lights is walked twice a second
+         * instead of sixty times. Pooled particle lights (D19) are ordinary scene lights and are deliberately NOT special-cased -
+         * a fire lighting its own smoke is exactly what Unity does.
+         */
+        private selectPointLights;
+        /**
+         * Binds only the uniforms the installed variant declares (T43). Everything that is the same for every system of a frame -
+         * the light solve, the depth texture - is resolved once per scene per frame and shared.
+         */
+        private bindShaderUniforms;
+        /** The number of sheet frames one flipbook wrap group holds: `numTilesX` for a SingleRow sheet, the whole sheet otherwise (1 without a sheet). */
+        static SheetFrames(s: TOOLKIT.IParticleSystemState): number;
+        /**
+         * T21 - whether a texture-sheet module animates at all. A Grid sheet (mode 0) always does; a Sprites sheet (mode 1) does
+         * only when the export carries the sprite rectangles this task reads - an export older than this plan has none, so such a
+         * system keeps exactly the no-sheet look it had before (Error policy).
+         */
+        static SheetEnabled(tsa: TOOLKIT.IParticleTextureSheetAnimationModule): boolean;
+        /** FEATURE_RECTS binds this many `vec4` sprite rectangles; more sprites than this show the whole texture (D28 warning). */
+        static MaxSpriteRects: number;
+        /** FR-32 - how often a SKINNED mesh shape re-samples the animated pose (Hz). 0 = the bind pose only, as before T22. */
+        static SkinnedShapeRefreshHz: number;
+        /**
+         * The shader features this system needs right now (T43 / D12). Every bit comes from an exported material flag, so a material
+         * that asks for nothing returns 0 and the system keeps drawing on Babylon's stock shader - byte for byte what it drew before.
+         * The request is ANDed with `FeatureMaskLimit` (the project kill switch) and stepped down past every variant that already
+         * failed on this system (D13), so a broken variant costs one feature, never the system.
+         */
+        private shaderFeatures;
+        /**
+         * The depth texture the soft fade samples. `resolve` true does the real per-frame lookup (which may CREATE the scene's
+         * depth renderer, D15); false reads only what this frame has already resolved, so `getShaderFeatures()` can report the
+         * same mask the tick would ask for without a single side effect (T10).
+         */
+        private softDepth;
+        /** D15: this system becomes one owner of the scene's depth source, exactly once, the first time it binds one. */
+        private countDepthOwner;
+        /**
+         * D15 - the other half of `countDepthOwner`, run from `destroy()` BEFORE the system is disposed: the last soft system to
+         * go gives the depth renderer back, and ONLY when `_prtDepthCreated` says the toolkit is the one that created it (a
+         * renderer SSAO, SSR or a project script owns is left exactly as it was found). The per-frame cache is cleared with it,
+         * or the next resolve would hand out a disposed texture.
+         */
+        private releaseDepthOwner;
+        /** D13: the requested mask with failed variants stepped down, newest / least essential feature first. */
+        private stepDownMask;
+        /**
+         * FR-39 / D13 - what the shader engine is doing for this system: the mask it wants (after the kill switch and the step-down),
+         * the mask the INSTALLED effect carries (0 = Babylon's stock shader) and every variant that failed on it. The bisect handle.
+         */
+        getShaderFeatures(): {
+            requested: number;
+            installed: number;
+            failed: number[];
+        };
+        /**
+         * The emission effect bookkeeping, every frame from update() (before any hold / cull return, so a system is ready BEFORE its
+         * first draw) and from every draw: a new or replacement effect is built as PENDING and only set as the system's custom effect
+         * once it is ready - the system keeps drawing (stock or the previous effect) while it compiles. T34 fix loop attempt 2
+         * (F-S.55): setting an effect that was still compiling made Babylon skip the whole system (ParticleSystem.isReady false):
+         * a system first drawn in a capture frame vanished on WebGPU, whose pipelines compile asynchronously (DustExplosion empty at
+         * t 1.5 on webgpu only). Defines are re-checked every 30 ticks.
+         */
+        private effectTick;
+        /** Consecutive not-ready ticks an INSTALLED effect is allowed before the variant is marked failed and stepped down (effectTick, D13). */
+        static EffectStallTicks: number;
+        /**
+         * Conventions > "Pending -> install when ready": the pending effect becomes the system's custom effect the moment it reports
+         * ready, and not one tick earlier (an effect installed while it compiles makes `ParticleSystem.isReady()` false, and Babylon
+         * then skips the WHOLE system - the 2026-09-06 F-S.55 defect). Shared by the per-frame tick and the compile-was-cached path.
+         */
+        private installPending;
+        /**
+         * D12: WebGL2 records the system's vertex array object against the attributes of the effect that FIRST drew it, so swapping in
+         * an effect built from a different VERTEX shader leaves the VAO pointing at the old program and the system draws nothing.
+         * `ps.rebuild()` drops the buffers so the next draw records them again. WebGPU builds its pipeline from the effect itself and
+         * needs no rebuild (and `rebuild()` there would throw away a perfectly good bundle every time a feature bit flips).
+         */
+        private onVertexShader;
+        /** D13: the ONE warning a failed variant raises, keyed by the mask and the node so a second failure of the same variant is silent. */
+        private warnVariant;
+        /**
+         * Records the mask the INSTALLED effect carries and switches the sheet's sub-frame on with it. The fractional cell index
+         * only makes sense to the derived vertex shader, so it is written exactly while that shader is the one drawing (a stock
+         * draw would smear every cell by the fraction).
+         */
+        private installMask;
+        /**
+         * T11 / D16 / D13 - a premultiplied or subtractive blend mode is only correct while the shader's PREMUL bit is drawing.
+         * `ALPHA_PREMULTIPLIED` (One, OneMinusSrcAlpha) expects the fragment to have multiplied its rgb by its alpha; on a stock
+         * shader - which is what the system draws before the variant is ready, after a compile failure, and whenever
+         * `FeatureMaskLimit` narrows the mask - the same blend would double the colour and fringe every soft edge. So the blend
+         * mode tracks the INSTALLED mask: PREMUL in it -> the block's own mode, PREMUL out of it -> plain alpha blending (D13's
+         * "dropping PREMUL restores BLENDMODE_STANDARD"). Babylon keys BOTH the custom effect and the draw wrapper by the blend
+         * mode (`_customWrappers[blendMode]`), so an installed effect is moved with it rather than orphaned at the old key.
+         */
+        /**
+         * T12 / D16 - `material:colormode` now means what it says. The warning used to fire for every non-Multiply material at
+         * awake, whether or not anything could be done about it; the shader combines the five modes now, so the only material
+         * that really is "applied as Multiply" is one whose COLORMODE variant did NOT end up drawing - dropped by D13's
+         * step-down, by a compile failure, or by `FeatureMaskLimit`. Same key, same text, raised from the one place that knows.
+         */
+        private warnColorMode;
+        private applyPremultipliedBlend;
+        /** Creates (as pending, see effectTick) / replaces / removes the custom particle effect for the system's blend mode and feature mask, with Babylon's own defines, attributes, uniforms and samplers. */
+        private refreshEffect;
+        /** A pending effect that is already ready (a cached compile, or a test stub) is installed at once. */
+        private effectTickReady;
+        /**
+         * AC-14: drops ONE reference to an emission effect. `Engine.createEffect` is refcounted - the same key hands back the
+         * same Effect with `_refCount++` - and `Effect.dispose()` releases the compiled program only when the last holder
+         * lets go, so every path that stops holding one calls this exactly once. A stub without `dispose` (the unit tests'
+         * recording engine before T38) is ignored rather than thrown on.
+         */
+        private static ReleaseEffect;
+        /** The particle shader features, one bit each; the effect's defines, uniform list and vertex shader are built from the mask (D12). */
+        static readonly FEATURE_EMISSION: number;
+        static readonly FEATURE_LIT: number;
+        static readonly FEATURE_SOFT: number;
+        static readonly FEATURE_CAMFADE: number;
+        static readonly FEATURE_FLIPBOOK: number;
+        static readonly FEATURE_CUTOUT: number;
+        static readonly FEATURE_COLORMODE: number;
+        static readonly FEATURE_PREMUL: number;
+        static readonly FEATURE_RECTS: number;
+        static readonly FEATURE_DISTORT: number;
+        /** The features that need the DERIVED vertex shader (LIT | SOFT | CAMFADE | FLIPBOOK | RECTS): the material emission alone draws on Babylon's own. */
+        static readonly FEATURE_VERTEX: number;
+        /**
+         * D13 - the project kill switch and the bisect tool: every requested mask is ANDed with it, so `0` puts every system back on
+         * Babylon's stock shader (bit-identical to a toolkit without this feature) and a single bit isolates one shader block.
+         * Set it and call `reapplyMaterial()` on the systems to re-evaluate.
+         */
+        static FeatureMaskLimit: number;
+        /**
+         * D24b - the "no effect" sentinel for `_prtEmissionBlend` / `_prtEmissionPendingBlend`. It cannot be `-1`: that is
+         * `BABYLON.ParticleSystem.BLENDMODE_SUBTRACT`, a real blend mode a subtractive material installs an effect for.
+         */
+        static readonly NoBlend: number;
+        /**
+         * D15 - soft-particle depth has ONE owner and is ON by default: when a scene carries no camera-space-Z depth source, the
+         * first soft-particle system creates one (`scene.enableDepthRenderer(camera, false, false, undefined, true)`), the systems
+         * that bind it are counted on `scene._prtDepthOwners`, and the last one to be destroyed disables it again - but only when
+         * the toolkit is the one that created it. A depth renderer another feature (SSAO / SSR / a project script) already owns is
+         * sampled for free and never disposed here. Set to `false` before the first soft system awakes to opt a project out: the
+         * SOFT feature is then simply not requested and one `material:softparticles:nodepth:<node>` line says so. The cost of the
+         * extra opaque pass is measured and reported (AC-13); on the 164-system Pack it is a fraction of a millisecond.
+         */
+        static SoftParticleDepth: boolean;
+        /**
+         * T10 step 3 - the V of the depth lookup. `-1` (the default) decides from the engine, which is what the measurement on the
+         * sandbox says is right for both: a `DepthRenderer` render target is written the same way up as the fragment stage reads its
+         * own coordinate on each API (WebGL `gl_FragCoord.y` and a GL texture both start at the BOTTOM, WebGPU
+         * `fragmentInputs.position.y` and a WebGPU texture both start at the TOP), so neither needs a flip. `0` / `1` force it,
+         * which is the handle a project with an unusual target orientation (an XR layer, a flipped offscreen canvas) reaches for.
+         */
+        static SoftDepthFlipV: number;
+        /** Babylon's directional diffuse divisor (`pbrDirectLightingFunctions` `diffuseTerm = vec3(1.0 / PI)`); see SceneLighting. */
+        static readonly DirectionalDiffuseTerm: number;
+        /**
+         * The material families Unity LIGHTS (D14). The three URP / HDRP lit families are lit by their family alone; Built-in is
+         * decided by the SHADER NAME, because the exporter maps `Particles/Standard Surface` (lit) and `Particles/Standard Unlit`
+         * onto the one family `builtin-standard` and the name is the only thing left that tells the two apart (T9).
+         */
+        static LitFamily(family: string, shaderName?: string): boolean;
+        /** `#define` lines for a feature mask, appended to Babylon's own defines (the effect key, so each variant compiles once). */
+        static FeatureDefines(mask: number, out: string[]): string[];
+        /** The uniform / sampler names a feature mask declares; only the ones the compiled variant actually carries are listed. */
+        static FeatureUniforms(mask: number, uniforms: string[], samplers: string[]): void;
+        /**
+         * The scene's particle lighting for this frame, solved ONCE per scene per frame (every system shares it), in LINEAR units:
+         * Unity's `SampleSH(N) + _MainLightColor x saturate(N.L)`.
+         *
+         *   main light - the enabled DIRECTIONAL light with the greatest `intensity x luminance(diffuse)`; `dir` is the direction
+         *                TO the light (Unity's `_MainLightPosition` for a directional light) and the colour is `diffuse x intensity`.
+         *                Point / spot lights are not summed: a particle billboard has one normal and Unity's per-pixel additional
+         *                lights need a per-particle position solve the vertex path deliberately does not pay for (documented deviation).
+         *   ambient    - the probe as a SKY / GROUND pair the shader lerps by `N.y x 0.5 + 0.5`. When the scene carries an environment
+         *                texture with a spherical polynomial (the toolkit's .env), the pair is Babylon's own irradiance polynomial
+         *                evaluated at +Y and -Y, which reduces to `yy + y` and `yy - y` (the Horner form of `harmonicsFunctions`
+         *                `computeEnvironmentIrradiance` at `N = (0, +-1, 0)`), times `scene.environmentIntensity`. `scene.ambientColor`
+         *                and every enabled hemispheric light (diffuse -> sky, groundColor -> ground) are added on top.
+         */
+        static SceneLighting(scene: BABYLON.Scene): TOOLKIT.IParticleLighting;
+        /**
+         * The scene's CAMERA-SPACE-Z depth texture for the soft-particle fade, resolved once per scene per frame, or null.
+         * Only a source that already exists is used (a depth renderer another feature created): a soft fade is never worth
+         * adding an opaque pass for, and the prepass attachment cannot be sampled at all (ResolveDepthTexture, T8).
+         * `SoftParticleDepth = true` opts a project in explicitly.
+         * A depth renderer that stores the normalised metric (Babylon's default) or packs the depth is NOT usable here and reads null.
+         */
+        static SoftDepthTexture(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        /**
+         * SoftDepthTexture's uncached body: an existing camera-space-Z depth renderer, then the opt-in.
+         *
+         * T8 - the prepass depth ATTACHMENT is deliberately NOT a source. Particles draw inside the very render pass whose
+         * multi-render target that texture is attached to, and WebGPU refuses a bind group that samples a texture the current
+         * pass writes: the device drops the WHOLE command buffer, so the entire scene renders as the clear colour with no
+         * JavaScript error and no not-ready effect for the D13 watchdog to catch. Measured on the Pack (164 systems, WebGPU):
+         * `FeatureMaskLimit = 4` alone blanks the frame, and the same variant sampling any NON-attachment texture draws it.
+         * That is the 2026-09-20 blank scene. A `DepthRenderer` renders into its own render target in its own pass and is
+         * safe, which is why it stays. T10 owns the final depth ownership (D15) and must not re-add the prepass source.
+         */
+        private static ResolveDepthTexture;
+        /**
+         * The name the particle FRAGMENT shader is registered under (`<name>PixelShader` in the language's ShaderStore). It carried
+         * only the material emission at T34 (hence the name); T43 added the lit / soft / camera-fade / flipbook features to the SAME
+         * shader, each behind its own `#ifdef`, so a system compiles exactly the variant its material asks for (never a uniform branch).
+         */
+        static readonly EmissionShaderName: string;
+        /** The name the derived particle VERTEX shader is registered under (`<name>VertexShader`); only the lit / soft / camera-fade / flipbook variants need it (T43). */
+        static readonly VertexShaderName: string;
+        /** Babylon's own particle fragment shader source for `language` (0 GLSL, 1 WGSL), or null while it is not loaded. */
+        static StockParticleShader(language: number): string;
+        /** Babylon's own particle VERTEX shader source for `language` (0 GLSL, 1 WGSL), or null while it is not loaded (T43). */
+        static StockParticleVertexShader(language: number): string;
+        /** One installed Babylon shader source by store key, or null. */
+        private static StockShader;
+        /**
+         * Registers the emission variant of the INSTALLED Babylon particle fragment shader for `language`: the declarations before
+         * `#define CUSTOM_FRAGMENT_DEFINITIONS`, and before `#ifdef BLENDMULTIPLYMODE` (right after `baseColor = texture x mask x
+         * vColor`) the linear-space sum `baseColor.rgb = gamma(linear(baseColor.rgb) + emissionColor.rgb x linear(map))` - Unity's
+         * `albedo + emission` in linear space; `emissionColor.a` = 1 samples the map, 0 = white. The base colour, tint and vertex
+         * colour are gamma-decoded (D30) but Unity feeds `_EmissionColor` to the shader UNCONVERTED (measured T34, linear URP_Samples,
+         * URP Particles/Unlit into a float target: _BaseColor 0.5 -> 0.2140, (2, 0.9, 0.5) -> (4.5948, 0.7874, 0.2140), vertex colour
+         * 0.5 -> 0.2157, but _EmissionColor 0.5 -> 0.5000 and (1.7556, 0.6379, 0) -> (1.7556, 0.6379, 0)), so the colour is added as
+         * a linear value and only the (sRGB) map is linearised.
+         * False while the stock shader is not loaded or when an anchor is missing / repeated (APP/tests/particles/shader.test.js).
+         */
+        static RegisterEmissionShader(language: number): boolean;
+        /**
+         * The toolkit variant of a particle FRAGMENT shader source; null when an anchor is not found exactly once.
+         *
+         * Three anchors, each replaced once:
+         *   `#define CUSTOM_FRAGMENT_DEFINITIONS` - the feature declarations (uniforms, samplers, varyings), each behind its `#ifdef`.
+         *   `vec4 textureColor=texture2D(diffuseSampler,vUV);` - PRTFLIP blends the NEXT sheet cell into the texel (Unity
+         *     `BlendTexture`: `lerp(color, color2, blendUv.z)`), so the sheet fraction reaches the mask, vColor and the multiply blend
+         *     exactly as Unity's does.
+         * PRTSOFT samples a CAMERA-SPACE-Z depth map, whose clear value is **0** (`DepthRenderer`: `clearColor = (storeCameraSpaceZ
+         * ? 0 : 1, 0, 0, 1)`). 0 therefore means "no opaque surface here", not "a surface at the eye" - taken literally the fade
+         * would drive every particle drawn against the sky to alpha 0 and soft smoke would VANISH over open space (measured T10 on
+         * the fixture scene: 98 % of the map reads 0). Unity's `_CameraDepthTexture` holds the far plane there, so the same shader
+         * reads a fade of 1. `step(prtDepth, 0.0)` restores that: a zero texel is infinitely far away.
+         *
+         *   `#ifdef BLENDMULTIPLYMODE` - the colour composition, in Unity's order `albedo x lighting + emission`, then the alpha fades:
+         *     PRTLIT multiplies the GAMMA-space lighting factor the vertex shader wrote (`toGamma(toLinear(c) x L) = c x L^(1/2.2)`
+         *     exactly, so a per-fragment pow pair is never needed - see DeriveVertexShader); PRTEMISSION keeps T34's linear-space sum
+         *     verbatim; PRTSOFT and PRTCAMFADE multiply `baseColor.a` by Unity's two saturating fades.
+         *
+         * T12 adds the COLORMODE block FIRST (it rewrites `baseColor` outright): Unity's `UnityStandardParticles.cginc` combines
+         * the TEXTURE x tint (`prtA`) against the VERTEX colour (`prtC`) in LINEAR space - Additive `A + C`, Subtractive `A - C`,
+         * Overlay, Color (the hue / saturation of the vertex colour with the albedo's value) and Difference - and the result is
+         * re-encoded. The tint is a uniform here, not part of the vertex colour, because a colour mode has to see the two factors
+         * apart (`installMask` moves it, `ParticleSimulation.colorAt` stops folding it in for exactly that mask).
+         *
+         * T11 adds three more blocks to that one insertion, in the plan's patch order
+         * (FLIPBOOK texel -> COLORMODE -> LIT -> CUTOUT -> PREMUL -> EMISSION -> DISTORT -> SOFT -> CAMFADE):
+         *   PRTCUTOUT  - `if (baseColor.a < prtCutoff) discard`, Unity's alpha test, which Babylon's particle shader has no form of.
+         *   PRTPREMUL  - `rgb *= a` BEFORE the emission add, the fragment half of `ALPHA_PREMULTIPLIED` (One, OneMinusSrcAlpha) and
+         *                of `BLENDMODE_SUBTRACT`. Because the colour is premultiplied from here on, the two fades must scale all four
+         *                channels rather than the alpha alone, which is why PRTSOFT and PRTCAMFADE carry a `#ifdef PRTPREMUL` variant.
+         *   PRTDISTORT - `alpha' = saturate(alpha - prtDistort)` (D17): Unity lerps the grabbed scene colour against the albedo by
+         *                `_DistortionBlend`, and with no scene grab inside the particle pass the albedo weight is the closed form that
+         *                survives. The refraction itself is a documented deviation, and `prtDistort` is the editable material number.
+         *
+         * The emission sum (T34, unchanged): `baseColor.rgb = gamma(linear(baseColor.rgb) + emissionColor.rgb x linear(map))` - Unity's
+         * `albedo + emission` in linear space; `emissionColor.a` = 1 samples the map, 0 = white. The base colour, tint and vertex
+         * colour are gamma-decoded (D30) but Unity feeds `_EmissionColor` to the shader UNCONVERTED (measured T34, linear URP_Samples,
+         * URP Particles/Unlit into a float target: _BaseColor 0.5 -> 0.2140, (2, 0.9, 0.5) -> (4.5948, 0.7874, 0.2140), vertex colour
+         * 0.5 -> 0.2157, but _EmissionColor 0.5 -> 0.5000 and (1.7556, 0.6379, 0) -> (1.7556, 0.6379, 0)), so the colour is added as
+         * a linear value and only the (sRGB) map is linearised.
+         */
+        static DeriveEmissionShader(src: string, language: number): string;
+        /**
+         * Registers the toolkit variant of the INSTALLED Babylon particle VERTEX shader for `language` (T43). False while the stock
+         * shader is not loaded or when an anchor is missing / repeated - the caller then drops every feature but the emission, which
+         * draws on Babylon's own vertex shader.
+         */
+        static RegisterVertexShader(language: number): boolean;
+        /**
+         * The toolkit variant of a particle VERTEX shader source (T43); null when an anchor is not found exactly once. Two anchors:
+         * `#define CUSTOM_VERTEX_DEFINITIONS` (declarations) and `#define CUSTOM_VERTEX_MAIN_END` (the code, where `vPositionW`,
+         * `vUV` and Babylon's `view` uniform are all in scope).
+         *
+         * PRTLIT - the particle lighting is solved PER VERTEX, not per fragment. A billboard quad's normal is constant across the
+         * quad (it faces the camera), so a per-fragment solve would compute the identical value for every one of a fire's dozens of
+         * overlapping fragments: per-vertex is the same number four times per particle instead of once per covered pixel, and it is
+         * exact (not an approximation) for the no-normal-map case - and the exporter writes no particle normal map at all.
+         * `N = normalize(eye - vPositionW)` is Unity's default particle normal (`ParticleSystemRenderer.normalDirection` 1, fully
+         * camera-facing). The irradiance is Unity's `SampleSH(N) + mainLightColor x saturate(N.L)` (URP `UniversalFragmentPBR` with
+         * the exported metallic / smoothness absent: the diffuse term is `albedo x (bakedGI + lightColor x NdotL)`), with the ambient
+         * probe as the sky / ground pair the scene solve evaluates the spherical polynomial at (see SceneLighting).
+         * Up to FOUR point lights are added to the same irradiance (T9): the nearest enabled `PointLight`s whose range reaches
+         * the emitter, `color x intensity / PI x saturate(N.L) x saturate(1 - d^2 / range^2)^2` - Unity's `GetAdditionalLight`
+         * distance attenuation in its squared-distance closed form, so the shader never divides or takes a square root of a
+         * length it already has. An unused slot binds zeros, which contributes exactly zero (its colour is black).
+         *
+         * The varying is the GAMMA-space factor `L^(1/2.2)`, because Babylon's particle fragment raises the whole
+         * `texel x vColor` product to 2.2: `toGamma(toLinear(c) x L) = c x L^(1/2.2)` EXACTLY, so the fragment needs one vec3
+         * multiply and no pow pair - the same closed form D9's `vertexColorScaleGamma` uses for the legacy x2. That identity is
+         * exact while Babylon LINEARISES the particle colour, which it does under `IMAGEPROCESSING` / `IMAGEPROCESSINGPOSTPROCESS`
+         * - every toolkit scene, which always has image processing. A scene with image processing switched off multiplies the
+         * factor in gamma space instead (a slightly flatter falloff): ONE code path is kept deliberately, because a second one
+         * would have to be selected per system from a define Babylon owns and would double every lit variant for a case the
+         * exporter never produces (T9 step 4).
+         *
+         * PRTSOFT / PRTCAMFADE - `vPrtViewZ` is Unity's `LinearEyeDepth` of the vertex, taken through Babylon's own `view` uniform.
+         *
+         * PRTFLIP - Babylon has no per-particle channel free for the sheet sub-frame, so the component writes the FRACTIONAL cell
+         * index into `particle.cellIndex` (`cell + fraction`) and this shader splits it again: `vUV` is recomputed from `floor`
+         * (Babylon's stock line would smear the current cell by the fraction) and `vPrtNext` carries the NEXT cell's uv plus the
+         * fraction. The next cell wraps inside its own group of `prtEye.w` frames, which is `numTilesX` for a SingleRow sheet and
+         * the whole sheet otherwise - the same wrap Unity's flipbook does.
+         */
+        static DeriveVertexShader(src: string, language: number): string;
+        private onTexture;
+        /**
+         * T21 / Algorithms > Sprite rects - the Sprites-mode texture sheet. Unity's Sprites mode is a LIST of rectangles inside an
+         * atlas, in the atlas's own bottom-left normalised coordinates; Babylon's particle sheet is a uniform grid addressed by a
+         * cell index. Three outcomes, in this order:
+         *
+         *   1. the rectangles ARE a uniform grid (all the same size, every origin on a cell boundary) - by far the common case, and
+         *      what a Unity sprite sheet sliced by Grid produces. `numTilesX / numTilesY` are overridden to that grid and a frame ->
+         *      cell table records where each sprite sits in it. No shader, no uniform: the stock cell maths draws it.
+         *   2. otherwise, up to `MaxSpriteRects` rectangles are bound as the `prtRects` uniform array (bit RECTS) and the derived
+         *      vertex shader reads `p.cellIndex` as the SPRITE index instead of a grid cell.
+         *   3. more than that - the whole texture, with one `deferred:textureSheetAnimation:sprites:toomany:<node>` (Error policy).
+         *
+         * Every rectangle is converted from Unity's bottom-left origin to the top-left origin Babylon's `vUV` uses (D26 keeps the
+         * EXPORT in Unity's own values; the conversion belongs here). Called from `applyRenderer` before the texture request.
+         */
+        private buildSpriteSheet;
+        /**
+         * D34 / D59: the fallback is one radial gradient, not an atlas. A system built with a sheet would otherwise keep Babylon's
+         * spriteCellWidth / Height at 0 and draw nothing (T18 live QA, F-S.27): the cell becomes the whole fallback texture and every
+         * particle holds cell 0 (`sheet.whole`), so the old-export / failed-load system draws the fallback look. Written once, editable.
+         */
+        private sheetOnFallback;
+        /** The colour-mode names in Unity's `ParticleSystemColorMode` order; the INDEX is what `prtColorMode` carries (T12). */
+        private static readonly ColorModes;
+        /** A colour-mode name -> the float the fragment shader selects on (0 Multiply, 1 Additive, 2 Subtractive, 3 Overlay, 4 Color, 5 Difference). */
+        static ColorModeIndex(name: string): number;
+        /** material.colorMode (the exporter's string, or Unity's ParticleSystemColorMode number) -> its name; null / absent -> Multiply. */
+        private static colorModeName;
+        /** IParticleSystemState with every field; scratch vectors allocated once (D58). */
+        /** What a sibling renderer needs from this system (D25): never the component itself. */
+        private _auxHost;
+        /**
+         * The `_update` wrap tail, once per animate (Module boundaries): triggers -> sort -> trails -> lights -> meshes, each
+         * hook null-checked and the whole tail skipped when the step did not advance (held, paused, culled).
+         *
+         * ONE hook runs on a stopped clock: lights. A pooled light is the only thing this component owns that holds a
+         * SCENE-wide resource while it is idle - a material light slot, taken from the scene's own exported lights - so it
+         * has to be able to give that slot back on a frame where nothing else moves. `ParticleLightPool.step` does nothing
+         * on this path but demote a slot that has gone dark: no particle step, no buffer upload, no arbitration.
+         * Trails need no such call: a trail mesh holds only its own geometry, which is correct exactly as the last moving
+         * frame left it, and it takes nothing from the rest of the scene by sitting still.
+         */
+        private _tail;
+        /** D25: a culled system hides everything its sibling renderers own (they keep their state and their slots). */
+        private _setAuxEnabled;
+        /**
+         * FR-37 / T24 - Unity's Custom Data module, read back through the API instead of being pushed into a vertex stream
+         * (Babylon has no custom particle vertex streams, and evaluating two curves or a gradient for every particle of
+         * every frame would cost the whole module's budget for data nothing draws). The streams are therefore LAZY: this
+         * method samples stream `stream` (0 or 1) at the particle's own normalised age with its own fixed random factor,
+         * exactly as the shader would have.
+         *
+         * Stream mode 1 Vector: component c is `streams[stream].x | y | z | w` for `c < vectorComponentCount`, 0 beyond.
+         * Stream mode 2 Color: the gradient sample, (r, g, b, a). A disabled module, a missing stream, mode 0, or a
+         * particle that has not been born yet answers (0, 0, 0, 0).
+         * @param particle a live particle of THIS system
+         * @param stream 0 or 1
+         * @param out the vector4 the answer is written into (returned)
+         */
+        getCustomData(particle: BABYLON.Particle, stream: number, out: BABYLON.Vector4): BABYLON.Vector4;
+        /** The one colour a Color custom-data stream is sampled into (getCustomData allocates nothing of its own). */
+        private static readonly CustomDataColor;
+        /** FR-39: the trail renderer of this system (null when the trails module is off). */
+        getTrails(): TOOLKIT.ParticleTrailRenderer;
+        /** FR-39: the instanced meshes of this system (null unless Mesh render mode found drawable geometry, T17). */
+        getMeshRenderer(): TOOLKIT.ParticleMeshRenderer;
+        /** T17 / Error policy: renderer.meshes carries at least one drawable geometry (an old export or a null mesh has none). */
+        static HasMeshGeometry(renderer: TOOLKIT.IParticleRendererModule): boolean;
+        /** FR-39: the pooled point lights of this system (null when the lights module is off). */
+        getLightPool(): TOOLKIT.ParticleLightPool;
+        private buildState;
     }
 }
 declare namespace TOOLKIT {
@@ -19838,7 +25167,21 @@ declare namespace TOOLKIT {
             aniso?: number;
             invertY?: boolean;
             mipmaps?: boolean;
+            linearize?: boolean;
+            largest?: boolean;
         }): Promise<BABYLON.RawTexture2DArray>;
+        /** X10: the array cell for `largest: true` - the largest slice width by the largest slice height (no cap). */
+        static LargestCell(slices: Array<{
+            width: number;
+            height: number;
+        }>): number[];
+        /** The cache keys each scene built (weak - a scene's list goes with the scene). */
+        private static _sceneKeys;
+        /**
+         * Scene lifecycle: the array texture belongs to the scene it was built for, so on that scene's dispose its cache
+         * entries are dropped (Babylon disposes the texture itself with the scene). Entries another scene built stay.
+         */
+        private static _watchScene;
         /** Upload a CPU-generated mip chain to every layer (works around the broken WebGPU array auto-mip-gen).
          *  Each level is a box-downsample of the previous, uploaded via engine.updateRawTexture2DArray(.., mipLevel). */
         /**
@@ -19860,6 +25203,8 @@ declare namespace TOOLKIT {
         /** Key by the URL list PLUS the GPU-result-affecting options. The same image files can be requested as
          *  a mipped colour array (albedo) and a NON-mipped linear array (normal) — those must NOT share one
          *  cached GPU texture, so the mip/flip/sampling choices are part of the key. */
+        /** T16: sRGB -> linear (rounded to 8 bits) on the RGB of a stacked RGBA8 buffer, in place. */
+        static LinearizeRgba8(data: Uint8Array): void;
         private static _cacheKey;
         private static _uploadMipChain;
         /** Box-average (2x2) downsample every layer of a stacked RGBA8 buffer to (dw x dh). Edge-clamped. */
@@ -19872,12 +25217,56 @@ declare namespace TOOLKIT {
          *  which NO browser can decode through an <img> tag — are routed through Babylon's texture loader and
          *  read back as RGBA8 pixels instead. */
         private static _loadSlices;
+        /**
+         * X10: one decode per image URL while arrays are being built - terrains share layers, so the same 2048 slice was decoded
+         * once per array that holds it (TerrainDemoScene: 129 slices, ~40 distinct images). Slices are read-only (StackSlices
+         * copies them), the promises are dropped a few seconds after the last build started, and a failure is never cached.
+         */
+        private static _decodes;
+        private static _decodeTimer;
+        private static _decoded;
         /** True for GPU texture containers that an <img> element cannot decode (KTX2/KTX/DDS/Basis). These must
          *  go through Babylon's transcoding texture loader — feeding one to an <img> fires onerror even though
          *  the HTTP request itself succeeded (the network tab shows a clean 200). */
         private static _isGpuContainerUrl;
-        /** Load a browser-decodable image (cross-origin enabled for canvas readback). */
+        /**
+         * Load a browser-decodable image as STRAIGHT (non-premultiplied) RGBA8 bytes (T26 fix loop), row 0 = the image's top row
+         * (never flipped). An opaque image keeps the <img> + 2D-canvas readback (exact for it); one with alpha is decoded again
+         * through createImageBitmap(premultiplyAlpha "none") and a WebGL2 upload with UNPACK_PREMULTIPLY_ALPHA false (readPixels).
+         */
         private static _loadImage;
+        private static _loadCanvasImage;
+        /** The straight bytes: fetch -> createImageBitmap(premultiplyAlpha / colorSpaceConversion "none") -> ReadStraightPixels. Null when unavailable. */
+        private static _loadStraightImage;
+        private static _warnedPremultiplied;
+        private static _warnPremultiplied;
+        /** The 2D-canvas readback (premultiplied storage: exact for opaque texels only). */
+        private static _canvasPixels;
+        /** True when every alpha byte of an RGBA8 buffer is 255 (a premultiplied readback of it is exact). */
+        static AllOpaque(pixels: Uint8Array | Uint8ClampedArray): boolean;
+        /** True for a format that cannot carry alpha (JPEG): premultiplication cannot change its bytes. */
+        static IsOpaqueFormat(url: string): boolean;
+        private static _gl;
+        /** One scratch WebGL2 context for straight-alpha readback (created once, reused). */
+        private static _scratchGl;
+        /**
+         * The straight RGBA8 bytes of `source` (an ImageBitmap decoded with premultiplyAlpha "none") through a WebGL2 context:
+         * uploaded with UNPACK_PREMULTIPLY_ALPHA_WEBGL false, no flip, no colour-space conversion, read back from a framebuffer
+         * (readPixels row 0 = texture row 0 = the image's first row). Null when `gl` is null or the read fails.
+         */
+        static ReadStraightPixels(gl: any, source: any, w: number, h: number): Uint8Array;
+        /**
+         * Stack straight RGBA8 slices ({ width, height, pixels }) into one w x h x depth buffer: a slice already at the cell
+         * size is copied byte for byte, any other is resampled on the CPU (box average when shrinking, bilinear when growing -
+         * straight, never alpha-weighted, as a GPU mip of the stored bytes), and `flipY` mirrors rows. Pure (no canvas).
+         */
+        static StackSlices(slices: {
+            width: number;
+            height: number;
+            pixels: Uint8Array | Uint8ClampedArray;
+        }[], w: number, h: number, flipY: boolean): Uint8Array;
+        /** Resample straight RGBA8 (sw x sh) to (dw x dh): per axis a box average when shrinking, bilinear when growing. */
+        static ResampleRgba8(src: Uint8Array | Uint8ClampedArray, sw: number, sh: number, dw: number, dh: number): Uint8Array;
         /** Decode a GPU container (KTX2/DDS/Basis) to RGBA8 CPU pixels via Babylon's texture loader.
          *  The file is transcoded to a compressed GPU format (ASTC/BC/ETC) that cannot be read back directly,
          *  so TextureTools.GetTextureDataAsync renders it through a pass shader into an RGBA8 target and reads
@@ -19885,12 +25274,121 @@ declare namespace TOOLKIT {
          *  _useSRGBBuffer off, so the shader's own toLinearSpace still applies exactly once). The temporary
          *  texture is disposed as soon as the pixels are out; only the stacked array keeps VRAM. */
         private static _loadGpuContainer;
-        /** Wrap a loaded slice as something ctx.drawImage() accepts — the image itself, or a scratch canvas
-         *  seeded from decoded pixels (only needed when a GPU-decoded slice must be flipped or resampled). */
-        private static _asDrawable;
         /** Dispose and drop every cached array (e.g. on scene teardown). Cached entries are promises, so we
          *  resolve each before disposing (handles arrays still finishing their async build). */
         static Clear(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /** The public Unity-unit settings of the SMAA passes (`postProcess.unity` on all three), read by `onApply` every frame. */
+    interface ISmaaUnitySettings {
+        /** 0 Low, 1 Medium, 2 High (Unity's presets). */
+        quality: number;
+        /** false = exact pass-through (D16). */
+        enabled: boolean;
+    }
+    /** One Unity SMAA preset (`SubpixelMorphologicalAntialiasing.hlsl` L307-327). */
+    interface ISmaaPreset {
+        threshold: number;
+        maxSearchSteps: number;
+        maxSearchStepsDiag: number;
+        cornerRounding: number;
+        diagDetection: boolean;
+        cornerDetection: boolean;
+    }
+    /**
+     * The three-pass port of Unity's SMAA 1x as PPv2 3.5.4 / URP 17.5 / HDRP 17.5 ship it
+     * (`SubpixelMorphologicalAntialiasing.hlsl`, Jimenez et al., Unity-tweaked; camera-antialiasing-parity D12, D13):
+     *
+     * 1. `smaaEdge` (`toolkitSmaaEdgeFragmentShader`): colour edge detection with local contrast adaptation 2.0.
+     * 2. `smaaWeights` (`toolkitSmaaWeightsFragmentShader`): blending weights (diagonal, orthogonal and corner patterns)
+     *    from Unity's AreaTex / SearchTex (`TOOLKIT.SmaaTextures`), with the Low / Medium / High presets as uniforms so a
+     *    quality edit lands next frame without a recompile.
+     * 3. `smaaBlend` (`toolkitSmaaBlendFragmentShader`): neighbourhood blending of the ORIGINAL colour (the edge pass's
+     *    input, bound with `setTextureFromPostProcess`).
+     *
+     * No predication and no temporal variants. Placement and colour space are decided by the caller (D12): the edge taps
+     * are raised to `EdgePower(srp, inputEncoded)` and, on a display-encoded input, the blend decodes to linear with a
+     * manual 4-tap bilinear and re-encodes. Unity's stencil optimisation is replaced by a cleared edge target plus
+     * `discard` (identical image): `smaaWeights` clears its own input, which the edge pass renders into. GLSL only (no
+     * comments in the shader text, no sampler parameters), transpiled by Babylon for WebGPU. Lifetime is owned by
+     * `TOOLKIT.PostProcessor`.
+     */
+    class SmaaPlugin {
+        static readonly EdgeShaderName: string;
+        static readonly EdgeShaderKey: string;
+        static readonly WeightsShaderName: string;
+        static readonly WeightsShaderKey: string;
+        static readonly BlendShaderName: string;
+        static readonly BlendShaderKey: string;
+        /** Unity's presets Low, Medium, High (`SubpixelMorphologicalAntialiasing.hlsl` L307-327). */
+        static readonly Presets: TOOLKIT.ISmaaPreset[];
+        static readonly QualityNames: string[];
+        static readonly LocalContrastAdaptationFactor: number;
+        static readonly GammaPower: number;
+        /** Clamped quality index (0..2, default 2). */
+        static Quality(quality: number): number;
+        /** Quality index -> preset (a copy); non-integers round, anything outside 0..2 -> High. */
+        static Preset(quality: number): TOOLKIT.ISmaaPreset;
+        /** D12: exponent applied to the edge taps: srp & !encoded -> 1/2.2; srp & encoded -> 1; !srp & encoded -> 2.2; !srp & !encoded -> 1. */
+        static EdgePower(srp: boolean, inputEncoded: boolean): number;
+        /** SMAA_RT_METRICS: (1/w, 1/h, w, h); zeros for a non-positive size. */
+        static PackMetrics(width: number, height: number): {
+            x: number;
+            y: number;
+            z: number;
+            w: number;
+        };
+        /** The lines shared by the three shaders (explicit-LOD sampling macro, precision, the pass input, SMAA_RT_METRICS). */
+        private static Prelude;
+        /** Edge pass: Unity `SMAAColorEdgeDetectionPS` (clear + discard replaces the stencil). */
+        static GetEdgeShader(): string;
+        /** Weights pass: Unity `SMAABlendingWeightCalculationPS` (SMAA 1x, subsample indices 0). */
+        static GetWeightsShader(): string;
+        /** Blend pass: Unity `SMAANeighborhoodBlendingPS` (`textureSampler` = the weights). */
+        static GetBlendShader(): string;
+        /**
+         * Creates the three passes for `camera` in chain order and returns the BLEND pass. The pass list hangs off it as
+         * `blend._toolkitSmaaPasses = [edge, weights, blend]`; every pass carries `unity` (shared) and
+         * `_toolkitPlugin = { name, uniforms }`. Takes one `SmaaTextures` reference (the caller releases it).
+         */
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            textureType?: number;
+            quality?: number;
+            srp?: boolean;
+            inputEncoded?: boolean;
+        }): BABYLON.PostProcess;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity's SMAA lookup textures (AreaTex 160×560 RG, SearchTex 64×16 R), byte-identical in PPv2 3.5.4 / URP 17.5 /
+     * HDRP 17.5 (md5 a0ab8e28… / bdee1cb6…), shipped with the runtime (camera-antialiasing-parity D14). Rows are in TGA
+     * file order and uploaded with invertY false: SMAA's texcoord convention samples the first stored row at v≈0. Data
+     * strings are written by the sandbox generator; never edit them by hand.
+     */
+    class SmaaTextures {
+        static readonly AreaWidth: number;
+        static readonly AreaHeight: number;
+        static readonly SearchWidth: number;
+        static readonly SearchHeight: number;
+        /** D14: AreaTex R plane then G plane, zero-run-length encoded, lowercase hex (written by $SB/gen-smaa-data.py). */
+        static readonly AreaData: string;
+        /** D14: SearchTex R bytes, lowercase hex. */
+        static readonly SearchData: string;
+        static HexToBytes(text: string): Uint8Array;
+        /** D14: `0x00, n` expands to n zeros; any other byte is literal. The output is zero-initialised. */
+        static DecodeZeroRle(bytes: Uint8Array, length: number): Uint8Array;
+        static DecodeAreaRGBA(): Uint8Array;
+        static DecodeSearchRGBA(): Uint8Array;
+        private static cache;
+        /** One reference per call; the per-scene pair is created on the first call (D14). */
+        static GetTextures(scene: BABYLON.Scene): {
+            area: BABYLON.Texture;
+            search: BABYLON.Texture;
+        };
+        /** Gives one reference back; the pair is disposed when the last one goes. Unknown scenes are ignored. */
+        static ReleaseTextures(scene: BABYLON.Scene): void;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -20099,6 +25597,10 @@ declare namespace TOOLKIT {
         /** Global singleton instance */
         static get instance(): SmoothMeshNormalSystem;
         private _registry;
+        private _watchedScenes;
+        /** Scene lifecycle: when a registered body's scene is disposed, drop that scene's entries (other scenes keep theirs). */
+        private watchScene;
+        private releaseScene;
         /**
          * Registers a MeshNormalProxy for a physics body.
          * @param body  Physics body of the mesh collider
@@ -20138,194 +25640,1845 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
-    /**
-     * Detail Layer Instance Data
-     */
-    interface IDetailLayerData {
-        layerindex?: number;
-        densitymap?: number[];
-        densitywidth?: number;
-        densityheight?: number;
-        minwidth?: number;
-        maxwidth?: number;
-        minheight?: number;
-        maxheight?: number;
-        noisespread?: number;
-        bendfactor?: number;
-        healthycolor?: number[];
-        drycolor?: number[];
-        colorvariationmap?: number[];
-        rendermode?: string;
-        useprototypemesh?: boolean;
-        useinstancing?: boolean;
-        prototypemeshnodeid?: string;
-        prototypemeshname?: string;
-        prototypetexturefile?: string;
-        prototypetexture?: any;
-        isvalid?: boolean;
-        maxdistance?: number;
-        noiseseed?: number;
-        positionjitter?: number;
-        positionsjitter?: number;
-        aligntoground?: number;
-        holeedgepadding?: number;
-        prototypelocalscale?: number[];
-        detailinstancepatches?: Array<{
-            patchX: number;
-            patchY: number;
-            bounds: number[];
-            transforms: number[];
-        }>;
-        densityparam?: number;
-        usedensityscaling?: boolean;
-        density?: number;
-        targetcoverage?: number;
-        detailscattermode?: string;
+    /** The exported SpeedTree 8 wind parameters of one tree (MaterialCommonConstant.speedTreeWindInfo). */
+    interface ISpeedTreeWindInfo {
+        version: number;
+        id?: string;
+        [key: string]: any;
     }
     /**
-     * Terrain Properties Interface
+     * shadergraph-transpiler-complete-coverage X3: drives the `_ST_Wind*` uniforms of compiled SpeedTree 8 wind functions
+     * the way Unity's SpeedTreeWindManager does. Measured in Unity Play Mode (TerrainDemoScene, 4 trees): with a directional
+     * WindZone the wind strength is the zone's windMain, every non-time uniform is a fixed parameter or a 10-point strength
+     * curve read linearly at that strength, and each of the 10 time uniforms advances every frame by its oscillation curve's
+     * value at that strength times the frame time. All materials of one tree share one set of clocks.
+     *
+     * Uniform layout (exported key = Unity name without the leading underscore; the History copies get the same values):
+     *   ST_WindVector           = (wind direction xyz, strength)
+     *   ST_WindGlobal           = (time0, globalDistance(s), 1 / globalHeight, globalHeightExponent)
+     *   ST_WindBranch           = (time1, branch1Distance(s), time2, branch2Distance(s))
+     *   ST_WindBranchTwitch     = (branch1Twitch, branch1TwitchFreqScale, branch2Twitch, branch2TwitchFreqScale)
+     *   ST_WindBranchWhip       = (branch1Whip(s), branch2Whip(s), 0, 0)
+     *   ST_WindBranchAnchor     = (normalize(anchor + dir * maxBranchLevel1Length * anchorDistanceScale), its length)
+     *   ST_WindBranchAdherences = (globalDirectionAdherence(s), branch1DirectionAdherence(s), branch2DirectionAdherence(s), 0)
+     *   ST_WindTurbulences      = (branch1Turbulence, branch2Turbulence, 0, 0)
+     *   ST_WindLeaf<n>Ripple    = (time, rippleDistance(s), leewardScalar, 0)                 n = 1 (times 3..5), 2 (times 6..8)
+     *   ST_WindLeaf<n>Tumble    = (time, tumbleFlip(s), tumbleTwist(s), tumbleDirectionAdherence(s))
+     *   ST_WindLeaf<n>Twitch    = (twitchThrow(s), twitchSharpness * 10 / twitchFrequency(s), time, 0)
+     *   ST_WindFrondRipple      = (time9, frondRippleDistance(s), frondRippleTile, frondRippleLightingScalar)
      */
-    interface ITerrainProperties {
-        name?: string;
-        terrainsize?: number[];
-        basemapdistance?: number;
-        treebillboarddistance?: number;
-        treecrossfadelength?: number;
-        treedistance?: number;
-        treeinstancecount?: number;
-        detailwidth?: number;
-        detailheight?: number;
-        detailpatchcount?: number;
-        detailresolution?: number;
-        detailresolutionperpatch?: number;
-        detailbillboardingmode?: number;
-        detailgrassshadowlevel?: number;
-        detailgrassreceiveshadows?: boolean;
-        detailobjectdensity?: number;
-        detailobjectdistance?: number;
-        wavinggrassamount?: number;
-        wavinggrassspeed?: number;
-        wavinggrasssize?: number;
-        wavinggrasstint?: number[];
-        detaillayers?: TOOLKIT.IDetailLayerData[];
-        detailscattermode?: string;
+    class SpeedTreeWind {
+        static readonly UNIFORMS: string[];
+        /** The longest frame step the clocks take (a stalled frame must not jump the wind). */
+        static MaxStep: number;
+        private static _scenes;
+        /** Adds a material to its tree's wind (called by the loader and by CustomShaderMaterial clones). */
+        static Register(material: BABYLON.Material, info: TOOLKIT.ISpeedTreeWindInfo): void;
+        /** The scene's wind: the exported zone's direction and windMain (no zone: no wind). */
+        static Zone(scene: BABYLON.Scene): {
+            direction: number[];
+            strength: number;
+        };
+        /** A 10-point strength curve read linearly (strength clamped to 0..1). */
+        static Evaluate(curve: number[], strength: number): number;
+        /** Advances the 10 oscillation clocks by one step. */
+        static Advance(info: TOOLKIT.ISpeedTreeWindInfo, times: Float64Array, strength: number, seconds: number): void;
+        /** The 15 uniform values (60 floats, UNIFORMS order) for a tree, a wind and its clocks. */
+        static Values(info: TOOLKIT.ISpeedTreeWindInfo, wind: {
+            direction: number[];
+            strength: number;
+        }, times: Float64Array): number[];
+        /** Writes the values into the material's uniforms (and their History copies). */
+        static Apply(material: BABYLON.Material, values: number[]): void;
+        /** One frame: every tree's clocks advance and its materials get the new uniforms. */
+        static Update(scene: BABYLON.Scene): void;
+    }
+}
+declare namespace TOOLKIT {
+    /** The public Unity-unit TAA settings (`postProcess.unity` on every TAA pass), read every frame; one object carries every pipeline's knobs, `variant` picks which apply. */
+    interface ITaaUnitySettings {
+        /** "ppv2" | "urp" | "hdrp". */
+        variant: string;
+        /** false = pass-through, no jitter (camera-antialiasing-taa D14). */
+        enabled: boolean;
+        /** PPv2 temporalAntialiasing (defaults 0.75, 0.25, 0.95, 0.85). */
+        jitterSpread: number;
+        sharpness: number;
+        stationaryBlending: number;
+        motionBlending: number;
+        /** URP 0 VeryLow..4 VeryHigh (default 3); HDRP 0 Low..2 High (default 1). */
+        quality: number;
+        /** URP taaSettings (defaults 0.1, 1, 0.9, 0, 0); jitterScale is also HDRP taaJitterScale. */
+        frameInfluence: number;
+        jitterScale: number;
+        varianceClampScale: number;
+        contrastAdaptiveSharpening: number;
+        mipBias: number;
+        /** HDRP (defaults 0.875, 0.5, 0, 0.35, 0.5, 0, false, 0). */
+        baseBlendFactor: number;
+        sharpenStrength: number;
+        sharpenMode: number;
+        historySharpening: number;
+        antiFlicker: number;
+        motionVectorRejection: number;
+        antiHistoryRinging: boolean;
+        ringingReduction: number;
+    }
+    /** The SRP resolve row one camera runs (D11, D12). */
+    interface ITaaSrpQuality {
+        clamp: number;
+        motion: number;
+        history: number;
+        central: number;
+        ycocg: number;
+        varianceClampScale: number;
+        bicubicSharpness: number;
+        blendMin: number;
+        blendMax: number;
+        mvTune: number;
+    }
+    /** Per-camera temporal state (hangs off the resolve pass as `_toolkitTaaState`). */
+    interface ITaaCameraState {
+        frameIndex: number;
+        jitterPx: {
+            x: number;
+            y: number;
+        };
+        ndc: {
+            x: number;
+            y: number;
+        };
+        ndcPrev: {
+            x: number;
+            y: number;
+        };
+        applied: {
+            x: number;
+            y: number;
+            ortho: boolean;
+            matrix: BABYLON.Matrix;
+            v1: number;
+            v2: number;
+        };
+        /** false until the resolve pass applied once (no jitter while its shader compiles). */
+        ready: boolean;
+        reset: boolean;
+        wasEnabled: boolean;
+        pingpong: number;
+        ping: BABYLON.RenderTargetWrapper;
+        pong: BABYLON.RenderTargetWrapper;
+        width: number;
+        height: number;
+        historyType: number;
+        velocityType: number;
+        /** false for a camera that is not `scene.activeCameras[0]` (D30: Babylon keeps one previous view-projection per material). */
+        velocityOn: boolean;
+        lastFrameId: number;
+        lastPosition: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        lastForward: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        lastStep: number;
+        resets: number;
+        observers: {
+            scene: BABYLON.Scene;
+            before: BABYLON.Observer<BABYLON.Camera>;
+            after: BABYLON.Observer<BABYLON.Camera>;
+            camera?: BABYLON.Camera;
+            projection?: BABYLON.Observer<BABYLON.Camera>;
+        };
+        released: boolean;
     }
     /**
-     * Color Correction Modes
+     * Temporal anti-aliasing for one camera (camera-antialiasing-taa). A toolkit-owned plugin BUILT FROM Babylon's TAA building
+     * blocks -- not a `BABYLON.TAARenderingPipeline` instance and not Babylon's jitter material plugin (D4): it owns
+     *
+     * - the per-camera projection jitter (D5, D6): a constant NDC shift written into the camera's cached projection matrix in
+     *   `scene.onBeforeCameraRenderObservable` (PPv2: 8-sample Halton(2,3) x `jitterSpread`; URP / HDRP: 1024-sample Halton
+     *   x `jitterScale`) and removed again in `scene.onAfterCameraRenderObservable`, so everything that reads the scene
+     *   transform is jittered (materials, particles, sprites, the sky); shadow maps are not. Babylon rebuilds the projection
+     *   between those two observables whenever a render target calls `scene.updateTransformMatrix(true)` (DepthRenderer,
+     *   mirrors, probes ...), so `camera.onProjectionMatrixChangedObservable` re-applies the same jitter to every rebuild
+     *   (`ReapplyJitter`, camera-antialiasing-taa T2 spike) -- otherwise the main draw renders unjittered;
+     * - the velocity + depth request on the prepass (D7): the resolve pass carries `_prePassEffectConfiguration` with texture
+     *   types 2 (velocity, cube-root encoded) and 5 (view-space depth). Not type 11 (linear velocity): Babylon 9.27.1's
+     *   `PrepareAttributesForInstances` adds the `previousWorld0-3` attributes only under `PREPASS_VELOCITY`, while
+     *   `instancesDeclaration` declares them under `PREPASS_VELOCITY_LINEAR` too, so a type-11-only prepass gives every
+     *   instanced / thin-instanced mesh shader attributes missing from its vertex state (WebGPU: invalid pipeline, blank
+     *   canvas; WebGL2: unbound previous matrices). The resolve still reads type 11 when only it is present. A saturated
+     *   type-2 texel (|e| > 0.99, a full screen per frame) is never real motion -- additive-blended transparent surfaces add
+     *   into the velocity target through the colour blend state -- so the resolve treats it as static;
+     * - two history targets per camera made like `TAARenderingPipeline._createPingPongTextures` (half float, else float,
+     *   else 8-bit), sized to the resolve pass and fed through the `taaHistory` `PassPostProcess` whose `inputTexture` is
+     *   forced each frame (D8);
+     * - one resolve shader `toolkitTaaResolve` (D10) with two paths selected by `taaMode`: 0 = the PPv2 port, 1 = the SRP
+     *   port (URP's quality rows, D12; HDRP mapped onto it, D11); presets and knobs are uniforms, so edits land next frame.
+     *   Reduced scope (`Ppv2UsesSrpResolve`, D28 / D29: the T2 spike measured 2.53 ms): PPv2 cameras run the SRP path too,
+     *   with URP High's row, current weight 1 - stationaryBlending and no sharpness step (PPv2 sharpness / motionBlending
+     *   have no effect); PPv2's jitterSpread jitter is kept;
+     * - an RCAS tail pass `taaSharpen` wrapping `BABYLON.ThinFSR1SharpenPostProcess` for URP / HDRP cameras (D9). The UMD
+     *   babylon.js 9.27.1 does not export that class, so there the pass runs Babylon's registered `fsr1Sharpen` shader
+     *   directly with `ThinFSR1SharpenPostProcess.updateConstants` inlined (`con.x = 2^-stops`).
+     *
+     * Per frame, one TAA camera:
+     * 1. `scene._renderForCamera(camera)` -> `updateTransformMatrix()` -> `onBeforeCameraRenderObservable` -> `BeforeCamera`:
+     *    `KeepPreviousWorldMatrices` (Babylon's prepass can switch `scene.needsPreviousWorldMatrices` off when a later
+     *    effect configuration needs no velocity, which gives instanced meshes garbage velocity), reset checks (D13), jitter
+     *    index, `ndc`, write the projection (D5), `scene.updateTransformMatrix()`; every projection rebuild inside the camera
+     *    render gets the same jitter again (`ReapplyJitter`).
+     * 2. The scene draws into the chain head (prepass MRT when the prepass is on: colour + velocity + depth).
+     * 3. Post chain: SSAO2 / SSR (if any) -> `taaResolve` (`onActivate`: history size check, force `taaHistory.inputTexture`
+     *    to the write target, flip `pingpong`; `onApply`: bind history / velocity / depth, set uniforms, consume `reset`)
+     *    renders into the write target -> `taaHistory` copies it to the next pass -> motion blur, ... -> image processing
+     *    -> `taaSharpen` (URP / HDRP) -> canvas.
+     * 4. `onAfterCameraRenderObservable` -> `AfterCamera`: remove the jitter from the projection.
+     *
+     * `unity.enabled = false` neutralises the passes (the resolve copies the current texel, no jitter, RCAS at 50 stops) and
+     * never detaches them (D14); re-enabling resets the history. Placement, attach and disposal belong to the orchestrator
+     * (`TOOLKIT.PostProcessor`); call `Release` before disposing the passes. Static helper, not a registered class.
+     *
+     * Babylon PRIVATE members used (upgrade risk, D26): `postProcess._prePassEffectConfiguration` (as `MotionBlurPostProcess`
+     * / `TAARenderingPipeline` use it), `effect._bindTexture` (as `TAARenderingPipeline` uses it), `camera._postProcesses`
+     * (already used by camera-antialiasing-parity, by the orchestrator), `postProcess._forcedOutputTexture` (to tell whether
+     * the resolve reads the prepass target directly).
+     *
+     * Viewports (T4 fix): Babylon's prepass renders every camera into ITS VIEWPORT RECT of the shared, render-sized prepass
+     * target (as `SSAO2RenderingPipeline`'s combine pass reads it), while the post-process chain carries a full-frame image.
+     * The resolve therefore reads velocity and depth -- and the colour, when its input IS the prepass target -- through the
+     * camera's viewport rect (`taaViewport`, `taaInput`), and writes and reprojects in full-frame UV, where velocity and
+     * jitter are already in the camera's own UV units. With more than one active camera only `scene.activeCameras[0]` uses
+     * prepass velocity (`taaVelocityOn`); the others reproject as static and warn once (D30).
      */
-    enum ColorCorrectionMode {
-        None = 0,
-        ToGamma = 1,
-        ToLinear = 2
+    class TaaPlugin {
+        static readonly ResolveShaderName: string;
+        static readonly ResolveShaderKey: string;
+        static readonly Uniforms: string[];
+        static readonly Samplers: string[];
+        /** Babylon's RCAS shader (`fsr1SharpenPixelShader`), used directly when `BABYLON.ThinFSR1SharpenPostProcess` is not exported (the UMD build). */
+        static readonly SharpenShaderName: string;
+        static readonly Ppv2SampleCount: number;
+        static readonly SrpSequenceLength: number;
+        static readonly Ppv2MotionAmplification: number;
+        static readonly CutDistance: number;
+        static readonly CutDistanceRatio: number;
+        static readonly CutAngleDegrees: number;
+        static readonly NeutralSharpenStops: number;
+        static readonly UrpMaxSharpnessStops: number;
+        static readonly FilterFalloff: number;
+        /** URP / HDRP neighbour order for the central filter (TemporalAA.cs:243-292). */
+        static readonly FilterOffsets: number[][];
+        /** D28: true only when the T2 spike records REDUCED scope -- it did (camera-antialiasing-taa D29: 2.53 ms on WebGPU): PPv2 cameras run the SRP path with URP High's row, current weight 1 - stationaryBlending, no sharpness step; PPv2's jitterSpread jitter is kept. */
+        static Ppv2UsesSrpResolve: boolean;
+        static Variant(variant: string): string;
+        static Defaults(variant: string): TOOLKIT.ITaaUnitySettings;
+        static Halton(index: number, base: number): number;
+        static JitterPixels(variant: string, frameIndex: number, settings: any): {
+            x: number;
+            y: number;
+        };
+        static SrpQuality(variant: string, settings: any): TOOLKIT.ITaaSrpQuality;
+        static CurrentWeight(variant: string, settings: any): number;
+        static InResolveSharpen(variant: string, settings: any): number;
+        static SharpenStops(variant: string, settings: any): number;
+        static FilterWeights(dx: number, dy: number): number[];
+        static IsCut(prevPosition: any, prevForward: any, position: any, forward: any, prevStep: number): boolean;
+        static HistoryTextureType(engine: any): number;
+        static IsSupported(scene: BABYLON.Scene): boolean;
+        static NewState(): TOOLKIT.ITaaCameraState;
+        /**
+         * Babylon's PrePassRenderer._enableTextures resets `scene.needsPreviousWorldMatrices` for every effect configuration it
+         * walks, so a configuration listed after TAA's that needs no velocity (SSAO2, SSR, screen-based motion blur) switches
+         * the previous world matrices of instanced meshes off: their prepass velocity is garbage (hundreds of pixels on a still
+         * camera), the resolve rejects their history and their edges shimmer. While the prepass carries a velocity texture the
+         * flag stays on (set every frame before the camera draws; a no-op when nothing reset it).
+         */
+        static KeepPreviousWorldMatrices(scene: BABYLON.Scene): void;
+        static BeforeCamera(scene: BABYLON.Scene, camera: BABYLON.Camera, unity: TOOLKIT.ITaaUnitySettings, state: TOOLKIT.ITaaCameraState): void;
+        /** Re-applies the frame's jitter to a projection Babylon just rebuilt (`getProjectionMatrix(true)` between BeforeCamera and AfterCamera). */
+        static ReapplyJitter(camera: BABYLON.Camera, state: TOOLKIT.ITaaCameraState): void;
+        static AfterCamera(camera: BABYLON.Camera, state: TOOLKIT.ITaaCameraState): void;
+        static GetResolveShader(): string;
+        static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            textureType?: number;
+            variant?: string;
+            settings?: any;
+            inputEncoded?: boolean;
+        }): BABYLON.PostProcess;
+        static ResetHistory(resolve: BABYLON.PostProcess): boolean;
+        static Release(resolve: BABYLON.PostProcess): void;
+        static CoverageWarnings(scene: BABYLON.Scene): {
+            key: string;
+            text: string;
+        }[];
     }
+}
+declare namespace TOOLKIT {
     /**
-     * Babylon Script Component
-     * @class TerrainBuilder
+     * Unity terrain runtime (unity-terrain-system-parity, contract 2). Builds the heightfield, holes, the Havok heightfield
+     * collider and the quadtree LOD surface from the TOOLKIT.TerrainBuilder component properties (Design Reference §3, §4.3).
+     * All generated content is parented under the terrain node in terrain-local metres (D4).
      */
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
-        private detailLayerContainers;
-        private detailMeshSources;
-        static grassHeightScale: number;
-        static grassRandomFlip: boolean;
-        static grassCastShadows: boolean;
-        static grassReceiveFog: boolean;
-        static grassColorCorrectionMode: TOOLKIT.ColorCorrectionMode;
-        static detailChunkMode: number;
-        static detailChunkTargetInstances: number;
-        static detailChunkWorldSize: number;
-        static detailChunkMaxChunksPerAxis: number;
-        static detailChunkMaxTotalChunks: number;
-        static meshDetailChunkMode: number;
-        static meshDetailChunkTargetInstances: number;
-        static meshDetailChunkWorldSize: number;
+        private static _registry;
+        readonly onBuiltObservable: BABYLON.Observable<TOOLKIT.TerrainBuilder>;
+        private _isBuilt;
+        private _disposed;
+        private _registered;
+        private _contract;
+        private _heightfield;
+        private _collider;
+        private _surface;
+        private _surfaceMaterial;
+        /** T26: the surface draws the materialTemplate's graph class (its layer arrays are the shared SkinTextureArray cache entries). */
+        private _graphSurface;
+        private _trees;
+        private _details;
+        private _treeBillboardDistance;
+        private _shadowGenerators;
+        private _shadowScanFrame;
+        /** Terrain-owned casters: the per-pass caster lists (D44) cull these and pass every other caster through. */
+        private static _casters;
+        /** Built-in terrain surfaces that cast with their back faces (see MarkBackFaceCaster). */
+        private static _backFaceCasters;
+        private static _planes;
+        private static _lightPos;
+        /** Margin (world metres) around a pass volume before a caster is dropped: texel snapping and filter taps. */
+        static readonly CASTER_MARGIN: number;
+        /**
+         * Radius around the camera within which terrain content can throw a shadow into view (D44), 0 without a shadow
+         * generator; with shadowLightDirection (unit, the way a directional light travels, zero for none) it describes the
+         * TerrainMath.InShadowReach volume. Refreshed every update.
+         */
+        shadowReach: number;
+        readonly shadowLightDirection: BABYLON.Vector3;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        get isBuilt(): boolean;
+        get contract(): TOOLKIT.ITerrainContract;
+        get heightfield(): TOOLKIT.TerrainHeightfield;
+        get surfaceRoot(): BABYLON.TransformNode;
+        /** The terrain tree instancer (null before the build or without trees). */
+        get trees(): TOOLKIT.TerrainTrees;
+        /** Unity Terrain.treeDistance: instances beyond it are culled. */
+        get treeDistance(): number;
+        set treeDistance(v: number);
+        /** The terrain detail streamer (null before the build or without details). */
+        get details(): TOOLKIT.TerrainDetails;
+        /** Unity Terrain.detailObjectDistance: mesh details fade out between 0.9x and 1x, chunks stream within 1.1x. */
+        get detailObjectDistance(): number;
+        set detailObjectDistance(v: number);
+        /** Unity Terrain.detailObjectDensity (D42, relative to the export density). */
+        get detailObjectDensity(): number;
+        set detailObjectDensity(v: number);
+        /** Unity Terrain.treeBillboardDistance: stored only (D17, the SpeedTree LOD group picks the billboard). */
+        get treeBillboardDistance(): number;
+        set treeBillboardDistance(v: number);
+        /** Unity Terrain.heightmapPixelError: the surface quadtree's screen-space error threshold (re-selects nodes next update). */
+        get heightmapPixelError(): number;
+        set heightmapPixelError(v: number);
+        /** Unity terrain grass wind settings (TerrainData.wavingGrassStrength/Amount/Speed/Tint), forwarded to the detail materials live. */
+        setGrassWind(strength: number, amount: number, speed: number, tint?: BABYLON.Color4 | number[]): void;
+        /**
+         * Per-frame CPU cost of TerrainBuilder.update in milliseconds (D43): the last frame per subsystem (detailBuild = chunk
+         * streaming, detailCompact = main-host compaction, both inside details) and a ring of the
+         * last 256 totals (history, write index next) for medians. Reset by resetStats().
+         */
+        readonly stats: {
+            frames: number;
+            total: number;
+            surface: number;
+            trees: number;
+            details: number;
+            detailBuild: number;
+            detailCompact: number;
+            history: Float32Array;
+            next: number;
+        };
+        resetStats(): void;
+        /** Median of the recorded update totals (ms). */
+        getMedianUpdateMs(): number;
+        /** Shadow generators this terrain has registered its casters with. */
+        get shadowGenerators(): Set<any>;
         protected awake(): void;
+        protected update(): void;
         protected destroy(): void;
+        private disposeParts;
+        private buildAsync;
         /**
-         * Dispose all detail layer instances
+         * Every current shadow caster: surface nodes follow the terrain's shadowCastingMode, tree hosts and detail hosts
+         * follow their own renderers (D28, D44: castshadows LOD renderers, never billboards, detail chunks in reach).
          */
-        private disposeDetailLayers;
+        private getShadowCasters;
         /**
-         * Build detail prototypes for the terrain
-         * This recreates Unity's terrain grass and detail system in Babylon.js
+         * Adds a newly created caster to every known shadow generator. Surface casters follow the terrain's
+         * shadowCastingMode; tree and detail hosts pass force = true because they follow their prototype renderer (D28, D44).
          */
-        static BuildDetailPrototypes(properties: TOOLKIT.ITerrainProperties, terrainTransform: BABYLON.TransformNode, scene: BABYLON.Scene, builderInstance?: TOOLKIT.TerrainBuilder): void;
+        addShadowCaster(mesh: BABYLON.AbstractMesh, force?: boolean): void;
+        /** Removes a caster from every known shadow generator (detail hosts leaving the shadow reach or being disposed). */
+        removeShadowCaster(mesh: BABYLON.AbstractMesh): void;
         /**
-         * Build mesh-based detail layer (3D mesh grass/rocks/etc)
+         * Registers all casters with shadow generators not seen before (covers generators created after awake) and keeps
+         * the per-pass caster lists installed on every generator (a recreated shadow map drops them).
          */
-        private static BuildMeshDetailLayer;
+        private scanShadowGenerators;
         /**
-         * Build grass-based detail layer
+         * D44 shadow reach: the largest Unity shadow distance of the registered generators turned into the radius of the
+         * camera frustum up to that depth (TerrainMath.ShadowReach), and the first directional light's travel direction.
          */
-        private static BuildGrassDetailLayer;
+        private updateShadowReach;
+        /** Unity's shadow distance behind a generator: the exported one (light metadata), else the CSM range, else the light's. */
+        static GetShadowDistance(generator: any): number;
+        /** True when the mesh was registered as a terrain caster (tests, diagnostics). */
+        static IsTerrainCaster(mesh: BABYLON.AbstractMesh): boolean;
         /**
-         * Generate mesh detail instances from Unity's authoritative ComputeDetailInstanceTransforms export.
-         * This is used ONLY for mesh detail prototypes (rocks/props/etc) and is intended to match Unity 100%.
+         * Installs the terrain's per-pass caster list on a generator's shadow map (once; a list installed by someone else is
+         * chained in front). Babylon draws every caster into every cascade, face or map; this keeps a terrain caster only
+         * in the passes whose volume it overlaps.
          */
-        private static GenerateMeshInstancesFromUnityPatches;
+        static InstallCasterCulling(generator: any): void;
         /**
-         * Grass optimization:
-         * Generate grass thin-instance buffers directly from the density map without allocating
-         * per-instance Vector3/Color4 objects.
-         *
-         * IMPORTANT: This preserves grass color/behavior by reusing the exact same placement,
-         * height sampling, scale, and color math as GenerateInstancesFromDensityMap.
+         * A Built-in terrain surface casts with its back faces only. Built-in light bias is authored in shadow-map texels
+         * (0.05 default, Candyland 0.0001) and reaches Babylon as almost no depth bias, so a heightfield that casts its own
+         * front faces shadows itself in rings (acne). Seen from the light, a hill's lit slope is a front face and its far
+         * slope a back face, so back faces alone still cast every terrain shadow Unity shows without self-shadowing the lit
+         * surface. Per mesh, not the generator's forceBackFacesOnly, so no other caster (and no URP terrain) changes.
          */
-        private static CreateGrassThinInstancesFromDensityMap;
+        static MarkBackFaceCaster(mesh: BABYLON.AbstractMesh): void;
+        /** The exported terrain flavour: "urp", "hdrp", "builtin-standard", "builtin-diffuse" or "builtin-specular" ("" when absent). */
+        static TerrainFlavour(contract: TOOLKIT.ITerrainContract): string;
+        /** True for a Built-in render pipeline terrain (any builtin-* flavour). */
+        static IsBuiltInTerrain(contract: TOOLKIT.ITerrainContract): boolean;
+        /** True for a Universal render pipeline terrain. */
+        static IsUrpTerrain(contract: TOOLKIT.ITerrainContract): boolean;
+        /** True for a High Definition render pipeline terrain. */
+        static IsHdrpTerrain(contract: TOOLKIT.ITerrainContract): boolean;
+        /** True for the terrain flavours whose surface casts with its back faces: Built-in only (see MarkBackFaceCaster). */
+        static UsesBackFaceCasting(contract: TOOLKIT.ITerrainContract): boolean;
+        /** Once per generator: reverse the cull state around the draws of marked surface meshes (Babylon sets the state, then notifies). */
+        private static InstallBackFaceCasting;
         /**
-         * Create thin instances for maximum performance
-         *
-         * IMPORTANT (Unity-style optimization):
-         * Babylon thin instances are frustum-culled using the *host mesh* bounding info.
-         * If you put an entire terrain's grass into one host mesh, it becomes "all-or-nothing".
-         *
-         * This implementation automatically *chunks* instances into a 2D grid (XZ) and creates
-         * one thin-instanced host mesh per chunk. Each chunk gets its own bounding box, so
-         * off-screen chunks are skipped by frustum culling (Unity terrain detail patch behavior).
-         *
-         * Drop-in compatibility:
-         * - The function signature is unchanged.
-         * - It returns the first created chunk mesh (or the only mesh if one chunk).
-         * - All chunk meshes are parented under the provided `parent` so disposal still works.
+         * One pass of a generator (cascade layer, cube face, or the single map): out receives every non-terrain caster and
+         * the terrain casters whose world AABB overlaps the pass volume. The volume is the pass transform's side planes
+         * (open toward the light), plus the light range for point and spot lights.
          */
-        private static CreateDetailThinInstancesFromDensityMap;
+        static CullCasters(generator: any, pass: number, renderList: BABYLON.AbstractMesh[], count: number, out: BABYLON.AbstractMesh[]): BABYLON.AbstractMesh[];
+        private static _casterFrames;
         /**
-         * Create prototype mesh for grass
+         * The render list's casters for this frame, in list order: every non-terrain caster (box NaN) and the enabled, visible
+         * terrain casters with their world AABBs. Rebuilt when the scene render id, the list or its count changes; without a
+         * scene (a bare generator) it is rebuilt on every call.
          */
-        private static CreateGrassPrototype;
+        private static CasterFrame;
+        /** Upper bound of the D45 shader pre-warm (milliseconds). */
+        static PREWARM_MS: number;
         /**
-         * Create a single quad billboard (Unity GrassBillboard mode)
+         * D45 shader pre-warm: polls the main-pass shaders of every tree host and every mesh-detail layer host, and the
+         * shadow shaders of the casting ones, until they are compiled, so no effect is built on first sight in flight.
          */
-        private static CreateSingleQuadBillboard;
+        private prewarm;
+        private _prewarming;
+        private _prewarmAgain;
+        private _prewarmObserver;
+        private _prewarmTimer;
+        private prewarmOnce;
+        private static NowMs;
+        /** [u, v] of a world position in Unity terrain space (unclamped), or null before the contract is known. */
+        private worldToUnityUV;
+        /** Height relative to the terrain (Unity semantics), clamped to the terrain rect. */
+        SampleHeight(worldPosition: BABYLON.Vector3): number;
+        /** Local height at normalised (u, v). */
+        GetInterpolatedHeight(u: number, v: number): number;
+        /** World-space normal at normalised (u, v). */
+        GetInterpolatedNormal(u: number, v: number): BABYLON.Vector3;
+        /** Normalised terrain uv of a world position, null when outside the terrain rect. */
+        WorldToTerrainUV(worldPosition: BABYLON.Vector3): BABYLON.Vector2;
+        /** World Y of the terrain surface under a world position (this terrain only, clamped to its rect). */
+        GetWorldHeight(worldPosition: BABYLON.Vector3): number;
+        private static Register;
+        private static Unregister;
+        /** Every registered (valid-contract) terrain of the scene. */
+        static GetTerrains(scene: BABYLON.Scene): TOOLKIT.TerrainBuilder[];
+        /** The terrain whose rect contains the world position (the last registered wins overlaps), or null. */
+        static GetTerrainAt(scene: BABYLON.Scene, worldPosition: BABYLON.Vector3): TOOLKIT.TerrainBuilder;
+        /** World Y of the terrain surface under a world position, or null when no terrain covers it. */
+        static GetWorldHeightAt(scene: BABYLON.Scene, worldPosition: BABYLON.Vector3): number;
+        /** True when at least one terrain is registered and every registered terrain has finished building. */
+        static IsAllBuilt(scene: BABYLON.Scene): boolean;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity terrain export contract, version 2 (unity-terrain-system-parity D1, Design Reference §3).
+     * The exporter (CanvasTools TerrainDataExporter / TerrainExportSchema) writes these exact key names into the
+     * TOOLKIT.TerrainBuilder component's `properties`. Binary data lives in the scene .bin as raw bufferViews (D2),
+     * resolved by the loader into `binaryblocks[key].data` before components are constructed.
+     */
+    interface ITerrainBinaryBlock {
+        bufferview: number;
+        type: "u16" | "u32" | "f32";
+        count: number;
+        data?: Uint16Array | Uint32Array | Float32Array;
+    }
+    interface ITerrainLayerData {
+        name: string;
+        albedo: string;
+        normal: string;
+        mask: string | null;
+        /** T26 (D39): a graph template's own layer textures (the asset textures as exported; each null when absent). */
+        graph?: {
+            albedo: {
+                url: string;
+                linear?: boolean;
+            } | null;
+            normal: {
+                url: string;
+                linear?: boolean;
+            } | null;
+            mask: {
+                url: string;
+                linear?: boolean;
+            } | null;
+        } | null;
+        st: number[];
+        /** shadergraph-transpiler-complete-coverage X10: the anisotropic level Unity samples the layer with (quality level applied); absent in older exports. */
+        aniso?: number;
+        normalscale: number;
+        metallic: number;
+        smoothness: number;
+        smoothnesssource: number;
+        diffuseremapscale: number[];
+        maskremapscale: number[];
+        maskremapoffset: number[];
+        hasmask: boolean;
+    }
+    interface ITerrainTreeLod {
+        height: number;
+        renderers: string[];
+        billboard: boolean;
+        /** X10 fix loop 2: per renderer, lit by light probes (Unity LightProbeUsage BlendProbes / UseProxyVolume); absent = true. */
+        lightprobes?: boolean[];
+    }
+    interface ITerrainTreeCollider {
+        type: "capsule" | "box" | "sphere";
+        center: number[];
+        size: number[];
+        radius: number;
+        height: number;
+        direction: number;
+    }
+    interface ITerrainTreePrototype {
+        name: string;
+        templateid: string;
+        bendfactor: number;
+        speedtree: boolean;
+        scale: number[];
+        lodsize: number;
+        lodrefpoint: number[];
+        fademode: number;
+        animatecrossfade: boolean;
+        lods: ITerrainTreeLod[];
+        radius: number;
+        height: number;
+        usesinstancecolor: boolean;
+        materials: {
+            [materialName: string]: {
+                hue: number[] | null;
+                billboard: boolean;
+            };
+        };
+        collider: ITerrainTreeCollider | null;
+    }
+    interface ITerrainDetailLayer {
+        index: number;
+        kind: "grass" | "mesh";
+        rendermode: "Grass" | "GrassBillboard" | "VertexLit";
+        instancing: boolean;
+        texture: string | null;
+        texturemipmaps?: boolean;
+        templateid: string | null;
+        minwidth: number;
+        maxwidth: number;
+        minheight: number;
+        maxheight: number;
+        noiseseed: number;
+        noisespread: number;
+        healthy: number[];
+        dry: number[];
+        density: number;
+        targetcoverage: number;
+        usedensityscaling: boolean;
+        aligntoground: number;
+        positionjitter: number;
+        holeedgepadding: number;
+        castshadows: boolean;
+        densityimage: number;
+        densitychannel: number;
+        transforms: string | null;
+        offsets: string | null;
+        counts: string | null;
+        sway: {
+            amount: number;
+            speed: number;
+            wavelength: number;
+        } | null;
+    }
+    interface ITerrainContract {
+        contract: number;
+        name: string;
+        key: string;
+        mode: "heightfield" | "mesh";
+        handedness: number;
+        flavour: "builtin-standard" | "builtin-diffuse" | "builtin-specular" | "urp" | "hdrp";
+        /** shadergraph-transpiler-complete-coverage T26 (D39): the materialTemplate's generated graph class and its bags (else null). */
+        materialtemplate?: {
+            customMaterial: string;
+            [bag: string]: any;
+        } | null;
+        size: number[];
+        heightresolution: number;
+        pixelerror: number;
+        basemapdistance: number;
+        castshadows: boolean;
+        rendergroup: number;
+        heightblend: boolean;
+        heighttransition: number;
+        layersize: number;
+        layers: ITerrainLayerData[];
+        control: string[];
+        controlresolution: number;
+        holes: string | null;
+        holesresolution: number;
+        lightmap: {
+            uri: string;
+            scaleoffset: number[];
+            level: number;
+        } | null;
+        groupingid: number;
+        allowautoconnect: boolean;
+        neighbors: {
+            left: string | null;
+            right: string | null;
+            top: string | null;
+            bottom: string | null;
+        };
+        trees: {
+            distance: number;
+            billboarddistance: number;
+            crossfadelength: number;
+            maxfulllod: number;
+            lodbias: number;
+            qualitylodbias: number;
+            colliders: boolean;
+            instances: string | null;
+            prototypes: ITerrainTreePrototype[];
+        } | null;
+        details: {
+            resolution: number;
+            perpatch: number;
+            patchcount: number;
+            scattermode: "coverage" | "instancecount";
+            distance: number;
+            density: number;
+            wind: {
+                strength: number;
+                amount: number;
+                speed: number;
+                tint: number[];
+            };
+            densityimages: string[];
+            layers: ITerrainDetailLayer[];
+        } | null;
+        collider: {
+            enabled: boolean;
+            staticfriction: number;
+            dynamicfriction: number;
+            restitution: number;
+            frictioncombine: number;
+            restitutioncombine: number;
+        } | null;
+        binaryblocks: {
+            [key: string]: ITerrainBinaryBlock;
+        };
+    }
+    /** Contract validation, binary block access and url resolution. Pure static helpers (not a script component). */
+    class TerrainContract {
+        static readonly VERSION: number;
+        /** Returns null when valid, else a one-line reason. Never throws. */
+        static Validate(props: any): string;
+        /** Returns the block's typed data or null (missing block, missing data, wrong type, count mismatch). */
+        static GetBlock(props: TOOLKIT.ITerrainContract, key: string, type: "u16" | "u32" | "f32"): Uint16Array | Uint32Array | Float32Array;
+        /** Resolves a scenes-relative asset path against the scene root (same rule as PostProcessor.ResolveSceneUrl, src/pro/PostProcessing.ts:1918-1925). */
+        static ResolveUrl(scene: BABYLON.Scene, path: string): string;
+        /** D1 warning text: "[TerrainBuilder] <name>: export contract <v> is not supported (expected 2) — re-export the scene". Pure. */
+        static FormatContractWarning(name: string, props: any): string;
+    }
+    /** CPU image decoding for terrain data images (control, holes, density). Exact bytes: no premultiply, no colour conversion. */
+    class TerrainImages {
+        /** fetch → createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" }) → OffscreenCanvas 2D getImageData.
+         *  Row 0 of the result is image row 0 (= terrain z 0 per D5). Rejects on failure. */
+        static LoadPixels(url: string): Promise<{
+            width: number;
+            height: number;
+            data: Uint8ClampedArray;
+        }>;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Terrain details (unity-terrain-system-parity D21, D24, D27, D28, D40-D42, Design Reference §4.4, §8). Patches are
+     * grouped into chunks of k x k patches, streamed in nearest first within 1.1 x detailObjectDistance (4 ms per frame),
+     * hidden beyond 1.25 x and disposed after 5 s. Every mesh layer builds one thin-instance host per (layer, chunk) from
+     * Unity's exact detail transforms, parented to the terrain node in terrain-local metres, frustum-culled by Babylon.
+     * A castshadows layer's hosts are shadow casters only while their chunk lies inside the terrain's shadow reach (D44).
+     * The chunk hosts never draw in the main pass (layerMask 0): one host per layer draws the instances of every shown
+     * chunk that lie in the camera frustum and within the detail distance, compacted on the CPU when the view changes (D45).
+     */
+    class TerrainDetails {
+        static readonly BUILD_BUDGET_MS: number;
+        static readonly DISPOSE_SECONDS: number;
+        static readonly ACTIVATE: number;
+        static readonly DEACTIVATE: number;
+        /** Hysteresis (metres) before a chunk leaving the shadow reach stops casting (D44). */
+        static readonly CAST_HYSTERESIS: number;
+        private _owner;
+        private _hf;
+        private _scene;
+        private _layers;
+        private _chunks;
+        private _active;
+        private _queue;
+        private _pc;
+        private _k;
+        private _cpa;
+        private _cw;
+        private _cd;
+        private _distance;
+        private _density;
+        private _exportDensity;
+        private _prepared;
+        private _wind;
+        private _windTint;
+        private _worldFlag;
+        private _invWorld;
+        private _lastWorld;
+        private _tmpV;
+        private _lastX;
+        private _lastZ;
+        private _hosts;
+        private _lastReach;
+        private _compactDirty;
+        private _compactPos;
+        private _compactDir;
+        private _dirTmp;
+        private _planes;
+        private _viewProj;
+        /** Instances drawn by the main-pass hosts after the last compaction (diagnostics, D45). */
+        drawn: number;
+        /** CPU ms of this frame's main-host compaction (0 when the view did not change; diagnostics, D43). */
+        lastCompactMs: number;
+        /** Milliseconds spent building chunks in the last update (diagnostics, D43). */
+        lastBuildMs: number;
+        private _n;
+        private static readonly UP;
+        private _qa;
+        private _qy;
+        private _q;
+        private _s;
+        private _p;
+        private _m;
+        constructor(owner: TOOLKIT.TerrainBuilder, hf: TOOLKIT.TerrainHeightfield);
+        /** Unity Terrain.detailObjectDistance. Rebuilds lazily. */
+        get distance(): number;
+        set distance(v: number);
+        /** Unity Terrain.detailObjectDensity (D42: relative to the export density). Rebuilds lazily. */
+        get density(): number;
+        set density(v: number);
+        /** Chunk grid [patchWorldSize, k, chunksPerAxis]. */
+        get chunking(): number[];
+        /** Unity terrain grass wind (details.wind), forwarded to the grass-wave materials. */
+        setWind(strength: number, amount: number, speed: number, tint: number[]): void;
+        prepare(): Promise<void>;
+        private prepareMeshLayer;
         /**
-         * Create crossed quads (Unity "Grass" mode, non-billboard).
-         * Two vertical quads intersecting at the center (one in X/Y, one in Z/Y).
+         * A texture grass layer (T13, D22, D25): the density image channel, Unity's per-patch counts when captured, the layer
+         * texture (bottom-row-first, D5, so invertY false), one 4-vertex quad source (Grass: x -0.5..0.5, y 0..1; GrassBillboard:
+         * every vertex at the origin, the extrusion in uv2) and one Grass(Billboard)Material per (layer, terrain).
          */
-        private static CreateCrossQuadGrass;
+        private prepareGrassLayer;
+        /** D25 quad: Grass spans x -0.5..0.5, y 0..1 (uv v = 0 bottom), GrassBillboard puts every vertex at the origin with uv2 = (offsetX, offsetY). */
+        static GrassQuad(billboard: boolean): {
+            positions: number[];
+            normals: number[];
+            uvs: number[];
+            uvs2: number[];
+            indices: number[];
+        };
+        private applyGrassParams;
+        /** D41: plain PBR clone per (template, material, modes) with the foliage plugin (FADE, SWAY, GRASSWAVE) attached. */
+        private layerMaterial;
+        private applyPluginParams;
+        private applyMaterialParams;
+        update(camera: BABYLON.Camera): void;
         /**
-         * Apply upward-pointing normals to a mesh
+         * D45: rewrites every layer's main-pass host with the instances of the shown chunks that lie in the camera frustum
+         * and within the detail distance (beyond it the fade has reached zero). A chunk fully inside both is copied whole,
+         * one fully outside is skipped, the rest is tested per instance (padded by the instance's bounding radius).
          */
-        private static ApplyUpNormals;
+        private compact;
         /**
-         * Deterministic hash-based RNG for stable grass placement
+         * The main-pass host of every mesh layer (created now with one identity instance and hidden, so the D45 pre-warm
+         * compiles against the buffers it draws with); cast tells whether the layer's chunk hosts cast shadows.
          */
-        private static HashToUnitFloat;
+        getMainHosts(): {
+            mesh: BABYLON.Mesh;
+            cast: boolean;
+        }[];
+        /** The layer's main-pass host with room for at least count instances (created or grown on demand). */
+        private ensureMain;
+        /** The main host's tint buffer: Babylon's "color" for mesh layers, "tkGrassTint" for texture grass (TerrainGrassPlugin). */
+        private static TintBuffer;
+        /** XZ distance from the camera (Unity-local metres) to the chunk rect. */
+        private chunkDistance;
+        private buildChunk;
         /**
-         * Normalize rotation angle to [0..2PI)
+         * Texture grass of one chunk (§8, D22, D23): per cell the density value, the count (Unity's patch count spread over
+         * the patch's cells by value, or the scatter-mode formula), placement on a jittered sub-grid, noise size and tint, y
+         * from the heightfield, cells near holes skipped. No host: the instance matrices and gamma tints are kept for the
+         * layer's compacted main-pass host (D45). Grass never casts (D25).
          */
-        private static NormalizeRotation;
+        private buildGrassEntry;
+        /** The world AABB of a terrain-local AABB [min xyz, max xyz] through world (all 8 corners). */
+        private static LocalToWorldBox;
+        /** One host per (layer, chunk) (D40), the §8 mesh detail matrix per kept instance. Null when the chunk has none. */
+        private buildMeshHost;
         /**
-         * Apply color correction based on mode
+         * A host with its own Geometry over the source's GPU vertex and index buffers. Thin-instance "world0..3" buffers
+         * are stored on the geometry (Mesh.setVerticesBuffer), so hosts must never share one Geometry (measured: shared
+         * clones bind another chunk's instance buffer, a WebGPU validation error and a blank canvas). Sharing the GPU
+         * buffers keeps one copy of the vertex data per layer. Falls back to a clone with its own geometry copy.
          */
-        private static DoColorCorrection;
+        private createHost;
+        /** Registers or drops the chunk's castshadows hosts as casters as it enters or leaves the shadow reach (D44). */
+        private updateCasting;
+        /** Keeps the host's instance data and its world AABB (padded by the largest instance radius) for the compaction. */
+        private recordChunkHost;
+        private hideChunk;
+        private showChunk;
+        private disposeChunk;
+        /** Disposes every chunk; they rebuild lazily on the next update (distance / density setters). */
+        private resetChunks;
+        private refreezeHosts;
+        /** The mesh's world AABB into out [min xyz, max xyz]. */
+        private static WorldBox;
+        /** Every shadow-casting host currently built (castshadows layers, chunks inside the shadow reach). */
+        getMeshes(): BABYLON.AbstractMesh[];
+        /** Diagnostics: layers, chunk states, hosts and built instances per layer index. */
+        getStats(): {
+            layers: number;
+            chunks: number;
+            active: number;
+            built: number;
+            hidden: number;
+            queued: number;
+            hosts: number;
+            instances: number;
+            perLayer: {
+                [index: number]: number;
+            };
+            drawn: number;
+        };
+        private static Now;
+        dispose(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Terrain foliage material plugin (unity-terrain-system-parity D17, D19, D20, D41, Design Reference §9).
+     * Adds tree wind sway, LOD crossfade dither, SpeedTree billboard face selection and hue variation (trees), and the
+     * mesh-detail sway / distance fade modes (details) to a plain PBR or Standard material. Callers attach it to a material
+     * they cloned for the purpose (D41), never to a shared scene material.
+     *
+     * Vertex code runs at CUSTOM_VERTEX_UPDATE_WORLDPOS on the instanced world position. Fragment code runs at
+     * CUSTOM_FRAGMENT_UPDATE_ALBEDO for PBR (inside albedoOpacityBlock, before the alpha test and before the reflectivity
+     * block reads surfaceAlbedo) and at CUSTOM_FRAGMENT_UPDATE_DIFFUSE / CUSTOM_FRAGMENT_BEFORE_FOG for Standard.
+     *
+     * D48 (T12.6): on a Shader Graph class (a CustomShaderMaterial whose own plugin writes surfaceAlbedo / alpha at
+     * CUSTOM_FRAGMENT_UPDATE_ALPHA, priority 100) the albedo edits (hue, grass wave) and the billboard alpha run at
+     * CUSTOM_FRAGMENT_UPDATE_ALPHA instead - this plugin's priority 120 puts them after the graph's writes, which would
+     * otherwise overwrite them. The dither discards stay at CUSTOM_FRAGMENT_UPDATE_ALBEDO (a discard is order-free).
+     */
+    class TerrainFoliagePlugin extends BABYLON.MaterialPluginBase {
+        static readonly MODE_TREE: number;
+        static readonly MODE_BILLBOARD: number;
+        static readonly MODE_SWAY: number;
+        static readonly MODE_GRASSWAVE: number;
+        static readonly MODE_FADE: number;
+        static readonly MODE_HUE: number;
+        static readonly MODE_CROSSFADE: number;
+        /** D46: URP specular on a PBR clone (Fresnel-free direct specular, URP's environment-reflection term). */
+        static readonly MODE_URPSPECULAR: number;
+        /** URP kDielectricSpec.r (BRDF.hlsl:9), the dielectric reflectance at normal incidence. */
+        static readonly URP_DIELECTRIC_F0: number;
+        /** Unity LODFadeCrossFade 4x4 Bayer matrix, used as (v + 0.5) / 16. */
+        static readonly BAYER: number[];
         /**
-         * Convert an sRGB color value [0..1] to linear space using a gamma of ~2.2.
+         * URP TerrainWaveGrass (WavingGrassInput.hlsl:62-106, FastSinCos :37-60) as inline statements, shared with the texture
+         * grass plugin (T13). Before it the caller declares tkWgPos (vec3, world position, read and written), tkWgAmount
+         * (float, the wave amount) and tkWgColor (vec4, the colour in). After it tkWgPos is displaced in xz and tkWgColor is
+         * (2 * waveColor * color.rgb, fade). Uniforms: tkWaveAndDistance, tkWavingTint, tkCameraPosition (D26). The unused
+         * cosine of FastSinCos is left out.
          */
-        private static GammaToLinear;
+        static readonly WAVE_GRASS_GLSL: string;
+        /** WGSL twin of WAVE_GRASS_GLSL (same contract, uniforms read through uniforms.). */
+        static readonly WAVE_GRASS_WGSL: string;
         /**
-         * Convert a linear color value [0..1] to sRGB space using a gamma of ~2.2.
+         * D46 direct specular through Babylon's own PBR knobs. URP's DirectBRDFSpecular has no Fresnel (brdfData.specular =
+         * lerp(0.04, albedo, metallic), BRDF.hlsl:93) and its diffuse is albedo * 0.96. Babylon's Schlick term is constant
+         * when F90 = F0: metallicF0Factor (specularWeight) = 0.04 sets F90 = 0.04, and metallicReflectanceColor = 1 / F0(ior)
+         * brings the dielectric F0 back to 0.04. On the default (legacy) energy path the same pair scales the diffuse albedo
+         * by 1 - 0.04, on the other path the constant Fresnel does, so both land on URP's 0.96.
          */
-        private static LinearToGamma;
+        static ApplyUrpSpecular(material: BABYLON.Material): boolean;
+        /**
+         * D46 environment reflection at CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION, behind `define`. Babylon's reflectance
+         * (colorSpecularEnvironmentReflectance, with its multi-scatter factor and radiance/horizon occlusion) is swapped for
+         * URP's EnvironmentBRDFSpecular (BRDF.hlsl:157-161, GlobalIllumination.hlsl:511-512): surfaceReduction * lerp(specular,
+         * grazingTerm, Pow4(1 - NoV)), surfaceReduction = 1 / (roughness^2 + 1), grazingTerm = saturate(smoothness +
+         * reflectivity). The swap is a ratio, so every other scale on finalRadianceScaled (environment intensity, the Unity
+         * IBL split) is kept. Metallic workflow only by default (the only one the terrain clones use).
+         * shadergraph-transpiler-complete-coverage T19 (D23): `anyWorkflow` (Shader Graph classes, PipelineLightingPlugin) drops the
+         * METALLICWORKFLOW guard - in the specular workflow URP's reflectivity is ReflectivitySpecular(specular) = max(F0.r, g, b),
+         * so grazingTerm = saturate(smoothness + max(F0)); the metallic workflow keeps 1 - 0.96 * (1 - metallic).
+         */
+        static UrpEnvironmentCode(define: string, wgsl: boolean, anyWorkflow?: boolean): string;
+        private static _wind;
+        private static readonly FORWARD_LH;
+        private static readonly FORWARD_RH;
+        modes: number;
+        params: {
+            bendFactor: number;
+            height: number;
+            hue: number[];
+            hueOverlay: boolean;
+            swayAmount: number;
+            swaySpeed: number;
+            swayWavelength: number;
+            fadeStart: number;
+            fadeEnd: number;
+            tint: number[];
+            wave: number[];
+            wavingTint: number[];
+        };
+        private _isStandard;
+        /** The defines of the effect being prepared (addFallbacks runs just before getAttributes in the same event). */
+        private _pendingDefines;
+        /**
+         * Meshes whose crossfade was dropped because tkLodFade would exceed the device's vertex buffer or attribute limit,
+         * with the scene's needsPreviousWorldMatrices at that time (a change re-evaluates the mesh).
+         */
+        private static _fadeOverBudget;
+        private static _fadeWarned;
+        private _isGraph;
+        private _camFwd;
+        constructor(material: BABYLON.Material);
+        /** True when the plugin was attached to a Shader Graph class (D48): the albedo edits run after the graph's writes. */
+        get isGraph(): boolean;
+        /**
+         * D48 (T12.6): a transpiled Shader Graph class (MY.*) - a toolkit CustomShaderMaterial that is neither the loader's
+         * plain-PBR stand-in (UniversalShaderMaterial) nor the bare base class, i.e. one whose own plugin owns the surface.
+         * Keyed on the material's type and shader name, never on a graph, scene or material name.
+         */
+        static IsGraphMaterial(material: BABYLON.Material): boolean;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** Installs (or extends, OR-ing the modes) the plugin on a material. Idempotent per material (metadata.tkFoliage). */
+        static Attach(material: BABYLON.Material, modes: number): TOOLKIT.TerrainFoliagePlugin;
+        /**
+         * Shared per-scene wind (D19): one time accumulator advanced once per frame (scene.getFrameId() guard) and the first
+         * non-spherical WindZone of scene.metadata.toolkit.windzones, direction normalised in XZ. No zone: main 0, turbulence 0, +X.
+         */
+        static GetWindState(scene: BABYLON.Scene): {
+            time: number;
+            dir: number[];
+            main: number;
+            turbulence: number;
+            pulseMagnitude: number;
+            pulseFrequency: number;
+        };
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        addFallbacks(defines: BABYLON.MaterialDefines, fallbacks: any, currentRank: number): number;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /**
+         * Vertex buffers an attribute list binds on WebGPU. With the mesh, each attribute is resolved to its vertex buffer and a
+         * run of consecutive attributes over the same underlying GPU buffer (an interleaved host, a thin-instance matrix) counts
+         * once, exactly as WebGPU pipelines merge them (WebGPUCacheRenderPipeline._CanMergeVertexBuffer: same buffer as the
+         * previous attribute and a valid offset range). Without the mesh (or for an attribute it cannot resolve) an instance
+         * matrix (world0..3, previousWorld0..3) is one buffer and every other attribute its own.
+         */
+        static CountVertexBuffers(attributes: string[], mesh?: BABYLON.AbstractMesh): number;
+        private static ResolveVertexBuffer;
+        /** WebGPU's merge condition for a vertex buffer view: its attribute lies inside one stride (computed as Babylon does). */
+        private static ValidOffsetRange;
+        /** True when extra single-attribute buffers still fit the engine's vertex buffer (WebGPU) and attribute limits. */
+        static FitsVertexBudget(attributes: string[], engine: BABYLON.AbstractEngine, extra: number, mesh?: BABYLON.AbstractMesh): boolean;
+        /** §9 uniforms. GLSL declarations for both stages: the toolkit runs WebGL2 without UBOs, so each stage needs its own. */
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        static BuildCode(modes: number, wgsl: boolean, isStandard: boolean, isGraph?: boolean): {
+            [hook: string]: string;
+        };
+    }
+    /**
+     * X10 fix loop 2: per-instance light probes on a thin-instance host (terrain trees). Unity lights every terrain tree
+     * instance whose prototype renderer uses light probes (LightProbeUsage BlendProbes / UseProxyVolume) with the probe SH
+     * interpolated at THAT instance; one host draws hundreds of instances in one call, so the per-mesh probe rider
+     * (UnityStyleLightingPlugin.WriteProbeHarmonics) cannot carry it. The host gets an instanced vertex buffer of the
+     * instance's probe SH, L0 + L1 in the uniform form the rider writes (Unity layout, scale applied - L2 is under 3% of L0
+     * for a probe and is dropped), packed as three vec4 (tkProbe0..2, one interleaved buffer):
+     *
+     *   tkProbe0 = (L00.r, L00.g, L00.b, L1-1.r)   tkProbe1 = (L1-1.g, L1-1.b, L10.r, L10.g)   tkProbe2 = (L10.b, L11.r, L11.g, L11.b)
+     *
+     * L00.r < 0 marks "no probe" (the environment SH stays). The vertex stage evaluates probe(d) / environment(d) per channel
+     * (d = the vertex normal through the reflection matrix and cube flips, as Babylon's irradiance vector; environment = the
+     * same L0 + L1 of the host's own SH, tkProbeHost0..2, the preScaledHarmonics Babylon binds) and hands ONE varying to the
+     * fragment - inter-stage variables are the scarce resource on a SpeedTree billboard host (28 on Apple, the three raw
+     * vectors overflowed it). At CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION - priority 90, so BEFORE a Shader Graph class's
+     * code (priority 100) reads reflectionOut.environmentIrradiance (the Baked GI node) - finalIrradiance and
+     * reflectionOut.environmentIrradiance are scaled by it: every other factor of Babylon's diffuse IBL (reflection colour,
+     * level, lighting intensity, albedo, AO) is kept, so the result is the rider's probe lighting.
+     */
+    class TerrainProbePlugin extends BABYLON.MaterialPluginBase {
+        static readonly PRIORITY: number;
+        static readonly ATTRIBUTES: string[];
+        /** Floats per instance in the probe buffer. */
+        static readonly STRIDE: number;
+        private _pendingDefines;
+        private _host;
+        private static _overBudget;
+        private static _warned;
+        constructor(material: BABYLON.Material);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** Installs the plugin once per material (metadata.tkProbes). */
+        static Attach(material: BABYLON.Material): TOOLKIT.TerrainProbePlugin;
+        /** True when the mesh carries the per-instance probe buffer. */
+        static HasProbeBuffer(mesh: BABYLON.AbstractMesh): boolean;
+        /**
+         * Packs 27 SH floats (Unity layout [R0..R8, G0..G8, B0..B8], scale applied) into the 12-float instance record at
+         * `outOffset`. Pure.
+         */
+        static Pack(sh: ArrayLike<number>, shOffset: number, out: Float32Array, outOffset: number): void;
+        /** Packs a BABYLON.SphericalHarmonics (l00, l1_1, l10, l11 vectors) the same way. Pure. */
+        static PackHarmonics(h: any, out: Float32Array, outOffset: number): void;
+        /** The packed record's irradiance along the (already rotated) irradiance vector d - the shader's evaluation. Pure. */
+        static Evaluate(rec: ArrayLike<number>, o: number, dx: number, dy: number, dz: number, out: number[]): number[];
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        addFallbacks(defines: BABYLON.MaterialDefines, fallbacks: any, currentRank: number): number;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /**
+         * The host's own SH as Babylon binds it (the reflection texture's preScaledHarmonics, the material's texture or the scene
+         * environment) and its reflection matrix. tkProbeHost0.x < 0 (no SH on this draw) turns the ratio off.
+         */
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        static BuildCode(wgsl: boolean): {
+            [hook: string]: string;
+        };
+    }
+    /** PBR tree branch material with TerrainFoliagePlugin MODE_TREE installed (D19). */
+    class TreeBranchMaterial extends TOOLKIT.CustomShaderMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * shadergraph-transpiler-complete-coverage T26 (D39): binds a terrain's data on its materialTemplate's generated Shader Graph class
+     * (a Terrain Lit graph) under the names the Terrain Texture / Terrain Properties nodes read (SgTerrain, SgNodes.Terrain.cs):
+     *
+     * - tkTerrainAlbedo / tkTerrainNormal / tkTerrainMask: the layer Texture2DArrays, built with the same SkinTextureArray.Build calls
+     *   (and so the same cached arrays) TerrainSplatMaterial.setup uses; layer uvs tile, so they wrap.
+     * - tkTerrainControl: Unity's control maps as a Texture2DArray, slice k = _Control&lt;k&gt; (RGBA = layers 4k..4k+3), repacked from the
+     *   exported RGB images (3 layers each) and stored the way every Unity texture is read (Unity uv v = 0 at the image bottom).
+     * - tkTerrainHoles: Unity's _TerrainHolesTexture (white = solid), white without holes.
+     * - tkTerrainLayerData: TerrainSplatMaterial.PackLayerData (6 RGBA32F texels per layer: st, diffuse remap, mask remap scale /
+     *   offset, (metallic, smoothness, normal scale, smoothness source), (has mask)).
+     * - tkTerrainSize (size.x, size.y, size.z, heightmap resolution), tkTerrainLayerCount (layers, basemap distance, 0, 0).
+     *
+     * TerrainBuilder keeps the data, LOD, holes-for-physics and physics; the surface meshes carry glTF-convention uvs for a graph
+     * (TerrainSurface.graphUvs) - the transpiler's UV nodes read (u, 1 - v) back as Unity's terrain uv.
+     */
+    class TerrainGraphAdapter {
+        static readonly MAX_LAYERS: number;
+        /**
+         * Unity's control maps from the exported RGB images (layer i in image i / 3, channel i % 3; image row r = terrain z r): one
+         * RGBA slice per 4 layers (layer i in slice i / 4, channel i % 4), rows flipped so slice row 0 is terrain z = h - 1.
+         */
+        static PackControl(images: {
+            width: number;
+            height: number;
+            data: Uint8ClampedArray | Uint8Array;
+        }[], layers: number): {
+            data: Uint8Array;
+            width: number;
+            height: number;
+            depth: number;
+        };
+        /** Unity's holes texture from the heightfield's (R-1)^2 holes (1 solid): RGBA, 255 solid, rows flipped like the control maps. */
+        static PackHoles(holes: Uint8Array, n: number): Uint8Array;
+        /**
+         * TerrainBuilder step 4: the terrain's materialTemplate class bound to its data, or null - no template, a class that does not
+         * instantiate (ShaderGraphRuntime reports it once) or a failed bind (warned, the half-built material disposed). A null
+         * result draws the splat material from `flavour`.
+         */
+        static CreateMaterial(scene: BABYLON.Scene, props: TOOLKIT.ITerrainContract, hf: TOOLKIT.TerrainHeightfield, name: string): Promise<BABYLON.Material>;
+        /**
+         * The layer images of each array: the layer's own asset textures a graph template exports (`graph`: a packed "NOH" normal slot
+         * keeps its occlusion / height channels, the diffuse its alpha), else the splat material's images (normal placeholder slice
+         * for a layer without a mask - hasmask 0 reads black).
+         */
+        static LayerUrls(layers: TOOLKIT.ITerrainLayerData[]): {
+            albedo: string[];
+            normal: string[];
+            mask: string[];
+            anyMask: boolean;
+        };
+        /** Binds the terrain's layers, control maps, holes and parameters on a generated Terrain Lit class. Throws when a layer array fails. */
+        static Attach(material: BABYLON.Material, props: TOOLKIT.ITerrainContract, hf: TOOLKIT.TerrainHeightfield): Promise<BABYLON.BaseTexture[]>;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity terrain texture grass (unity-terrain-system-parity T13, D25, D26, D27, D46, Design Reference §10): Unity's
+     * "Hidden/TerrainEngine/Details/UniversalPipeline/WavingDoublePass" (Grass render mode) as a Standard material with the
+     * TerrainGrassPlugin. One material per (grass layer, terrain), drawn by the layer's CPU-compacted thin-instance host.
+     *
+     * Ported from the user's GrassStandardMaterial (git 407c403^:APP/src/core/TerrainMaterialGrass.ts), reviewed line by
+     * line against URP WavingGrassInput.hlsl / WavingGrassPasses.hlsl and Built-in TerrainEngine.cginc. Changes against the
+     * old code (each is a divergence from Unity that the old code had):
+     *  - waves: Unity's own constants restored. The old code divided the wave sizes by 10 (0.0012..), the wave speeds by 40
+     *    ((0.03, 0.05, 0.04, 0.12) against Unity's (1.2, 2, 1.6, 4.8)) and multiplied the moves by 5 ((0.12, 0.2, -0.6, 0.48)).
+     *  - wave phase: per vertex (Unity feeds v.vertex), not the blade centre, in Unity terrain-local metres (the patch mesh
+     *    object space), not Babylon world space (which also mirrored the band direction through the glTF root).
+     *  - wave amount: Grass = uv2.y * _WaveAndDistance.z (Unity v.color.a, 1 on top vertices), GrassBillboard = the extruded
+     *    height in metres (Unity v.tangent.y). The old code used positionUpdated.y * amount * amount for both.
+     *  - _WaveAndDistance: MEASURED in Unity 6000.5 / URP (T13, a replacement shader reading the terrain's own values,
+     *    three settings made distinct): x = Time.deltaTime * wavingGrassStrength * 0.05 (the per-frame increment, never an
+     *    accumulated time - Unity's texture grass barely moves), y = wavingGrassSpeed * 0.4, z = wavingGrassAmount * 6,
+     *    w = detail distance². _CameraPosition and the patch vertices are terrain-local; _WavingTint is linear (sRGB decoded);
+     *    the vertex colour is the gamma healthy/dry mix used as-is, alpha 1 on top, rgb * 160/255 on the bottom vertices.
+     *    The old code used time * speed with its reduced constants and accumulated time only while speed > 0.
+     *  - waving tint: Unity's colour animation (2 * lerp(0.5, _WavingTint, lighting) * colour) is applied. The old code
+     *    computed lighting and discarded it (waveColor was commented out).
+     *  - fade: Unity's saturate(2 * (dist² - |offset|²) / dist²) per vertex (whole blades vanish at 0.87 x distance), not a
+     *    linear fade from the blade centre; alpha clip at _Cutoff 0.5 (the old default was 0.3, and `<=`).
+     *  - size: the instance matrix carries (w, h, w) once. The old code rebuilt the vertex from the matrix column lengths and
+     *    multiplied them in again (grass size applied twice), and wrote gl_Position / vPositionW itself.
+     *  - billboard: Unity TerrainBillboardGrass (offset.x * _CameraRight, + offset.y world up for URP, _CameraUp for Built-in,
+     *    offset zeroed beyond the detail distance). The old billboard built its own camera-facing basis around the blade.
+     *  - lighting: URP SimpleLit with zero specular (UUM-113119): albedo * (bakedGI + direct light), bakedGI = the scene
+     *    ambient SH at the normal, direct light = Babylon's diffuseBase / PI (the exporter scales light intensity by PI for
+     *    Babylon PBR's Lambert 1/PI, so this is Unity's lightColor * NdotL * shadow). The old code added emissive 0.7 and a "shadow intensity" lift (self-lighting, removed).
+     *  - registration: TerrainMaterialGrassBillboard.ts registered GrassStandardMaterial a second time and never registered
+     *    GrassBillboardMaterial; both are registered under their own names here. The double terrain transform (finalWorld
+     *    already holds the terrain world matrix and the old code applied the instance basis again) is gone.
+     */
+    class GrassStandardMaterial extends TOOLKIT.StandardShaderMaterial {
+        /** The terrain node the grass is parented to (terrain-local camera values). */
+        terrain: BABYLON.TransformNode;
+        /** Unity terrain wind (details.wind, the TerrainData values): speed, strength, amount, detail distance (D26). */
+        wave: number[];
+        /** Maps Babylon terrain-local x to Unity terrain-local x: -1 for handedness 0 (local x = -Unity x, D4), else 1. */
+        localSignX: number;
+        /**
+         * Built-in terrains (measured in Unity 6000.5 Play Mode, 2026-09-25): Unity's Built-in detail renderer ACCUMULATES
+         * _WaveAndDistance.x (+= deltaTime * wavingGrassStrength * 0.05 per frame, so the painted grass keeps waving), while URP
+         * feeds only the per-frame increment (nearly static grass). y, z and w are the same on both. Set by TerrainDetails from
+         * TerrainBuilder.IsBuiltInTerrain; false keeps the URP behaviour.
+         */
+        accumulateWaveTime: boolean;
+        private _waveTime;
+        private _lastUpdateFrame;
+        private _lastCamera;
+        private _lastViewFlag;
+        private _lastWorldFlag;
+        private _invWorld;
+        private _tmp;
+        private _ambient;
+        private _identity;
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+        /** Unity _WavingTint: the authored (gamma) wavingGrassTint, decoded to linear as Unity feeds it (measured). */
+        setWavingTint(tint: number[]): void;
+        /**
+         * Per-frame values (§10, §13 per-frame guard): _WaveAndDistance = (t * speed, strength, amount, distance²) with t the
+         * shared terrain wind clock (TerrainFoliagePlugin.GetWindState, accumulated once per frame, dt clamped to 1/30, so the
+         * texture grass and the mesh grass wave together as in Unity), _CameraPosition (Unity terrain-local, w 1 / distance²),
+         * _CameraRight / _CameraUp (rows 0 and 1 of the view matrix, transposed, taken into terrain-local), and URP's bakedGI
+         * for the up normal from the scene ambient SH.
+         */
+        update(): void;
+        /**
+         * URP bakedGI for the grass normal (0, 1, 0): the scene's ambient spherical polynomial at +Y (y + yy), times the
+         * scene environment intensity, the same irradiance Babylon's PBR ground reads for that normal. Linear RGB. Written into
+         * out when given (the per-frame caller passes its own array, T13.1: no per-frame allocation), else a new array.
+         */
+        static AmbientUp(scene: BABYLON.Scene, out?: number[]): number[];
+    }
+    /** Unity "BillboardWavingDoublePass" (GrassBillboard render mode): the grass material with the TerrainBillboardGrass extrusion. */
+    class GrassBillboardMaterial extends TOOLKIT.GrassStandardMaterial {
+        constructor(name: string, scene: BABYLON.Scene);
+    }
+    /** Constants of the texture grass: Unity's _WaveAndDistance mapping, measured in Unity 6000.5 URP (T13, D26 amended). */
+    class TerrainGrass {
+        /** Scales the measured time term (1 = Unity). Changing it requires an amendment to D26. */
+        static readonly WAVE_TIME_SCALE: number;
+        /** _WaveAndDistance.x = Time.deltaTime * wavingGrassStrength * 0.05 (a per-frame value, measured). */
+        static readonly WAVE_TIME_FACTOR: number;
+        /** _WaveAndDistance.y = wavingGrassSpeed * 0.4 (measured). */
+        static readonly WAVE_SIZE_SCALE: number;
+        /** _WaveAndDistance.z = wavingGrassAmount * 6 (measured). */
+        static readonly WAVE_BEND_SCALE: number;
+        /** Unity's bottom-vertex colour factor, 160/255 (measured, the top vertices carry the full healthy/dry colour). */
+        static readonly BOTTOM_SHADE: number;
+        /** _WaveAndDistance.x for a frame of dt seconds. */
+        static WaveTime(dt: number, strength: number): number;
+    }
+    /**
+     * The grass shader (§10) on a Standard material, priority 110. Vertex at CUSTOM_VERTEX_UPDATE_WORLDPOS (before the
+     * shadow coordinates, vPositionW and gl_Position read worldPos): billboard extrusion, TerrainWaveGrass in Unity
+     * terrain-local space, back to world. Fragment: the wave colour and the fade clip at CUSTOM_FRAGMENT_UPDATE_DIFFUSE, the
+     * URP SimpleLit composition at CUSTOM_FRAGMENT_BEFORE_FOG, in linear space (the sRGB texture decoded, Unity's vertex
+     * colour and wave colour applied as-is, as URP does). The per-instance healthy/dry colour is the "tkGrassTint" thin-instance
+     * buffer, the wave colour input of TerrainWaveGrass.
+     */
+    class TerrainGrassPlugin extends TOOLKIT.StandardShaderMaterialPlugin {
+        constructor(material: TOOLKIT.GrassStandardMaterial);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getClassName(): string;
+        /** The per-instance healthy/dry colour: a "tkGrassTint" thin-instance buffer (vec4), kept out of Babylon's "color" path, which multiplies the gamma texture. */
+        static HasTint(mesh: BABYLON.AbstractMesh): boolean;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        getSamplers(samplers: string[]): void;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** §10 code for both languages (the WGSL is a line-for-line port). Behind TKGRASS / TKGRASS_BILLBOARD. */
+        static BuildCode(wgsl: boolean): {
+            [hook: string]: string;
+        };
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Terrain heights, sampling, holes, error pyramid and physics collider data (unity-terrain-system-parity Design Reference §4.4).
+     * Heights are u16 row-major with z outer: index = z * R + x (D3). All queries take Unity-space normalised (u, v), where
+     * u runs along Unity +x and v along +z. Local x is mirrored when handedness is 0 (D4).
+     * The constructor and every non-texture, non-collider method are engine-free, so they are unit-tested in node.
+     */
+    class TerrainHeightfield {
+        readonly R: number;
+        readonly size: number[];
+        readonly handedness: number;
+        readonly heights: Uint16Array;
+        readonly minHeight: number;
+        readonly maxHeight: number;
+        /** (R-1)*(R-1), 1 = solid, 0 = hole, null when no holes */
+        holes: Uint8Array;
+        /** Error pyramid (D11), filled by buildErrorPyramid. */
+        levels: number;
+        leafCells: number;
+        private _errors;
+        private _minH;
+        private _maxH;
+        constructor(contract: TOOLKIT.ITerrainContract, heights: Uint16Array);
+        get cellSizeX(): number;
+        get cellSizeZ(): number;
+        /** Local height (metres above the terrain origin) at normalised (u, v), bilinear. */
+        heightAt(u: number, v: number): number;
+        /** Local height of the exact sample (x, z). */
+        sampleHeight(x: number, z: number): number;
+        /** Terrain-local normal (handedness applied to x). */
+        normalAt(u: number, v: number, out: number[]): void;
+        /** Fills the holes grid from TerrainImages pixels (R channel, > 127 = solid). Image row 0 = terrain z 0. */
+        setHoles(pixels: Uint8ClampedArray, width: number): void;
+        private cellX;
+        private cellZ;
+        isHole(u: number, v: number): boolean;
+        /** True when a hole cell lies within paddingMetres of (u, v) (distance to the hole cell's rectangle). */
+        isNearHole(u: number, v: number, paddingMetres: number): boolean;
+        /** RGBA8 per-sample normal texture, (n * 0.5 + 0.5) * 255 of the terrain-local normal, BILINEAR, CLAMP, invertY false (D12). */
+        createNormalTexture(scene: BABYLON.Scene): BABYLON.RawTexture;
+        /** RGBA8 (R-1)^2 holes texture (255 solid, 0 hole), NEAREST, CLAMP. Null when there are no holes (D13). */
+        createHolesTexture(scene: BABYLON.Scene): BABYLON.RawTexture;
+        /** Nodes per side at a pyramid level (node = leafCells * 2^level cells). */
+        nodesPerSide(level: number): number;
+        /**
+         * D11 geometric errors, bottom-up and exact: for every node, the max over its full-resolution samples of
+         * |h(sample) - bilinear(node grid at step 2^level)|, maxed with its children. Also keeps per-node min/max heights.
+         * Level 0 is the leaf (step 1, error 0). Nodes past R-1 are clamped to the edge.
+         */
+        buildErrorPyramid(leafCells?: number): void;
+        /** Geometric error (metres) of a pyramid node, 0 before buildErrorPyramid. */
+        nodeError(level: number, nx: number, nz: number): number;
+        /** [min, max] local height of a pyramid node. */
+        nodeHeightRange(level: number, nx: number, nz: number): number[];
+        /** D33 collider sample slot of local sample (i along +X, k along +Z): order C, data[(R-1-k)*R + i]. */
+        static ColliderIndex(R: number, i: number, k: number): number;
+        /**
+         * Static Havok heightfield on "<name>.Collider" (D29), null when physics v2 is absent.
+         * Hole cells drop their corner samples to minHeight - 1000 (D13).
+         */
+        createCollider(scene: BABYLON.Scene, parent: BABYLON.TransformNode, collider: any, layerMask: number): BABYLON.PhysicsBody;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Pure terrain maths (unity-terrain-system-parity Design Reference §4.2). Number arrays and typed arrays only:
+     * this file must never reference the engine namespace, so it is unit-tested in node (APP/tests/terrain).
+     * Heights are u16 row-major with z outer: index = z * R + x (D3). Terrain-local metres, x in [0,size.x],
+     * z in [0,size.z]; handedness 0 negates local x and yaw (D4).
+     */
+    class TerrainMath {
+        /** value / 65535 * sizeY */
+        static DecodeHeight(value: number, sizeY: number): number;
+        /** Bilinear local height at normalised (u, v), both clamped to 0..1. */
+        static SampleHeightBilinear(h: Uint16Array, R: number, sizeY: number, u: number, v: number): number;
+        /** Central difference at the nearest sample (one-sided on border samples), normalised [x, y, z] into out. */
+        static SampleNormal(h: Uint16Array, R: number, size: number[], u: number, v: number, out: number[]): void;
+        /** handedness 0 → -x */
+        static UnityToLocalX(x: number, handedness: number): number;
+        /** handedness 0 → -yaw */
+        static UnityYawToLocal(yaw: number, handedness: number): number;
+        /** [image, channel] = [floor(layer/3), layer % 3] (D6). */
+        static ControlSlot(layer: number): number[];
+        /** Texel-centre control uv: [(u*(res-1)+0.5)/res, (v*(res-1)+0.5)/res]. */
+        static ControlSampleUV(u: number, v: number, res: number): number[];
+        /** Layer tiling [sx, sy, ox, oy]; a tile size <= 0 gives 0 scale and 0 offset on that axis. */
+        static SplatST(sizeX: number, sizeZ: number, tileX: number, tileY: number, offX: number, offY: number): number[];
+        /**
+         * CPU reference of the §7 URP splat weights. heights = RAW remapped mask .b per layer (multiplied by control here),
+         * null when there is no height blend. diffuseAlpha / densityOff default to 1 per layer when missing.
+         * Returns the normalised weights w / (sum + 6.103515625e-5).
+         */
+        static BlendWeightsURP(control: number[], heights: number[], transition: number, heightBlend: boolean, diffuseAlpha: number[], densityOff: number[]): number[];
+        /**
+         * CPU reference of the §7 HDRP splat weights (TerrainLit_Splatmap.hlsl TerrainSplatBlend). heights = the layer's final
+         * remapped mask .z (HDRP weights the raw height by the control value before the remap). Without any mask HDRP runs
+         * neither blend nor normalisation, so the control weights come back unchanged. With a mask: height blend when
+         * heightBlend, otherwise opacity-as-density, then w / sum. Both only up to 8 layers (one HDRP pass).
+         */
+        static BlendWeightsHDRP(control: number[], heights: number[], transition: number, heightBlend: boolean, anyMask: boolean, diffuseAlpha: number[], densityOff: number[]): number[];
+        /** CPU reference of the §7 Built-in splat weights (TerrainSplatmapCommon.cginc SplatmapMix): w / (sum + 1e-3). */
+        static BlendWeightsBuiltin(control: number[]): number[];
+        /** D14 lightmap uv2 from terrain uv pairs: (u*so.x + so.z, 1 - (v*so.y + so.w)). */
+        static LightmapUV2(uvs: Float32Array, so: number[]): Float32Array;
+        /** geomError * viewportHeight / (2 * max(distance,1e-3) * tan(fov/2)) */
+        static PixelError(geomError: number, distance: number, viewportHeight: number, fovRadians: number): number;
+        /** Standard Mulberry32 generator, values in [0, 1). */
+        static Mulberry32(seed: number): () => number;
+        /** 32-bit mix of four integers (§8). */
+        static HashSeed(a: number, b: number, c: number, d: number): number;
+        static Lerp(a: number, b: number, t: number): number;
+        static Clamp01(x: number): number;
+        /** (v / 255) * density * cellArea / max(0.01, avgW * avgW) * densityScale (§8 coverage mode). */
+        static CoverageCount(value: number, density: number, cellArea: number, avgWidth: number, densityScale: number): number;
+        /** value * densityScale (§8 instance-count mode). */
+        static InstanceCountCount(value: number, densityScale: number): number;
+        /**
+         * Spreads round(total) instances over the cells in proportion to their values, by largest remainder
+         * (ties go to the lower index). All-zero values or a total <= 0 give all zeros.
+         */
+        static DistributePatchCount(total: number, values: number[]): number[];
+        /**
+         * 2n numbers in [0,1): slot j of a k = ceil(sqrt(n)) sub-grid, jittered by (rng() - 0.5) * jitter / k per axis
+         * (sx then sz). rng is always consumed twice per slot so the stream does not depend on the jitter value.
+         */
+        static CellSlots(n: number, jitter: number, rng: () => number): number[];
+        /** Clamp01(0.5 + 0.5 * noise(x * spread, z * spread)) */
+        static NoiseFactor(noise: (x: number, y: number) => number, x: number, z: number, spread: number): number;
+        /** size * 0.5 / (max(d, 1e-3) * tan(fov / 2)) */
+        static LodRelativeHeight(size: number, distance: number, fovRadians: number): number;
+        /** First i with relHeight * bias >= lodHeights[i], else -1 (culled). */
+        static SelectLod(relHeight: number, lodHeights: number[], bias: number): number;
+        /** Clamp01(2 * (maxDistSq - distSq) / maxDistSq); a non-positive max distance fades everything out. */
+        static GrassFade(distSq: number, maxDistSq: number): number;
+        /**
+         * Texture grass count of one cell (§8, D22): "instancecount" → value * densityScale (density and target coverage
+         * are ignored, as in Unity's Instance Count mode), otherwise CoverageCount. Fractional; the caller rounds by rng.
+         */
+        static GrassCellCount(scatterMode: string, value: number, density: number, cellArea: number, avgWidth: number, densityScale: number): number;
+        /**
+         * 2n terrain-local [x, z] pairs (Unity axes, before handedness) of n grass instances in cell (cx, cz) of size cw x cd:
+         * CellSlots(n, jitter, Mulberry32(seed)) placed at ((cx + sx) * cw, (cz + sz) * cd) (§8, D23). Deterministic per seed.
+         */
+        static ScatterCell(n: number, cx: number, cz: number, seed: number, jitter: number, cw: number, cd: number): number[];
+        /**
+         * The grass instance matrix T(x, y, z) . R_y(yaw) . S(w, h, w) (§8) into out at offset (16 numbers, Babylon row-vector
+         * layout, RotationY: x' = x cos + z sin). Width and height are applied here once and never again in the shader.
+         */
+        static GrassMatrix(x: number, y: number, z: number, yaw: number, w: number, h: number, out: Float32Array | number[], o: number): void;
+        /** Unity FastSinCos (URP WavingGrassInput.hlsl:38-60, Built-in TerrainEngine.cginc:54-76): 4 Taylor sines of val in 0..1. */
+        static FastSin4(val: number[]): number[];
+        /**
+         * CPU port of Unity TerrainWaveGrass (URP WavingGrassInput.hlsl:62-105; Built-in TerrainEngine.cginc:78-123 has the
+         * same numbers written as (0.3, .5, .4, 1.2) * 4 and (0.012, 0.02, -0.06, 0.048) * 2). vertex [x, y, z] in the space
+         * Unity feeds it (terrain-local), waveAndDistance = _WaveAndDistance (x time * speed, y wave size, z bending, w
+         * distance²), cameraPosition = _CameraPosition (xyz camera in the same space, w 1 / distance²). Returns the displaced
+         * vertex and the colour (2 * waveColor * color.rgb, fade). The reference for the shader code (grass.test.js).
+         */
+        static WaveGrass(vertex: number[], waveAmount: number, color: number[], waveAndDistance: number[], wavingTint: number[], cameraPosition: number[]): {
+            vertex: number[];
+            color: number[];
+        };
+        /**
+         * Copy of lods where only the maxFull nearest LOD0 entries keep LOD0 and every other LOD0 becomes 1 (Unity
+         * treeMaximumFullLODCount, D17). Ties go to the lower index. Entries that are not 0 are copied unchanged.
+         */
+        static SelectLodWithFullCount(lods: number[], distances: number[], maxFull: number): number[];
+        /** Crossfade values at progress t: [outgoing +(1 - t), incoming -(1 - t)] (D17). */
+        static CrossfadePair(t: number): number[];
+        /**
+         * Detail streaming chunks (D24): [patchWorldSize = perpatch * sizeX / resolution, k = max(1, round(32 / patchWorldSize))
+         * patches per chunk side, chunksPerAxis = ceil(patchCount / k)].
+         */
+        static DetailChunking(resolution: number, perpatch: number, patchCount: number, sizeX: number): number[];
+        /** Quaternion [x, y, z, w] rotating the unit vector up onto normalize(lerp(up, n, amount)) (FromUnitVectors). */
+        static AlignToGround(up: number[], n: number[], amount: number): number[];
+        /** D42: instance j of layer i survives when HashSeed(i, j, 7, 0) / 2^32 < ratio (ratio >= 1 keeps all, <= 0 none). */
+        static KeepByDensity(layer: number, j: number, ratio: number): boolean;
+        /** Exact sRGB-to-linear conversion of one gamma channel (D27 mesh-detail tints). */
+        static GammaToLinear(c: number): number;
+        /**
+         * The four side planes (left, right, bottom, top) of a 4x4 transform m (Babylon row-vector layout, 16 numbers) as
+         * normalised [a, b, c, d] quadruples in out (16 numbers): a point p is inside a plane when a*x + b*y + c*z + d >= 0.
+         * Near and far are left out on purpose, so the volume extends toward the light (and behind the far plane) and a
+         * reverse or half-range depth mapping does not matter.
+         */
+        static SidePlanes(m: ArrayLike<number>, out: Float32Array | number[]): void;
+        /** True when the box [min, max] lies fully on the outside of any of the count planes (margin in plane units, >= 0 widens). */
+        static AabbOutsidePlanes(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, planes: ArrayLike<number>, count: number, margin: number): boolean;
+        /** True when the box [min, max] and the sphere (cx, cy, cz, r) overlap. */
+        static AabbSphereOverlap(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, cx: number, cy: number, cz: number, r: number): boolean;
+        /**
+         * Radius of the sphere around the camera that holds the view frustum up to depth `distance` (the corner of the far
+         * rectangle): distance * sqrt(1 + tan(fovY/2)^2 * (1 + aspect^2)).
+         */
+        static ShadowReach(distance: number, fovY: number, aspect: number): number;
+        /**
+         * True when a caster sphere (px, py, pz, radius) can throw a shadow into the reach sphere (camera c, reach): the
+         * point lies in the cylinder of radius reach + radius around the ray from the camera toward the light, capped
+         * reach + radius downstream (ldx, ldy, ldz = unit direction the light travels). Without a light direction
+         * (all zero) the test is the plain sphere.
+         */
+        static InShadowReach(px: number, py: number, pz: number, radius: number, cx: number, cy: number, cz: number, reach: number, ldx: number, ldy: number, ldz: number): boolean;
+        /** Cell index of coordinate v on an axis starting at origin with cells of size cell, clamped to [0, count - 1]. */
+        static GridCell(v: number, origin: number, cell: number, count: number): number;
+        /**
+         * Counting-sort grid over n xz points (xz[stride * i], xz[stride * i + 2]); points with skip[i] < 0 are left out.
+         * A point on a cell border belongs to the cell above it (floor), the far border to the last cell. Returns
+         * [originX, originZ, cell, nx, nz] in out, the cell start offsets (nx * nz + 1) and the point indices sorted by cell.
+         */
+        static BuildGrid(xz: ArrayLike<number>, stride: number, n: number, cell: number, skip: ArrayLike<number>, out: number[]): {
+            start: Uint32Array;
+            items: Uint32Array;
+        };
+        /**
+         * Tree record i of the D16 f32 x 15 block → out = [x, y, z, yaw, widthScale, heightScale, prototypeIndex]
+         * in terrain-local metres with the D4 handedness applied.
+         */
+        static TreeLocal(rec: Float32Array, i: number, size: number[], handedness: number, out: number[]): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity terrain splat material (unity-terrain-system-parity D9, D10, D12, D13, D14, D27, Design Reference §6, §7).
+     * One PBR pass blends up to 16 terrain layers from four Texture2DArrays (albedo, normal, mask, control) plus a float
+     * layer-data texture, per pixel normals from the heightfield normal texture, holes and an optional lightmap.
+     * The blend is a verbatim port of the Unity flavour the exporter names (urp, hdrp, builtin-standard/diffuse/specular).
+     */
+    class TerrainSplatMaterial extends TOOLKIT.CustomShaderMaterial {
+        /** §7 flavour index (TK_TERRAIN_FLAVOUR). */
+        static readonly FLAVOURS: {
+            [name: string]: number;
+        };
+        static readonly MAX_LAYERS: number;
+        /** Fields read by TerrainSplatPlugin.prepareDefines / getCustomCode (set by setup). */
+        layerCount: number;
+        controls: number;
+        flavour: string;
+        heightBlend: boolean;
+        anyMask: boolean;
+        holes: boolean;
+        private _terrainNode;
+        private _lastUpdateFrame;
+        /** Textures this material created and owns (the arrays are shared through the SkinTextureArray cache). */
+        private _ownedTextures;
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+        static FlavourIndex(flavour: string): number;
+        /** CVTOOLS_unity_metadata.IBL_TINY_VALUE: the diffuse IBL scale of a lightmapped toolkit material. */
+        static readonly LIGHTMAPPED_DIFFUSE_IBL: number;
+        /**
+         * X10 fix loop 2: a lightmapped terrain takes its indirect diffuse from the lightmap ONLY, as Unity does (URP / Built-in
+         * never add the ambient probe to a lightmapped pixel) and as the loader already does for every lightmapped glTF material
+         * (CanvasTools: splitLighting(IBL_TINY_VALUE, specular)). The terrain materials are built at runtime, past that loader
+         * path, so they added the environment SH on top of the baked indirect (TerrainDemoScene ground 98 vs Unity 73). The
+         * specular IBL scale is kept.
+         */
+        static LightmappedIndirect(material: any): void;
+        /** §6 layer data, 6 RGBA texels per layer (row = layer): length 24 * layers.length. */
+        /**
+         * X10: the options of the terrain layer arrays - the largest layer image is the slice size (smaller layers scale up, never
+         * down: layers export at their Unity-imported size) and the anisotropic level is the largest the layers' Unity textures
+         * sample with (`aniso`, e.g. 9 under ForceEnable); an export without it keeps the previous 8.
+         */
+        static LayerArrayOptions(layers: TOOLKIT.ITerrainLayerData[]): any;
+        static PackLayerData(layers: TOOLKIT.ITerrainLayerData[]): Float32Array;
+        /**
+         * Builds the arrays and data textures, sets the plugin fields, then marks every define dirty. Throws on any failed
+         * array ("texture array failed: <kind>"), so the builder can fall back to its grey stand-in.
+         */
+        setup(contract: TOOLKIT.ITerrainContract, hf: TOOLKIT.TerrainHeightfield, terrainNode: BABYLON.TransformNode): Promise<void>;
+        /** Called by updateCustomBindings before every bind: refresh the terrain world matrix once per frame. */
+        update(): void;
+        /** Disposes the textures this material created. The arrays stay in the SkinTextureArray cache (shared by terrains). */
+        dispose(forceDisposeEffect?: boolean, forceDisposeTextures?: boolean): void;
+    }
+    /**
+     * Splat plugin (§7). Only isCompatible, getSamplers, prepareDefines and getCustomCode: the material's uniforms ride on
+     * the UnityStyleLightingPlugin UBO chain and are uploaded by its bindForSubMesh (updateCustomBindings).
+     * getSamplers is implemented here because SkinArraySwitchingPlugin registers custom samplers only for skin arrays.
+     */
+    class TerrainSplatPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(material: TOOLKIT.TerrainSplatMaterial, shaderName: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getSamplers(samplers: string[]): void;
+        /**
+         * GLSL vertex declaration of tkTerrainSizeInv. The toolkit runs WebGL2 with uniform buffers disabled, so plugin uniforms
+         * reach a stage only through getUniforms().vertex / .fragment, and UnityStyleLightingPlugin supplies only the fragment
+         * block (measured: "'tkTerrainSizeInv' : undeclared identifier" in the vertex shader). The value is already on the
+         * material uniform list, so only the declaration is added. WGSL reads it from the shared uniforms struct.
+         */
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        private static readonly UNIFORMS;
+        /** GLSL line → WGSL line: declarations, constructors, uniforms and varyings. */
+        private static ToWGSL;
+        static BuildCode(flavour: string, layers: number, wgsl: boolean, flags: {
+            heightBlend: boolean;
+            anyMask: boolean;
+            holes: boolean;
+        }): {
+            [hook: string]: string;
+        };
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Terrain surface (unity-terrain-system-parity D11, Design Reference §4.4). Heightfield mode is a CPU chunked-LOD quadtree:
+     * every node is a 33x33 vertex grid at step 2^level cells with a skirt ring (1 m + 2 x node error deep) that closes cracks
+     * at LOD changes and tile borders, so there is no neighbour stitching. Node meshes are built lazily (16 per frame) and kept,
+     * with frozen world matrices (refrozen only when the terrain's world matrix values change) and no picking (D45: height
+     * queries and physics use the heightfield).
+     * Mesh mode adopts the exporter's legacy mesh segments (tagged TerrainMesh) and skips the quadtree.
+     */
+    class TerrainSurface {
+        static readonly GRID: number;
+        static readonly MAX_BUILDS_PER_FRAME: number;
+        /** Babylon's front-face rule (left-handed, clockwise): cross(b - a, c - a) points away from the front normal. */
+        private static readonly FRONT_SIGN;
+        private _owner;
+        private _hf;
+        private _material;
+        private _root;
+        private _meshes;
+        private _adopted;
+        private _selected;
+        private _nextSelected;
+        private _pixelError;
+        private _dirty;
+        private _pending;
+        private _builds;
+        private _lastPosition;
+        private _lastForward;
+        private _lastViewport;
+        private _lastFov;
+        private _camLocal;
+        private _forward;
+        private _viewport;
+        private _camera;
+        private _worldFlag;
+        private _lastWorld;
+        /**
+         * shadergraph-transpiler-complete-coverage T26 (D39): the surface draws a generated Shader Graph class, whose UV nodes read a
+         * glTF-convention uv (Unity's (u, v) stored as (u, 1 - v), flipped back by the class): node meshes are built that way.
+         * The lightmap uv2 is computed from Unity's uv either way.
+         */
+        graphUvs: boolean;
+        /** Times every node was refrozen after a terrain move (diagnostics, D45). */
+        refreezes: number;
+        constructor(owner: TOOLKIT.TerrainBuilder, hf: TOOLKIT.TerrainHeightfield, material: BABYLON.Material);
+        get root(): BABYLON.TransformNode;
+        get pixelError(): number;
+        set pixelError(v: number);
+        /** Every surface mesh built so far (node meshes or adopted legacy meshes). */
+        getMeshes(): BABYLON.AbstractMesh[];
+        build(): void;
+        update(camera: BABYLON.Camera): void;
+        /**
+         * D45: the terrain node's updateFlag advances on every recompute (measured: every frame in the URP sample), so the
+         * values are compared and the frozen nodes refrozen only when the terrain really moved.
+         */
+        private checkWorld;
+        dispose(): void;
+        private nodeExists;
+        private selectNode;
+        private shouldRefine;
+        private static Key;
+        /** The node mesh, built on demand when create is true (33x33 grid + skirt ring). */
+        private getNodeMesh;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Terrain trees (unity-terrain-system-parity D15-D18, D29, D41, Design Reference §4.4, §14). Every prototype LOD renderer
+     * becomes one thin-instance host parented to the terrain node. Each update selects a Unity LODGroup level per instance
+     * (relative height, maxfulllod, 0.5 s dithered crossfade), culls by distance and frustum, and rewrites the host buffers.
+     * Instances outside the frustum but inside the terrain's shadow reach still go to the casting hosts, so trees behind
+     * the camera cast into view (D44). Instances are visited through a 64 m grid (D45). Tree colliders are one static
+     * PhysicsShapeContainer per terrain.
+     */
+    class TerrainTrees {
+        static readonly FADE_SECONDS: number;
+        /** D45 spatial grid cell size (metres). */
+        static readonly GRID_CELL: number;
+        /** Per-scene clones of prototype materials, keyed "<templateid>|<material uniqueId>" (D41), with a reference count. */
+        private static _materials;
+        private _owner;
+        private _hf;
+        private _scene;
+        private _protos;
+        private _hosts;
+        private _materialKeys;
+        private _root;
+        private _colliderBody;
+        private _colliderShapes;
+        private _distance;
+        private _built;
+        private _n;
+        private _proto;
+        private _local;
+        private _scale;
+        private _matrix;
+        private _refWorld;
+        private _centreWorld;
+        private _radius;
+        private _lodSize;
+        private _cur;
+        private _prev;
+        private _fadeStart;
+        private _visible;
+        private _dist;
+        private _top;
+        private _probeSh;
+        private _probeHosts;
+        private _probesSampled;
+        private _worldFlag;
+        private _lastWorld;
+        private _want;
+        private _state;
+        private _work;
+        private _fullIdx;
+        private _fullDist;
+        private _planes;
+        private _grid;
+        private _gridStart;
+        private _gridItems;
+        private _cellMinY;
+        private _cellMaxY;
+        private _cellTouched;
+        private _maxRadius;
+        /** Instances visited by the last update (diagnostics, D45). */
+        lastVisited: number;
+        private _lastPos;
+        private _lastDir;
+        private _dir;
+        private _frame;
+        private _fading;
+        private _dirty;
+        private _tmpV;
+        private _viewProj;
+        constructor(owner: TOOLKIT.TerrainBuilder, hf: TOOLKIT.TerrainHeightfield);
+        set distance(v: number);
+        get distance(): number;
+        /** Every host mesh. */
+        getMeshes(): BABYLON.AbstractMesh[];
+        /** The hosts that cast shadows (D44): castshadows LOD renderers, never billboards. */
+        getCasterMeshes(): BABYLON.AbstractMesh[];
+        /** Host count and instances drawn per host (diagnostics). */
+        getStats(): {
+            hosts: number;
+            instances: number;
+            drawn: number;
+            visibleHosts: number;
+            colliders: boolean;
+        };
+        build(): void;
+        /** Hosts per LOD renderer (§4.4 step 1). Returns null when no LOD produced a host. */
+        private buildPrototype;
+        /** X10 fix loop 2: a LOD's exported per-renderer light-probe flags (bool[] parallel to renderers); absent = probe-lit (Unity's default). */
+        static RendererUsesProbes(flags: any, index: number): boolean;
+        /**
+         * X10 fix loop 2: gives a host the per-instance probe SH - one instanced buffer, three vec4 views (tkProbe0..2, see
+         * TerrainProbePlugin) over `probes` (every record starts at "no probe") - and the probe plugin on its material(s).
+         */
+        static AttachProbeBuffer(host: BABYLON.Mesh, probes: Float32Array): BABYLON.Buffer;
+        /**
+         * X10 fix loop 2: samples the scene's light-probe network once per instance (spatially ordered by the D45 grid so each
+         * tetrahedral walk starts in the previous instance's cell), at the instance's world position (ProbeSampleHeight 0).
+         * Measured on TerrainDemoScene against Unity: the tree position matches Unity's terrain-tree lighting (big rock 85/77/54
+         * vs Unity 86/81/53) where the bounds centre does not (97/91/67). True once sampled.
+         */
+        private sampleProbes;
+        /**
+         * X11: runs on tree updates until settled. The scene's network is created with the scene's components, before the terrain's
+         * first update: none (or a disabled one) = the trees are never probe-lit - no buffer, no plugin, no further lookups. An
+         * active one = sample every instance, then attach the buffer + plugin to the probe-lit hosts. A loading one = try again.
+         */
+        pollProbes(): void;
+        /** X11: gives every probe-lit host its probe buffer + plugin (once, after the network is active). */
+        private attachProbeHosts;
+        /** True once any host carries the per-instance probe buffer (diagnostics / tests). */
+        get probesAttached(): boolean;
+        /** X10 fix loop 2: where on an instance the probes are sampled, as a fraction of its bounds height above its position (0 = Unity's tree position). */
+        static ProbeSampleHeight: number;
+        /**
+         * D44: the exported renderer.castshadows of a LOD renderer (the source mesh or, for multi-primitive meshes, the
+         * renderer node above it). Without exported metadata the renderer casts, as before D44.
+         */
+        static RendererCastsShadows(source: BABYLON.Node, renderer: BABYLON.Node): boolean;
+        /**
+         * X10: moves every per-vertex float stream of a mesh with its own geometry into ONE interleaved buffer (views at their
+         * offsets, one stride). Returns the number of streams interleaved (0 when there is nothing to merge).
+         */
+        static InterleaveVertexData(mesh: BABYLON.Mesh): number;
+        static HasGeometry(m: BABYLON.AbstractMesh): boolean;
+        private createHost;
+        /** D41: one clone per (prototype, source material), named "<material>.<prototype>", with the foliage plugin attached. */
+        private hostMaterial;
+        /**
+         * Shared per-scene material-clone cache (D41), used by the tree and mesh-detail hosts: returns the clone stored under
+         * key (creating "<cloneName>" from source on first use, foliage plugin metadata dropped, unused graph samplers
+         * stripped) and counts one reference. Returns source itself when it cannot be cloned (no reference is counted).
+         */
+        static AcquireMaterial(scene: BABYLON.Scene, key: string, source: BABYLON.Material, cloneName: string): BABYLON.Material;
+        /** Drops one reference taken by AcquireMaterial and disposes the clone when none remain. */
+        static ReleaseMaterial(scene: BABYLON.Scene, key: string): void;
+        /**
+         * The glTF loader builds every material as the toolkit UniversalShaderMaterial and binds the Unity material's extra
+         * texture properties (Shader Graph inputs, SpeedTree _ExtraTex / _SubsurfaceTex) as custom samplers, which that shader
+         * never samples. On a host that also receives shadows and the environment they push the fragment stage past the 16
+         * WebGPU samplers (measured: Shader Graphs/Rock, 13 inputs, 18 samplers, blank canvas). D41 wants plain PBR inputs,
+         * so the unused custom samplers are removed from the clone (toolkit "tk*" samplers are kept). The exporter no longer
+         * writes a prototype graph's texture bags (GLTFMetaDataExporter skipPrototypeGraphBags), so on a current export this
+         * is a defensive no-op kept for older exports.
+         */
+        private static StripGraphTextures;
+        /** WebGPU's default per-stage sampled-texture limit, the fallback when the engine reports none (D48). */
+        static readonly SAMPLER_BUDGET: number;
+        /**
+         * Texture / sampler bindings the fragment shader of a compiled effect declares (D48 budget): the larger of the WGSL
+         * `var name: texture_*` and `var name: sampler[_comparison]` counts (WebGPU limits both per stage), or GLSL
+         * `uniform [precision] [iu]sampler* name[ [n] ]` (an array counts its length). Declared counts, so an upper bound.
+         */
+        static CountFragmentTextures(source: string): number;
+        /**
+         * The fragment textures / samplers a compiled effect really binds. On WebGPU that is the bind group layout Babylon builds
+         * from the processed shader (the thing the device validates - the WGSL source text undercounted it by one on the
+         * TerrainDemoScene Rock graph); elsewhere the declared count from the fragment source.
+         */
+        static MeasureFragmentSamplers(effect: BABYLON.Effect): number;
+        /** T32.1: the fragment textures and samplers of a WebGPU effect's bind group layout (null off WebGPU). */
+        static MeasureFragmentBindings(effect: BABYLON.Effect): {
+            textures: number;
+            samplers: number;
+        };
+        /**
+         * The per-stage budget (D48): the engine's sampled-texture limit (WebGPU maxSampledTexturesPerShaderStage, WebGL2
+         * MAX_TEXTURE_IMAGE_UNITS), capped by WebGPU's separate maxSamplersPerShaderStage - measured live: the device allowed
+         * 48 textures but 16 samplers, and Rock's 18 samplers invalidated the bind group layout.
+         */
+        static SamplerBudget(engine: BABYLON.AbstractEngine): number;
+        /**
+         * D48 (T12.6): the stock PBR textures a Shader Graph class overwrites, in the order they are given up when a clone is
+         * over the sampler budget - albedo (the graph writes surfaceAlbedo, and its alpha too or the material neither tests
+         * nor blends), metallic/roughness (the graph writes both channels), emissive (the graph writes finalEmissive), and the
+         * normal map last (the graph writes normalW; without BUMP its frame comes from derivatives instead of the tangents).
+         * The graph's own samplers are never on the list - every one of them is read by the generated shader.
+         */
+        static StockTexturesTheGraphOverwrites(material: BABYLON.Material, fragmentCode: string): string[];
+        /**
+         * D48 (T12.6): the fragment samplers a PBR clone's graph and stock inputs plus the scene will need, estimated BEFORE
+         * the first compile - WebGL2 logs a failed link ("texture image units count exceeds MAX_TEXTURE_IMAGE_UNITS") before
+         * any measured check can react. Graph (custom) samplers, the stock textures set on the material, the environment
+         * (reflection + BRDF lookup, + irradiance map when the environment has no SH), and per shadow-casting light one map
+         * (two for PCSS) plus a spot light's projection texture. The measured check (FitSamplerBudget) stays the safety net.
+         */
+        static EstimateFragmentSamplers(material: BABYLON.Material, mesh?: BABYLON.AbstractMesh): number;
+        /**
+         * D48 (T12.6): applies the budget to a Shader Graph clone before its first compile, from EstimateFragmentSamplers - drops
+         * the stock textures the graph overwrites (StockTexturesTheGraphOverwrites order) until the estimate fits. Returns the
+         * names dropped.
+         */
+        static PreFitSamplerBudget(material: BABYLON.Material, mesh?: BABYLON.AbstractMesh): string[];
+        /** The fragment hook code of a Shader Graph class's own plugin (both languages write the same assignments). */
+        private static GraphFragmentCode;
+        /**
+         * D48 (T12.6) sampler budget of one Shader Graph clone, from its compiled effect: while the fragment stage declares more
+         * textures or samplers than the engine allows (SamplerBudget), drop the next stock PBR texture the
+         * graph overwrites. Returns true when a texture was dropped (the material recompiles). A graph that is still over the
+         * budget with nothing left to drop is reported once.
+         */
+        static FitSamplerBudget(material: BABYLON.Material, effect: BABYLON.Effect): boolean;
+        /** Decodes D16 records into terrain-local transforms, LOD reference points and cull spheres. */
+        private decodeInstances;
+        /**
+         * World LOD reference points and sphere centres from the terrain world matrix (again whenever its values change),
+         * and the D45 grid over the centres with each cell's height range.
+         */
+        private refreshWorld;
+        /**
+         * §4.4 step 2: LOD selection, maxfulllod, crossfade state, culling and host buffer writes. Only grid cells near the
+         * frustum (within the tree distance) or inside the shadow reach are visited; nothing is allocated per update (D45).
+         */
+        update(camera: BABYLON.Camera): void;
+        /** True when the box lies fully outside one of the frustum planes. */
+        private static BoxOutside;
+        /**
+         * Unity treeMaximumFullLODCount (D17) without allocations: only the maxFull nearest LOD0 entries keep LOD0, every
+         * other becomes LOD1 (ties go to the lower instance index, as TerrainMath.SelectLodWithFullCount).
+         */
+        private limitFullLod;
+        /** Number of tied entries (distance == threshold) with a lower instance index than entry j. */
+        private static TieRank;
+        /** k-th smallest of the first count values (k >= 1) by repeated minimum passes (only when the scratch tail is short). */
+        private static KthSmallest;
+        /** Appends instance i to every host of the LOD (only the casting hosts when castOnly) and grows the host bounds. */
+        private writeInstance;
+        private static Now;
+        /** §4.4 step 3: one static PhysicsShapeContainer on "<name>.TreeColliders" (physics v2 only). */
+        private buildColliders;
+        dispose(): void;
     }
 }
 declare namespace TOOLKIT {
@@ -20518,6 +27671,10 @@ declare namespace TOOLKIT {
          *  and the container preloader (PreloadContainerSkinsAsync) — so WhenAllSkinsReady and
          *  OnAllSkinsReadyObservable always cover the work no matter who kicked it off. */
         private static NoteBuildStarted;
+        /** Scenes whose dispose already releases `_batchScene` (weak). */
+        private static _batchWatchedScenes;
+        /** Scene lifecycle: `_batchScene` outlived a finished batch - release it (and stop its watch) when that scene is disposed. */
+        private static SetBatchScene;
         /** Retire one build from the global gate. ALWAYS called — success or failure — so it can never stick. */
         private static NoteBuildFinished;
         /** Wrap a slice-array build so the global gate sees it, whoever started it. Passes the result (and any
@@ -20688,6 +27845,475 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * One uGUI canvas (unity-gui-pipeline-parity D5, D7, D8, D10, D14, D16, D22): builds a UnityElement tree from a v2 canvas payload,
+     * runs the pure layout (UserInterfaceLayout) and applies the rects. Overlay canvases (and Screen Space – Camera canvases without a
+     * camera) live on the scene-wide foreground texture; camera and world canvases are planes carrying their own mesh texture (A10).
+     */
+    class UserInterfaceCanvas implements UiInterface {
+        name: string;
+        component: TOOLKIT.UserInterface;
+        payload: IUiCanvasPayload;
+        host: UnityCanvasHost | null;
+        mesh: BABYLON.Mesh | null;
+        meshTexture: BABYLON.GUI.AdvancedDynamicTexture | null;
+        elements: Map<string, UnityElement>;
+        byName: Map<string, UnityElement[]>;
+        rectOverrides: Map<string, IUiRect>;
+        built: boolean;
+        destroyed: boolean;
+        lastHit: boolean;
+        /** Canvas units → texture px of the last layout (render px for overlay canvases), and the canvas reference pixels per unit. */
+        scale: number;
+        refPPU: number;
+        /** "overlay" (foreground texture), "camera" (plane in front of the camera) or "world" (plane on the canvas node). */
+        mode: string;
+        camera: BABYLON.Camera;
+        scene: BABYLON.Scene;
+        /** The GUI texture hosting this canvas (the foreground texture or the mesh texture). */
+        texture: BABYLON.GUI.AdvancedDynamicTexture;
+        /** Per element id: the last layout rect relative to its parent (canvas units, y-down). */
+        rects: Map<string, IUiLayoutRect>;
+        /** Canvas size in canvas units of the last layout. */
+        canvasSize: [number, number];
+        /** Every behaviour of this canvas (frame tick order). */
+        behaviours: any[];
+        images: Map<string, HTMLImageElement>;
+        private subHosts;
+        private payloads;
+        private parents;
+        private absCache;
+        private material;
+        private texSize;
+        private enabledState;
+        /** World canvases: the area drawn (canvas units, y-down, relative to the root's top-left) — root rect ∪ overflowing children (A10). */
+        private contentBounds;
+        /** Texture px of the root rect's top-left inside the mesh texture (non-zero only when world content overflows the root rect). */
+        texOrigin: [number, number];
+        /** World canvases: minimum mesh-texture px per world unit, so canvases authored in world-sized units stay legible (A10 floor). */
+        static WorldPixelsPerUnit: number;
+        constructor(component: TOOLKIT.UserInterface, payload: IUiCanvasPayload, adt: BABYLON.GUI.AdvancedDynamicTexture);
+        /** Loads the fonts and sprites a canvas needs, resolves its render mode, then builds its element tree (not yet laid out). */
+        static BuildAsync(component: TOOLKIT.UserInterface, payload: IUiCanvasPayload, state: UiSceneState): Promise<UserInterfaceCanvas>;
+        private static ResolveCamera;
+        overlayEntries(): {
+            host: UnityCanvasHost;
+            key: number[];
+        }[];
+        private HostEntries;
+        dispose(): void;
+        /** Shows / hides the whole interface with its node (D12; called by the runtime tick). */
+        SyncEnabled(enabled: boolean): void;
+        MarkDirty(): void;
+        RequestLayout(): void;
+        /** Lays the canvas out at the current screen / texture size and applies every rect (D15, D16, A1–A6, A10). */
+        relayout(): void;
+        PayloadOf(id: string): IUiElement;
+        ParentPayloadOf(id: string): IUiElement;
+        /** The RectTransform values in effect (runtime override, else the exported values). */
+        RectOf(id: string): IUiRect;
+        /** An element's last layout rect relative to the canvas root (canvas units, y-down). */
+        AbsRect(id: string): IUiLayoutRect;
+        /** A12: shows or hides one element (and its subtree), excluded from its layout group while hidden. */
+        SetElementActive(el: UnityElement, active: boolean): void;
+        /** Builds a payload subtree under an element (a nested override-sorting canvas becomes a sub-host) and attaches its behaviours. */
+        AddPopup(parentId: string, subtree: IUiElement): UnityElement;
+        /** Removes a subtree added by AddPopup (disposes its controls, sub-hosts and behaviours). */
+        RemovePopup(id: string): void;
+        /** Deep copy of a payload subtree with every element id (and component references to them) suffixed. */
+        static ClonePayload(el: IUiElement, suffix: string, idMap: Map<string, string>): IUiElement;
+        static FindParentPayload(root: IUiElement, id: string): IUiElement;
+        static OriginalId(idMap: Map<string, string>, newId: string): string;
+        private WorldRect;
+        private MeshTextureSize;
+        /** Largest world scale of the canvas node's X / Y axes (world units per canvas unit). */
+        private NodeScale;
+        private CreateMesh;
+        /** D22 material: unlit, both sides, no depth write, its own neutral image processing (the scene's post chain still applies). */
+        private SetupMaterial;
+        /** Plane size / placement (A10) and the handedness fix: a mirrored parent chain flips the plane back so the UI reads correctly. */
+        private PlaceMesh;
+        /** Keeps the camera plane and both mesh textures in step with the screen (called from relayout). */
+        private UpdateMesh;
+        private Build;
+        private BuildElement;
+        /** Configures one element from its payload; returns whether CanvasGroups below it stay interactable / block raycasts. */
+        private Setup;
+        /**
+         * T31 (D40): the graph graphic of an Image / RawImage whose material is a generated Canvas graph, drawing `plain` when the class is
+         * missing or not a UI graph (warned once per element) or the graph fails at runtime.
+         */
+        private GraphGraphic;
+        private Register;
+        /** Per-layout graphic settings: canvas scale, sprite pixels per unit, clip padding in px. */
+        private ApplyGraphic;
+        /** True for "", null and text made only of zero-width characters (TMP's empty input text is U+200B). */
+        static IsEmptyText(text: string): boolean;
+    }
+}
+declare namespace TOOLKIT {
+    /** Unity PointerEventData subset handed to UI behaviours (positions in the interface texture px, y-down). */
+    export interface UiPointerEventData {
+        x: number;
+        y: number;
+        screenX: number;
+        screenY: number;
+        pressX: number;
+        pressY: number;
+        button: number;
+        pointerType: string;
+        pointerId: number;
+        useDragThreshold: boolean;
+        /** Unity scrollDelta (one wheel notch = 1, positive = wheel up / away from the user). */
+        scrollX: number;
+        scrollY: number;
+        iface: UserInterfaceCanvas;
+        raw: UnityElement;
+    }
+    interface UiPress {
+        iface: UserInterfaceCanvas;
+        raw: UnityElement;
+        rawControl: any;
+        pressEl: UnityElement | null;
+        clickEl: UnityElement | null;
+        dragEl: UnityElement | null;
+        startScreen: [number, number];
+        pressPos: [number, number];
+        dragging: boolean;
+        eligibleForClick: boolean;
+        useDragThreshold: boolean;
+        pointerId: number;
+        pointerType: string;
+        button: number;
+    }
+    /** Per-scene pointer / selection state (Unity EventSystem subset). */
+    export interface UiPointerState {
+        scene: BABYLON.Scene;
+        hover: UnityElement | null;
+        entered: UnityElement[];
+        press: UiPress | null;
+        selected: UnityElement | null;
+        downHandled: boolean;
+        preObserver: any;
+        hoverType: string;
+    }
+    /**
+     * uGUI interaction (unity-gui-pipeline-parity D8, D19, D20, A8, A12, A14): an EventSystem-like pointer dispatcher on top of Babylon
+     * GUI picking plus the Selectable / Button / Toggle / ToggleGroup / Slider / Scrollbar / Dropdown / InputField / ScrollRect behaviours.
+     * Behaviours are plain objects on `UnityElement.behaviours`; events go to the first element up the hierarchy that handles them.
+     */
+    export class UserInterfaceControls {
+        /** EventSystem.pixelDragThreshold (render px). */
+        static DragThreshold: number;
+        private static _states;
+        /** Creates the behaviours of every element of a payload subtree (after its elements were built). */
+        static AttachSubtree(iface: UserInterfaceCanvas, root: IUiElement): void;
+        /** Makes a control a raycast target that forwards pointer events to `owner`'s hierarchy (FR-21: it blocks the scene). */
+        static WireHitTarget(control: BABYLON.GUI.Control, owner: UnityElement): void;
+        static ParentOf(el: UnityElement): UnityElement;
+        /** Unity ExecuteEvents.GetEventHandler: the first element up the chain with a behaviour implementing `method`. */
+        static FindHandler(el: UnityElement, method: string): UnityElement;
+        static Execute(el: UnityElement, method: string, arg?: any): void;
+        static IfaceOf(el: UnityElement): UserInterfaceCanvas;
+        private static Chain;
+        static State(scene: BABYLON.Scene): UiPointerState;
+        static DisposeScene(scene: BABYLON.Scene): void;
+        /** Drops every reference an interface's elements hold in the pointer state (interface destroyed). */
+        static ForgetInterface(scene: BABYLON.Scene, iface: UserInterfaceCanvas): void;
+        /** Drops pointer-state references to removed elements (runtime subtrees such as dropdown lists). */
+        static ForgetElements(scene: BABYLON.Scene, iface: UserInterfaceCanvas, ids: Set<string>): void;
+        /** Unity EventSystem.SetSelectedGameObject: deselects the old element and selects the new one. */
+        static Select(scene: BABYLON.Scene, el: UnityElement): void;
+        private static HitEnter;
+        private static HitOut;
+        private static SetHover;
+        private static HitDown;
+        /** Pointer in the interface's layout px (texture px minus the root origin of an overflowing world canvas, A10). */
+        private static PointerPos;
+        private static Event;
+        /** Scene-level pointer tracking: drags, releases, clicks, wheel and "clicked nothing" deselection. Runs after the GUI's own picking. */
+        private static OnPrePointer;
+        static Tick(iface: UserInterfaceCanvas, dt: number): void;
+        /** Pointer in an element's local canvas units (y-down from its top-left) using the last layout. */
+        static Local(iface: UserInterfaceCanvas, el: UnityElement, ev: UiPointerEventData): [number, number];
+        static Contains(iface: UserInterfaceCanvas, el: UnityElement, ev: UiPointerEventData): boolean;
+        static Clamp01(v: number): number;
+        static CopyRect(r: IUiRect): IUiRect;
+        /** Unity Mathf.SmoothDamp (maxSpeed infinite). Returns [value, velocity]. */
+        static SmoothDamp(current: number, target: number, velocity: number, smoothTime: number, dt: number): [number, number];
+    }
+    /** A8 — Unity Selectable: state machine, colour tint (faded) and sprite swap on its target graphic. */
+    export class UiSelectable {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        disposed: boolean;
+        isPointerInside: boolean;
+        isPointerDown: boolean;
+        hasSelection: boolean;
+        interactable: boolean;
+        target: UnityElement;
+        private baseSprite;
+        private baseImage;
+        private tweenFrom;
+        private tweenTo;
+        private tweenTime;
+        private tweenDuration;
+        private lastState;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any);
+        link(): void;
+        start(): void;
+        IsInteractable(): boolean;
+        State(): string;
+        Evaluate(instant?: boolean): void;
+        update(dt: number): void;
+        onPointerDown(e: UiPointerEventData): void;
+        onPointerUp(e: UiPointerEventData): void;
+        onPointerEnter(e: any): void;
+        onPointerExit(e: any): void;
+        onSelect(): void;
+        onDeselect(): void;
+        SetInteractable(on: boolean): void;
+        dispose(): void;
+    }
+    /** Unity Button: click → onClick (persistent listeners, then OnClick observers). */
+    export class UiButton {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        onPointerClick(e: UiPointerEventData): void;
+        Press(): void;
+        dispose(): void;
+    }
+    /** Unity ToggleGroup: exclusivity and allowSwitchOff. */
+    export class UiToggleGroup {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        disposed: boolean;
+        toggles: UiToggle[];
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any);
+        get allowSwitchOff(): boolean;
+        AnyTogglesOn(): boolean;
+        NotifyToggleOn(toggle: UiToggle, sendCallback: boolean): void;
+        start(): void;
+        dispose(): void;
+    }
+    /** Unity Toggle: click flips isOn (group rules), checkmark alpha fades 0.1 s. */
+    export class UiToggle {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        isOn: boolean;
+        group: UiToggleGroup;
+        graphicEl: UnityElement;
+        /** Runtime listeners (dropdown items). */
+        onChanged: ((on: boolean) => void)[];
+        private fadeFrom;
+        private fadeTo;
+        private fadeTime;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        link(): void;
+        start(): void;
+        onPointerClick(e: UiPointerEventData): void;
+        Set(value: boolean, sendCallback: boolean): void;
+        private PlayEffect;
+        update(dt: number): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Unity Slider: click-to-jump, drag with the handle offset, whole numbers, fill/handle anchors (rect overrides). */
+    export class UiSlider {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        value: number;
+        private fillEl;
+        private handleEl;
+        private offset;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        get axis(): number;
+        get reverse(): boolean;
+        get min(): number;
+        get max(): number;
+        link(): void;
+        start(): void;
+        get normalizedValue(): number;
+        set normalizedValue(v: number);
+        Clamp(v: number): number;
+        Set(input: number, sendCallback: boolean): void;
+        UpdateVisuals(): void;
+        private MayDrag;
+        private ClickRect;
+        onPointerDown(e: UiPointerEventData): void;
+        onInitializePotentialDrag(e: UiPointerEventData): void;
+        onDrag(e: UiPointerEventData): void;
+        private UpdateDrag;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Unity Scrollbar: value/size/steps, handle anchors, drag with offset, click-repeat paging toward the pointer. */
+    export class UiScrollbar {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        value: number;
+        size: number;
+        onChanged: ((v: number) => void)[];
+        private handleEl;
+        private offset;
+        private downNotDragging;
+        private lastEvent;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        get axis(): number;
+        get reverse(): boolean;
+        link(): void;
+        start(): void;
+        private Quantize;
+        Set(input: number, sendCallback: boolean): void;
+        SetSize(s: number): void;
+        UpdateVisuals(): void;
+        private MayDrag;
+        private Container;
+        private HandleOffset;
+        onPointerDown(e: UiPointerEventData): void;
+        onPointerUp(e: UiPointerEventData): void;
+        onInitializePotentialDrag(e: UiPointerEventData): void;
+        onBeginDrag(e: UiPointerEventData): void;
+        onDrag(e: UiPointerEventData): void;
+        update(dt: number): void;
+        private UpdateDrag;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Unity ScrollRect (A14): drag with elastic rubber band, inertia, wheel, clamping, linked scrollbars and their visibility. */
+    export class UiScrollRect {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        disposed: boolean;
+        private contentEl;
+        private viewEl;
+        private hbar;
+        private vbar;
+        private velocity;
+        private dragging;
+        private scrolling;
+        private pointerStart;
+        private contentStart;
+        private prevPos;
+        private prevKey;
+        private laidPos;
+        private updatingBars;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any);
+        link(): void;
+        private Pos;
+        private SetPos;
+        onLayout(): void;
+        /** View and content bounds in the view's y-up space (content shifted by any position change since the last layout). */
+        private Bounds;
+        private CalculateOffset;
+        private static RubberDelta;
+        private LocalView;
+        onInitializePotentialDrag(e: UiPointerEventData): void;
+        onBeginDrag(e: UiPointerEventData): void;
+        onDrag(e: UiPointerEventData): void;
+        onEndDrag(e: UiPointerEventData): void;
+        onScroll(e: UiPointerEventData): void;
+        private NormalizedPosition;
+        private SetNormalizedPosition;
+        private ActiveInHierarchy;
+        update(dt: number): void;
+        private UpdateScrollbars;
+        /** Unity UpdateScrollbarVisibility + the AutoHideAndExpandViewport viewport drive. */
+        private UpdateVisibility;
+        dispose(): void;
+    }
+    /** Unity (TMP) Dropdown: caption, popup list cloned from the template (A3 placement, flip, 0.15 s fade), blocker, selection. */
+    export class UiDropdown {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        value: number;
+        private listEl;
+        private listId;
+        private blockerId;
+        private fade;
+        private static _serial;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        start(): void;
+        onPointerClick(e: UiPointerEventData): void;
+        RefreshShownValue(): void;
+        Set(v: number, sendCallback: boolean): void;
+        get isOpen(): boolean;
+        Show(): void;
+        private OnSelectItem;
+        Hide(): void;
+        update(dt: number): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** The dropdown blocker: a click anywhere outside the list closes it. */
+    export class UiBlocker {
+        dropdown: UiDropdown;
+        disposed: boolean;
+        element: UnityElement;
+        constructor(dropdown: UiDropdown);
+        onPointerClick(e: UiPointerEventData): void;
+        dispose(): void;
+    }
+    /** Unity (TMP) InputField (D19): a stock Babylon InputText / InputPassword / InputTextArea at the text component rect. */
+    export class UiInputField {
+        iface: UserInterfaceCanvas;
+        element: UnityElement;
+        data: any;
+        selectable: UiSelectable;
+        disposed: boolean;
+        text: string;
+        input: BABYLON.GUI.InputText;
+        private textEl;
+        private placeholderEl;
+        private editing;
+        private submitPending;
+        private keyObserver;
+        private lastFont;
+        constructor(iface: UserInterfaceCanvas, element: UnityElement, data: any, selectable: UiSelectable);
+        private get masked();
+        link(): void;
+        onLayout(): void;
+        private ApplyTextColor;
+        /** Content-type filter and character limit (Unity InputField.Validate subset). */
+        private Accept;
+        private OnTextChanged;
+        private RefreshGraphics;
+        Focus(): void;
+        onPointerDown(e: UiPointerEventData): void;
+        onSelect(): void;
+        onDeselect(): void;
+        private BeginEdit;
+        private EndEdit;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    export {};
+}
+declare namespace TOOLKIT {
+    /**
      * Babylon Toolkit User Interface Controls
      */
     class UnitySlider extends BABYLON.GUI.Slider {
@@ -20725,8 +28351,1700 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
+    /** Hooks of one listener invoke (tests inject fakes; the runtime defaults to its own warning and element toggle). */
+    interface IUiInvokeHooks {
+        warn?: (code: string, subject: string, message: string) => void;
+        setElementActive?: (guid: string, active: boolean) => boolean;
+    }
+    /**
+     * Unity persistent listeners (unity-gui-pipeline-parity D20, A9) and the per-element runtime observables that the public API
+     * exposes (OnClick / OnValueChanged / OnSubmit …). Persistent listeners run first, then runtime observers — Unity's UnityEvent order.
+     */
+    class UserInterfaceEvents {
+        private static _observables;
+        /** Calls every persistent listener of `event` (A9). Returns the number of listeners that were called. Never throws. */
+        static Invoke(scene: BABYLON.Scene, event: IUiEvent, dynamicValue: any, subject: string, hooks?: IUiInvokeHooks): number;
+        /** Node of a listener target: by guid (node id) first, then the node named `name` whose ancestor path ends with `path`. */
+        static ResolveTarget(scene: BABYLON.Scene, target: {
+            guid: string;
+            name: string;
+            path: string;
+        }): BABYLON.Node;
+        /** A lazily created runtime observable per element and kind (click, value, submit, endEdit, select, deselect). */
+        static Observable(el: any, kind: "click" | "value" | "submit" | "endEdit" | "select" | "deselect"): BABYLON.Observable<any>;
+        /** Notifies the runtime observable of an element (only when one was created). */
+        static Notify(el: any, kind: string, value: any): void;
+        /** Drops every runtime observable of an element (interface disposal). */
+        static Clear(el: any): void;
+        private static NodePath;
+        private static Describe;
+        private static DefaultWarn;
+        private static DefaultSetElementActive;
+    }
+}
+declare namespace TOOLKIT {
+    /** One node of a flex layout pass (internal to UserInterfaceFlex). */
+    interface IUiFlexNode {
+        el: IUiDocElement;
+        st: IUiDocStyle;
+        kids: IUiFlexNode[];
+        measured: boolean;
+        /** Layout result of the last performing pass: position relative to the parent's border box, border-box size. */
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+        /** Measured border-box size of the last pass (Yoga measuredDimensions). */
+        mw: number;
+        mh: number;
+        basis: number;
+        line: number;
+        cache: Map<string, number[]>;
+    }
+    /**
+     * Pure flexbox layout of a UI Toolkit document (unity-gui-pipeline-parity D16, D18, A11, A13): the Yoga algorithm Unity's layout
+     * engine runs (flex basis, lines, the two-pass flexible length resolution, justify / align / align-content, absolute children,
+     * min/max clamps with the padding+border floor) plus Unity's pixel-grid rounding. No GUI types and no DOM.
+     */
+    class UserInterfaceFlex {
+        private static readonly EXACT;
+        private static readonly AT_MOST;
+        private static readonly UNDEF;
+        /**
+         * Lays a document out at panelW × panelH points. `measure` returns the CONTENT size (points) of a text / image leaf for an
+         * available content width (Infinity = unconstrained). `pointScale` is the panel's pixels per point (the pixel grid).
+         * Result: per element id, [x, y, w, h] relative to the parent's border box (points, y-down) — Unity's `VisualElement.layout`.
+         */
+        static Layout(root: IUiDocElement, panelW: number, panelH: number, measure: (el: IUiDocElement, maxW: number) => {
+            w: number;
+            h: number;
+        }, pointScale?: number): Map<string, [number, number, number, number]>;
+        /** A13 — Unity PanelSettings.ResolveScale as pixels per point (1 / panel scale). */
+        static PanelScale(panel: IUiPanel, screenW: number, screenH: number, screenDpi: number): number;
+        /** True for the leaves Unity measures itself (TextElement text, Image content). */
+        static IsMeasuredLeaf(el: IUiDocElement): boolean;
+        private static Build;
+        private static PanelStyle;
+        /** UiLength → points (NaN = undefined: auto, none, or a percentage of an undefined basis). */
+        private static Len;
+        private static IsPercent;
+        private static Def;
+        private static Row;
+        private static Rev;
+        /** Leading / trailing edge values of a T,R,B,L quad for an axis (percentages of the owner width, as Yoga). */
+        private static Edge;
+        private static Margin;
+        private static MarginAxis;
+        private static Border;
+        private static PB;
+        private static PBAxis;
+        private static Dim;
+        private static MinDim;
+        private static MaxDim;
+        private static DimDefined;
+        private static Absolute;
+        private static Hidden;
+        private static Pos;
+        private static PosDefined;
+        private static PosValue;
+        /** Relative offset of a relative-positioned node along an axis (leading wins, else minus trailing). */
+        private static RelPos;
+        private static Align;
+        private static Grow;
+        private static Shrink;
+        private static IsFlex;
+        private static BoundMinMax;
+        private static Bound;
+        /** Yoga constrainMaxSizeForMode. Returns [mode, size]. */
+        private static ConstrainMax;
+        /** Lays one node out for an available size (margin-box) and modes. Sets n.mw / n.mh; with `perform` also its children's positions. */
+        private static LayoutNode;
+        private static LayoutImpl;
+        private static Zero;
+        private static Measured;
+        private static MainPos;
+        private static SetMain;
+        /**
+         * CSS automatic minimum size of a flex item along a row (Unity keeps an item from shrinking below it): with `min-width: auto` and a
+         * visible overflow, min(specified width, min-content width); 0 otherwise. Only consulted while shrinking.
+         */
+        private static AutoMin;
+        /** Yoga computeFlexBasisForChild. */
+        private static ComputeBasis;
+        /** Yoga absoluteLayoutChild: size from width/height, else from both insets, else content; position from the insets / alignment. */
+        private static LayoutAbsolute;
+        /**
+         * Unity 6's layout rounding (matches every exported rect): each absolute edge snaps to the pixel grid (half up) and a node's
+         * position / size are differences of snapped edges. No Yoga text-node ceil / floor rounding.
+         */
+        private static Round;
+        private static Snap;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Unity UI graphics drawn into the scene-wide GUI canvas (unity-gui-pipeline-parity D7, D8, D10, D11, D17; A2, A7).
+     * Every class that `extends` another new class lives in this file (D24: UMD byte order).
+     */
+    abstract class UnityGraphicBase {
+        /** The graphic's own colour (Graphic.color). */
+        color: UiColor;
+        /** The selectable colour tint (CanvasRenderer colour), default white. */
+        tint: UiColor;
+        /** The CanvasRenderer alpha (Toggle graphics fade it). */
+        rendererAlpha: number;
+        raycastTarget: boolean;
+        /** false when a Mask hides its own graphic (showMaskGraphic off). */
+        visible: boolean;
+        /** Canvas units → render pixels. */
+        canvasScale: number;
+        /** Shadow / Outline mesh effects on the same GameObject, in component order. */
+        effects: {
+            type: string;
+            color: UiColor;
+            distance: UiVec2;
+            useGraphicAlpha: boolean;
+        }[];
+        abstract draw(ctx: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+        /** color × tint × renderer alpha. */
+        FinalColor(): UiColor;
+        /** Drops cached layout (text) or geometry. */
+        invalidate(): void;
+        /** The text engine of a graphic: a uGUI/TMP text graphic itself, or the text of a UI Toolkit box. */
+        static TextOf(g: any): UnityTextGraphic;
+        private static _tintCache;
+        private static _subCache;
+        private static _alphaCache;
+        static Rgb(c: UiColor): string;
+        static Rgba(c: UiColor, alphaScale?: number): string;
+        /** The image multiplied by an rgb colour (Unity vertex colour × texture), cached per image and colour. Alpha is left to globalAlpha. */
+        static Tinted(img: any, c: UiColor): any;
+        /** A cropped copy of part of an image (pattern tiles of sliced/tiled sprites). */
+        static SubImage(img: any, sx: number, sy: number, sw: number, sh: number): any;
+        /** True when any pixel of the image is not fully opaque (D10 `mask-shape`). */
+        static HasAlpha(img: any): boolean;
+        /** Fills a destination rect with a repeating tile of `src` (tile size tw × th px, a tile corner at ax, ay). */
+        static PatternFill(ctx: any, src: any, dx: number, dy: number, dw: number, dh: number, tw: number, th: number, ax: number, ay: number): void;
+        /** Unity Image.GetAdjustedBorders: scales opposite borders down when they exceed the rect. Border order L,B,R,T. */
+        static AdjustBorders(b: number[], w: number, h: number): number[];
+    }
+    /** Every Unity UI element: an absolutely placed Babylon container that draws its graphic itself (D7). */
+    class UnityElement extends BABYLON.GUI.Container {
+        uiId: string;
+        uiPath: string;
+        /** A disabled nested Canvas component on the element: it and its subtree draw nothing (the GameObject stays active). */
+        canvasHidden: boolean;
+        uiActive: boolean;
+        groupAlpha: number;
+        interactableInHierarchy: boolean;
+        blocksRaycasts: boolean;
+        /** L,T,R,B px when this element clips its children (Mask / RectMask2D, D10). */
+        clipPadding: [number, number, number, number] | null;
+        graphic: UnityGraphicBase | null;
+        behaviours: any[];
+        /** The payload element this control was built from. */
+        payload: IUiElement | null;
+        /** The logical Unity parent when the Babylon parent is a sub-host (nested override-sorting canvas). */
+        alphaParent: UnityElement | null;
+        constructor(name?: string);
+        /** D8: alpha × CanvasGroup alpha × the parent chain. */
+        get effectiveAlpha(): number;
+        protected _getTypeName(): string;
+        /**
+         * D21: scripts written for the old exporter observe the Babylon events of a button (onPointerDown/Up/Click, AttachClickHandler).
+         * A raycast target is a pointer blocker, so Babylon never bubbles its events to the button that owns it (e.g. the button's
+         * TMP label). Unity bubbles to the ancestors, so the target re-notifies those observables on its UnityElement ancestors
+         * (state untouched; the runtime's own hit observers ignore events whose target is another control).
+         */
+        _onPointerDown(target: BABYLON.GUI.Control, coordinates: BABYLON.Vector2, pointerId: number, buttonIndex: number, pi?: any): boolean;
+        _onPointerUp(target: BABYLON.GUI.Control, coordinates: BABYLON.Vector2, pointerId: number, buttonIndex: number, notifyClick: boolean, pi?: any): void;
+        private static BubbleLegacy;
+        /** D21 legacy "<name>_background": a detached control whose visibility/alpha drive only this element's own graphic (not its children). */
+        graphicHandle: UnityGraphicHandle | null;
+        GraphicHandle(): UnityGraphicHandle;
+        protected _localDraw(context: BABYLON.ICanvasRenderingContext): void;
+        _clipForChildren(context: BABYLON.ICanvasRenderingContext): void;
+    }
+    /** The old exporter's "<name>_background" image control, kept for v1 scripts (D21): hiding or fading it hides only the owner's own graphic. */
+    class UnityGraphicHandle extends BABYLON.GUI.Control {
+        owner: UnityElement;
+        constructor(owner: UnityElement);
+        protected _getTypeName(): string;
+        _markAsDirty(force?: boolean): void;
+    }
+    /** The stock password input with Unity's asterisk mask character (TMP asteriskChar '*') instead of bullets (D19). */
+    class UnityPasswordInput extends BABYLON.GUI.InputPassword {
+        protected _getTypeName(): string;
+        protected _beforeRenderText(textWrapper: any): any;
+    }
+    /** One canvas (or nested override-sorting canvas) on the scene-wide foreground texture. */
+    class UnityCanvasHost extends UnityElement {
+        iface: any;
+        protected _getTypeName(): string;
+    }
+    /** uGUI Image: simple, sliced, tiled and filled sprites, tinted at runtime (D11, A2). */
+    class UnityImageGraphic extends UnityGraphicBase {
+        data: any;
+        sprite: IUiSprite | null;
+        image: HTMLImageElement | null;
+        /** sprite.ppu / canvas refPPU (A2). */
+        pixelsPerUnit: number;
+        fillAmount: number;
+        pivot: UiVec2;
+        constructor(data: any);
+        SetReferencePixelsPerUnit(refPPU: number): void;
+        draw(ctx: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+        private paint;
+        private HasBorder;
+        private ImageSize;
+        /** Unity PreserveSpriteAspectRatio (pivot-anchored) in y-down px. */
+        private AspectRect;
+        private DrawSimple;
+        private BordersPx;
+        private DrawSliced;
+        private DrawTiled;
+        private DrawFilled;
+        /** Unity Image.GenerateFilledSprite geometry in the unit rect (y-up): the quads that remain visible. */
+        static FillQuads(method: string, origin: number, amount: number, clockwise: boolean): number[][][];
+        /** Unity Image.RadialCut (in place on one quad: [x0y0, x0y1, x1y1, x1y0], y-up). */
+        private static RadialCut;
+    }
+    /** uGUI RawImage: a whole texture with a uvRect (repeat when the texture wraps). */
+    class UnityRawImageGraphic extends UnityGraphicBase {
+        data: any;
+        image: HTMLImageElement | null;
+        constructor(data: any);
+        draw(context: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T31 (D40): when a UI graph element renders. A static graph (no clock / scene input)
+     * renders once and again when its inputs change; an animated graph renders every frame, and every other frame once a readback took
+     * longer than the budget (one deviation, reported once).
+     */
+    class UiGraphSchedule {
+        static BudgetMs: number;
+        animated: boolean;
+        halved: boolean;
+        dirty: boolean;
+        frame: number;
+        deviations: number;
+        constructor(animated: boolean);
+        /** Advances one frame; true when this frame renders. */
+        Tick(): boolean;
+        Rendered(): void;
+        Invalidate(): void;
+        /** A readback took `ms`: over the budget halves the rate (true the first time). */
+        Readback(ms: number): boolean;
+    }
+    /**
+     * shadergraph-transpiler-complete-coverage T31 (D40): a uGUI Image / RawImage (or a UI Toolkit element) whose material is a generated
+     * Canvas / UI graph. The class's UiElement pass (TOOLKIT.ShaderGraphPass) renders into an RGBA8 render target of the element's pixel
+     * size with the element's inputs (UV, vertex colour, render type, texture, rect); the pixels are read back (rows flipped on WebGL2,
+     * which reads bottom-up) into an ImageBitmap that draw() paints in the element's rect, inside its clip and group alpha. The GPU work
+     * runs before the scene renders (one observer per scene). On any failure the element draws its plain graphic (`fallback`).
+     */
+    class UnityShaderGraphGraphic extends UnityGraphicBase {
+        /** Test seam: the GPU side (target, render, readback, clock). */
+        static Backend: any;
+        private static _scenes;
+        private static _tmpWarned;
+        data: any;
+        scene: BABYLON.Scene;
+        className: string;
+        fallback: UnityGraphicBase;
+        renderType: number;
+        /** The element texture (sprite / raw image), bound as sg_uiTexture and as the graph's _MainTex. */
+        texture: BABYLON.BaseTexture;
+        schedule: UiGraphSchedule;
+        failed: boolean;
+        bitmap: any;
+        renders: number;
+        onWarn: (reason: string) => void;
+        private _pass;
+        private _target;
+        private _size;
+        private _rect;
+        private _key;
+        private _pending;
+        private _owner;
+        /** The scene frame (Process count) of the last draw: a graphic not drawn for two frames (hidden, removed) stops ticking. */
+        private _drawnAt;
+        private _disposed;
+        private _notReady;
+        private _globalsKey;
+        /** True when the graphic created `texture` itself (disposed with it). */
+        ownsTexture: boolean;
+        private static _frames;
+        constructor(scene: BABYLON.Scene, data: any, fallback: UnityGraphicBase);
+        /** The generated class of a component's customMaterial when it is a UI graph, else null with the reason. */
+        static ResolveUiClass(customMaterial: any): {
+            klass: any;
+            reason: string;
+        };
+        private static get backend();
+        /** The browser / Babylon backend. */
+        static DefaultBackend: any;
+        private static Queue;
+        /** One frame of every UI graph of the scene (called before the scene renders). */
+        static Process(scene: BABYLON.Scene): void;
+        /** A key of the graph's Global property values (TOOLKIT.ShaderGlobals): a change re-renders a static graph. */
+        private GlobalsKey;
+        /** Repaints the GUI texture that draws the element (a control's own dirty flag does not repaint the texture). */
+        private Redraw;
+        /** Marks the graph for a re-render (a property / input change). */
+        invalidate(): void;
+        setFloat(name: string, value: number): void;
+        setColor(name: string, value: any): void;
+        setVector(name: string, value: any): void;
+        private Fail;
+        private EnsurePass;
+        /** Per frame (before the scene renders): renders the graph when the schedule says so and no readback is in flight. */
+        Tick(): void;
+        draw(ctx: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+        dispose(): void;
+        /**
+         * T31 (D41): a TextMeshProUGUI whose font material is a TMP SDF graph keeps the GUI text renderer and takes face colour, outline
+         * width / colour and underlay offset / softness / colour from the graph material's bags (TMP_SDF graph properties _FaceColor,
+         * _IsoPerimeter, _OutlineColor1, _UnderlayColor, _UnderlayOffset, _UnderlaySoftness; bag colours are linear). Returns true when
+         * the text data was changed (one Polyfill deviation for the caller to report).
+         */
+        static ApplyTmpGraphBags(data: any): boolean;
+    }
+    /** One drawable piece of a laid-out text line (px). */
+    interface UiTextDrawRun {
+        run: UiTextRun;
+        text: string;
+        x: number;
+        w: number;
+        size: number;
+        font: string;
+        extra?: number;
+        bold?: number;
+    }
+    interface UiTextDrawLine {
+        runs: UiTextDrawRun[];
+        baseline: number;
+        w: number;
+        x: number;
+        extraPerSpace: number;
+    }
+    /** TextMeshPro / legacy Text drawn with Unity's line metrics and rich-text runs (D17, A7). */
+    class UnityTextGraphic extends UnityGraphicBase {
+        data: any;
+        text: string;
+        /** The rect size (canvas units) Unity laid the text out at on export — TMP auto size keeps Unity's size there. */
+        exportRectSize: UiVec2 | null;
+        measure: (font: string, s: string) => number;
+        onUnknownTag: (tag: string) => void;
+        private _key;
+        private _plan;
+        private static _measureCtx;
+        private static _measureCache;
+        private static _fontMetrics;
+        /** Families the runtime loaded from the font manifest, and their real faces ("family|weight|style"). */
+        static ManagedFamilies: Set<string>;
+        static RealFaces: Set<string>;
+        constructor(data: any);
+        invalidate(): void;
+        /** Canvas 2D text width of `s` in the CSS font `font` (px), cached. */
+        static Measure(font: string, s: string): number;
+        /** Clears measurement caches (fonts finished loading). */
+        static ResetMeasurements(): void;
+        /** [ascent, descent, lineHeight] per em for this text's font (Unity's exported face metrics; the browser's for legacy fonts). */
+        private Metrics;
+        static FontString(f: IUiFontRef, bold: boolean, italic: boolean, sizePx: number): string;
+        private WantsBold;
+        /** Bold asked of a manifest family that has no real bold face: Unity synthesizes it (TMP dilate + bold spacing, FreeType embolden). */
+        private FakeBold;
+        private RunFont;
+        /** Extra advance per character of a synthesized bold run (px): TMP bold spacing 0.07 em, FreeType embolden 1/24 em. */
+        private BoldExtra;
+        /** Stroke width that thickens a synthesized bold run (px). */
+        private BoldStroke;
+        /** TMP material _GradientScale (atlas padding + 1, atlas texels per SDF unit); older payloads fall back to the 10% padding default. */
+        private GradientScale;
+        private RunWidth;
+        private DisplayText;
+        private static CaseOutsideTags;
+        /** Lays the text out at a size (canvas units) inside availW × availH px. */
+        private Compose;
+        /** The size (canvas units) to draw at: TMP auto size / legacy Best Fit search the largest size that fits (A7). */
+        private ChooseSize;
+        private Plan;
+        /** Characters of `runs` (in order) that fit `width`; with `ellipsis` the cut tail becomes "…" (TMP last-line fill). */
+        private FillLine;
+        draw(context: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+        /** Draws every run; `override` replaces the run colours (effects), `decorate` adds underline/strikethrough. */
+        private DrawLines;
+        private Gradient;
+        /** Unconstrained (Infinity) or wrapped layout at a px width: widest line (px) and line count (UI Toolkit measure). */
+        LayoutSize(maxWidthPx: number): {
+            w: number;
+            lines: number;
+        };
+        /** Line height per em of this text's font (exported metrics, else 1.2). */
+        LineHeightRatio(): number;
+        /** Preferred size in canvas units (used after a runtime text change, D16): unwrapped width + margins, wrapped height at `width`. */
+        preferredSize(width: number): {
+            w: number;
+            h: number;
+        };
+    }
+    /** UI Toolkit element box (D18, A11): background colour / image (scale modes, 9-slice, tint), per-side borders, radii, content image and text. */
+    class UnityBoxGraphic extends UnityGraphicBase {
+        /** The effective (state-resolved) style. */
+        style: IUiDocStyle;
+        image: any;
+        /** UI Toolkit Image content (`data.image`) and its settings. */
+        contentImage: any;
+        contentData: any;
+        textGraphic: UnityTextGraphic;
+        /** T31 (D40): the element's UI Toolkit graph material, or null. */
+        graph: UnityShaderGraphGraphic;
+        /** false hides the background image (an unchecked toggle's checkmark). */
+        showImage: boolean;
+        /** Background image rotation in radians (a collapsed foldout arrow). */
+        imageRotation: number;
+        /** Panel referenceSpritePixelsPerUnit (slice / sprite size in points = px · refPPU / sprite ppu). */
+        referencePPU: number;
+        constructor(style: IUiDocStyle);
+        invalidate(): void;
+        private static Num;
+        /** Rounded-rect path (radii TL,TR,BR,BL px, already clamped). */
+        static RoundRect(ctx: any, x: number, y: number, w: number, h: number, r: number[]): void;
+        /** CSS radius clamping: every radius scales down by the same factor when two neighbours exceed a side. */
+        static ClampRadii(r: number[], w: number, h: number): number[];
+        draw(context: BABYLON.ICanvasRenderingContext, m: BABYLON.GUI.Measure, owner: UnityElement): void;
+        private DrawBackgroundImage;
+        private DrawContentImage;
+        /** Per-side borders: the ring between the outer and the inner rounded rect, each side clipped to its trapezoid. */
+        private DrawBorder;
+    }
+}
+declare namespace TOOLKIT {
+    /** A resolved element rect: relative to its parent's rect top-left, y-down, canvas units. */
+    interface IUiLayoutRect {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+    }
+    /**
+     * Pure uGUI layout math (unity-gui-pipeline-parity D15/D16, A1–A6, A10 size helpers).
+     * Mirrors Unity's CanvasScaler, RectTransform, LayoutUtility, Horizontal/Vertical/Grid layout groups and the two fitters.
+     * No GUI types, no DOM: the runtime (UserInterfaceCanvas) converts the results into control placements.
+     */
+    class UserInterfaceLayout {
+        /** A1 — CanvasScaler scale factor and the canvas reference pixels per unit. */
+        static ScaleFactor(scaler: IUiScaler | null, screenW: number, screenH: number, screenDpi: number): {
+            scale: number;
+            refPPU: number;
+        };
+        /** A3 — RectTransform rect in the parent's rect (parent size pw × ph), y-down, relative to the parent's top-left. */
+        static ResolveRect(rect: IUiRect, parentW: number, parentH: number): IUiLayoutRect;
+        /** A4 — the element's merged layout values (Unity LayoutUtility). Groups compute theirs from their children. */
+        static ChildLayoutSizes(el: IUiElement, refPPU?: number, knownWidth?: number): IUiLayoutValues;
+        /**
+         * A5 — lays out a whole canvas tree. Returns, per element id, the rect relative to its PARENT's rect top-left (y-down, canvas
+         * units). The root maps to {0, 0, canvasW, canvasH}. `override` replaces an element's RectTransform values (runtime behaviours).
+         */
+        static LayoutCanvas(root: IUiElement, canvasW: number, canvasH: number, override?: Map<string, IUiRect>, refPPU?: number): Map<string, IUiLayoutRect>;
+        /** D14 — dense ranks (0..n-1) by lexicographic key; ties keep input order. */
+        static OverlayOrder(keys: number[][]): number[];
+        /** A10 — the world-space size of a Screen Space – Camera plane at `distance` (perspective, vertical fov). */
+        static CameraPlaneSize(fovRad: number, distance: number, aspect: number): {
+            w: number;
+            h: number;
+        };
+        /**
+         * A10 — the mesh texture size of a World Space canvas: 2 px per dynamic pixel, raised to `minPxPerUnit` (the caller's
+         * density floor for canvases authored in world-sized units, e.g. a 1×1 canvas holding 0.2-unit text), capped at 2048.
+         */
+        static WorldTextureSize(w: number, h: number, dynamicPPU: number, minPxPerUnit?: number): {
+            tw: number;
+            th: number;
+            capped: boolean;
+        };
+        /**
+         * A10 — the bounds (canvas units, y-down, relative to the root's top-left) a World Space canvas draws into: the root rect
+         * united with every descendant rect (Unity never clips a canvas to its own rect). The children of a Mask / RectMask2D are
+         * clipped by it, so their rects do not widen the bounds.
+         */
+        static ContentBounds(root: IUiElement, rects: Map<string, IUiLayoutRect>, canvasW: number, canvasH: number): IUiLayoutRect;
+        private static NewContext;
+        private static RectOf;
+        private static Find;
+        private static IgnoresLayout;
+        private static LayoutChildrenOf;
+        /** Unity GetLayoutProperty-style merge of [value, priority] candidates (negative values ignored; same priority → max). */
+        private static Merge;
+        /** [min, preferred(>= min), flexible] of an element along `axis` (A4). */
+        private static Values;
+        /** Unity Image.preferredWidth/Height in canvas units (A2). */
+        private static ImagePreferred;
+        /** A child's current sizeDelta along an axis — a ContentSizeFitter's steady-state size when it has one. */
+        private static ChildSizeDelta;
+        private static ChildSizes;
+        private static Padding;
+        private static PadStart;
+        private static Align;
+        private static Spacing;
+        private static StartOffset;
+        /** Unity LayoutGroup totals along an axis: [totalMin, totalPreferred, totalFlexible]. */
+        private static GroupTotals;
+        /** Positions one driven child along one axis (Unity SetChildAlongAxisWithScale), writing x/w or y/h (y-down). */
+        private static Place;
+        /** Rects of the children a layout group drives, relative to the group's rect (w × h), y-down. */
+        private static GroupChildren;
+        /** Keeps the pivot fixed while changing one axis size (Unity SetSizeWithCurrentAnchors). */
+        private static Resize;
+        private static ApplyFitters;
+        private static LayoutChildren;
+    }
+    interface UiLayoutContext {
+        out: Map<string, IUiLayoutRect>;
+        override: Map<string, IUiRect> | null;
+        refPPU: number;
+        memo: Map<string, number[]>;
+    }
+}
+declare namespace TOOLKIT {
+    /** One built Unity interface (canvas or document) of a scene. */
+    interface UiInterface {
+        name: string;
+        component: TOOLKIT.UserInterface;
+        payload: IUiPayload;
+        host: UnityCanvasHost | null;
+        mesh: BABYLON.Mesh | null;
+        meshTexture: BABYLON.GUI.AdvancedDynamicTexture | null;
+        elements: Map<string, UnityElement>;
+        byName: Map<string, UnityElement[]>;
+        rectOverrides: Map<string, IUiRect>;
+        built: boolean;
+        destroyed: boolean;
+        lastHit: boolean;
+        /** Extra overlay hosts (nested override-sorting canvases) with their D14 sort keys. */
+        overlayEntries(): {
+            host: UnityCanvasHost;
+            key: number[];
+        }[];
+        dispose(): void;
+        relayout(): void;
+    }
+    /** Per-scene runtime state (Data shapes). */
+    interface UiSceneState {
+        scene: BABYLON.Scene;
+        adt: BABYLON.GUI.AdvancedDynamicTexture;
+        interfaces: UiInterface[];
+        fonts: Map<string, Promise<void>>;
+        manifest: Map<string, Promise<any[]>>;
+        images: Map<string, Promise<HTMLImageElement>>;
+        warnings: Set<string>;
+        resizeObserver: any;
+        tickObserver: any;
+        disposeObserver: any;
+        pendingLayout: Set<UiInterface>;
+        lastW: number;
+        lastH: number;
+        lastScaling: number;
+        /** Mesh-canvas pass-through picking (A10): installed once per scene. */
+        picking: {
+            hitObserver: any;
+            pickObserver: any;
+            down: any;
+            up: any;
+            move: any;
+        } | null;
+        /** The mesh interface that owns the current press (FR-21), until release. */
+        meshOwner: {
+            iface: any;
+            pointerId: number;
+        } | null;
+    }
+    /**
+     * The per-scene orchestrator of the Unity UI runtime (unity-gui-pipeline-parity D5, D6, D9, D14): the foreground texture, the
+     * interface list and its overlay ranks, font/sprite caches, the resize hook, the frame tick and warnings.
+     */
+    class UserInterfaceRuntime {
+        private static _states;
+        private static readonly ASSET_TIMEOUT_MS;
+        /** Builds one v2 payload: overlay, camera and world canvases, and overlay / world / render-texture UI Toolkit documents. */
+        static BuildAsync(component: TOOLKIT.UserInterface, gui: IUiPayload): Promise<UiInterface>;
+        /** Removes one interface: disposes its hosts / meshes and re-ranks the rest. */
+        static Unregister(iface: UiInterface): void;
+        /** Schedules a relayout of one interface for the next frame (D16). */
+        static RequestLayout(iface: UiInterface): void;
+        /** Re-assigns the overlay ranks of a scene (a runtime sub-host was added or removed). */
+        static Rerank(scene: BABYLON.Scene): void;
+        /** Persistent SetActive targets (D20): an interface root enables its node, an element shows/hides (A12). False = not a UI element. */
+        static SetElementActiveById(scene: BABYLON.Scene, guid: string, active: boolean): boolean;
+        static GetInterfaces(scene: BABYLON.Scene): UiInterface[];
+        /** The scene-wide fullscreen texture with the D5 / D9 settings applied once. */
+        static GetForeground(scene: BABYLON.Scene): BABYLON.GUI.AdvancedDynamicTexture;
+        /** D14: dense zIndex ranks of every overlay host by (sortingLayer, sortingOrder, kindTie, sceneOrder). */
+        static OverlayRank(list: UiInterface[]): void;
+        /** Loads the manifest faces of every needed family as FontFaces (D28); never throws. */
+        static LoadFontsAsync(scene: BABYLON.Scene, rootUrl: string, manifestUrl: string, fonts: IUiFontRef[]): Promise<void>;
+        /** One cached image per url and scene; null (with one `asset` warning) when it cannot load. */
+        static LoadImageAsync(scene: BABYLON.Scene, rootUrl: string, url: string): Promise<HTMLImageElement>;
+        static Warn(scene: BABYLON.Scene, code: string, subject: string, message: string): void;
+        static GetWarnings(scene: BABYLON.Scene): string[];
+        /** D6: Unity screen pixels = render pixels. */
+        static ScreenSize(scene: BABYLON.Scene): {
+            w: number;
+            h: number;
+            dpi: number;
+        };
+        /** Element centre in CSS px of the rendering canvas: overlay from its measure, mesh-hosted through the plane and the camera. */
+        static ScreenPoint(el: UnityElement): [number, number];
+        /** The scene pointer (CSS px, as scene.pointerX/Y) in an interface's texture px: overlay like the fullscreen GUI, mesh through its plane. */
+        static PointerToInterface(iface: any, sx: number, sy: number): [number, number];
+        /**
+         * A10 pass-through picking: UI planes are pickable only where a raycast-target graphic lies under the pointer (Unity's
+         * GraphicRaycaster), so empty HUD areas pick the 3D scene behind; a pick on a UI plane never reaches POINTERPICK observers.
+         */
+        static InstallMeshPicking(scene: BABYLON.Scene): void;
+        /** Updates every mesh interface's `lastHit`; returns the nearest mesh interface whose raycast-target graphic is under the pointer. */
+        private static UpdateLastHit;
+        /** True when a raycast-target graphic of an overlay interface is under the scene pointer (the overlay draws above every mesh UI). */
+        private static OverlayHit;
+        /**
+         * FR-21 for mesh interfaces (A10): a press on a raycast-target graphic of a camera / world canvas is owned by the UI until release.
+         * Its events go straight to that mesh texture's picking and are hidden from the scene (camera inputs, picks) — what the
+         * fullscreen texture does for overlay UI. Presses on empty HUD area pass through to the scene.
+         */
+        private static OnMeshPrePointer;
+        private static ForwardToMesh;
+        /** A mesh texture coordinate → the interface's texture px (honours the texture's y inversion). */
+        static UvToTexture(iface: any, uv: BABYLON.Vector2): [number, number];
+        /** The mesh-local position whose texture coordinate is (u, v): barycentric search over the mesh's triangles in UV space. */
+        static UvToLocal(mesh: BABYLON.AbstractMesh, u: number, v: number): BABYLON.Vector3;
+        /** True when a visible, hit-testable graphic of the interface contains the texture point (A10 pass-through). */
+        static HitTestAt(iface: UiInterface, texX: number, texY: number): boolean;
+        static State(scene: BABYLON.Scene): UiSceneState;
+        private static Tick;
+        private static DisposeState;
+        private static Timeout;
+    }
+}
+declare namespace TOOLKIT {
+    /** px number, or "N%", "auto", "none" */
+    type UiLength = number | string;
+    type UiColor = [number, number, number, number];
+    type UiVec2 = [number, number];
+    interface IUiSprite {
+        url: string;
+        size: UiVec2;
+        border: [number, number, number, number];
+        ppu: number;
+    }
+    interface IUiFontRef {
+        family: string;
+        weight: number;
+        style: "normal" | "italic";
+        metrics?: {
+            ascent: number;
+            descent: number;
+            lineHeight: number;
+            pointSize: number;
+        } | null;
+    }
+    interface IUiListener {
+        kind: "script" | "setActive" | "unsupported";
+        target: {
+            guid: string;
+            name: string;
+            path: string;
+        } | null;
+        klass: string | null;
+        method: string;
+        mode: "dynamic" | "void" | "object" | "int" | "float" | "string" | "bool";
+        arg: any;
+        callState: "off" | "runtime" | "editorAndRuntime";
+        targetType?: string;
+    }
+    interface IUiEvent {
+        listeners: IUiListener[];
+    }
+    interface IUiRect {
+        anchorMin: UiVec2;
+        anchorMax: UiVec2;
+        anchoredPosition: UiVec2;
+        sizeDelta: UiVec2;
+        pivot: UiVec2;
+        rotation: number;
+        scale: UiVec2;
+        unityRect?: [number, number, number, number];
+        tilted?: boolean;
+    }
+    interface IUiLayoutValues {
+        minWidth: number;
+        minHeight: number;
+        preferredWidth: number;
+        preferredHeight: number;
+        flexibleWidth: number;
+        flexibleHeight: number;
+    }
+    interface IUiElement {
+        id: string;
+        name: string;
+        path: string;
+        active: boolean;
+        order: number;
+        rect: IUiRect;
+        layout: IUiLayoutValues | null;
+        components: IUiComponent[];
+        children: IUiElement[];
+    }
+    type IUiComponent = {
+        type: "image";
+        color: UiColor;
+        sprite: IUiSprite | null;
+        imageType: "simple" | "sliced" | "tiled" | "filled";
+        preserveAspect: boolean;
+        fillCenter: boolean;
+        fillMethod: "horizontal" | "vertical" | "radial90" | "radial180" | "radial360";
+        fillOrigin: number;
+        fillAmount: number;
+        fillClockwise: boolean;
+        pixelsPerUnitMultiplier: number;
+        raycastTarget: boolean;
+        customMaterial?: string | null;
+        customBags?: any;
+    } | {
+        type: "rawImage";
+        color: UiColor;
+        texture: {
+            url: string;
+            size: UiVec2;
+            repeat: boolean;
+        } | null;
+        uvRect: [number, number, number, number];
+        raycastTarget: boolean;
+        customMaterial?: string | null;
+        customBags?: any;
+    } | {
+        type: "text";
+        flavor: "tmp" | "legacy";
+        text: string;
+        richText: boolean;
+        font: IUiFontRef;
+        fontSize: number;
+        autoSize: boolean;
+        minSize: number;
+        maxSize: number;
+        styles: {
+            bold: boolean;
+            italic: boolean;
+            underline: boolean;
+            strikethrough: boolean;
+            upper: boolean;
+            lower: boolean;
+            smallCaps: boolean;
+        };
+        color: UiColor;
+        gradient: {
+            mode: "horizontal" | "vertical" | "fourCorners";
+            tl: UiColor;
+            tr: UiColor;
+            bl: UiColor;
+            br: UiColor;
+        } | null;
+        alignH: "left" | "center" | "right" | "justified" | "flush";
+        alignV: "top" | "middle" | "bottom" | "baseline" | "midline" | "capline";
+        wrap: boolean;
+        overflow: "overflow" | "ellipsis" | "truncate" | "masking";
+        lineSpacing: number;
+        characterSpacing: number;
+        wordSpacing: number;
+        paragraphSpacing: number;
+        margins: [number, number, number, number];
+        outline: {
+            width: number;
+            color: UiColor;
+        } | null;
+        underlay: {
+            offset: UiVec2;
+            softness: number;
+            color: UiColor;
+        } | null;
+        sdf?: {
+            gradientScale: number;
+            ratioA: number;
+            ratioC: number;
+        } | null;
+        raycastTarget: boolean;
+        customMaterial?: string | null;
+        customBags?: any;
+    } | {
+        type: "shadow" | "outline";
+        color: UiColor;
+        distance: UiVec2;
+        useGraphicAlpha: boolean;
+    } | {
+        type: "selectable";
+        interactable: boolean;
+        transition: "none" | "colorTint" | "spriteSwap" | "animation";
+        targetGraphic: string | null;
+        colors: {
+            normal: UiColor;
+            highlighted: UiColor;
+            pressed: UiColor;
+            selected: UiColor;
+            disabled: UiColor;
+            multiplier: number;
+            fadeDuration: number;
+        };
+        sprites: {
+            highlighted: IUiSprite | null;
+            pressed: IUiSprite | null;
+            selected: IUiSprite | null;
+            disabled: IUiSprite | null;
+        };
+    } | {
+        type: "button";
+        onClick: IUiEvent;
+    } | {
+        type: "toggle";
+        isOn: boolean;
+        graphic: string | null;
+        group: string | null;
+        transition: "none" | "fade";
+        onValueChanged: IUiEvent;
+    } | {
+        type: "toggleGroup";
+        allowSwitchOff: boolean;
+    } | {
+        type: "slider";
+        direction: "leftToRight" | "rightToLeft" | "bottomToTop" | "topToBottom";
+        min: number;
+        max: number;
+        wholeNumbers: boolean;
+        value: number;
+        fillRect: string | null;
+        handleRect: string | null;
+        onValueChanged: IUiEvent;
+    } | {
+        type: "scrollbar";
+        direction: "leftToRight" | "rightToLeft" | "bottomToTop" | "topToBottom";
+        value: number;
+        size: number;
+        steps: number;
+        handleRect: string | null;
+        onValueChanged: IUiEvent;
+    } | {
+        type: "dropdown";
+        flavor: "tmp" | "legacy";
+        template: string | null;
+        captionText: string | null;
+        captionImage: string | null;
+        itemText: string | null;
+        itemImage: string | null;
+        options: {
+            text: string;
+            image: IUiSprite | null;
+        }[];
+        value: number;
+        onValueChanged: IUiEvent;
+    } | {
+        type: "inputField";
+        flavor: "tmp" | "legacy";
+        text: string;
+        textComponent: string | null;
+        placeholder: string | null;
+        contentType: "standard" | "autocorrected" | "integer" | "decimal" | "alphanumeric" | "name" | "email" | "password" | "pin" | "custom";
+        lineType: "single" | "multiSubmit" | "multiNewline";
+        characterLimit: number;
+        readOnly: boolean;
+        caretColor: UiColor;
+        selectionColor: UiColor;
+        onValueChanged: IUiEvent;
+        onEndEdit: IUiEvent;
+        onSubmit: IUiEvent;
+        onSelect: IUiEvent;
+        onDeselect: IUiEvent;
+    } | {
+        type: "scrollRect";
+        content: string | null;
+        viewport: string | null;
+        horizontal: boolean;
+        vertical: boolean;
+        movementType: "unrestricted" | "elastic" | "clamped";
+        elasticity: number;
+        inertia: boolean;
+        decelerationRate: number;
+        scrollSensitivity: number;
+        horizontalScrollbar: string | null;
+        verticalScrollbar: string | null;
+        horizontalVisibility: "permanent" | "autoHide" | "autoHideAndExpandViewport";
+        verticalVisibility: "permanent" | "autoHide" | "autoHideAndExpandViewport";
+        horizontalSpacing: number;
+        verticalSpacing: number;
+        onValueChanged: IUiEvent;
+    } | {
+        type: "mask";
+        showMaskGraphic: boolean;
+    } | {
+        type: "rectMask2D";
+        padding: [number, number, number, number];
+        softness: UiVec2;
+    } | {
+        type: "canvasGroup";
+        alpha: number;
+        interactable: boolean;
+        blocksRaycasts: boolean;
+        ignoreParentGroups: boolean;
+    } | {
+        type: "layoutGroup";
+        kind: "horizontal" | "vertical" | "grid";
+        padding: [number, number, number, number];
+        spacing: UiVec2;
+        childAlignment: number;
+        reverse: boolean;
+        controlWidth: boolean;
+        controlHeight: boolean;
+        useScaleWidth: boolean;
+        useScaleHeight: boolean;
+        expandWidth: boolean;
+        expandHeight: boolean;
+        cellSize: UiVec2;
+        startCorner: number;
+        startAxis: number;
+        constraint: number;
+        constraintCount: number;
+    } | {
+        type: "layoutElement";
+        ignoreLayout: boolean;
+        minWidth: number;
+        minHeight: number;
+        preferredWidth: number;
+        preferredHeight: number;
+        flexibleWidth: number;
+        flexibleHeight: number;
+        priority: number;
+    } | {
+        type: "contentSizeFitter";
+        horizontal: "unconstrained" | "min" | "preferred";
+        vertical: "unconstrained" | "min" | "preferred";
+    } | {
+        type: "aspectRatioFitter";
+        mode: "none" | "widthControlsHeight" | "heightControlsWidth" | "fitInParent" | "envelopeParent";
+        ratio: number;
+    } | {
+        type: "canvas";
+        overrideSorting: boolean;
+        sortingOrder: number;
+        sortingLayer: number;
+        pixelPerfect: boolean;
+        enabled?: boolean;
+    };
+    interface IUiScaler {
+        mode: "constantPixel" | "scaleWithScreen" | "constantPhysical";
+        scaleFactor: number;
+        referenceResolution: UiVec2;
+        screenMatchMode: "matchWidthOrHeight" | "expand" | "shrink";
+        match: number;
+        physicalUnit: "cm" | "mm" | "in" | "pt" | "pc";
+        fallbackScreenDpi: number;
+        defaultSpriteDpi: number;
+        referencePixelsPerUnit: number;
+        dynamicPixelsPerUnit: number;
+    }
+    interface IUiCanvasPayload {
+        version: 2;
+        kind: "canvas";
+        id: string;
+        name: string;
+        renderMode: "overlay" | "camera" | "world";
+        camera: string | null;
+        planeDistance: number;
+        sortingLayer: number;
+        sortingOrder: number;
+        pixelPerfect: boolean;
+        order: number;
+        scaler: IUiScaler | null;
+        exportCanvasSize: UiVec2;
+        root: IUiElement;
+        fonts: string;
+    }
+    interface IUiDocStyle {
+        display: "flex" | "none";
+        visibility: "visible" | "hidden";
+        position: "relative" | "absolute";
+        overflow: "visible" | "hidden";
+        opacity: number;
+        flexDirection: "column" | "column-reverse" | "row" | "row-reverse";
+        flexWrap: "nowrap" | "wrap" | "wrap-reverse";
+        flexGrow: number;
+        flexShrink: number;
+        flexBasis: UiLength;
+        justifyContent: "flex-start" | "flex-end" | "center" | "space-between" | "space-around" | "space-evenly";
+        alignItems: "auto" | "flex-start" | "flex-end" | "center" | "stretch";
+        alignSelf: "auto" | "flex-start" | "flex-end" | "center" | "stretch";
+        alignContent: "auto" | "flex-start" | "flex-end" | "center" | "stretch";
+        width: UiLength;
+        height: UiLength;
+        minWidth: UiLength;
+        minHeight: UiLength;
+        maxWidth: UiLength;
+        maxHeight: UiLength;
+        left: UiLength;
+        top: UiLength;
+        right: UiLength;
+        bottom: UiLength;
+        margin: [UiLength, UiLength, UiLength, UiLength];
+        padding: [UiLength, UiLength, UiLength, UiLength];
+        borderWidth: [number, number, number, number];
+        borderColor: [UiColor, UiColor, UiColor, UiColor];
+        borderRadius: [number, number, number, number];
+        backgroundColor: UiColor;
+        backgroundImage: IUiSprite | null;
+        backgroundTint: UiColor;
+        backgroundScaleMode: "stretch" | "fit" | "crop";
+        slice: [number, number, number, number];
+        sliceScale: number;
+        color: UiColor;
+        font: IUiFontRef | null;
+        fontSize: number;
+        textAlign: "upper-left" | "upper-center" | "upper-right" | "middle-left" | "middle-center" | "middle-right" | "lower-left" | "lower-center" | "lower-right";
+        whiteSpace: "normal" | "nowrap" | "pre" | "pre-wrap";
+        textOverflow: "clip" | "ellipsis";
+        textOutlineWidth: number;
+        textOutlineColor: UiColor;
+        textShadow: {
+            offset: UiVec2;
+            blur: number;
+            color: UiColor;
+        } | null;
+        letterSpacing: number;
+        wordSpacing: number;
+        paragraphSpacing: number;
+        rotate: number;
+        scale: UiVec2;
+        translate: [UiLength, UiLength];
+        transformOrigin: [UiLength, UiLength];
+    }
+    type UiDocState = "hover" | "active" | "focus" | "checked" | "disabled";
+    interface IUiDocElement {
+        id: string;
+        name: string;
+        type: string;
+        classes: string[];
+        path: string;
+        data: any;
+        style: IUiDocStyle;
+        states: {
+            [state in UiDocState]?: Partial<IUiDocStyle>;
+        } | null;
+        stateOwner: string | null;
+        layout: [number, number, number, number] | null;
+        children: IUiDocElement[];
+    }
+    interface IUiPanel {
+        scaleMode: "constantPixel" | "constantPhysical" | "scaleWithScreen";
+        scale: number;
+        referenceResolution: UiVec2;
+        screenMatchMode: "matchWidthOrHeight" | "expand" | "shrink";
+        match: number;
+        referenceDpi: number;
+        fallbackDpi: number;
+        referenceSpritePixelsPerUnit: number;
+        sortingOrder: number;
+        clearColor: UiColor | null;
+    }
+    interface IUiDocumentPayload {
+        version: 2;
+        kind: "document";
+        id: string;
+        name: string;
+        renderMode: "overlay" | "world" | "texture";
+        panel: IUiPanel;
+        sortingOrder: number;
+        order: number;
+        world: {
+            size: UiVec2;
+            sizeMode: "fixed" | "dynamic";
+            pivot: string;
+        } | null;
+        targets: {
+            guid: string;
+            property: "albedo" | "emissive";
+        }[];
+        textureSize: UiVec2 | null;
+        exportPanelSize: UiVec2;
+        root: IUiDocElement;
+        fonts: string;
+    }
+    type IUiPayload = IUiCanvasPayload | IUiDocumentPayload;
+    interface IInactiveInterface {
+        name: string;
+        guid: string;
+        parent: string | null;
+        component: {
+            klass: string;
+            order: number;
+            properties: any;
+        };
+    }
+    interface IUserInterfacesBlock {
+        version: 2;
+        inactive: IInactiveInterface[];
+    }
+    class UserInterfaceSchema {
+        static readonly Version: number;
+        static IsVersion2(gui: any): boolean;
+        static Css(c: UiColor, alphaScale?: number): string;
+        static Multiply(a: UiColor, b: UiColor): UiColor;
+        static Length(v: UiLength, basis: number): number;
+        static FindComponent<T extends IUiComponent>(el: IUiElement, type: string): T;
+    }
+}
+declare namespace TOOLKIT {
+    /** One styled run of text (A7). `size` null = inherit the component font size; `color` null = the component colour. */
+    interface UiTextRun {
+        text: string;
+        bold: boolean;
+        italic: boolean;
+        underline: boolean;
+        strike: boolean;
+        color: UiColor | null;
+        size: number | null;
+        alpha: number | null;
+    }
+    interface UiTextLineRun {
+        run: UiTextRun;
+        text: string;
+        x: number;
+        w: number;
+        size: number;
+    }
+    interface UiTextLine {
+        runs: UiTextLineRun[];
+        w: number;
+        paragraphEnd: boolean;
+    }
+    /**
+     * Pure rich-text parsing and line layout for uGUI Text, TextMeshPro and UI Toolkit labels (unity-gui-pipeline-parity D17, A7).
+     * No GUI types, no DOM: glyph measurement is injected by the caller.
+     */
+    class UserInterfaceText {
+        private static readonly TMP_COLORS;
+        private static readonly LEGACY_COLORS;
+        /** A hex colour (#RGB, #RGBA, #RRGGBB, #RRGGBBAA) or a supported name → UiColor, else null. */
+        static ParseColor(value: string, legacy?: boolean): UiColor | null;
+        /**
+         * Parses rich text into paragraphs of runs. Paragraphs split at "\n" and `<br>`. Supported tags: b i u s color size alpha br;
+         * any other `<tag…>` is removed and reported through `onUnknownTag(tagName)`. `<size=N%>` → baseSize·N/100, `<size=N>` → N.
+         */
+        static Parse(text: string, rich: boolean, baseSize: number, onUnknownTag?: (tag: string) => void, legacyColors?: boolean): UiTextRun[][];
+        /**
+         * Greedy line layout of parsed paragraphs (A7 wrapping): breaks at spaces, hard-breaks a word wider than the line. Trailing
+         * spaces at a wrap point are dropped. `characterSpacing` / `wordSpacing` are TMP em/100 units.
+         */
+        static LayoutLines(paragraphs: UiTextRun[][], opts: {
+            width: number;
+            fontSize: number;
+            wrap: boolean;
+            characterSpacing: number;
+            wordSpacing: number;
+            measure: (run: UiTextRun, s: string, size: number) => number;
+        }): {
+            lines: UiTextLine[];
+            w: number;
+        };
+        /** The longest prefix of `text` plus "…" whose width ≤ `width` (A7 ellipsis). */
+        static Ellipsize(text: string, width: number, measure: (s: string) => number): {
+            text: string;
+            w: number;
+        };
+        private static SameStyle;
+        private static ApplyTag;
+    }
+}
+declare namespace TOOLKIT {
+    /** Per-element runtime record of a UI Toolkit document. */
+    interface IUiDocNode {
+        /** The live element (mutable style) the flex layout reads; `src` is the exported element. */
+        live: IUiDocElement;
+        src: IUiDocElement;
+        parent: IUiDocNode | null;
+        children: IUiDocNode[];
+        control: UnityElement;
+        box: UnityBoxGraphic;
+        text: UnityTextGraphic | null;
+        /** Visual style keys without state variants (behaviours may change them). */
+        base: any;
+        owner: string | null;
+        hit: boolean;
+        display: string;
+    }
+    /**
+     * One UI Toolkit document (unity-gui-pipeline-parity D5, D7, D8, D10, D14, D17–D19, D21, D22; A10, A11, A13): a UnityElement per
+     * exported VisualElement drawn by UnityBoxGraphic, laid out by UserInterfaceFlex at the panel scale, with the pseudo-state styles
+     * Unity exported and the stock controls' behaviours. Overlay documents live on the foreground texture (ranked with the canvases),
+     * world documents on a plane under their node, render-texture documents on the target mesh's material.
+     */
+    class UserInterfaceDocument implements UiInterface {
+        name: string;
+        component: TOOLKIT.UserInterface;
+        payload: IUiDocumentPayload;
+        host: UnityCanvasHost | null;
+        mesh: BABYLON.Mesh | null;
+        meshTexture: BABYLON.GUI.AdvancedDynamicTexture | null;
+        elements: Map<string, UnityElement>;
+        byName: Map<string, UnityElement[]>;
+        rectOverrides: Map<string, IUiRect>;
+        built: boolean;
+        destroyed: boolean;
+        lastHit: boolean;
+        scene: BABYLON.Scene;
+        /** The GUI texture hosting this document (foreground texture or its own mesh texture). */
+        texture: BABYLON.GUI.AdvancedDynamicTexture;
+        /** "overlay", "world" or "texture". */
+        mode: string;
+        /** Pixels per point of the last layout (texture px per panel point). */
+        scale: number;
+        panelSize: [number, number];
+        behaviours: any[];
+        images: Map<string, HTMLImageElement>;
+        /** Per element id: the last layout rect relative to its parent's border box (points). */
+        rects: Map<string, [number, number, number, number]>;
+        nodes: Map<string, IUiDocNode>;
+        /** Texture-mode documents map pointers through the target mesh's UVs. */
+        uvPicking: boolean;
+        root: IUiDocNode;
+        /** Runtime-only overlay elements (dropdown menus) placed after every layout. */
+        popups: {
+            el: UnityElement;
+            place: () => void;
+        }[];
+        private states;
+        private pressed;
+        private upObserver;
+        private material;
+        private texSize;
+        private enabledState;
+        private target;
+        private absCache;
+        /** Pseudo states in the order their exported diffs apply (later wins). */
+        private static readonly STATE_ORDER;
+        private static readonly VISUAL_KEYS;
+        private static readonly KNOWN_TYPES;
+        constructor(component: TOOLKIT.UserInterface, payload: IUiDocumentPayload);
+        /** Loads the fonts and images a document needs, resolves its render mode, then builds its element tree (not yet laid out). */
+        static BuildAsync(component: TOOLKIT.UserInterface, payload: IUiDocumentPayload, state: UiSceneState): Promise<UserInterfaceDocument>;
+        overlayEntries(): {
+            host: UnityCanvasHost;
+            key: number[];
+        }[];
+        dispose(): void;
+        /** Shows / hides the whole document with its node (D12). */
+        SyncEnabled(enabled: boolean): void;
+        MarkDirty(): void;
+        RequestLayout(): void;
+        /** A13 + A11: panel scale, flex layout at the panel size, then every control placement (points × pixels per point). */
+        relayout(): void;
+        private ApplyNode;
+        private static Resolve;
+        /** UI Toolkit TextElement / Image measure (content size, points). */
+        private Measure;
+        NodeOf(id: string): IUiDocNode;
+        NodeOfControl(el: UnityElement): IUiDocNode;
+        /** Absolute rect of an element in panel points (untransformed layout), [x, y, w, h]. */
+        AbsPoints(id: string): number[];
+        /** uGUI-behaviour compatible absolute rect (points). */
+        AbsRect(id: string): IUiLayoutRect;
+        /** A pointer event position in panel points. */
+        PointerPoints(e: UiPointerEventData): [number, number];
+        /** The first descendant (or self) whose classes contain `cls`. */
+        FindByClass(n: IUiDocNode, cls: string, includeSelf?: boolean): IUiDocNode;
+        FindAllByClass(n: IUiDocNode, cls: string, out?: IUiDocNode[]): IUiDocNode[];
+        FindAllByType(n: IUiDocNode, type: string, out?: IUiDocNode[], stopAtSameType?: boolean): IUiDocNode[];
+        /** UI Toolkit enabledInHierarchy: no `unity-disabled` element up the chain. */
+        IsEnabled(n: IUiDocNode): boolean;
+        /** Sets a layout / visual style value of an element (a behaviour drive); layout re-runs next frame. */
+        SetStyle(n: IUiDocNode, key: string, value: any, layout?: boolean): void;
+        SetDisplay(n: IUiDocNode, shown: boolean): void;
+        SetText(n: IUiDocNode, text: string): void;
+        /** A12 for documents: an element hides with `display: none` and shows with its exported display. */
+        SetElementActive(el: UnityElement, active: boolean): void;
+        /** Enables / disables an element (the `unity-disabled` class and the `disabled` pseudo state). */
+        SetEnabled(n: IUiDocNode, on: boolean): void;
+        /** Calls `fn` for every state tracker owned by an element of this subtree. */
+        ForOwners(n: IUiDocNode, fn: (st: UiDocPseudo) => void): void;
+        StateOf(id: string): UiDocPseudo;
+        /** Re-applies every element's visual style from its base and its owner's active pseudo states. */
+        RestyleAll(): void;
+        Restyle(n: IUiDocNode): void;
+        /** Pointer press on a hit target: every state owner in its chain becomes `active` until the release. */
+        private OnPress;
+        private OnRelease;
+        private Build;
+        private BuildNode;
+        /** UnityTextGraphic data for a UI Toolkit text element (TextCore ≈ TMP metrics, spacing in em/100). */
+        static TextData(st: IUiDocStyle, text: string): any;
+        /** Creates the behaviours (stock controls, state trackers) and wires the pointer hit targets. */
+        private AttachBehaviours;
+        Add(n: IUiDocNode, b: any): void;
+        /** D19: a TextField / numeric field edits through the stock Babylon input (UiInputField) on its inner TextElement. */
+        private CreateTextInput;
+        private WorldSize;
+        private CreateWorld;
+        private SetupMaterial;
+        /** The mesh of the first exported renderer that uses the render texture (a node id, or its first child mesh). */
+        private ResolveTarget;
+        private targetProperty;
+        private CreateTexture;
+    }
+    /** Pseudo-state flags of one exported state owner (hover from the pointer chain, active from presses, others from controls). */
+    class UiDocPseudo {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        hover: boolean;
+        active: boolean;
+        focus: boolean;
+        checked: boolean;
+        disabled: boolean;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        onPointerEnter(e: any): void;
+        onPointerExit(e: any): void;
+        dispose(): void;
+    }
+    /** Button / RepeatButton: click (RepeatButton: on press, then every 100 ms while held). */
+    class UiDocButton {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        repeat: boolean;
+        disposed: boolean;
+        private holding;
+        private elapsed;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode, repeat: boolean);
+        get element(): UnityElement;
+        private Enabled;
+        onPointerClick(e: UiPointerEventData): void;
+        onPointerDown(e: UiPointerEventData): void;
+        onPointerUp(e: UiPointerEventData): void;
+        update(dt: number): void;
+        Click(): void;
+        dispose(): void;
+    }
+    /** Toggle (and the Foldout's toggle): value, checkmark visibility (or arrow rotation), `:checked`. */
+    class UiDocToggle {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        value: boolean;
+        onChanged: ((v: boolean) => void)[];
+        private checkmark;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        start(): void;
+        onPointerClick(e: UiPointerEventData): void;
+        Set(v: boolean, notify: boolean): void;
+        private Visuals;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** RadioButton: exclusive among the radios of its group (RadioButtonGroup, GroupBox, else its parent); the dot shows when checked. */
+    class UiDocRadio {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        value: boolean;
+        group: UiDocRadioGroup;
+        peers: UiDocRadio[];
+        private checkmark;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        start(): void;
+        /** The element that scopes exclusivity. */
+        Scope(): IUiDocNode;
+        onPointerClick(e: UiPointerEventData): void;
+        /** Checks this radio and clears its peers. */
+        Check(notify: boolean): void;
+        SetRaw(v: boolean, notify: boolean): void;
+        private Visuals;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** RadioButtonGroup: the selection is the group's value (choices index), exported as data.value. */
+    class UiDocRadioGroup {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        value: number;
+        radios: UiDocRadio[];
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        start(): void;
+        Select(index: number, notify: boolean): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Standalone radio exclusivity (radios outside a RadioButtonGroup share their GroupBox / parent) is linked by the document. */
+    /** Slider / SliderInt: dragger translate from the value, click-to-jump, drag, and the optional input field. */
+    class UiDocSlider {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        value: number;
+        private container;
+        private dragger;
+        private field;
+        private grab;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        private get data();
+        private get whole();
+        private get vertical();
+        link(): void;
+        start(): void;
+        private Normalized;
+        /** Unity BaseSlider.UpdateDragElementPosition: translate = normalized × (container − dragger). */
+        onLayout(): void;
+        Set(v: number, notify: boolean): void;
+        private ShowValue;
+        /** Unity's float field text ("g7": seven significant digits). */
+        static Format(v: number, whole: boolean): string;
+        private Enabled;
+        private FromPointer;
+        onPointerDown(e: UiPointerEventData): void;
+        onInitializePotentialDrag(e: UiPointerEventData): void;
+        onDrag(e: UiPointerEventData): void;
+        onEndDrag(e: UiPointerEventData): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** MinMaxSlider: dragger left / width from the range (calibrated on Unity's exported placement), thumb drags. */
+    class UiDocMinMax {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        min: number;
+        max: number;
+        private input;
+        private dragger;
+        private minThumb;
+        private maxThumb;
+        private offset;
+        private shrink;
+        private dragging;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        private get lo();
+        private get hi();
+        private N;
+        link(): void;
+        beforeLayout(): boolean;
+        onInitializePotentialDrag(e: UiPointerEventData): void;
+        onPointerDown(e: UiPointerEventData): void;
+        onDrag(e: UiPointerEventData): void;
+        onEndDrag(e: UiPointerEventData): void;
+        onPointerUp(e: UiPointerEventData): void;
+        SetRange(a: number, b: number, notify: boolean): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** ProgressBar: the progress element's `right` inset follows the value; the title shows `title`. */
+    class UiDocProgress {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        value: number;
+        private progress;
+        private background;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        /** The progress `right` inset is (1 − normalized) of the background's padding box (an absolute child's percentage basis). */
+        beforeLayout(): boolean;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** A numeric field's value is its parsed input text. */
+    class UiDocNumber {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        input: UiInputField;
+        integer: boolean;
+        disposed: boolean;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode, input: UiInputField, integer: boolean);
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Vector fields: the value is the array of the child numeric fields. */
+    class UiDocComposite {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        private fields;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** Foldout: its toggle shows / hides the content container. */
+    class UiDocFoldout {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        private toggle;
+        private content;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        start(): void;
+        private Apply;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** TabView: header click selects a tab (content display, header `:checked` look taken from the exported selected / unselected headers). */
+    class UiDocTabView {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        index: number;
+        private headers;
+        private tabs;
+        private looks;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        Select(i: number, notify: boolean): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** TwoPaneSplitView: fixed pane dimension, dragline drag clamped to the container. */
+    class UiDocSplitView {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        dimension: number;
+        private container;
+        private anchor;
+        private panes;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        private get horizontal();
+        private get fixedIndex();
+        link(): void;
+        /** Unity TwoPaneSplitView.Init: the fixed pane takes the dimension, the other pane flexes. */
+        beforeLayout(): boolean;
+        private Drag;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** ScrollView (A14 subset for UI Toolkit): wheel scrolling (ScrollView.mouseWheelScrollSize 18 per notch), clamped offset, scroller visibility / dragger. */
+    class UiDocScrollView {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        offset: [number, number];
+        private viewport;
+        private content;
+        private vScroller;
+        private hScroller;
+        private grab;
+        static WheelSize: number;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        private get data();
+        link(): void;
+        private Sizes;
+        private Mode;
+        onLayout(): void;
+        private Clamp;
+        /** Content translate = −offset (applied to the control directly: no relayout), scroller draggers follow. */
+        private Apply;
+        ScrollBy(dx: number, dy: number, notify: boolean): void;
+        onScroll(e: UiPointerEventData): void;
+        private BarPress;
+        private BarDrag;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** ListView / TreeView (existing rows): click selects a row (tinted highlight). */
+    class UiDocList {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        index: number;
+        private rows;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        link(): void;
+        onPointerClick(e: UiPointerEventData): void;
+        Select(i: number, notify: boolean): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+    /** DropdownField / EnumField: a popup list of `choices` under the field (click outside closes), the value is the index. */
+    class UiDocDropdown {
+        doc: UserInterfaceDocument;
+        node: IUiDocNode;
+        disposed: boolean;
+        index: number;
+        choices: string[];
+        private textNode;
+        private input;
+        private popup;
+        private blocker;
+        constructor(doc: UserInterfaceDocument, node: IUiDocNode);
+        private get isEnum();
+        /** Unity ObjectNames.NicifyVariableName for enum names ("MiddleCenter" → "Middle Center"). */
+        static Nicify(s: string): string;
+        private Label;
+        link(): void;
+        onPointerClick(e: UiPointerEventData): void;
+        Set(i: number, notify: boolean): void;
+        private Box;
+        Open(): void;
+        Close(): void;
+        getValue(): any;
+        setValue(v: any, notify: boolean): void;
+        dispose(): void;
+    }
+}
+declare namespace TOOLKIT {
     /**
      * Babylon Toolkit User Interface Component
+     *
+     * Rebuilds an exported Unity user interface (glTF `gui` payload, schema version 2) with BabylonJS GUI.
+     * One component per root Canvas or UIDocument. It covers three UI kinds:
+     * - uGUI with TextMeshPro text (Canvas, Image, RawImage, Mask, RectMask2D, layout groups, all Selectables)
+     * - uGUI Legacy (UnityEngine.UI.Text, legacy InputField and Dropdown)
+     * - UI Toolkit (UIDocument + PanelSettings, UXML/USS flex layout, controls and hover/active/focus states)
+     *
+     * Render modes: uGUI Screen Space - Overlay (foreground texture, sorted by sortingOrder), Screen Space - Camera
+     * (a plane at planeDistance in front of its camera, overlay when the camera is missing) and World Space (a mesh
+     * texture on the canvas node). UI Toolkit: overlay panels, world-space panels and render-texture panels (drawn
+     * into the material that samples the render texture). Screen canvases follow the CanvasScaler (constant pixel,
+     * scale with screen, constant physical) and relayout on resize.
+     *
+     * Public API: GetInterface, GetInterfaceNames, AllInterfacesLoaded, FindElement, QueryElements, OnClick,
+     * OnValueChanged, OnSubmit, GetText, SetText, GetValue, SetValue, SetInteractable, SetActive,
+     * RegisterInactiveInterfaces, GetCanvasElement, ShowCanvasElement, HideCanvasElement, AttachClickHandler,
+     * GetForegroundTexture, SetForegroundTexture, IsForegroundReady, GetBackgroundTexture, SetBackgroundTexture,
+     * IsBackgroundReady, OnParseNodeObject, OnInterfaceLoaded.
+     *
+     * Documented deviations from Unity:
+     * - sprite-shaped Masks clip to their rectangle (warning `mask-shape`)
+     * - no keyboard / gamepad navigation between Selectables
+     * - Animation transitions render the normal state
+     * - TMP `<sprite>` and `<link>` tags are removed (warning `rich-text-tag`)
+     * - UI Toolkit data binding is not exported
+     * - translucent UI blends in sRGB space (Unity Linear projects blend in linear space and look lighter)
+     * - world / camera UI materials use their own image processing (HDRP: unexposed, same tone mapping)
+     * - legacy Text draws a faux bold when no bold font face ships with the export
+     *
+     * Scenes exported by an older toolkit (no schema version 2 payload) still load through the previous
+     * BabylonJS GUI JSON path and log one warning per scene: "was exported by an older toolkit - re-export the scene".
      */
     class UserInterface extends TOOLKIT.ScriptComponent {
         private static readonly PHYSICAL_SIZE_SLICE_FACTOR;
@@ -20735,7 +30053,20 @@ declare namespace TOOLKIT {
         static OnParseNodeObject: BABYLON.Observable<any>;
         static OnInterfaceLoaded: BABYLON.Observable<string>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected start(): Promise<void>;
+        /** Scenes whose disposal purges the static component sets (no static may keep a disposed scene). */
+        private static _watched;
+        private static WatchScene;
+        /** Every constructed UserInterface component (built or waiting on a disabled node, D12). */
+        private static _all;
+        private _v2;
+        _destroyed: boolean;
+        _loaded: boolean;
+        private static _legacyWarned;
+        protected start(): void;
+        private startAsync;
+        protected destroy(): void;
+        private static _started;
+        private startLegacyAsync;
         protected parseNodeObject(rootNode: any, hostPrefix: string): void;
         private processNodeSources;
         /**
@@ -20875,6 +30206,47 @@ declare namespace TOOLKIT {
         static SetBackgroundTexture(scene: BABYLON.Scene, adt: BABYLON.GUI.AdvancedDynamicTexture): void;
         static GetBackgroundTexture(scene: BABYLON.Scene, createOptions?: any): BABYLON.GUI.AdvancedDynamicTexture;
         static GetCanvasElement(name: string, scene?: BABYLON.Scene): BABYLON.GUI.Control;
+        /** The built interface (root canvas or document) with this name. */
+        static GetInterface(name: string, scene?: BABYLON.Scene): TOOLKIT.UiInterface;
+        /** The names of every built interface of the scene, in build order. */
+        static GetInterfaceNames(scene?: BABYLON.Scene): string[];
+        /** True when every started UserInterface on an enabled node of the scene has finished building (fonts settled). */
+        static AllInterfacesLoaded(scene?: BABYLON.Scene): boolean;
+        /** A built element by "Canvas/Parent/Child" path (or a path suffix), else the first element with that name. */
+        static FindElement(nameOrPath: string, scene?: BABYLON.Scene): TOOLKIT.UnityElement;
+        /** Elements by UI Toolkit name / class / type selector; uGUI elements match by name and by component type (e.g. "button"). */
+        static QueryElements(selector: {
+            name?: string;
+            className?: string;
+            type?: string;
+        }, scene?: BABYLON.Scene): TOOLKIT.UnityElement[];
+        /** Runtime click observers of an element (after its persistent onClick listeners). */
+        static OnClick(el: TOOLKIT.UnityElement): BABYLON.Observable<TOOLKIT.UnityElement>;
+        /** Runtime value observers (toggle bool, slider/scrollbar number, dropdown index, input string, scroll rect {x,y}). */
+        static OnValueChanged(el: TOOLKIT.UnityElement): BABYLON.Observable<any>;
+        /** Runtime submit observers of an input field. */
+        static OnSubmit(el: TOOLKIT.UnityElement): BABYLON.Observable<string>;
+        /** The text of an element: its text graphic, an input field's value, else the first text below it. */
+        static GetText(el: TOOLKIT.UnityElement): string;
+        /** Sets the text of an element (text graphic or input field); layouts that depend on it re-run (D16). */
+        static SetText(el: TOOLKIT.UnityElement, text: string): void;
+        /** Slider / scrollbar number, toggle bool, dropdown index, input string. */
+        static GetValue(el: TOOLKIT.UnityElement): any;
+        static SetValue(el: TOOLKIT.UnityElement, value: any, notify?: boolean): void;
+        /** Selectable.interactable of an element (disabled tint, no events). */
+        static SetInteractable(el: TOOLKIT.UnityElement, on: boolean): void;
+        /** Shows or hides an element by name/path (A12), or a whole interface by name — enabling its node builds it if needed (D12). */
+        static SetActive(nameOrPathOrInterface: string, active: boolean, scene?: BABYLON.Scene): void;
+        /**
+         * D12: every inactive root canvas / document of the scene block gets a disabled node (id = its guid) with a UserInterface
+         * component; it builds the first time game code enables it.
+         */
+        static RegisterInactiveInterfaces(scene: BABYLON.Scene, block: TOOLKIT.IUserInterfacesBlock): void;
+        private static FindInterfaceComponent;
+        private static FindBehaviour;
+        private static ValueBehaviour;
+        private static FindTextOwner;
+        private static FindTextGraphic;
         static ShowCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
         static HideCanvasElement(element: BABYLON.GUI.Control, fadeDuration?: number, fadeSpeedRatio?: number): Promise<void>;
         static AttachClickHandler(element: BABYLON.GUI.Control, func: (eventData?: BABYLON.GUI.Vector2WithInfo, eventState?: BABYLON.EventState) => any): BABYLON.Observer<BABYLON.GUI.Vector2WithInfo> | null;
