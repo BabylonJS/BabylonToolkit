@@ -3014,6 +3014,8 @@ declare namespace TOOLKIT {
          * USESPHERICALFROMREFLECTIONMAP (no such uniforms exist), is left untouched.
          */
         static WriteProbeHarmonics(uniformBuffer: BABYLON.UniformBuffer, subMesh: BABYLON.SubMesh): boolean;
+        /** Rewrites the nine SH uniforms from the material's reflection texture, exactly as Babylon's BindIBLParameters does, after a probe rider overwrote them. */
+        private static RestoreGlobalHarmonics;
     }
     /**
       * Per-Skin Texture2DArray Switching Plugin (BABYLON.MaterialPluginBase)
@@ -17808,6 +17810,8 @@ declare namespace TOOLKIT {
         static MoveThreshold: number;
         /** Upper bound on tetrahedra visited per lookup before the walk restarts from the nearest probe (FR-14). */
         static MaxWalkSteps: number;
+        /** Show Debug Probes: diameter (metres) of the yellow sphere drawn at every probe position. Read when the spheres are built. */
+        static DebugProbeSize: number;
         /** The binary's seven sections in file order (plan lpn D23); the header's `layout` names them. */
         private static readonly Sections;
         private _url;
@@ -17838,6 +17842,8 @@ declare namespace TOOLKIT {
         private _lastWalkSteps;
         private _tmp;
         private _nearestWarned;
+        private _debugVisible;
+        private _debugMesh;
         /**
          * Sets (or clears, with null) a mesh's rider: the D28 source of truth `metadata.toolkit.lightProbeSH` AND the
          * per-draw cache `mesh._tkLightProbeSH` that UnityStyleLightingPlugin.WriteProbeHarmonics reads first. The two
@@ -17877,6 +17883,12 @@ declare namespace TOOLKIT {
         /** Steps of the most recent dynamic lookup (AC-7). */
         getLastWalkSteps(): number;
         getWalker(): TOOLKIT.LightProbeTetraWalker;
+        /** Show Debug Probes: true while the yellow probe spheres are requested (exported `showdebug`, or setDebugVisible). */
+        isDebugVisible(): boolean;
+        /** Show Debug Probes: shows or hides a small yellow sphere at every probe position. Callable before the binary loads - the spheres appear once it has. */
+        setDebugVisible(visible: boolean): void;
+        /** Builds the debug spheres on first show (one unlit, unpickable, thin-instanced mesh - a single draw for any probe count) and toggles them. */
+        private updateDebugProbes;
         /**
          * Attaches a mesh: static copies its exported slot once; dynamic joins the registry and is evaluated on the
          * next late(). Returns false (with one warning) for an InstancedMesh, an inactive network, or a mesh with
