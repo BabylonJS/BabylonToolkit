@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.28.0 - R1) */
+        /** Gets the toolkit framework version string (9.29.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -675,8 +675,10 @@ declare namespace TOOLKIT {
          * @param geometry The scene geometry to build the navigation mesh from
          * @param heightMesh The optional height mesh geometry
          * @param showDebugMesh Whether to show a debug mesh
+         * @param options Optional bake options (offMeshConnections: extra links baked with this navmesh only). The scene's registered
+         *                off-mesh links (exported or added with AddNavigationLink) are always baked.
          */
-        static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        static CreateNavigationMeshSceneDataAsync(scene: BABYLON.Scene, properties: TOOLKIT.IUnityNavigationOptions, geometry: BABYLON.Mesh[], heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean, options?: TOOLKIT.INavigationBakeOptions): Promise<void>;
         /**
          * Scene lifecycle: the navigation statics are engine-wide but hold the scene they were built for. Registered once per
          * scene (the TerrainBuilder idiom); when that scene is disposed its navmesh, debug meshes, crowd and area sources go too.
@@ -766,6 +768,87 @@ declare namespace TOOLKIT {
         private static ForEachNavigationPolygon;
         private static CreateNavigationAreaSurface;
         private static IsOverNavigationAreaSurface;
+        /** First and last toolkit-only cost areas (Unity areas are 0..31, Detour areas are 6-bit). */
+        static NAVIGATION_FIRST_COST_AREA: number;
+        static NAVIGATION_LAST_COST_AREA: number;
+        /** Most parallel segments one wide link expands into. */
+        static NAVIGATION_MAX_LINK_SEGMENTS: number;
+        /** Agent radius used to split a wide link added at runtime when none is given (Unity's default agent radius). */
+        static NAVIGATION_LINK_AGENT_RADIUS: number;
+        /** Fires after a scene's off-mesh link table or a link's activation changes. */
+        static OnNavigationLinksChangedObservable: BABYLON.Observable<number>;
+        private static NavLinkTables;
+        private static NavLinkBakeExtras;
+        private static NavLinkDebugger;
+        private static NavLinkScene;
+        private static NavLinkShowDebug;
+        private static NavLinkVersion;
+        /** Replaces the scene's off-mesh links (the exported navigation.offmeshlinks list). Invalid entries are skipped; each link's cost area is registered. */
+        static SetNavigationLinks(scene: BABYLON.Scene, links: any): void;
+        /** Gets copies of the scene's off-mesh links (plus the extra links the current navmesh was baked with). */
+        static GetNavigationLinks(scene: BABYLON.Scene): TOOLKIT.INavigationLink[];
+        /** Gets a copy of one off-mesh link by id, or null. */
+        static GetNavigationLink(scene: BABYLON.Scene, id: number): TOOLKIT.INavigationLink;
+        /**
+         * Adds (or replaces, by id) an off-mesh link. It takes effect on the next navmesh build. A link without segments is split by
+         * width (ExpandNavigationLink). Returns the link id, or -1 when the link is invalid.
+         * @param scene The scene
+         * @param link The link (start and end are required; a missing id gets the next free id)
+         * @param agentRadius The agent radius used for the width split and the default radius
+         */
+        static AddNavigationLink(scene: BABYLON.Scene, link: TOOLKIT.INavigationLink, agentRadius?: number): number;
+        /** Removes an off-mesh link by id (takes effect on the next navmesh build). Returns false when there is no such link. */
+        static RemoveNavigationLink(scene: BABYLON.Scene, id: number): boolean;
+        /**
+         * Switches an off-mesh link on or off (Unity OffMeshLink.activated) without a rebake: its link polys' flags are cleared (no
+         * query passes them) or restored. Returns false when there is no such link.
+         */
+        static SetNavigationLinkActive(scene: BABYLON.Scene, id: number, active: boolean): boolean;
+        /**
+         * Splits a link of this width into clamp(ceil(width / (2 x agentRadius)), 1, 16) parallel point segments, spaced evenly across
+         * the width, perpendicular to start -> end in the horizontal plane (the exporter's OffMeshLinkMath.SplitWidth, number for number).
+         * @param start World start [x, y, z]
+         * @param end World end [x, y, z]
+         * @param width Link width (0 = one point link)
+         * @param agentRadius Agent radius
+         * @param linkId Link id (segment userid = (linkId << 8) | index)
+         * @param fallbackAxis Width direction used when start -> end is vertical (null = +X)
+         */
+        static ExpandNavigationLink(start: number[], end: number[], width: number, agentRadius: number, linkId: number, fallbackAxis?: number[]): TOOLKIT.INavigationLinkSegment[];
+        /**
+         * Creates the toolkit's Detour tile-cache mesh process: ground polys become area 0 / flag 1 and the scene's off-mesh links are
+         * added to every tile (re)build, so tiles rebuilt after an obstacle change keep their links. Null when Recast is not loaded.
+         */
+        static CreateNavigationAreaMeshProcess(scene?: BABYLON.Scene): any;
+        /** Gets the off-mesh link debug node (one line mesh per link, arrowheads on one-way links, grey when off), or null. */
+        static GetNavigationLinkDebug(): BABYLON.TransformNode | null;
+        /** Rebuilds the off-mesh link debug lines for a scene. */
+        static RefreshNavigationLinkDebug(scene: BABYLON.Scene): BABYLON.TransformNode;
+        private static PrepareNavigationLinks;
+        private static CheckNavigationLinkBake;
+        private static GetNavigationLinkPolyMap;
+        private static GetNavigationOffMeshConnections;
+        private static GetNavigationLinkTable;
+        private static GetNavigationLinkRecords;
+        private static FindNavigationLinkRecord;
+        private static CloneNavigationLink;
+        private static NotifyNavigationLinksChanged;
+        private static GetNavigationCostAreaOwners;
+        private static RegisterNavigationLinkCostAreas;
+        private static GetNavigationLinkSegmentCount;
+        private static ToNavigationPoint;
+        private static NormalizeNavigationLinks;
+        private static AllocateNavigationCostArea;
+        private static FilterNavigationOffMeshConnections;
+        /** Least vertical tolerance (in voxels of cell height) Detour gets for attaching off-mesh link end points to the navmesh. */
+        static NAVIGATION_LINK_CLIMB_VOXELS: number;
+        private static GetNavigationLinkClimb;
+        private static NAV_OFFMESH_ARRAY_OFFSETS;
+        private static NavLinkPendingArrays;
+        private static ReadNavigationOffMeshArrays;
+        private static FreeNavigationOffMeshArrays;
+        private static FlushNavigationOffMeshArrays;
+        private static DisposeNavigationLinkDebug;
         /** Toggle full screen scene mode. */
         static ToggleFullscreenMode(scene: BABYLON.Scene, requestPointerLock?: boolean): void;
         /** Enter full screen scene mode. */
@@ -1199,6 +1282,54 @@ declare namespace TOOLKIT {
         mesh: BABYLON.AbstractMesh;
         area: number;
         heightTolerance: number;
+    }
+    /**
+     * One Detour point-to-point connection of an off-mesh link (a wide link expands into several). userid = (id << 8) | segment index.
+     */
+    interface INavigationLinkSegment {
+        start: number[];
+        end: number[];
+        userid: number;
+    }
+    /**
+     * An off-mesh link (Unity OffMeshLink / NavMeshLink): the exported scene metadata navigation.offmeshlinks entry, or a link added
+     * with SceneManager.AddNavigationLink. Positions are world [x, y, z]. Only id, start and end are required when adding one.
+     */
+    interface INavigationLink {
+        /** Link id (exported: linkIndex + 1). Detour userId >> 8 == id. */
+        id?: number;
+        start: number[];
+        end: number[];
+        /** Authored Unity area id (its flags still apply, so area masks exclude the link). */
+        area?: number;
+        /** Detour polygon flags (from the authored area). */
+        flags?: number;
+        /** Detour connection end radius. */
+        radius?: number;
+        /** 1 = bidirectional, 0 = start to end only. */
+        direction?: number;
+        /** "offmeshlink" | "navmeshlink" */
+        kind?: string;
+        bidirectional?: boolean;
+        activated?: boolean;
+        /** Cost override (< 0 = none, the area cost applies). */
+        costoverride?: number;
+        /** Toolkit cost area 32..63 carrying the cost override (-1 = none). */
+        costarea?: number;
+        width?: number;
+        agenttype?: number;
+        autoupdate?: boolean;
+        /** Owning node hierarchy path. */
+        owner?: string;
+        segments?: TOOLKIT.INavigationLinkSegment[];
+    }
+    /**
+     * Optional sixth argument of SceneManager.CreateNavigationMeshSceneDataAsync.
+     */
+    interface INavigationBakeOptions {
+        /** Extra off-mesh links baked with this navmesh only (on top of the scene's registered links). Link records, or raw Detour
+         *  connection params ({ startPosition, endPosition, radius, bidirectional, area, flags, userId }). */
+        offMeshConnections?: any[];
     }
 }
 /** Babylon Toolkit Namespace */
@@ -2327,6 +2458,8 @@ declare namespace TOOLKIT {
         /** plan lbm D3: the Unity shadowmask, cached by lightmap index exactly as the lightmap is - one
          *  texture per index, shared by every material that lands on it. */
         private _shadowmaskMap;
+        /** unity-export-parity-gaps T15: the Unity Directional lightmap's direction map, cached by texture index like the lightmap. */
+        private _lightmapDirMap;
         private _reflectionMap;
         private _reflectionCache;
         private _assetContainer;
@@ -2470,6 +2603,13 @@ declare namespace TOOLKIT {
          * boxes at load (the reference point is stored in the root's local space, so a moving group keeps it).
          */
         private _setupLevelOfDetailSwitcher;
+        /** T19 fix: registers a single-renderer coverage group on Babylon's native LOD (see UnityLodGroups.addNativeGroup). */
+        private _setupNativeCoverageLevelOfDetail;
+        /**
+         * The group's Unity size and reference point: the exported LODGroup.size / localReferencePoint (H-a), else the union of
+         * the level meshes' world boxes (Unity's LODGroup.RecalculateBounds), the point kept in the root's local space.
+         */
+        private _levelOfDetailSize;
         /**
          * T12.8: Unity's per-object light selection for every mesh of the scene (`TOOLKIT.UnityLightSelector`).
          * The additional-light limit is the exported URP "Per Object Limit" (`additionallightsperobject`) when the
@@ -3193,6 +3333,111 @@ declare namespace TOOLKIT {
         private getWGSLDefinitions;
         private getWGSLSample;
         private getWGSLLightCode;
+    }
+    /**
+      * Unity Directional Lightmap Plugin (BABYLON.MaterialPluginBase)
+      *
+      * unity-export-parity-gaps T15 (Decision E-a). A Unity Directional bake stores, beside each colour lightmap, a
+      * direction map (lightmapDir): xyz = the dominant incoming light direction remapped to 0..1, w = how directional the
+      * light is (the rebalancing factor). Unity's DecodeDirectionalLightmap re-shades the lightmap with the PER-PIXEL normal:
+      *
+      *     halfLambert = dot(normalWorld, dir.xyz - 0.5) + 0.5
+      *     color       = color * halfLambert / max(1e-4, dir.w)
+      *
+      * which is what puts the baked relief of a normal map back into a lightmapped surface. Without a normal map, normalW is
+      * the interpolated vertex normal, exactly Unity's behaviour.
+      *
+      * Where it runs: `lightmapColor` is declared by pbrBlockLightmapInit AFTER CUSTOM_FRAGMENT_BEFORE_LIGHTS, and nothing
+      * reads it before the light loop, so the decode is appended to the include's LAST statement (the lightmap-level scale)
+      * through a `!`-prefixed regex key matched against the include-expanded source. `$0` re-emits the matched statement.
+      * Both language keys are returned from the first call (MaterialPluginManager freezes the key SET when the plugin is
+      * added); the key of the other language is simply absent from the shader and is a no-op.
+      *
+      * Attached ONLY to a material whose lightmap has a direction map (CanvasTools intake), so non-directional scenes compile
+      * exactly as before. The direction map shares the lightmap's UV2 atlas (vLightmapUV) and is sampled raw (gammaSpace
+      * false, never RGBD). No uniforms: one sampler, bound in bindForSubMesh.
+      *
+      * World frame: the toolkit's Babylon world is Unity's world (the same raw-floats contract the SH probes rely on), so the
+      * baked direction and normalW are compared directly.
+      * @class DirectionalLightmapPlugin - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class DirectionalLightmapPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PluginName: string;
+        static readonly SamplerName: string;
+        /** The include-expanded GLSL / WGSL statements the decode is appended to (whitespace tolerant). */
+        static readonly GLSLAnchor: string;
+        static readonly WGSLAnchor: string;
+        private _directionTexture;
+        /** The JS mirror of the injected shader expression (pinned against Unity's formula by lightmaps.test.js). */
+        static Decode(color: BABYLON.Vector3, normal: BABYLON.Vector3, direction: BABYLON.Vector4): BABYLON.Vector3;
+        /** The intake gate (CanvasTools): a material's common-constant metadata carries a direction map beside its lightmap. */
+        static HasDirection(commonConstant: any): boolean;
+        /** Attaches (or re-targets) the plugin on a lightmapped PBR material. Returns null for a material that cannot carry it. */
+        static Attach(material: BABYLON.Material, directionTexture: BABYLON.BaseTexture): TOOLKIT.DirectionalLightmapPlugin;
+        /** The plugin on this material, or null. */
+        static Get(material: BABYLON.Material): TOOLKIT.DirectionalLightmapPlugin;
+        constructor(material: BABYLON.Material);
+        get directionTexture(): BABYLON.BaseTexture;
+        set directionTexture(value: BABYLON.BaseTexture);
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getClassName(): string;
+        isReadyForSubMesh(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getSamplers(samplers: string[]): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        hasTexture(texture: BABYLON.BaseTexture): boolean;
+        getActiveTextures(activeTextures: BABYLON.BaseTexture[]): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        static GLSLDefinitions(): string;
+        static GLSLDecode(): string;
+        static WGSLDefinitions(): string;
+        static WGSLDecode(): string;
+    }
+    /**
+      * unity-export-parity-gaps T19 (H-b) - Unity's LOD cross-fade dither (LODFadeCrossFade) for scene LODGroups whose fade
+      * mode is CrossFade or SpeedTree. Mirrors the terrain tree cross-fade (TerrainFoliagePlugin.MODE_CROSSFADE): the same
+      * 4x4 Bayer matrix as (v + 0.5) / 16 and the same signed fade value - the outgoing level carries +f, the incoming level
+      * -f, and a fragment is discarded when `fade - sign(fade) * dither < 0`, so the two levels cover complementary pixels
+      * and the pair always fills the surface exactly once.
+      *
+      * Attached ONLY to material clones made once at load per (material, LOD level) of cross-fade groups
+      * (LodCrossFadePlugin.AcquireClone) and swapped onto a level's meshes only while it fades, so no other draw changes.
+      * The fade value is PER MESH (`mesh._tkLodFade`): two groups sharing a clone can fade at different points. Babylon
+      * rebinds a material's uniform buffer only when the material/effect changes between draws, so hardBindForSubMesh (run
+      * on every draw) forces the rebind for these few fading draws and bindForSubMesh writes the mesh's own value.
+      * @class LodCrossFadePlugin - All rights reserved (c) 2024 Mackey Kinard
+      */
+    class LodCrossFadePlugin extends BABYLON.MaterialPluginBase {
+        static readonly PluginName: string;
+        /** Unity LODFadeCrossFade 4x4 Bayer matrix, used as (v + 0.5) / 16 (TerrainFoliagePlugin.BAYER). */
+        static readonly BAYER: number[];
+        /** Clones made by AcquireClone, per scene: key "<material uniqueId>|<level>". */
+        private static _clones;
+        /** Total clones ever made (tests: clones are made at load, never during a fade). */
+        static CloneCount: number;
+        constructor(material: BABYLON.Material);
+        /** The plugin on this material, or null. */
+        static Get(material: BABYLON.Material): TOOLKIT.LodCrossFadePlugin;
+        /**
+         * The cross-fade clone of `material` for LOD level `level` (made on first request and cached per scene; a MultiMaterial
+         * gets a MultiMaterial of clones). Null when the material cannot be cloned - the caller then hard-switches that mesh.
+         * `mesh` (optional) pre-compiles the clone's effect so the first fade does not hitch.
+         */
+        static AcquireClone(material: BABYLON.Material, level: number, mesh?: BABYLON.AbstractMesh): BABYLON.Material;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** Every draw: a fading draw must rebind so bindForSubMesh writes THIS mesh's fade into the shared uniform buffer. */
+        hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** The Bayer table, declared once per build under the plugin's own define (WGSL: module scope var<private>). */
+        static Definitions(wgsl: boolean): string;
+        /** Unity LODFadeCrossFade: discard when fade - sign(fade) * dither < 0 (outgoing +f, incoming -f). */
+        static Clip(wgsl: boolean): string;
+        /** The JS mirror of Clip: true when the fragment with Bayer value `dither` (0..1) is kept. */
+        static Keeps(fade: number, dither: number): boolean;
     }
     /**
      * Babylon custom uniform items (GLTF)
@@ -5104,6 +5349,14 @@ declare namespace TOOLKIT {
          * (culled) below the last one. `count` limits the levels considered (mismatched lods/coverages arrays).
          */
         static SelectCoverageLevel(relativeHeight: number, coverages: ArrayLike<number>, count: number): number;
+        /**
+         * unity-export-parity-gaps T19 (H-b): Unity's fade-width cross-fade progress. Level `level`'s band runs from its own
+         * transition height up to the previous level's (1 for LOD0); its LOWEST `width` share of that band is the transition
+         * zone, where it fades into the next level (or out to nothing when it is the last level and the group is culled
+         * below it). Returns the outgoing level's weight in [0, 1) inside the zone (0 at the level's own transition height),
+         * or 1 when no fade is in progress.
+         */
+        static WidthFade(relativeHeight: number, coverages: ArrayLike<number>, level: number, widths: ArrayLike<number>, count: number): number;
         /** The legacy distance rule: level i while distance < distances[i]; past the last band => -1 (culled). */
         static SelectDistanceLevel(distance: number, distances: ArrayLike<number>, count: number): number;
         /** Rec. 709 luminance of a linear colour. */
@@ -5210,12 +5463,36 @@ declare namespace TOOLKIT {
     class UnityLodGroups {
         static readonly MODE_DISTANCE: number;
         static readonly MODE_COVERAGE: number;
+        /** LODGroup.fadeMode (the exported `fademode`). */
+        static readonly FADE_NONE: number;
+        static readonly FADE_CROSSFADE: number;
+        static readonly FADE_SPEEDTREE: number;
+        /** Unity's LODGroup.crossFadeAnimationDuration default (the terrain trees use the same, TerrainTrees.FADE_SECONDS). */
+        static FADE_SECONDS: number;
+        /**
+         * H-a: the group's world size and local reference point from the exported `lodsize` (LODGroup.size, local) and
+         * `lodcenter` (LODGroup.localReferencePoint in the node's glTF local space). Unity's world size is the size times
+         * the largest absolute lossy scale. Null when the export has neither (older exports: the mesh boxes are used).
+         */
+        static ExportedSize(root: BABYLON.TransformNode, metadata: any): {
+            worldSize: number;
+            localPoint: BABYLON.Vector3;
+        };
+        /** H-a: coverages whenever present (Unity's own rule), the exported distances only as the fallback. */
+        static SelectThresholds(coverages: number[], distances: number[]): {
+            useDistances: boolean;
+            thresholds: number[];
+        };
+        /** Exported fade mode name => FADE_*. */
+        static ParseFadeMode(mode: string): number;
         /** Scene-wide QualitySettings.lodBias (the exported `lodbias`, 1 when absent). */
         lodBias: number;
         private _scene;
         private _groups;
         private _observer;
         private _point;
+        private _native;
+        private _nativeKey;
         /** The scene's switcher, created on first use. */
         static Get(scene: BABYLON.Scene): TOOLKIT.UnityLodGroups;
         constructor(scene: BABYLON.Scene);
@@ -5225,9 +5502,46 @@ declare namespace TOOLKIT {
          * (MODE_COVERAGE). `worldSize` and `localPoint` (the reference point in the root's local space) are only
          * read in MODE_COVERAGE. Starts with level 0 shown; the next update() corrects it before anything renders.
          */
-        addGroup(root: BABYLON.TransformNode, levels: BABYLON.AbstractMesh[][], mode: number, thresholds: number[], worldSize: number, localPoint: BABYLON.Vector3): TOOLKIT.IUnityLodGroup;
-        /** Evaluates every group against the active camera. No allocation. */
-        update(): void;
+        addGroup(root: BABYLON.TransformNode, levels: BABYLON.AbstractMesh[][], mode: number, thresholds: number[], worldSize: number, localPoint: BABYLON.Vector3, fade?: TOOLKIT.IUnityLodFade): TOOLKIT.IUnityLodGroup;
+        /**
+         * H-b: the cross-fade state of a CrossFade / SpeedTree group, with its material clones made NOW (load), once per
+         * (material, LOD level) through LodCrossFadePlugin.AcquireClone. A group with an instanced renderer (one shared
+         * material) or a material that cannot be cloned keeps the hard switch.
+         */
+        private static PrepareFade;
+        /**
+         * unity-export-parity-gaps T19 fix: a single-renderer, non-fading group on regular meshes keeps Babylon's NATIVE LOD
+         * (`master.addLODLevel`), exactly as before coverages were preferred. Leaving that path cost Oasis +27% frame time:
+         * a native level mesh is blocked from shadow-map render lists (`isBlocked`, only its master's chosen level casts),
+         * while a switcher-shown level casts by its own flag, so the cascaded shadow pass drew ~1100 more casters. The
+         * native thresholds are Unity's coverage rule for the ACTIVE camera: level k appears at the distance where the
+         * group's screen-relative height falls below coverage[k-1] (size x lodBias / (2 tan(vfov / 2) coverage)), the
+         * group culls below the last coverage, and an orthographic camera (whose Babylon LOD distance is minZ) gets
+         * 0 / 1e30 thresholds that pick Unity's distance-independent level. They are recomputed only when the camera,
+         * its fov / fov mode / aspect / projection / ortho size, or the LOD bias change.
+         * `details[k - 1]` is level k's mesh. Returns false (nothing registered) when the levels cannot be native.
+         */
+        addNativeGroup(master: BABYLON.Mesh, details: BABYLON.Mesh[], coverages: number[], worldSize: number): boolean;
+        get nativeGroupCount(): number;
+        /** Unity's native thresholds for one coverage at the given camera (see addNativeGroup). */
+        static NativeThreshold(worldSize: number, coverage: number, index: number, vfov: number, lodBias: number, orthoHalf: number): number;
+        private updateNative;
+        /** Evaluates every group against the active camera. No allocation (outside a fade's start and end). */
+        update(nowSeconds?: number): void;
+        /**
+         * H-b: one cross-fade group. `animateCrossFading` => a FADE_SECONDS timed fade from the old level to the new one,
+         * started at each switch. Otherwise the fade follows the position inside the level's fadeTransitionWidth zone
+         * (UnityLodAndLights.WidthFade), into the next level or out to nothing for a culled last level. During a fade both
+         * levels draw through their clones (outgoing +f, incoming -f) and only the higher-weight level casts shadows.
+         */
+        private static UpdateFade;
+        /** Swaps a level's meshes onto their cross-fade clones (on) or back to the materials they had (off). */
+        private static SwapMaterials;
+        /**
+         * Removes meshes from (on = false) or returns them to (on = true) the shadow-map render lists they were in. Runs
+         * only at a fade's start, its weight crossover and its end.
+         */
+        static SetCasting(meshes: BABYLON.AbstractMesh[], on: boolean): void;
         private static ShowLevel;
         dispose(): void;
     }
@@ -5242,6 +5556,37 @@ declare namespace TOOLKIT {
         current: number;
         disposed: boolean;
         visibleOnly: BABYLON.AbstractMesh[];
+        /** H-b cross-fade state (null = hard switch). */
+        fade: TOOLKIT.IUnityLodFadeState;
+    }
+    /** The fields of a Babylon MeshLODLevel the native coverage groups rewrite. */
+    interface INativeLodLevel {
+        distanceOrScreenCoverage: number;
+        mesh: BABYLON.Mesh;
+    }
+    /** A group's exported cross-fade settings (LODGroup.fadeMode, LOD.fadeTransitionWidth, animateCrossFading). */
+    interface IUnityLodFade {
+        mode: number;
+        widths: number[];
+        animate: boolean;
+    }
+    /** The live cross-fade state of one group. */
+    interface IUnityLodFadeState {
+        mode: number;
+        animate: boolean;
+        widths: number[];
+        initialized: boolean;
+        /** animateCrossFading: the level fading out (-2 none, -1 culled) and the fade's start time (seconds). */
+        from: number;
+        start: number;
+        /** The pair drawn this frame: outgoing (+value) and incoming (-value, -1 = nothing), -2 when not fading. */
+        outgoing: number;
+        incoming: number;
+        value: number;
+        shown: boolean[];
+        /** Per level: the materials its meshes had before the clone swap (null = not swapped). */
+        swapped: BABYLON.Material[][];
+        noCast: boolean[];
     }
     /**
      * Applies UnityLodAndLights.SelectLights to every mesh of a scene: owns `mesh.lightSources` for the meshes it
@@ -13581,6 +13926,8 @@ declare namespace PROJECT {
         cameraSmoothing: number;
         cameraCollisions: boolean;
         inputMagnitude: number;
+        /** Unity StarterAssetsInputs.analogMovement: true drives the MotionSpeed parameter with the input magnitude (gamepad sticks), false keeps it at 1 (keyboard). */
+        analogMovement: boolean;
         landingEpsilon: number;
         minimumDistance: number;
         movementAllowed: boolean;
@@ -13845,6 +14192,8 @@ declare namespace PROJECT {
         private getCheckedVerticalVelocity;
         private destroyPlayerController;
         private validateAnimationStateParams;
+        /** Fills a missing params object with the defaults, and merges keys added since a params object was exported (motionSpeed). */
+        static ApplyAnimationStateParamDefaults(params: PROJECT.AnimationStateParams): PROJECT.AnimationStateParams;
     }
     /**
     * Babylon Interface Definition
@@ -13859,6 +14208,8 @@ declare namespace PROJECT {
         mouseYInput: string;
         heightInput: string;
         speedInput: string;
+        /** Speed multiplier parameter of the Starter Assets controller (Unity sets MotionSpeed every frame). */
+        motionSpeed?: string;
         jumpFrame: string;
         jumpState: string;
         actionState: string;
@@ -13943,6 +14294,8 @@ declare namespace PROJECT {
         useClimbSystem: boolean;
         distanceFactor: number;
         inputMagnitude: number;
+        /** Unity StarterAssetsInputs.analogMovement: true drives the MotionSpeed parameter with the input magnitude (gamepad sticks), false keeps it at 1 (keyboard). */
+        analogMovement: boolean;
         landingEpsilon: number;
         minimumDistance: number;
         movementAllowed: boolean;
@@ -14170,6 +14523,8 @@ declare namespace PROJECT {
         private getCheckedVerticalVelocity;
         private destroyPlayerController;
         private validateAnimationStateParams;
+        /** Fills a missing params object with the defaults, and merges keys added since a params object was exported (motionSpeed). */
+        static ApplyAnimationStateParamDefaults(params: PROJECT.AnimationStateParams): PROJECT.AnimationStateParams;
     }
     /**
     * Babylon Enum Definition
@@ -15080,6 +15435,25 @@ declare namespace TOOLKIT {
         private _hasrootmotion;
         private _animationplaying;
         private _initialtargetblending;
+        private _blendAccumWeight;
+        private _syncedStates;
+        private _trackSignatures;
+        private _trackTargetLookup;
+        private _blendTargetUnions;
+        private _additiveBase;
+        /** Exported (sub) state machine records keyed "layerIndex|path". */
+        private _machineRecords;
+        /** Machine path of every state keyed "layerIndex|stateName". */
+        private _stateMachinePaths;
+        /** Resolved StateMachineBehaviour counterpart instances (one per exported behaviour record of this animator). */
+        private _behaviourInstances;
+        /** Mirror (C-c) per animated bone: counterpart bone and the rest-pose corrections; null until the first mirrored sample, false when not humanoid. */
+        private _mirrorInfo;
+        private _mirrorQuaternion;
+        private _mirrorVector;
+        private _sampleMirror;
+        /** Behaviour class names that already warned about a missing counterpart (warn once per name). */
+        private static WarnedBehaviourClasses;
         private _hastransformhierarchy;
         private _leftfeetbottomheight;
         private _rightfeetbottomheight;
@@ -15224,6 +15598,16 @@ declare namespace TOOLKIT {
         onAnimationUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the animation state is going to transition */
         onAnimationTransitionObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /**
+         * StateMachineBehaviour callbacks (Unity OnStateEnter / OnStateUpdate / OnStateExit / OnStateMachineEnter / OnStateMachineExit), always raised:
+         * kind is "enter", "update", "exit", "machineEnter" or "machineExit"; behaviour is the exported record; state is the state name (the machine
+         * path for machine kinds); layer is the layer index; properties are the behaviour's exported serialised fields. Behaviours on a (sub) state
+         * machine also receive enter / update / exit for every state inside it, as in Unity. A class registered with
+         * TOOLKIT.SceneManager.RegisterClass under the behaviour's C# class name (full name first, then short name) is instantiated on the first
+         * enter and its onStateEnter / onStateUpdate / onStateExit(animator, stateInfo, layerIndex) and onStateMachineEnter / onStateMachineExit
+         * (animator, machinePath) hooks are called.
+         */
+        onStateMachineBehaviourObservable: BABYLON.Observable<IStateMachineBehaviourEvent>;
         protected m_zeroVector: BABYLON.Vector3;
         protected m_defaultGroup: BABYLON.AnimationGroup;
         protected m_animationTargets: BABYLON.TargetedAnimation[];
@@ -15397,7 +15781,14 @@ declare namespace TOOLKIT {
         getCurrentAnimationName(animationLayer?: number): string;
         getDefaultClips(): any[];
         getDefaultSource(): string;
+        /**
+         * Sets a layer's blend weight (Unity Animator.SetLayerWeight): clamped to [0,1] and written to the layer's weight, which scales
+         * the layer's override or additive contribution from the next tick. The base layer (index 0) always plays at full weight, as in
+         * Unity, so a call for layer 0 is ignored. VAT mode is single-layer and ignores layer weights.
+         */
         setLayerWeight(layer: number, weight: number): void;
+        /** Current blend weight of a layer (the base layer is always 1); 0 for a layer that does not exist. */
+        getLayerWeight(layer: number): number;
         private sourceAnimationGroups;
         fixAnimationGroup(group: BABYLON.AnimationGroup): string;
         getAnimationGroup(name: string): BABYLON.AnimationGroup;
@@ -15430,8 +15821,24 @@ declare namespace TOOLKIT {
         private isLayerLooping;
         /** Seconds of the primary clip of the layer's active state (D16); 0 when unresolvable. */
         private getLayerClipLength;
-        /** Signed effective speed of a layer (state.speed * speedRatio; state.speed defaults to 1; 0 when no state). speedParameter is not applied (unchanged from today). */
+        /** Signed effective speed of a layer: state.speed (default 1) x the speed multiplier parameter when active (Unity) x speedRatio (Animator speed); 0 when no state. */
         private computeLayerSpeed;
+        /** The Animator speed multiplier (speedRatio; a non-finite value counts as 0). */
+        private getAnimatorRatio;
+        /** Signed effective speed of a state: state.speed x its speed multiplier parameter (when active) x Animator speed. */
+        private computeStateSpeed;
+        /**
+         * Rate of the layer's transition clock (Unity): a fixed-duration transition, and every crossfade outside a recorded transition, runs on
+         * Animator time (speedRatio); a normalized-duration transition runs on its source state's time. The destination state's own speed (or speed
+         * parameter) never holds a transition.
+         */
+        private getTransitionClockSpeed;
+        /**
+         * Synced layers with "Timing" (syncedLayerAffectsTiming) stretch their SOURCE layer's playback: the shared effective duration is
+         * lerp(sourceLength, syncedLength, syncedLayerWeight), so the source plays at sourceLength / that duration (Unity). 1 when no
+         * timing-affecting synced layer follows this layer, or when either length is unknown.
+         */
+        private computeSyncedTimingScale;
         /**
          * Advances one layer's normalized phase by a SIGNED step and applies the loop / end policy:
          * looping states wrap in either direction (one loop event per wrap, capped), non-looping states clamp at
@@ -15441,6 +15848,12 @@ declare namespace TOOLKIT {
         private advanceLayerPhase;
         /** Wraps a normalized value into [0,1). */
         private static WrapNormal;
+        /** The state's normalized cycle offset: the cycle-offset parameter when active (read live), else the authored cycleOffset. */
+        private getStateCycleOffset;
+        /** Normalized time the layer's motion is sampled at: the phase shifted by the state's cycle offset (wrapped when looping, clamped otherwise). */
+        private getLayerSampleNormal;
+        /** Mirror flag of the layer's active state (the mirror parameter when active, else the authored mirror); humanoid rigs only (C-c). */
+        private isLayerMirrored;
         /**
          * Counts how many times a LOOPING layer's normalized phase crossed eventTime during one advance (D27, run-log Decision 8).
          * tPrev / tCurr are the wrapped normalized phases before / after the advance, wraps is the count advanceLayerPhase returned and dir is
@@ -15458,10 +15871,119 @@ declare namespace TOOLKIT {
         private updateAnimationTargets;
         private updateBlendableTargets;
         private finalizeAnimationTargets;
+        /**
+         * Evaluates the layer's transitions once per tick (Unity order): with no transition in flight, AnyState transitions first, then the
+         * active state's own. While a transition is in flight (C-a), AnyState transitions are always queued first (an ordered AnyState
+         * transition only admits higher-priority ones), then the in-flight transition's interruption source decides which of the source and
+         * destination states' transitions may interrupt it (orderedInterruption limits the source's to those ordered before it).
+         */
         private checkStateMachine;
+        /** True when every condition passes; true triggers among them are collected into triggers (consumed only when the transition fires). */
+        private evaluateConditions;
+        /**
+         * Scans one transition list from fromState (whose timer and length drive exit time and normalized durations). stopAt ends the scan
+         * (ordered interruption), exclude skips the in-flight transition. The first transition that passes and resolves to a state of the layer
+         * (a sub-machine destination enters through its entry transitions, an exit leaves through the machine's exit rules) is written to the
+         * checker; an AnyState transition onto the current state is skipped unless canTransitionToSelf. Returns true when one fired.
+         */
         private checkStateTransitions;
+        /** Starts a fired transition: the destination becomes the layer's state at once and, with a positive duration, the transition is recorded as in flight (C-a). */
+        private transitionLayerState;
+        /** Ends the layer's in-flight transition (its source state exits). */
+        private finishActiveTransition;
+        /** The layer's transition in flight (C-a) as {transition, source, destination, elapsed, duration}, or null. */
+        getActiveTransition(animationLayer?: number): TOOLKIT.IActiveTransition;
+        /** True while the layer has a transition in flight (Unity Animator.IsInTransition). */
+        isInTransition(animationLayer?: number): boolean;
+        /** Older exports without machine records: the flat entry list of the layer's root machine. */
+        private resolveLegacyEntry;
+        private getRootMachineRecord;
+        private getStateMachineRecord;
+        /** A machine record by name: a child of nearPath first, then a sibling, then any machine of the layer with that name. */
+        private findMachineRecord;
+        /** First passing transition of a machine-level list (entry or exit transitions: conditions only, mute / solo honoured); consumes its triggers. */
+        private pickMachineTransition;
+        /** Entering a (sub) machine: its entry transitions in order choose the state (or a nested machine), else its default state. */
+        private resolveMachineEntry;
+        /**
+         * Leaving a sub-machine through its Exit node (Unity): the machine's outgoing transitions in the parent graph are evaluated in order;
+         * when none passes the parent is re-entered through its entry transitions. Exiting the root machine re-enters it through Entry.
+         */
+        private resolveMachineExit;
+        private _hasBehaviours;
+        /** Root-first chain of machine records containing path. */
+        private getMachineChain;
+        private raiseStateEnter;
+        private raiseStateExit;
+        private updateStateBehaviours;
+        /** Machine enter / exit for the machines left and entered when the active state's machine changes. */
+        private updateBehaviourMachinePath;
+        private dispatchMachineBehaviours;
+        /** State enter / update / exit for the state's own behaviours and the behaviours of every machine containing it (root first). */
+        private dispatchStateBehaviours;
+        private makeStateInfo;
+        private invokeBehaviour;
+        /** Lazily instantiates the class registered under the behaviour's C# class name (full name, then short name); warns once per name when none is registered yet. */
+        private resolveBehaviourCounterpart;
+        /** Plays a state outside a transition (play calls, bootstrap): same-name calls are a no-op. */
         private playCurrentAnimationState;
+        /** Arms every target mixer of the layer for a crossfade of the given blending speed (skeleton) from the current pose. */
+        private resetLayerMixers;
+        /** Makes state the layer's active state at normalizedOffset (the mixers were armed by resetLayerMixers). */
+        private startLayerState;
         private stopCurrentAnimationState;
+        /** C-b: an additive layer (blendingMode 1, never the base layer, skeleton mode only). */
+        private isAdditiveLayer;
+        /** First key of a track (the additive reference pose), or null. */
+        private static FirstKeyValue;
+        private static IdentityQuaternion;
+        private static TempAdditiveVector;
+        private static TempAdditiveQuaternion;
+        /** Writes position delta (sample - first key) into the mixer's position buffer. */
+        private bakeAdditivePosition;
+        /** Writes rotation delta (inverse(first key) x sample) into the mixer's rotation buffer. */
+        private bakeAdditiveRotation;
+        /** Writes scale ratio (sample / first key) into the mixer's scaling buffer. */
+        private bakeAdditiveScaling;
+        /**
+         * Applies an additive layer's deltas on top of the layers below (C-b): position + w x delta, rotation x slerp(identity, delta, w),
+         * scale x lerp(1, ratio, w). The base is this frame's composed lower-layer pose; when no lower layer posed the target this frame,
+         * the last composed base (a held clip end) or the rest pose. A state change crossfades from the previous delta.
+         */
+        private applyAdditiveLayer;
+        /**
+         * C-c mirror tables (built on the first mirrored sample from machine.mirrorMap): per animated bone its left/right counterpart (itself
+         * for centre bones) and rest-pose corrections so that a mirrored local rotation is kParentInverse x reflect(q_counterpart) x k, where
+         * reflect is the reflection across the character's YZ plane (x, -y, -z, w) and k = inverse(reflect(G_counterpart)) x G_bone from the
+         * rest model-space rotations. False when the rig has no mirror map (not humanoid).
+         */
+        private getMirrorInfo;
+        /**
+         * Samples a mirrored value for (target, property) of a track (C-c): the counterpart bone's track (left / right swapped), reflected across
+         * the character's YZ plane with the rest-pose corrections; scaling is taken from the counterpart unreflected. Bones outside the humanoid
+         * map, or whose counterpart has no track in this clip, sample unmirrored. The returned rotation / position is a shared scratch value.
+         */
+        private sampleMirroredValue;
+        /** A synced layer: index > 0 whose syncedLayerIndex names another existing layer. */
+        private isSyncedLayer;
+        /** The source layer whose normalized time a synced layer plays on, or null. */
+        private getSyncedTimingSource;
+        /**
+         * Builds each synced layer's per-state copies of its source layer's states: same name, timing fields and parameters, the layer's
+         * exported motion override (motionOverrides) as its blend tree when it has one (else an empty motion), no transitions or behaviours of its own.
+         */
+        private setupSyncedLayerStates;
+        /** A synced layer follows its source layer's current state (its destination as soon as a transition starts). */
+        private syncLayerState;
+        /** Stable signature of a track's (target, property) list. */
+        private getTrackSignature;
+        /** The targeted animation of track for (target, property), via a per-track cached lookup; null when the track does not animate it. */
+        private findTrackTargetedAnimation;
+        /**
+         * The (target, property) list a blend tree samples: the master track's own list when every weighted clip animates the same list
+         * (the common case, index fast path), else the union over all weighted tracks in first-seen order.
+         */
+        private resolveBlendTargets;
         private checkAvatarTransformPath;
         private filterTargetAvatarMask;
         private sortWeightedBlendingList;
@@ -15473,6 +15995,12 @@ declare namespace TOOLKIT {
         private parse1DSimpleTreeBranches;
         private parse2DSimpleDirectionalTreeBranches;
         private parse2DFreeformDirectionalTreeBranches;
+        /**
+         * Direct blend tree: each child's weight is its own directBlendParameter value (negative counts as 0). When the tree was exported
+         * with normalizeBlendValues the weights are divided by their sum. Child weights are scaled by the parent weight, so a Direct tree
+         * nests inside any other tree type and vice versa.
+         */
+        private parseDirectTreeBranches;
         private parse2DFreeformCartesianTreeBranches;
     }
     class BlendTreeValue {
@@ -15547,6 +16075,37 @@ declare namespace TOOLKIT {
         blending: number;
         duration: number;
         triggered: string[];
+        /** The transition that fired (null for none). */
+        transition: TOOLKIT.ITransition;
+    }
+    /** C-a: a layer's transition in flight (destination is already the layer's animationStateMachine). */
+    interface IActiveTransition {
+        transition: TOOLKIT.ITransition;
+        source: TOOLKIT.MachineState;
+        destination: TOOLKIT.MachineState;
+        /** Scaled seconds since the transition started. */
+        elapsed: number;
+        /** Transition duration in seconds. */
+        duration: number;
+    }
+    /** Payload of AnimationState.onStateMachineBehaviourObservable. */
+    interface IStateMachineBehaviourEvent {
+        kind: string;
+        behaviour: TOOLKIT.IBehaviour;
+        state: string;
+        layer: number;
+        properties: any;
+    }
+    /** The AnimatorStateInfo-like record passed to StateMachineBehaviour counterpart hooks. */
+    interface IAnimatorStateInfo {
+        name: string;
+        tag: string;
+        layerIndex: number;
+        machine: string;
+        normalizedTime: number;
+        length: number;
+        speed: number;
+        loop: boolean;
     }
     class AnimationMixer {
         influenceBuffer: number;
@@ -15558,6 +16117,18 @@ declare namespace TOOLKIT {
         blendingSpeed: number;
         rootPosition: BABYLON.Vector3;
         rootRotation: BABYLON.Quaternion;
+        /** Additive layers: the delta in effect when the current crossfade started (null outside a crossfade). */
+        additiveFrom?: {
+            p: BABYLON.Vector3;
+            q: BABYLON.Quaternion;
+            s: BABYLON.Vector3;
+        };
+        /** Additive layers: the delta applied last tick. */
+        additiveLast?: {
+            p: BABYLON.Vector3;
+            q: BABYLON.Quaternion;
+            s: BABYLON.Vector3;
+        };
     }
     class BlendingWeights {
         primary: TOOLKIT.IBlendTreeChild;
@@ -15640,6 +16211,18 @@ declare namespace TOOLKIT {
         defaultWeight: number;
         syncedLayerIndex: number;
         syncedLayerAffectsTiming: boolean;
+        /** Exporter (T9): true for a synced layer (it has no states of its own). */
+        synced?: boolean;
+        /** Exporter (T9): a synced layer's per-state motion overrides (GetOverrideMotion); null for other layers. */
+        motionOverrides?: TOOLKIT.IMotionOverride[];
+        /** Runtime: blending speed (skeleton) / duration (VAT) of the transition that started the current state. */
+        animationBlending?: number;
+        /** Runtime: the source-layer state name a synced layer is currently following. */
+        syncedSourceState?: string;
+        /** Runtime (C-a): the transition in flight on this layer, or null. */
+        activeTransition?: TOOLKIT.IActiveTransition;
+        /** Runtime: machine path of the active state, for StateMachineBehaviour machine enter / exit. */
+        behaviourMachinePath?: string;
         animationTime: number;
         animationNormal: number;
         animationMaskMap: Map<string, number>;
@@ -15671,8 +16254,51 @@ declare namespace TOOLKIT {
     interface IBehaviour {
         hash: number;
         name: string;
+        /** Exporter (T9): namespace-qualified C# class name. */
+        fullName?: string;
         layerIndex: number;
         properties: any;
+    }
+    /** Exporter (T9): a synced layer's override motion for one source state. */
+    interface IMotionOverride {
+        state: string;
+        machine: string;
+        type: TOOLKIT.MotionType;
+        motion: string;
+        motionid: number;
+        length: number;
+        rate: number;
+        blendtree: TOOLKIT.IBlendTree;
+        events: TOOLKIT.IAnimatorEvent[];
+        ccurves: TOOLKIT.IUnityCurve[];
+    }
+    /** Exporter (T9): one (sub) state machine record of machine.machines. */
+    interface IStateMachineInfo {
+        hash: number;
+        name: string;
+        path: string;
+        parent: string;
+        parentPath: string;
+        layerIndex: number;
+        machineLayer: string;
+        isRoot: boolean;
+        defaultState: string;
+        states: string[];
+        machines: string[];
+        entries: TOOLKIT.ITransition[];
+        stateMachineTransitions: {
+            source: string;
+            sourcePath: string;
+            transitions: TOOLKIT.ITransition[];
+        }[];
+        exitTransitions: TOOLKIT.ITransition[];
+        behaviours: TOOLKIT.IBehaviour[];
+    }
+    /** Exporter (T9): one humanoid left/right bone pair of machine.mirrorMap (avatar-mask path convention). */
+    interface IMirrorPair {
+        bone: string;
+        left: string;
+        right: string;
     }
     interface ITransition {
         hash: number;
@@ -15694,6 +16320,10 @@ declare namespace TOOLKIT {
         orderedInt: boolean;
         solo: boolean;
         conditions: TOOLKIT.ICondition[];
+        /** Exporter (T9): destination sub-machine name when the transition targets a state machine (destination is null then). */
+        destinationMachine?: string;
+        /** Exporter (T9): owning machine path, on machine-record entry / state-machine / exit transitions. */
+        machinePath?: string;
     }
     interface ICondition {
         hash: number;
@@ -15722,6 +16352,8 @@ declare namespace TOOLKIT {
         useAutomaticThresholds: boolean;
         valueParameterX: number;
         valueParameterY: number;
+        /** Exporter (T9): Direct trees — divide child weights by their sum. */
+        normalizeBlendValues?: boolean;
     }
     interface IBlendTreeChild {
         hash: number;
@@ -15773,6 +16405,12 @@ declare namespace TOOLKIT {
         private _panstereo;
         private _mindistance;
         private _maxdistance;
+        private _rolloffmode;
+        private _rollofftable;
+        private _gain;
+        private _appliedVolume;
+        private _listenerDistance;
+        private _hasStereo;
         private _reverbzonemix;
         private _bypasseffects;
         private _bypassreverbzones;
@@ -15791,7 +16429,25 @@ declare namespace TOOLKIT {
         protected destroy(): void;
         protected awakeAudioSource(): Promise<void>;
         protected startAudioSource(): void;
-        protected updateAudioSource(): Promise<void>;
+        /**
+         * unity-export-parity-gaps T18 (G-a, G-b): Unity's rolloff as a per-frame gain on the v2 sound. Native distance
+         * attenuation is neutralised at creation (inverse model, rolloff factor 0) and panning stays native, so the only
+         * per-frame work is ONE distance (the spatial position the engine already keeps attached, to the listener) and
+         * a volume write when the gain changed. The legacy v1 path runs the same function through setAttenuationFunction.
+         */
+        protected updateAudioSource(): void;
+        /** Writes (mute ? 0 : volume) x rolloff gain to the v2 sound, skipping an unchanged value. */
+        private applyVolume;
+        /** The rolloff gain applied this frame (1 for a 2D source) - lerp(1, attenuation, spatialBlend). */
+        getRolloffGain(): number;
+        /** The source to listener distance measured this frame (spatial v2 sources). */
+        getListenerDistance(): number;
+        /** The Unity stereo pan of the 2D share of the source: panStereo x (1 - spatialBlend). */
+        getStereoPan(): number;
+        /** The value on the v2 sound's StereoPannerNode (Unity's pan law mapped onto Web Audio's equal-power law), null without one. */
+        getAppliedStereoPan(): number;
+        /** Unity's rolloff mode of this source ("logarithmic" | "linear" | "custom"). */
+        getRolloffMode(): string;
         protected destroyAudioSource(): void;
         /**
          * Is legacy audio engine enabled
@@ -15870,25 +16526,41 @@ declare namespace TOOLKIT {
          */
         setPlaybackSpeed(rate: number): void;
         /**
-         * Sets the sound rolloff mode (linear, inverse, exponential)
+         * Sets Unity's rolloff mode: "logarithmic", "linear" or "custom" (the legacy Web Audio names map to the nearest
+         * Unity mode: "inverse" / "exponential" => logarithmic). The runtime computes the curve itself (G-a).
          * @param mode the rolloff mode
+         * @param curve (optional) the custom curve as Unity keys [time, value, inTangent, outTangent] over distance / maxDistance
          */
-        setRolloffMode(mode: string): void;
+        setRolloffMode(mode: string, curve?: number[][]): void;
         /**
-         * Sets the sound track min distance level
+         * Sets the sound track min distance level (Unity minDistance - full volume inside it)
          * @param distance the min distance level
          */
         setMinDistance(distance: number): void;
         /**
-         * Sets the sound track max distance level
+         * Sets the sound track max distance level (Unity maxDistance)
          * @param distance the mmax distance level
          */
         setMaxDistance(distance: number): void;
         /**
-         * Sets the sound track spatial blend level
+         * Sets the sound track spatial blend level (Unity spatialBlend: 0 = 2D, 1 = fully 3D). The rolloff gain is
+         * lerp(1, attenuation, blend) and the stereo pan applies to the 2D share, scaled by (1 - blend).
          * @param blend the spatial blend level
          */
         setSpatialBlend(blend: number): void;
+        /**
+         * Sets the stereo pan (Unity panStereo, -1 left .. 1 right) of the 2D share of the source.
+         * @param pan the stereo pan
+         */
+        setStereoPan(pan: number): void;
+        private applyStereoPan;
+        /**
+         * G-b on the legacy engine: Babylon 9's BABYLON.Sound plays through an internal v2 sound but exposes no stereo pan, so
+         * the pan (and the 2D centre level, see setAudioDataSource) goes onto that inner sound's stereo node when it exists.
+         */
+        private applyLegacyStereoPan;
+        /** Turns the v2 sound's spatial node on with native distance attenuation neutralised and attaches it (G-a). */
+        private enableSpatial;
         /**
          * Gets the spatial sound option of the track
          */
@@ -15932,6 +16604,17 @@ declare namespace TOOLKIT {
         static UnlockAudioEngine(): Promise<void>;
         /** Attach Audio Spatial Camera */
         static AttachSpatialCamera(node: BABYLON.Node): Promise<void>;
+        /**
+         * The listener position the rolloff gain is measured from: the v2 listener when it is attached (the same point
+         * the native panner uses), else the scene's active camera. No allocation.
+         */
+        static GetListenerPosition(scene: BABYLON.Scene): BABYLON.Vector3;
+        /**
+         * Unity hears through the AudioListener on the main camera. A v2 listener nobody attached sits at the world origin,
+         * so every spatial source would pan (and attenuate) relative to the origin: attach it to the active camera once.
+         * A camera system that attaches the listener itself (DefaultCameraSystem) simply re-attaches it.
+         */
+        static EnsureListener(scene: BABYLON.Scene): void;
         /** Detaches Current Audio Spatial Camera */
         static DetachSpatialCamera(): Promise<void>;
         /** Create Audio Engine Version 2 Buffered Sound Instance */
@@ -15940,6 +16623,47 @@ declare namespace TOOLKIT {
         static CreateStaticSound(name: string, source: ArrayBuffer | AudioBuffer | BABYLON.StaticSoundBuffer | string | string[], options: Partial<BABYLON.IStaticSoundOptions>): Promise<BABYLON.StaticSound>;
         /** Create Audio Engine Version 2 Streaming Sound Instance */
         static CreateStreamingSound(name: string, source: HTMLMediaElement | string | string[], options?: Partial<BABYLON.IStreamingSoundOptions>): Promise<BABYLON.StreamingSound>;
+    }
+    /**
+     * unity-export-parity-gaps T18 (G-a, G-b) - Unity's AudioSource volume rolloff, spatial blend and stereo pan as pure
+     * functions (node-testable, no engine). Both the v2 per-frame gain and the legacy v1 attenuation callback use them.
+     *  - Logarithmic (Unity's default): `min / d`, 1 inside `min`. Unity keeps attenuating past `max` (measured in Play mode
+     *    with AudioListener.GetOutputData: min 1 / max 5 gives 0.1 at 10 m and 0.05 at 20 m), so `max` does not hold it.
+     *  - Linear: `1 - (d - min) / (max - min)`, clamped to [0, 1].
+     *  - Custom: the exported curve sampled into TABLE_SIZE entries over `d / max` (held at the last entry beyond `max`).
+     *  A max distance below the min is treated as equal to the min.
+     *  - Stereo pan: Unity pans a 2D source with a constant-power square-root law, gains sqrt((1 - p) / 2) and
+     *    sqrt((1 + p) / 2) (so 0.707 each at the centre - measured), which WebAudioPan maps onto the Web Audio equal-power
+     *    StereoPannerNode exactly for a mono clip.
+     * @class AudioRolloff - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class AudioRolloff {
+        static readonly TABLE_SIZE: number;
+        /** Unity rolloff mode name from an exported / user value (AudioRolloffMode.ToString().ToLower() or a Web Audio name). */
+        static NormalizeMode(mode: string): string;
+        static Logarithmic(distance: number, minDistance: number, maxDistance: number): number;
+        static Linear(distance: number, minDistance: number, maxDistance: number): number;
+        /** Samples a custom table over distance / maxDistance (linear between entries, held at both ends). */
+        static Custom(distance: number, minDistance: number, maxDistance: number, table: ArrayLike<number>): number;
+        /** The rolloff attenuation of `mode` at `distance`. */
+        static Attenuation(mode: string, distance: number, minDistance: number, maxDistance: number, table: ArrayLike<number>): number;
+        /** G-b: Unity's spatial blend mixes an unattenuated 2D share with the attenuated 3D share - lerp(1, attenuation, blend). */
+        static Gain(attenuation: number, spatialBlend: number): number;
+        /** G-b: the stereo pan of the 2D share - panStereo x (1 - blend), 0 for a fully 3D source. */
+        static Pan(panStereo: number, spatialBlend: number): number;
+        /**
+         * The Web Audio StereoPannerNode value that reproduces Unity's pan law for a mono clip: equal-power gives
+         * sin(x * pi / 2) with x = (p' + 1) / 2, Unity gives sqrt((1 + p) / 2), so p' = (4 / pi) * asin(sqrt((1 + p) / 2)) - 1.
+         */
+        static WebAudioPan(unityPan: number): number;
+        /** Resamples an exported table (Unity AnimationCurve.Evaluate samples) to TABLE_SIZE entries. */
+        static ResampleTable(samples: ArrayLike<number>): Float32Array;
+        /**
+         * Samples Unity curve keys [time, value, inTangent, outTangent] (unweighted Hermite, clamped outside the keys,
+         * an infinite tangent = a constant step) into TABLE_SIZE entries over [0, 1].
+         */
+        static BuildTable(keys: number[][]): Float32Array;
+        static EvaluateKeys(keys: number[][], t: number): number;
     }
 }
 declare namespace TOOLKIT {
@@ -17945,6 +18669,7 @@ declare namespace TOOLKIT {
         static CORNER_ADVANCE_DISTANCE: number;
         static MAX_PATH_POLYGONS: number;
         static MAX_PATH_CORNERS: number;
+        static STRAIGHTPATH_OFFMESH_CONNECTION: number;
         private crowd;
         private type;
         private baseOffset;
@@ -17977,6 +18702,11 @@ declare namespace TOOLKIT {
         private m_pathCorners;
         private m_cornerIndex;
         private m_finalDestination;
+        private m_cornerLinks;
+        private m_linkCrossing;
+        private m_linkReplanGoal;
+        private m_linksChangedObserver;
+        private m_enabledObserver;
         private static CROWD_FILTER_SLOTS;
         private static CROWD_FILTER_WARNED;
         speed: number;
@@ -17996,7 +18726,14 @@ declare namespace TOOLKIT {
         isReady(): boolean;
         isNavigating(): boolean;
         isTeleporting(): boolean;
+        /** True while the agent is crossing an off-mesh link, or waiting at its start for completeOffMeshLink() (manual traversal). */
         isOnOffMeshLink(): boolean;
+        /** The off-mesh link being crossed (Unity NavMeshAgent.currentOffMeshLinkData), or null when the agent is not on a link. */
+        get currentOffMeshLinkData(): TOOLKIT.IOffMeshLinkData;
+        /** Gets whether the agent crosses off-mesh links by itself (Unity NavMeshAgent.autoTraverseOffMeshLink). */
+        getAutoTraverseOffMeshLink(): boolean;
+        /** Sets whether the agent crosses off-mesh links by itself. When false it stops at each link start until completeOffMeshLink(). */
+        setAutoTraverseOffMeshLink(auto: boolean): void;
         getAgentType(): number;
         getAgentState(): number;
         getAgentIndex(): number;
@@ -18021,6 +18758,10 @@ declare namespace TOOLKIT {
         onNavCompleteObservable: BABYLON.Observable<BABYLON.TransformNode>;
         /** Register handler that is triggered when the agent becomes stuck */
         onNavStuckObservable: BABYLON.Observable<BABYLON.TransformNode>;
+        /** Register handler that is triggered when the agent reaches an off-mesh link start (auto traversal begins, or manual traversal waits) */
+        onOffMeshLinkStartObservable: BABYLON.Observable<IOffMeshLinkData>;
+        /** Register handler that is triggered when the agent arrives at an off-mesh link end (not when a crossing is aborted) */
+        onOffMeshLinkEndObservable: BABYLON.Observable<IOffMeshLinkData>;
         protected m_agentState: number;
         protected m_agentIndex: number;
         protected m_agentReady: boolean;
@@ -18044,12 +18785,22 @@ declare namespace TOOLKIT {
         private refreshAgentPolicy;
         private static ToNumberArray;
         private buildPathCorners;
+        private static HasLiveObservers;
+        private static DestroyRecastArray;
+        private createOffMeshLinkData;
         private startNavigationRun;
         private gotoPathCorner;
         private getCornerAdvanceDistance;
         private hasRemainingPathCorners;
         private advancePathCorners;
         private clearPathCorners;
+        private isLinkCorner;
+        private getOffMeshLinkTriggerDistance;
+        private beginOffMeshLink;
+        private updateOffMeshLink;
+        private finishOffMeshLink;
+        private abortOffMeshLink;
+        private refreshLinkRoute;
         private getFilteredClosestPoint;
         private destroyNavigationAgent;
         /** Move agent relative to current position. */
@@ -18087,6 +18838,12 @@ declare namespace TOOLKIT {
         getAgentWaypoint(): BABYLON.Vector3;
         /** Gets agent current waypoint position. */
         getAgentWaypointToRef(result: BABYLON.Vector3): void;
+        /**
+         * Finishes the off-mesh link the agent is on (Unity NavMeshAgent.CompleteOffMeshLink): the agent is placed at the link end and
+         * its run continues. With autoTraverseOffMeshLink false the agent waits at each link start (isOnOffMeshLink() true, the transform
+         * left to the caller - play a jump, move it along the link) until this is called. Returns false when the agent is not on a link.
+         */
+        completeOffMeshLink(): boolean;
         /** Cancel current waypoint path navigation. */
         cancelNavigation(): void;
         /**
@@ -18116,6 +18873,36 @@ declare namespace TOOLKIT {
         getDebugDestinationMesh(): BABYLON.Mesh;
         /** Shows or hides the debug destination mesh. */
         showDebugDestination(show: boolean): void;
+    }
+    /**
+     * The off-mesh link a navigation agent is crossing (Unity OffMeshLinkData). Positions are world space, in travel order.
+     */
+    interface IOffMeshLinkData {
+        /** Where the link starts (the side the agent enters from). */
+        startPosition: BABYLON.Vector3;
+        /** Where the link ends (the side the agent leaves on). */
+        endPosition: BABYLON.Vector3;
+        /** The link's Unity area id (-1 when unknown). */
+        area: number;
+        /** The scene link id (SceneManager.GetNavigationLink), or -1 for a connection that is not a registered link. */
+        linkId: number;
+        /** The link's activation when the agent reached it. */
+        activated: boolean;
+        /** True when the agent crosses by itself; false when it waits for completeOffMeshLink(). */
+        autoTraverse: boolean;
+        /** The Detour link polygon reference. */
+        polyRef?: number;
+    }
+    /** @hidden A navigation agent's link crossing state. */
+    interface NavigationLinkCrossing {
+        data: TOOLKIT.IOffMeshLinkData;
+        cornerIndex: number;
+        from: BABYLON.Vector3;
+        to: BABYLON.Vector3;
+        position: BABYLON.Vector3;
+        elapsed: number;
+        duration: number;
+        waiting: boolean;
     }
     /**
      *  Recast Detour Crowd Agent States
@@ -20646,7 +21433,7 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /** What the colour grading applier wrote for one camera (FR-19 .. FR-25), for read-backs and the drift check. */
-    interface IPostProcessColorGradingState {
+    export interface IPostProcessColorGradingState {
         camera: string;
         configuration: BABYLON.ImageProcessingConfiguration;
         expected: {
@@ -20680,7 +21467,7 @@ declare namespace TOOLKIT {
      * scene-level writes and `DefaultCameraSystem` all read and write too -- so destroying a volume has to put back what
      * it found rather than leave the scene graded by a component that no longer exists.
      */
-    interface IPostProcessImagingSnapshot {
+    export interface IPostProcessImagingSnapshot {
         configuration: BABYLON.ImageProcessingConfiguration;
         /** Configuration field, or `colorCurves.<field>` when the value lives on the configuration's ColorCurves. */
         key: string;
@@ -20696,7 +21483,7 @@ declare namespace TOOLKIT {
         camera: string;
     }
     /** Decisions that span the appliers of one camera stack (spit-and-polish T13), derived from the blended model. */
-    interface IPostProcessStackFlags {
+    export interface IPostProcessStackFlags {
         /** A Classic vignette with intensity > 0 is active: bloom must run through the head chain (never after the vignette). */
         vignetteActive: boolean;
         /** Grading takes the HDR LogC LUT path (HDR-mode profile, LogC LUT exported, HDR pipeline). */
@@ -20709,7 +21496,7 @@ declare namespace TOOLKIT {
      * Unity value (Unity units); `set` converts on write (toolkit passes: their `unity` object; Babylon-driven effects: the
      * conversion table onto the live Babylon object) and notifies `PostProcessor.onEffectListingChangedObservable`.
      */
-    interface IPostProcessInspectorField {
+    export interface IPostProcessInspectorField {
         /** Unique within the effect (e.g. `intensity`, `center.x`, `color.r`). */
         key: string;
         /** The Unity field name as shown. */
@@ -20730,7 +21517,7 @@ declare namespace TOOLKIT {
         set?(value: any): void;
     }
     /** One Unity effect of a camera's applied stack as the Inspector section lists it (inspector-truth T6, FR-10). */
-    interface IPostProcessInspectorEffect {
+    export interface IPostProcessInspectorEffect {
         camera: BABYLON.Camera;
         /** Canonical family (`grain`, `bloom`, ... `antialiasing`). */
         family: string;
@@ -20749,11 +21536,38 @@ declare namespace TOOLKIT {
         fields: IPostProcessInspectorField[];
     }
     /**
+     * unity-export-parity-gaps T17 (F-a): one camera whose stack includes LOCAL volumes. The chain was built from `union`
+     * (every volume at full local weight); `UpdateLocalVolumes` re-blends the real weights whenever the camera or a volume
+     * moved (or a volume was switched) and writes the values through the Inspector setters of the camera's listing.
+     */
+    interface IPostProcessLocalRecord {
+        camera: BABYLON.Camera;
+        mask: number;
+        /** The registry volumes, index-aligned with `entries`. */
+        volumes: any[];
+        entries: TOOLKIT.IPostProcessVolumeEntry[];
+        union: TOOLKIT.IPostProcessStack;
+        /** Each volume's own baked LUT (null: none / identity), index-aligned with `entries`. */
+        luts: TOOLKIT.IPostProcessLutReference[];
+        /** The last per-frame blend and its weights. */
+        stack: TOOLKIT.IPostProcessStack;
+        weights: number[];
+        /** The weights the bound blended LUT was made with (re-blended only when one moves by more than 1/255). */
+        lutWeights: number[];
+        lutTexture: BABYLON.RawTexture3D;
+        lutData: Uint8Array;
+        lutBase: Uint8Array;
+        lutKey: string;
+        cameraPos: number[];
+        nodeMatrices: Float64Array[];
+        enabled: boolean[];
+    }
+    /**
      * Unity terrain parity T12.3 (D47): the tone mapper of one camera's URP LogC grading stack -- what the frame renders
      * with, where it comes from, and why. Written by `applyHdrColorGrading`, switched live by `SetToneMapper` (the
      * Inspector's tone-mapper dropdown), read back by `GetToneMappers`.
      */
-    interface IPostProcessToneMapperRecord {
+    export interface IPostProcessToneMapperRecord {
         camera: BABYLON.Camera;
         volumetype: string;
         /** The mode baked into the exported strip (SRP `Tonemapping.mode`: 0 None, 1 Neutral, 2 ACES). */
@@ -20782,7 +21596,7 @@ declare namespace TOOLKIT {
         failed: boolean;
     }
     /** camera-antialiasing-parity D26: one camera's anti-aliasing as applied (read-backs, Inspector, live edits). */
-    interface IPostProcessAntialiasingRecord {
+    export interface IPostProcessAntialiasingRecord {
         /** The camera's pipeline (owned, reused, or null for a canvas-MSAA camera). */
         pipeline: BABYLON.DefaultRenderingPipeline;
         camera: BABYLON.Camera;
@@ -20827,7 +21641,7 @@ declare namespace TOOLKIT {
      * @class PostProcessor
      */
     /** One bloom chain this instance created (`GetColoredBloomChains`, the read-back's `postProcessor.coloredBloom[]`). */
-    interface IPostProcessBloomRecord {
+    export interface IPostProcessBloomRecord {
         camera: BABYLON.Camera;
         /** The `ColoredBloomPlugin` chain (pyramid on Built-in, blur pair on SRP). */
         chain: any;
@@ -20847,7 +21661,7 @@ declare namespace TOOLKIT {
         /** urp-verification T9b: the URP ladder's `lerp(0.05, 0.95, scatter)` upsample factor; null on every other chain. */
         scatter?: number;
     }
-    class PostProcessor extends TOOLKIT.ScriptComponent {
+    export class PostProcessor extends TOOLKIT.ScriptComponent {
         private static GlobalInstance;
         private static Registry;
         private static Warned;
@@ -21057,6 +21871,17 @@ declare namespace TOOLKIT {
          * texture nobody owned (and bound it into a disposed stack), leaking one texture per interrupted load (FR-8).
          */
         private disposed;
+        /** T17: `SetVolumeEnabled` state of this volume (its node's enabled state is checked too). */
+        private volumeEnabled;
+        /** T17: the cameras whose stacks include local volumes (empty = global-only: no per-frame observer). */
+        private localRecords;
+        private localObserver;
+        private localObserverScene;
+        /** T17: re-blend on the next update even when nothing moved (a listing rebuild, an effect switched back on, a LUT arrived). */
+        private localForce;
+        /** T17: weight change below which a re-blend writes nothing (parameters) and the LUT threshold (Decision F-a: 1/255). */
+        static LocalWeightEpsilon: number;
+        static LocalLutEpsilon: number;
         /** The pipeline of the first rendered camera (legacy accessor). */
         GetDefaultRenderPipeline(): BABYLON.DefaultRenderingPipeline;
         GetSSAORRenderPipeline(): BABYLON.SSAO2RenderingPipeline;
@@ -21093,6 +21918,50 @@ declare namespace TOOLKIT {
          * arrived after the first apply contributes to the blend. Pipelines this instance did not create are left as found.
          */
         applyVolumes(): void;
+        /**
+         * Switches this volume on or off (Unity `Volume.enabled`). The orchestrator re-blends on the next frame, so a camera
+         * inside the volume sees its contribution go (or come back) at once. A disabled node does the same.
+         */
+        SetVolumeEnabled(enabled: boolean): void;
+        /** Whether this volume contributes: `SetVolumeEnabled` and its node's own enabled state. */
+        IsVolumeEnabled(): boolean;
+        /** True while the per-frame local-volume observer is registered (only scenes with local volumes register one). */
+        HasLocalVolumeObserver(): boolean;
+        /** The live blend weight of every volume on `camera` (default: the first local-volume camera), as the Inspector shows it. */
+        GetVolumeWeights(camera?: BABYLON.Camera): {
+            name: string;
+            weight: number;
+            local: boolean;
+            priority: number;
+            enabled: boolean;
+        }[];
+        /** Registers the per-frame update (once; only when a stack includes local volumes). */
+        protected armLocalObserver(): void;
+        protected disarmLocalObserver(): void;
+        /**
+         * T17 (F-a): re-blends every local-volume camera whose camera or volumes moved (or whose volumes were switched) since
+         * the last call -- nothing runs for a still camera. The weights use Unity's `1 - d^2 / b^2`; when one moved by more
+         * than `LocalWeightEpsilon` the blended Unity values are written into the EXISTING passes through the camera
+         * listing's Inspector setters (nothing is created, attached or detached, so the chain head never moves; an effect at
+         * weight 0 is neutralised by its Unity default), and the overlapping LUTs are re-blended on the CPU when a LUT
+         * volume's weight moved by more than `LocalLutEpsilon`. A family switched off from the Inspector is left alone.
+         * Returns how many cameras re-blended. `force` re-blends even when nothing moved.
+         */
+        UpdateLocalVolumes(force?: boolean): number;
+        /** T17: writes the blended Unity values of every listed, enabled family of the union through its Inspector setters. */
+        protected writeBlendedValues(record: IPostProcessLocalRecord, model: TOOLKIT.IPostProcessModel): void;
+        /**
+         * T17 (F-a, documented deviation): one LUT per camera. The baked LUTs of the contributing volumes are blended on the
+         * CPU in priority order from the identity LUT (`PostProcessingContract.blendLuts`) into one per-camera RawTexture3D,
+         * bound to the HDR grading pass (`toolkitGrading.lut`) or the LDR image processing (`colorGradingTexture`). Waits
+         * (and retries) while a strip is loading; needs the repacked 3D volumes (WebGL2 / WebGPU) -- on the 2D strip
+         * fallback the union strip stays bound, with one warning.
+         */
+        protected blendLocalLut(record: IPostProcessLocalRecord, weights: number[], lutWeights: number[]): boolean;
+        /** T17: the Inspector row with each volume's live blend weight (only on a camera whose stack includes local volumes). */
+        private listVolumeWeights;
+        /** How many per-volume weight rows the Inspector lists (the `weights` summary row lists every volume). */
+        static readonly VolumeWeightRows: number;
         /**
          * FR-14: exactly one DefaultRenderingPipeline per camera. An existing pipeline attached to the camera
          * (for example PROJECT.DefaultCameraSystem's) is reused and overridden by the volume; otherwise one is created.
@@ -21948,6 +22817,7 @@ declare namespace TOOLKIT {
         /** Stops the watchdog and abandons any retry in flight (releaseStacks: re-apply and destroy). */
         protected disarmGlslangWatchdog(): void;
     }
+    export {};
 }
 declare namespace TOOLKIT {
     /** One Unity ParameterOverride / VolumeParameter: `{ value, overrideState }` (+ `unsupported` when the exporter could not serialise the type). */
@@ -22195,6 +23065,12 @@ declare namespace TOOLKIT {
          * `localVolumeWeight` stay pure arithmetic (urp-material-export-parity D26).
          */
         cameraLocal?: number[];
+        /**
+         * unity-export-parity-gaps T17 (F-a): false when the volume is switched off (its node disabled or
+         * `PostProcessor.SetVolumeEnabled(false)`). A disabled volume contributes nothing (`ignored`, weight 0).
+         * Absent = enabled.
+         */
+        enabled?: boolean;
     }
     interface IPostProcessIgnoredVolume {
         name: string;
@@ -22207,6 +23083,12 @@ declare namespace TOOLKIT {
         applied: string[];
         ignored: IPostProcessIgnoredVolume[];
         warnings: string[];
+        /**
+         * unity-export-parity-gaps T17 (F-a): the final blend weight of every INPUT volume, by input index
+         * (`volume.weight x localVolumeWeight`, 0 for an ignored volume). Drives the per-frame re-blend and the
+         * Inspector's live weight rows.
+         */
+        weights?: number[];
     }
     interface IPostProcessCameraCandidate {
         name: string;
@@ -22354,7 +23236,9 @@ declare namespace TOOLKIT {
          * URP's local-volume weight (urp-material-export-parity D26). `cameraLocal` is the camera position
          * ALREADY IN THE VOLUME'S LOCAL SPACE - pure arithmetic, no BABYLON, so the stub-based test suite can run
          * it. Returns 0 for any missing / non-finite input. A camera INSIDE the bounds is always 1, whatever
-         * `blendDistance` is: the blend band only applies outside.
+         * `blendDistance` is: the blend band only applies outside, where Unity's `VolumeManager` uses
+         * `1 - d^2 / b^2` (d = distance to the closest point of the bounds, b = blend distance; T17 F-a). A blend
+         * distance of 0 is inside-only.
          */
         static localVolumeWeight(bounds: IPostProcessVolumeBounds, cameraLocal: number[], blendDistance: number): number;
         /**
@@ -22366,6 +23250,50 @@ declare namespace TOOLKIT {
          * `ignored[]`, except a `pipelinedefault` layer, which no layer mask applies to.
          */
         static blendStack(volumes: IPostProcessVolumeEntry[], layerMask?: number): IPostProcessStack;
+        /**
+         * unity-export-parity-gaps T17 (F-a): the stack the post chain is BUILT from when local volumes exist -- every
+         * placeable local volume counted as if the camera stood inside it (at its own `weight`), disabled ones included,
+         * so the chain holds the union of every volume's effects. The per-frame `blendStack` then writes the real values
+         * into those passes; an effect whose real weight is 0 is neutralised, never detached, so the chain head never moves.
+         */
+        static unionStack(volumes: IPostProcessVolumeEntry[], layerMask?: number): IPostProcessStack;
+        /** True when any weight moved by more than `threshold` (or the lists differ in length / one is missing). */
+        static weightsChanged(previous: number[], next: number[], threshold: number): boolean;
+        /**
+         * T17: the identity LUT volume (N x N x N RGBA bytes, index ((b * N + g) * N + r) * 4 -- the layout
+         * `PostProcessor.RepackLutStrip` produces). `decode` maps a LUT coordinate in [0, 1] to linear colour (LogC
+         * strips pass `LogCToLinear`; null = the coordinate itself, an LDR strip), `encodeSrgb` stores the saturated
+         * value sRGB-encoded (`lutencoding: "srgb"`). It is the stack value a LUT blends FROM before any volume with a
+         * LUT contributed (Unity's default grading: no tone mapper, nothing graded).
+         */
+        static identityLut(n: number, decode?: (x: number) => number, encodeSrgb?: boolean): Uint8Array;
+        /**
+         * T17 (F-a, documented deviation): the CPU blend of overlapping volumes' baked LUTs. Starting from `base`, each
+         * layer (priority order) moves the stack toward its LUT by its weight -- the same `lerp(stack, override, w)` the
+         * parameters use -- and the result is rounded to bytes. Unity re-bakes one LUT from the blended parameters
+         * instead; blending the baked LUTs is exact at weights 0 and 1 and close in between. Every array must have the
+         * length of `base` (a mismatched layer is skipped). Writes into `out` when given (same length), else a new array.
+         */
+        static blendLuts(base: Uint8Array, layers: {
+            data: Uint8Array;
+            weight: number;
+        }[], out?: Uint8Array): Uint8Array;
+        /** T17: the fields of a family as Unity creates it (the pipeline-specific defaults), the value a blend starts from. */
+        static defaultFamilyFields(family: string, volumetype: string): {
+            [name: string]: IPostProcessField;
+        };
+        /**
+         * T17: the Unity value an Inspector field (`key`, e.g. "intensity", "center.x", "color.g", "lumContrib",
+         * "filteringLow") shows for a blended family: the blended field when the family carries it, else the Unity
+         * default. A key names a field directly (lower-cased, dots dropped: "center.x" -> "centerx" on lens distortion),
+         * or one component of an array field ("center.x" -> center[0] on the vignette, "color.g" -> color[1]).
+         * Returns undefined when neither the family nor the defaults know the field (the field is then left alone).
+         */
+        static inspectorFieldValue(fields: {
+            [name: string]: IPostProcessField;
+        }, defaults: {
+            [name: string]: IPostProcessField;
+        }, key: string): any;
         /** True when `layer` is inside `mask` (mask undefined, null or -1 = everything). */
         static layerInMask(layer: number, mask: number): boolean;
         /**
@@ -23360,6 +24288,84 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
+     * Unity Realtime reflection probe (unity-export-parity-gaps T13, Decision D-a).
+     *
+     * The exporter attaches this component to every Realtime-mode ReflectionProbe. It builds a BABYLON.ReflectionProbe at the
+     * probe's position and resolution, with Unity's box projection, renders the probe's culling-mask render list into it, and
+     * hands the live cube to every material whose renderer carries the probe's `PROBE_{id}` node tag.
+     *
+     * Refresh modes: On Awake renders once, Every Frame renders every frame (time slicing approximated as a refresh every 9
+     * frames for All Faces At Once and 14 for Individual Faces), Via Scripting renders once at start and then on `render()`.
+     * Low render quality keeps the scene IBL and warns once. A scene without a realtime probe never constructs this class,
+     * so it pays nothing.
+     * @class RealtimeReflection - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class RealtimeReflection extends TOOLKIT.ScriptComponent {
+        /** Unity ReflectionProbeRefreshMode */
+        static readonly REFRESH_ON_AWAKE: number;
+        static readonly REFRESH_EVERY_FRAME: number;
+        static readonly REFRESH_VIA_SCRIPTING: number;
+        /** Unity ReflectionProbeTimeSlicingMode */
+        static readonly SLICING_ALL_FACES_AT_ONCE: number;
+        static readonly SLICING_INDIVIDUAL_FACES: number;
+        static readonly SLICING_NO_TIME_SLICING: number;
+        /** Frames between refreshes for the two time-sliced modes (Unity spreads one update over 9 / 14 frames). */
+        static readonly SLICED_ALL_FACES_FRAMES: number;
+        static readonly SLICED_INDIVIDUAL_FACES_FRAMES: number;
+        /** The tag prefix the exporter writes on every renderer whose closest probe is this one. */
+        static readonly PROBE_TAG_PREFIX: string;
+        private static _WarnedLowQuality;
+        private static _PreviousReflection;
+        protected m_probe: BABYLON.ReflectionProbe;
+        protected m_probeId: number;
+        protected m_refreshMode: number;
+        protected m_receivers: BABYLON.AbstractMesh[];
+        protected m_materials: BABYLON.Material[];
+        protected m_overrides: BABYLON.Material[];
+        /** The live Babylon probe (null at Low render quality). */
+        getReflectionProbe(): BABYLON.ReflectionProbe;
+        /** The live cube texture (null at Low render quality). */
+        getCubeTexture(): BABYLON.RenderTargetTexture;
+        /** The Unity probe id the receivers are tagged with. */
+        getProbeId(): number;
+        /** The meshes fed with this probe's cube. */
+        getReceivers(): BABYLON.AbstractMesh[];
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected destroy(): void;
+        /** Re-renders the probe on the next frame (Unity's ReflectionProbe.RenderProbe, for Via Scripting probes). */
+        render(): void;
+        /**
+         * The RenderTargetTexture refresh rate for a Unity refresh / time-slicing pair: 0 renders once
+         * (REFRESHRATE_RENDER_ONCE), N renders every N frames.
+         */
+        static RefreshRateFor(refreshMode: number, timeSlicingMode: number): number;
+        /**
+         * Builds the live probe from the exported properties on a scene, or returns null (with one warning) at Low render
+         * quality. Pure of the component lifecycle so the tests can drive it on a NullEngine.
+         */
+        static CreateProbe(scene: BABYLON.Scene, name: string, properties: any, position: BABYLON.Vector3): BABYLON.ReflectionProbe;
+        /**
+         * The probe's render list from the Unity culling mask: Everything (-1) is null (every scene mesh), Nothing (0) is
+         * empty, any other mask is the exported layer list. The editor RealtimeReflection component's list adds extra
+         * entries, and a Skybox-cleared probe keeps the infinite-distance sky meshes.
+         */
+        static ResolveRenderList(scene: BABYLON.Scene, props: any): BABYLON.AbstractMesh[];
+        /** Every mesh tagged with the probe id (and its untagged glTF primitive children). */
+        static FindReceivers(scene: BABYLON.Scene, probeId: number): BABYLON.AbstractMesh[];
+        /**
+         * Gives every receiver's material the probe cube. A receiver that is also in the probe's render list renders into
+         * the probe with a copy of its material that reads the scene IBL instead (Unity captures a probe without its own
+         * reflection, and sampling the cube while rendering into it is a GPU feedback loop).
+         */
+        static ApplyToReceivers(probe: BABYLON.ReflectionProbe, receivers: BABYLON.AbstractMesh[], materials?: BABYLON.Material[], overrides?: BABYLON.Material[]): void;
+        protected awakeRealtimeReflection(): void;
+        protected destroyRealtimeReflection(): void;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
      * Babylon full rigidbody physics standard class (Native Havok Physics Engine)
      * @class RigidbodyPhysics - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -23432,6 +24438,50 @@ declare namespace TOOLKIT {
         static OnSetupPhysicsPlugin: (scene: BABYLON.Scene) => void;
         private static PhysicsShapeScene;
         /**
+         * The scene's Layer Collision Matrix (scene key layercollisionmatrix): int[32], bit j of row i is set when layers i and j collide.
+         * Null for an export without a matrix - shapes then keep the legacy masks.
+         */
+        static LayerCollisionMatrix: number[];
+        /**
+         * The collision filter masks for a node's shapes.
+         * With a matrix: membership = 1 << layer, collide = the CollisionFilter override (physics.filteroverride) else the matrix row.
+         * Without one: membership = metadata.layermask (else -1) and collide = null (left untouched).
+         * @param metadata - The node's toolkit metadata (layer, layermask, physics)
+         * @param physics - The physics metadata whose CollisionFilter override applies (defaults to metadata.physics)
+         */
+        static ResolveCollisionMasks(metadata: any, physics?: any): TOOLKIT.IPhysicsCollisionMasks;
+        /** Applies collision filter masks to a shape (collide null leaves the shape's collide mask untouched). */
+        static ApplyShapeMasks(shape: BABYLON.PhysicsShape, membership: number, collide: number): void;
+        /** Applies matrix masks to a container shape so the body filters like its child shapes. A legacy export (collide null) leaves the container alone. */
+        static ApplyContainerMasks(shape: BABYLON.PhysicsShape, membership: number, collide: number): void;
+        /**
+         * A raycast query that only hits shapes on the given layers (a Unity layer mask: bit n = layer n).
+         * @param mask - The layer mask, e.g. ~(1 << 9) to skip layer 9
+         * @returns The query for Raycast / RaycastToRef
+         */
+        static LayerMaskQuery(mask: number): BABYLON.IRaycastQuery;
+        private static NonConvexTriggerWarned;
+        /** A non-convex mesh trigger warns once: it is built as a convex hull trigger. */
+        protected static WarnNonConvexTrigger(entity: BABYLON.TransformNode): void;
+        /** World-unit drift on a frozen axis before the captured coordinate is written back to the body. */
+        static FROZEN_POSITION_TOLERANCE: number;
+        private static FrozenBodies;
+        private static FrozenObservers;
+        private static _frozenVelocity;
+        private static _frozenPosition;
+        /**
+         * Holds a dynamic body on frozen world axes (Rigidbody Freeze Position). Every physics step the frozen velocity components are zeroed
+         * and the captured coordinates restored, so gravity, forces, impulses and collisions cannot move it on those axes.
+         * Calling it again re-captures the current coordinates. Kinematic and static bodies are exempt.
+         * @returns true when the body is held
+         */
+        static HoldFrozenAxes(body: BABYLON.PhysicsBody, freezeX: boolean, freezeY: boolean, freezeZ: boolean): boolean;
+        /** Stops holding a body's frozen axes. */
+        static ReleaseFrozenAxes(body: BABYLON.PhysicsBody): void;
+        /** One physics step of frozen-axis holding for a scene (runs after each Havok step). */
+        protected static ApplyFrozenAxes(scene: BABYLON.Scene): void;
+        private static ReleaseFrozenScene;
+        /**
          * Scene lifecycle: the shape cache and the debug viewer are static but belong to the scene physics was configured
          * for. On that scene's dispose the cache is reset (the next ConfigurePhysicsEngine resets it anyway) and a viewer
          * drawing into that scene is disposed. A cache configured for another, still-live scene is left alone.
@@ -23440,11 +24490,11 @@ declare namespace TOOLKIT {
         private static ReleasePhysicsScene;
         /** globalThis.HKP keeps the plugin's body map (and so the scene) alive after Scene.dispose - drop it when the plugin dies. */
         private static ReleasePluginOnDispose;
-        static ConfigurePhysicsEngine(scene: BABYLON.Scene, fixedTimeStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3): Promise<void>;
+        static ConfigurePhysicsEngine(scene: BABYLON.Scene, fixedTimeStep?: boolean, subTimeStep?: number, maxWorldSweep?: number, ccdEnabled?: boolean, ccdPenetration?: number, gravityLevel?: BABYLON.Vector3, layerCollisionMatrix?: number[]): Promise<void>;
         static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.TransformNode): void;
         protected static GetPhysicsMaterialCombine(unity: number): number;
         protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
-        protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeConvexHull;
+        protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number, trigger?: boolean): BABYLON.PhysicsShapeConvexHull;
         protected static GetCachedPhysicsBoxShape(scene: BABYLON.Scene, trigger: boolean, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeBox;
         protected static GetCachedPhysicsSphereShape(scene: BABYLON.Scene, trigger: boolean, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeSphere;
         protected static GetCachedPhysicsCapsuleShape(scene: BABYLON.Scene, trigger: boolean, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeCapsule;
@@ -23711,6 +24761,15 @@ declare namespace TOOLKIT {
          * Ignores the body passed if it is in the query
          */
         ignoreBody?: BABYLON.PhysicsBody;
+        /**
+         * Only hit shapes on these layers (a Unity layer mask: bit n = layer n). Applied as the cast shape's collide mask for the call.
+         */
+        layerMask?: number;
+    }
+    /** A shape's collision filter masks. collide null = an export without a Layer Collision Matrix: the collide mask is left untouched. */
+    interface IPhysicsCollisionMasks {
+        membership: number;
+        collide: number;
     }
 }
 declare namespace TOOLKIT {
