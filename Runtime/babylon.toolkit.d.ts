@@ -35,6 +35,13 @@ declare namespace TOOLKIT {
         static LostRenderContext: boolean;
         /** Set the preload auto update progress flag */
         static AutoUpdateProgress: boolean;
+        /**
+         * Set by a page splash screen that hands its status line and progress bar to the toolkit once the scene file has downloaded
+         * (the default engine.html and React splash screens do, and stop showing their download percent once the toolkit posts).
+         * Then the toolkit posts "BUILDING SCENE NN%" and "SETTING UP SCENE" with a real fraction while it builds the scene;
+         * otherwise it posts only the detail line there, so a page still showing its own download percent never fights it.
+         */
+        static HostDefersSceneStatus: boolean;
         /** Set the capsule collider shape type */
         static PhysicsCapsuleShape: number;
         /** The animation start mode. Defaults to NONE. */
@@ -117,6 +124,8 @@ declare namespace TOOLKIT {
         static OnRebuildContextObservable: BABYLON.Observable<BABYLON.AbstractEngine>;
         /** Register asset manager progress event (engine.html) */
         static OnAssetManagerProgress: (event: ProgressEvent) => void;
+        /** Every scene loader status update (preloader counts, terrain build stages, splash status text). Lets a page splash screen (React SplashScreen) show what the window.update* loader globals show on engine.html. */
+        static OnLoaderStatusObservable: BABYLON.Observable<ILoaderStatus>;
         /** All layer mask value */
         static readonly AllLayerMask: number;
         /** Default layer mask value */
@@ -233,8 +242,39 @@ declare namespace TOOLKIT {
         static ShowSplashScreen(): void;
         /** Hide the splash screen with optional delay and fade effect */
         static HideSplashScreen(scene?: BABYLON.Scene, delayMs?: number): void;
-        /** Update the status text on the splash screen (Direct Access Hack) */
+        /** Update the status text on the splash screen. A splash that listens to OnLoaderStatusObservable (React) renders it itself, so the DOM is only written when nobody listens. */
         static UpdateSplashScreenStatus(text: string): void;
+        /** Default upper bound of WhenSceneReady (milliseconds). */
+        static SCENE_READY_TIMEOUT_MS: number;
+        /** Consecutive smooth frames (each under SCENE_SMOOTH_FRAME_MS) WhenSceneReady waits for after the ready point. */
+        static SCENE_SMOOTH_FRAMES: number;
+        /** A frame counts as smooth when it follows the previous one within this many milliseconds. */
+        static SCENE_SMOOTH_FRAME_MS: number;
+        /** Upper bound (milliseconds) of the smooth-frame wait after the ready point. */
+        static SCENE_SMOOTH_MAX_MS: number;
+        /**
+         * Shows the render canvas under the splash screen, then calls done once the scene has rendered `frames` consecutive frames each within SCENE_SMOOTH_FRAME_MS of the previous
+         * one (shader compiles and first-draw uploads finished), or after maxMs, or at once when the scene is disposed.
+         */
+        static WaitForSmoothFrames(scene: BABYLON.Scene, frames: number, maxMs: number, done: () => void): void;
+        /** @hidden Counts one toolkit scene load (glTF with scene metadata) that has not reached its scene ready point yet; the first load in flight forgets the previous load's LoadingProgress jobs. */
+        static NoteSceneLoadStarted(scene: BABYLON.Scene): void;
+        /** @hidden The toolkit scene load reached its scene ready point (asset preloader finished, ready() called). */
+        static NoteSceneLoadFinished(scene: BABYLON.Scene): void;
+        /** True when no toolkit scene load is in flight for the scene (every asset preloader task has finished). */
+        static IsSceneLoadComplete(scene: BABYLON.Scene): boolean;
+        /**
+         * Splash-screen gate: resolves once every toolkit scene load in flight for the scene has finished its asset preloader
+         * (terrains built, skins uploaded, probe data and audio loaded, components ready) and one more frame rendered — or
+         * when the timeout expires, whichever comes first. NEVER rejects and NEVER hangs: resolves true when the scene really
+         * finished, false on timeout or disposal. A scene with no toolkit load in flight resolves at once.
+         *
+         *      TOOLKIT.SceneManager.WhenSceneReady(scene).then(() => TOOLKIT.SceneManager.HideSplashScreen(scene));
+         *
+         * @param scene The scene to wait on.
+         * @param timeoutMs Hard deadline in milliseconds (values <= 0 use SCENE_READY_TIMEOUT_MS).
+         */
+        static WhenSceneReady(scene: BABYLON.Scene, timeoutMs?: number): Promise<boolean>;
         private static SceneLoaderFileNames;
         private static SceneLoaderPropertyBag;
         private static SceneLoaderHandledFlag;
@@ -276,6 +316,12 @@ declare namespace TOOLKIT {
          * following it, with the exposure fixed at 1. Null when the scene is not an HDRP export (nothing to undo there).
          */
         static GetUnexposedImageProcessing(scene: BABYLON.Scene): BABYLON.ImageProcessingConfiguration;
+        /**
+         * HDRP `GetCurrentExposureMultiplier()` (hdrp-complete-parity D7): the scalar every radiance source of the scene
+         * is multiplied by. A parity HDRP scene answers its pre-exposure; every other scene the image-processing exposure
+         * (1 when absent).
+         */
+        static GetCurrentExposureMultiplier(scene: BABYLON.Scene): number;
         /** Get the system render quality local storage setting. */
         static GetRenderQuality(): TOOLKIT.RenderQuality;
         /** Set the system render quality local storage setting. */
@@ -627,6 +673,22 @@ declare namespace TOOLKIT {
         static OnNavMeshReadyObservable: BABYLON.Observable<BABYLON.Mesh>;
         /** Fires right before the navigation mesh data is destroyed, so crowds/agents can release themselves. */
         static OnNavMeshDestroyObservable: BABYLON.Observable<BABYLON.Scene>;
+        /** Longest time (ms) the asset preloader (the splash) waits for the pre-baked navigation mesh; the mesh keeps loading after it. */
+        static NAVIGATION_PRELOAD_TIMEOUT_MS: number;
+        /** LoadingProgress job key of the pre-baked navigation mesh load. */
+        private static readonly NAVIGATION_JOB_KEY;
+        /** LoadingProgress group title of the pre-baked navigation mesh load ("LOADING NAVIGATION NN%"). */
+        private static readonly NAVIGATION_JOB_TITLE;
+        /** Detail label while the navigation mesh binary downloads. */
+        private static readonly NAVIGATION_DOWNLOAD_LABEL;
+        /** Detail label while the navigation mesh is built from the downloaded binary. */
+        private static readonly NAVIGATION_BUILD_LABEL;
+        /** Share of the navigation job taken by the download (the build is the rest). */
+        private static readonly NAVIGATION_DOWNLOAD_SHARE;
+        /** Navigation job progress reported while a download of unknown size runs. */
+        private static readonly NAVIGATION_UNKNOWN_SIZE_PROGRESS;
+        /** Pre-baked navigation mesh loads waiting to join their scene's asset preloader, keyed by scene.uniqueId. */
+        private static PendingNavigationLoads;
         private static NavMeshPlugin;
         private static NavMeshSurface;
         private static NavMeshDebugger;
@@ -654,6 +716,35 @@ declare namespace TOOLKIT {
          * @param createDebugMesh Whether to show a debug mesh
          */
         static LoadNavigationMeshDataAsync(scene: BABYLON.Scene, binaryUrl: string, heightMesh?: BABYLON.Mesh, createDebugMesh?: boolean): Promise<void>;
+        /**
+         * Registers the scene's pre-baked navigation mesh load so the asset preloader (the splash) waits for it. CanvasTools calls
+         * it while parsing the scene and takes it back (TakePendingNavigationLoad) right before the preloader starts. The entry is
+         * dropped when the scene is disposed.
+         * @param scene The scene being loaded
+         * @param load The load; it must never reject
+         */
+        static SetPendingNavigationLoad(scene: BABYLON.Scene, load: Promise<void>): void;
+        /**
+         * Returns and clears the scene's registered pre-baked navigation mesh load.
+         * @param scene The scene being loaded
+         * @returns The load, or null when none is registered (or it was already taken)
+         */
+        static TakePendingNavigationLoad(scene: BABYLON.Scene): Promise<void>;
+        /**
+         * Downloads the navigation mesh binary through the scene's file loader, reporting "Downloading navigation mesh" on the job.
+         * @param scene The scene that owns the request
+         * @param binaryUrl The navigation mesh binary url
+         * @param job The scene's navigation loading job
+         * @returns The downloaded bytes; rejects when the request fails
+         */
+        private static DownloadNavigationMeshAsync;
+        /**
+         * Progress of the navigation job while its binary downloads: the download is NAVIGATION_DOWNLOAD_SHARE of the job and the
+         * build the rest; a download of unknown size reports NAVIGATION_UNKNOWN_SIZE_PROGRESS.
+         * @param event The request progress event
+         * @returns Job progress, 0 to NAVIGATION_DOWNLOAD_SHARE
+         */
+        private static GetNavigationDownloadProgress;
         /** Build the navigation mesh from binary data.
          * @param scene The Babylon.js scene
          * @param binaryData The navigation mesh binary data
@@ -1198,6 +1289,17 @@ declare namespace TOOLKIT {
     /**
      * Interface for tween options
      */
+    /** One scene loader status update (SceneManager.OnLoaderStatusObservable). Null fields are unchanged since the last update. */
+    interface ILoaderStatus {
+        /** Main status line (engine.html loader label), e.g. "LOADING TERRAIN 45%". */
+        status: string;
+        /** Detail line (engine.html loader details), e.g. "LOADING TERRAIN TEXTURES" or "LOADING 3 OF 7 ASSETS". */
+        details: string;
+        /** Progress of the current loading phase, 0 to 1 (null when the update carries none). */
+        progress: number;
+        /** TOOLKIT.Utilities loading state (0 load content, 1 parse transforms, 2 parse metadata, 3 asset preloader, 4 prepare viewport). */
+        state: number;
+    }
     interface ITweenOptions {
         /** Duration in seconds (default: 1) */
         duration?: number;
@@ -1479,8 +1581,10 @@ declare namespace TOOLKIT {
         autoHideSplashScreen: boolean;
         /** Delay in milliseconds to trigger the createScene function on the script component. Note: This is required to ensure the scene is fully initialized before createScene is called. Default is 500 milliseconds. */
         postCreateSceneDelayMs: number;
-        /** Prewarm the scene and optionally hide the splash screen after a delay. Note: This is required to trigger the createScene function on the script component. Default is 2500 milliseconds. */
+        /** Minimum time in milliseconds the splash screen stays up after createScene. The splash also waits for the scene's asset preloader (terrains, skins, probes, audio) via SceneManager.WhenSceneReady. Default is 2500 milliseconds. */
         scenePrewarmDurationMs: number;
+        /** Upper bound in milliseconds the splash screen waits for the asset preloader before it is hidden anyway. Default is 120000 milliseconds. */
+        sceneReadyTimeoutMs: number;
         /**
          * @param transform The transform node associated with this scene controller.
          * @param scene The Babylon.js scene instance.
@@ -2318,6 +2422,102 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * Unity's `_CameraDepthTexture` for transpiled Shader Graph materials of every pipeline, made like URP's CopyDepth pass: the
+     * camera's own depth (the PrePassRenderer's linear view-Z attachment) is copied once per frame and camera, right before the
+     * first rendering group whose queues draw a sampling material renders its transparents - no second scene pass.
+     *  - Encoding: linear view-space depth in metres, R32F, NEAREST; empty pixels hold the camera's far plane, as Unity's
+     *    cleared depth does (the generated Scene Depth bodies rely on it).
+     *  - Opaque samplers read the previous frame's copy (URP's texture is not produced yet when opaques draw).
+     *  - Acquire returns null - the caller keeps its own depth source - when the scene has no prepass (WebGL1) or `Enabled` is
+     *    false. Per-scene state is released on scene dispose.
+     * @class CameraDepthCopy - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class CameraDepthCopy {
+        /** Set false before the scene loads to make every consumer use its own DepthRenderer again. */
+        static Enabled: boolean;
+        private static readonly StoreKey;
+        private static readonly ConfigurationName;
+        private static readonly ShaderName;
+        /**
+         * The camera depth copy for `camera`, created on first use and shared by every material that asks. Creating it from a
+         * material bind is safe: OpaqueSceneColor.GetTexture creates its target from the same generated call sites.
+         * @param scene The scene.
+         * @param camera The camera whose depth is copied (normally scene.activeCamera).
+         * @param material The sampling material - registered so a rendering group drawing it triggers the copy.
+         * @returns The R32F target, or null when the copy is unavailable (the caller keeps its own source).
+         */
+        static Acquire(scene: BABYLON.Scene, camera: BABYLON.Camera, material: BABYLON.Material): BABYLON.RenderTargetTexture;
+        /** GLSL fragment of the copy: abs(view depth), or the far plane where the prepass wrote nothing. Pure. */
+        static FragmentSource(): string;
+        /**
+         * Whether a rendering group must copy before its transparents: any of its opaque, alpha-test or transparent queues draws
+         * a sampling material. Pure.
+         * @param group A rendering group (reads _opaqueSubMeshes, _alphaTestSubMeshes, _transparentSubMeshes), or null.
+         * @param samplers The registered sampling materials.
+         * @returns True when the copy is needed.
+         */
+        static GroupNeedsCopy(group: BABYLON.RenderingGroup, samplers: Set<BABYLON.Material>): boolean;
+        /**
+         * Releases a scene's targets, copy shader and hooks (runs on scene.onDisposeObservable; safe to call twice).
+         * @param scene The scene whose depth-copy state is released.
+         */
+        static Dispose(scene: BABYLON.Scene): void;
+        /**
+         * The scene's depth-copy store, created on first use; creating it also schedules Dispose on scene dispose.
+         * @param scene The scene.
+         * @returns The scene's store.
+         */
+        private static GetOrCreateStore;
+        /**
+         * Enables the scene's PrePassRenderer and asks it for the depth attachment. A scene without a prepass (WebGL1) marks
+         * the store unavailable, so later calls never try again.
+         * @param scene The scene.
+         * @param store The scene's store; receives the configuration or the unavailable flag.
+         * @returns True when the prepass now produces depth.
+         */
+        private static RequestPrePassDepth;
+        /**
+         * Creates a camera's copy target: R32F, NEAREST, the render size (kept equal to it on every engine resize, like the
+         * prepass target it copies), no depth buffer, nothing to render on its own (it is filled by CopyNow, never through
+         * scene.customRenderTargets).
+         * @param scene The scene.
+         * @param camera The camera the target belongs to.
+         * @returns The target, or null (with one warning) when it could not be created.
+         */
+        private static CreateTarget;
+        /**
+         * The engine's render size, at least 1x1 (the size of the prepass target the copy reads).
+         * @param engine The engine.
+         * @returns The size in pixels.
+         */
+        private static RenderSize;
+        /**
+         * Hooks every rendering group of the scene's main rendering manager (re-checked each frame: groups are created on
+         * demand) so that, right before a group draws its transparents, the prepass depth is copied when that group draws a
+         * sampling material. Installed once per scene; mirrors OpaqueSceneColor.InstallCopy.
+         * @param scene The scene.
+         * @param store The scene's store.
+         */
+        private static InstallHooks;
+        /**
+         * Copies the prepass depth of the active camera into its target, between draws: ends the pass, draws the copy shader
+         * (or clears to the far plane while the shader compiles), then resumes the pass. Mirrors OpaqueSceneColor.CopyNow.
+         * @param scene The scene.
+         * @param store The scene's store.
+         * @param group The rendering group about to draw its transparents.
+         */
+        private static CopyNow;
+        /**
+         * Creates the copy shader and its renderer. Called by the first copy only - between draws - never from a material
+         * bind (an EffectRenderer creates buffers that would reset the bound mesh's index buffer mid-draw).
+         * @param engine The engine.
+         * @param store The scene's store; receives the wrapper and renderer.
+         */
+        private static CreateCopyShader;
+    }
+}
+declare namespace TOOLKIT {
+    /**
      * Babylon Toolkit Unity Editor - Loader Class
      * @class CVTOOLS_unity_metadata - All rights reserved (c) 2024 Mackey Kinard
      * [Specification](https://github.com/MackeyK24/glTF/tree/master/extensions/2.0/Vendor/CVTOOLS_unity_metadata)
@@ -2350,6 +2550,29 @@ declare namespace TOOLKIT {
     class CVTOOLS_unity_metadata implements BABYLON.GLTF2.IGLTFLoaderExtension {
         /** The name of this extension. */
         readonly name: string;
+        /** hdrp-complete-parity T25: the most frames the scene loader overlay waits for a dynamic HDRP exposure to meter (default: 120) */
+        static HideLoaderSettleFrames: number;
+        /**
+         * Builds the mesh primitives of a toolkit scene one task each (vertex data, materials, textures), so the page paints between
+         * them instead of building every mesh of the scene in one block that locks the page for seconds on a large scene. The meshes
+         * themselves are still created in glTF order. Default true; false builds every primitive at once (diagnostics).
+         */
+        static SliceSceneParse: boolean;
+        /**
+         * Fetches each external image file once per toolkit scene load: glTF image entries that name the same uri share one
+         * download (scenes exported before the exporter de-duplicated its images list a file once per material using it).
+         * Default true; false fetches every image entry on its own (diagnostics).
+         */
+        static ShareImageDownloads: boolean;
+        /** Image file extensions and the mime type their downloaded bytes are decoded as (the glTF loader passes the same). */
+        private static readonly IMAGE_MIME_TYPES;
+        /**
+         * texture-image-deduplication: per scene, the finished image downloads a toolkit load hands to its components, by absolute
+         * url. A component that names an image file in its metadata (a Shader Graph block texture, a terrain lightmap) builds its
+         * texture during scene setup, after the glTF downloads finished; it takes the bytes from here instead of fetching the file
+         * again. Each load releases its entries at its ready point.
+         */
+        private static readonly ComponentImageDownloads;
         /** A tiny value used for diffuse IBL adjustments (default: 0.001) */
         static readonly IBL_TINY_VALUE: number;
         /** A factor used for specular IBL adjustments (default: 1.0) */
@@ -2416,6 +2639,24 @@ declare namespace TOOLKIT {
         static ToHalf(value: number): number;
         /** True when a custom sampler holds linear data and must not be loaded as an sRGB color texture. */
         static IsNonColorDataSampler(samplerName: string): boolean;
+        /**
+         * texture-image-deduplication: creates the texture of a scene image file, decoding the bytes the toolkit scene load already
+         * downloaded for that file when the load still holds them for its components (scene setup), so the file is not fetched a
+         * second time. Otherwise it is exactly `new BABYLON.Texture(url, scene, options)`. Either way the texture reports ready
+         * once its image is decoded, and a failed shared download falls back to loading the url.
+         * @param scene The scene the texture belongs to.
+         * @param url The url of the image file (absolute, or relative to the page).
+         * @param options The texture creation options (mip maps, invertY, sampling mode, sRGB buffer).
+         * @returns The new texture.
+         */
+        static CreateTextureSharingDownload(scene: BABYLON.Scene, url: string, options: BABYLON.ITextureCreationOptions): BABYLON.Texture;
+        /**
+         * The absolute form of a url, relative urls resolving against the page: the key of the downloads a load hands to its
+         * components, so the loader's `rootUrl + uri` and a component's resolved url meet whatever their spelling.
+         * @param url The url to resolve.
+         * @returns The absolute url, or the url unchanged where no page base exists.
+         */
+        private static AbsoluteUrl;
         private static _boxProjectionShaderPatched;
         /**
          * Installs a Unity-faithful per-pixel containment test into Babylon's shared `parallaxCorrectNormal`
@@ -2442,6 +2683,28 @@ declare namespace TOOLKIT {
         enabled: boolean;
         private _webgpu;
         private _loader;
+        /** Releases this load's count in SceneManager.WhenSceneReady (once; at the ready point or on a load error). */
+        private _releaseSceneLoad;
+        private _primitiveQueue;
+        private _primitivePumpScheduled;
+        private _primitiveChannel;
+        private _primitiveGate;
+        /** This load's external image downloads by uri, shared by every image entry naming the uri (null outside a load). */
+        private _imageDownloads;
+        /** Ends the image download cache when the load's scene is disposed mid-load; removed when the cache ends first. */
+        private _imageDownloadsObserver;
+        /** The glTF image uris this load's node components name in their metadata (collected before the downloads start). */
+        private _componentImageUris;
+        /** The downloads this load handed to its components, by absolute url, and the scene they are registered on. */
+        private _componentImageDownloads;
+        private _componentImageScene;
+        private _buffersLoaded;
+        private _primitivesTotal;
+        private _primitivesBuilt;
+        private _texturesMaxPending;
+        private _buildFraction;
+        private _buildPosted;
+        private _buildTimer;
         private _babylonScene;
         private _metadataParser;
         private _loaderScene;
@@ -2514,6 +2777,25 @@ declare namespace TOOLKIT {
         onReady(): void;
         /** @hidden */
         onComplete(): void;
+        /**
+         * Posts a scene-build stage (states 1 and 2, between the scene file download and the asset preloader). The status line and
+         * bar go to the page loader only when the page hands them over (SceneManager.HostDefersSceneStatus); the detail line always.
+         */
+        private static PostSceneStage;
+        /** Calls `action` once the page painted a frame (requestAnimationFrame, then a task), or after 100 ms when no frame comes (hidden tab). */
+        private static AfterNextPaint;
+        /** How often (ms) the scene-build stage is posted while the glTF builds (BUILDING SCENE NN%). */
+        static BuildStatusIntervalMs: number;
+        /** Starts posting the scene-build stage (geometry download, meshes built, textures loaded) until onComplete. */
+        private _startBuildStatus;
+        private _stopBuildStatus;
+        /**
+         * One scene-build post: "BUILDING SCENE NN%" with the stage the build waits on - the scene geometry download, then
+         * "BUILDING n OF m MESHES" (glTF primitives built), then "LOADING n OF m TEXTURES" (textures still loading before the loader
+         * completes). The fraction is meshes 0.65 + textures 0.35 x meshes (the texture total grows while meshes build, so its share
+         * counts in step with them) and never goes back.
+         */
+        private _postBuildStatus;
         getScriptBundleTag(): string;
         getScriptBundleUrl(): string;
         finishComplete(): void;
@@ -2523,14 +2805,35 @@ declare namespace TOOLKIT {
         onCleanup(): void;
         /** @hidden */
         setupLoader(): void;
+        /**
+         * A SceneShaderWarmup progress callback that posts the shader stage to the page loader: "COMPILING SHADERS NN%" with
+         * "<ready> OF <total> SHADERS COMPILED" while it runs, then "STARTING SCENE" with "ALL <total> SHADERS COMPILED" once
+         * every unit is ready, so the splash shows a clear end state for the last moments before the reveal. The bar and percentage are
+         * the warm-up's overall fraction (never going back), else the ready fraction. Posts only while AutoUpdateProgress is on and only
+         * when the counts or the percentage changed.
+         * @returns The callback for SceneShaderWarmup.RunAsync.
+         */
+        private static CreateShaderProgressPoster;
         /** @hidden */
         startParsing(): void;
+        /** hdrp-complete-parity D11: a parity HDRP camera clears to its background when no sky renders (bound with HDRP's background exposure weight, 0). */
+        private _applyHdrpBackground;
         private _processActiveMeshes;
         private _processUnityMeshes;
         private _processPreloadTimeout;
         /** @hidden */
         loadSceneAsync(context: string, scene: BABYLON.GLTF2.Loader.IScene): Promise<void> | null;
         private _loadSceneInternalAsync;
+        /**
+         * Downloads the scene's external buffers before its nodes load (SliceSceneParse): every primitive reads the same buffer, and
+         * primitives waiting on a buffer still downloading would all resume - and build - together the moment it arrives. Never
+         * rejects: a buffer that fails reports through the normal load path.
+         */
+        private _preloadSceneBuffers;
+        /** Runs `build` in its own task, after every primitive queued before it (SliceSceneParse); the result settles with build's. */
+        private _queuePrimitive;
+        /** Schedules the next queued primitive as a new task (MessageChannel: no timer clamping; the page renders between tasks). */
+        private _schedulePrimitiveTask;
         private _loadSceneExAsync;
         /** @hidden */
         loadNodeAsync(context: string, node: BABYLON.GLTF2.Loader.INode, assign: (babylonMesh: BABYLON.TransformNode) => void): Promise<BABYLON.TransformNode> | null;
@@ -2540,7 +2843,55 @@ declare namespace TOOLKIT {
          * skipped on the nested call by the loader's own re-entry guard) and gets TextureSampling.ApplyExtras before it is assigned.
          */
         _loadTextureAsync(context: string, texture: any, assign: (babylonTexture: BABYLON.BaseTexture) => void): Promise<BABYLON.BaseTexture>;
+        /**
+         * texture-image-deduplication: one download per external image uri during a scene load. On a miss the loader's own fetch
+         * is called synchronously - no await before it, so Babylon's re-entry guard still holds and the nested call skips this
+         * hook - and its promise is shared with every later image entry naming the same uri, in flight or finished. Data URIs,
+         * buffers and every non-image property load exactly as before (null = not handled).
+         * @param context The loader context of the property being loaded.
+         * @param property The glTF property that names the uri (an image entry, a buffer, ...).
+         * @param uri The relative or data uri to load.
+         * @returns The shared download for an external image uri, or null to let the loader fetch it itself.
+         */
+        _loadUriAsync(context: string, property: any, uri: string): Promise<ArrayBufferView>;
+        /** Starts this load's shared image download cache (see _loadUriAsync); a scene disposed mid-load ends it. */
+        private _beginImageDownloads;
+        /** Ends this load's shared image download cache (complete, ready point, load error or loader dispose); safe to call twice. */
+        private _endImageDownloads;
+        /**
+         * The external uris of the glTF images list (data uris and bufferView images excluded).
+         * @param images The glTF images list (may be missing).
+         * @returns The set of external image uris.
+         */
+        private _imageUrisOf;
+        /**
+         * Records every glTF image uri a node component names anywhere in its properties (a Shader Graph block texture url, a terrain
+         * lightmap uri): such a component loads the file itself during scene setup, after the glTF downloads finished.
+         * Arrays of numbers (heightfields, instance data) and typed arrays are skipped.
+         * @param value A component property value (walked recursively).
+         * @param imageUris The external image uris of the glTF images list.
+         */
+        private _collectComponentImageUris;
+        /**
+         * texture-image-deduplication: hands the finished downloads of the image files this load's components name to those
+         * components (CreateTextureSharingDownload), registered on the scene by absolute url until the load's ready point. Every
+         * other download is released with the image download cache, so the load holds no bytes it will not use again.
+         */
+        private _shareComponentImageDownloads;
+        /**
+         * Releases the downloads this load handed to its components, at the load's ready point or on a load error (a disposed scene
+         * drops its entry with it); safe to call twice.
+         */
+        private _releaseComponentImageDownloads;
         loadMaterialPropertiesAsync(context: string, material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.Nullable<Promise<void>>;
+        /**
+         * The glTF material the loader reads properties from. A generated Shader Graph class drives its surface - clearcoat,
+         * sheen, iridescence, transmission, specular - from the graph itself (it enables those Babylon blocks when its graph
+         * has them), so the KHR_materials_* extensions the exporter also scraped for the plain-PBR stand-in must not apply on
+         * top of it. Every other material, the stand-in included, reads the glTF material as is. The copy shares the loader's
+         * per-property re-entry state, and every KHR_materials_* loader runs after this extension (order 100 < 170).
+         */
+        static GraphMaterialSource(material: BABYLON.GLTF2.Loader.IMaterial, babylonMaterial: BABYLON.Material): BABYLON.GLTF2.Loader.IMaterial;
         private _getCachedMaterialByIndex;
         private _getCachedLightmapByIndex;
         /** Registers the shadowmask on a toolkit material as a RAW sampler (plan lbm D18).
@@ -2620,11 +2971,32 @@ declare namespace TOOLKIT {
         private _processShaderMaterials;
         private preProcessSceneProperties;
         private postProcessSceneProperties;
+        /**
+         * Applies the exported scene environment: Unity's ambient SH as the diffuse (mode 0, locked onto the texture) and the
+         * prefiltered .env as specular only, at level = SpecularEnvironmentLevel(refl, units) * scale.
+         *
+         * HDRP SKY (hdrp-sky-environment-parity): an HDRP export bakes the ACTIVE sky (sky + clouds, no geometry, before
+         * exposure) and writes environment.units = "physical", skybox.physicalscale and skybox.bakedsky. Its .env pixels were
+         * divided by the sky's mean luminance so they fit the 8-bit RGBD container; refl = reflection multiplier x physical
+         * scale restores the nits, and pre-exposure (parity scenes, hdrp-complete-parity D8) brings them to the display.
+         * Only "physical" skips the 0-1000 clamp. On a parity scene the level is also x hdrp.indirect.reflection (D15).
+         * Deviations: a static bake (a sky that moves at runtime is not reproduced); the sun disk appears only when HDRP's
+         * "include sun in baking" is on; no fog in the bake; highlights beyond 255x the sky's mean are clipped.
+         */
         private updateSkyboxEnvironment;
+        /**
+         * Installs Unity's ambient SH (27 pre-scaled floats) as the scene's diffuse ambient.
+         * @param environmentLevel HDRP parity only: the physical part of the environment texture's level (its physical scale x
+         *   reflection multiplier) when the SH is locked onto that texture. PBR multiplies the SH by the texture's level, which
+         *   already carries pre-exposure, so the SH is stored divided by it and unexposed; without an environment (null) the SH
+         *   itself carries pre-exposure.
+         */
         private generateSphericalHarmonics;
         private lateProcessSceneProperties;
         private _preloadRawMaterialsAsync;
         private _parseMultiMaterialAsync;
+        /** hdrp-complete-parity T13: the absolute URL of an exported glTF texture's image (null when it has none). */
+        private _gltfImageUrl;
         /** The render pipeline this load was exported from (its scene metadata), else the scene-wide value. */
         private _exportedRenderPipeline;
         private _parseCommonConstantProperties;
@@ -3135,6 +3507,26 @@ declare namespace TOOLKIT {
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         getClassName(): string;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /**
+         * hdrp-complete-parity SSGI (HDRP LightLoop `replaceBakeDiffuseLighting`): while `tkSsgiReplace` is on, an OPAQUE lit
+         * surface drops its own indirect diffuse - the probe / ambient SH irradiance (finalIrradiance) and an additive lightmap -
+         * because HDRP replaces builtinData.bakeDiffuseLighting with the SSGI result. The diffuse weight Babylon applied to that
+         * irradiance (albedo x AO x energy conservation x lighting intensity x IBL diffuse scale = finalIrradiance / irradiance)
+         * is kept in `tkSsgiWeight` for the prepass (SsgiWeightCode), so the composite adds GI x the same weight. Transparent
+         * surfaces keep theirs (HDRP: no SSGI on transparent). No `;` inside the shader comments.
+         */
+        static SsgiReplaceCode(wgsl: boolean): string;
+        /** After the colour is composed (only the prepass reads surfaceAlbedo from here on): the prepass albedo carries the SSGI diffuse weight. */
+        static SsgiWeightCode(wgsl: boolean): string;
+        /**
+         * HDRP's SSGI ray-miss fallback under Adaptive Probe Volumes is the APV irradiance AT THE SHADED PIXEL - the toolkit
+         * models APV per mesh (the probe SH the material just used), so the material hands that irradiance (before albedo) to the
+         * trace through the PREPASS_LOCAL_POSITION target, which nothing else reads while SSGI is live. Written after the
+         * prepass block: GLSL through Babylon's writeGeometryFragmentOutput, WGSL straight into the indexed fragment output.
+         */
+        static SsgiIrradianceCode(wgsl: boolean): string;
+        /** 1 while the camera being drawn composites HDRP SSGI (HdrpPostEffects marks it before the draw), else 0. */
+        static SsgiReplaceValue(scene: BABYLON.Scene): number;
         /** Provide custom uniforms (UBO) declarations */
         getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -3155,6 +3547,17 @@ declare namespace TOOLKIT {
          */
         static WriteProbeHarmonics(uniformBuffer: BABYLON.UniformBuffer, subMesh: BABYLON.SubMesh): boolean;
         /** Rewrites the nine SH uniforms from the material's reflection texture, exactly as Babylon's BindIBLParameters does, after a probe rider overwrote them. */
+        /**
+         * HDRP parity: a renderer with no light-probe rider takes its diffuse ambient from the SKY's ambient probe (HDRP
+         * EvaluateAmbientProbe - reflection probes are specular only). Babylon derives the irradiance from the material's
+         * reflection texture instead - for a renderer under an HDRP reflection probe that is the probe cube, whose polynomial
+         * (the normalised global SH) x the probe's level (multiplier x physical scale) is not the sky ambient: the fixture's
+         * probed cubes rendered 2.4x too dark. Writes the environment's harmonics x environment level / reflection level (the
+         * material multiplies by its reflection level, so the surface receives sky SH x sky level - pre-exposure and indirect
+         * diffuse included). Off-parity, or when the reflection texture IS the environment, nothing changes. Returns true when
+         * it wrote.
+         */
+        static WriteHdrpSkyAmbient(uniformBuffer: BABYLON.UniformBuffer, subMesh: BABYLON.SubMesh): boolean;
         private static RestoreGlobalHarmonics;
     }
     /**
@@ -3255,6 +3658,8 @@ declare namespace TOOLKIT {
         static SelName(i: number): string;
         static StrName(i: number): string;
         static KillName(i: number): string;
+        private static _probeOccNames;
+        static ProbeOcclusionName(i: number): string;
         static Selector(channel: number): BABYLON.Vector4;
         updateShadowmaskBindings(mesh: BABYLON.AbstractMesh): void;
         /** Binds the Subtractive main-light uniforms (plan lbm D9, D30, D35).
@@ -3424,6 +3829,12 @@ declare namespace TOOLKIT {
          * `mesh` (optional) pre-compiles the clone's effect so the first fade does not hitch.
          */
         static AcquireClone(material: BABYLON.Material, level: number, mesh?: BABYLON.AbstractMesh): BABYLON.Material;
+        /**
+         * material.clone() with the source's own texture objects: Babylon's clone makes a new Texture per texture slot (a large
+         * scene's thousands of fade clones made ~20,000 texture objects). A fade clone must draw exactly like its source, so it
+         * shares them - a UV offset animated on the source then reaches the clone too.
+         */
+        private static CloneSharingTextures;
         getClassName(): string;
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
@@ -3455,6 +3866,750 @@ declare namespace TOOLKIT {
     class UniversalShaderMaterial extends TOOLKIT.CustomShaderMaterial {
         constructor(name: string, scene: BABYLON.Scene);
         getShaderName(): string;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The engine's hardware scaling level from the display's device pixel ratio and the exported URP Render Scale, so a Unity
+     * quality tier's Render Scale renders at the same resolution here (terrain-performance D14). Built-in and HDRP export 1.
+     * An engine WindowManager watches for device-pixel-ratio changes, or one that starts on the default level (1 / devicePixelRatio,
+     * or the default level itself), stays on the default path and follows the current ratio, the optional cap and Render Scale; an
+     * engine the host gave its own level keeps that level, divided by Render Scale.
+     * @class DisplayScaling - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class DisplayScaling {
+        /** Highest device pixel ratio the default path renders at. No cap by default (a Unity web build renders at full DPR). */
+        static MaxDevicePixelRatio: number;
+        /** URP Render Scale of the loaded scene's quality tier (scene metadata `renderscale`); 1 when absent. */
+        static RenderScale: number;
+        /** Two scaling levels closer than this are the same level (guards float noise in 1 / ratio). */
+        private static readonly LEVEL_TOLERANCE;
+        /** The path of each engine, recorded the first time a scene applies scaling to it. */
+        private static readonly enginePaths;
+        /**
+         * 1 / (min(ratio, cap) x renderScale). Pure.
+         * @param devicePixelRatio The display ratio; invalid or non-positive reads as 1.
+         * @param maxDevicePixelRatio The cap; non-positive or NaN reads as no cap.
+         * @param renderScale URP Render Scale; invalid or non-positive reads as 1.
+         * @returns The hardware scaling level (larger = fewer pixels).
+         */
+        static ScalingLevel(devicePixelRatio: number, maxDevicePixelRatio: number, renderScale: number): number;
+        /**
+         * The window's device pixel ratio.
+         * @returns window.devicePixelRatio, or 1 outside a browser or when the ratio is not positive.
+         */
+        static CurrentDevicePixelRatio(): number;
+        /**
+         * The default-path level for a ratio (the window's when omitted).
+         * @param devicePixelRatio The display ratio.
+         * @returns ScalingLevel(ratio, MaxDevicePixelRatio, RenderScale).
+         */
+        static DefaultLevel(devicePixelRatio?: number): number;
+        /**
+         * Applies Render Scale (and on the default path the cap and the current ratio) to an engine, then calls engine.resize()
+         * when the level changed. The first call for an engine decides its path: an engine WindowManager watches, or a level
+         * equal to 1 / ratio or to the default level, is the default path (level = DefaultLevel(ratio) on every call, so a ratio change the watcher applied is kept);
+         * any other level is the host's choice (level = that first level / RenderScale on every call).
+         * @param engine The engine.
+         * @param devicePixelRatio The display ratio (the window's when omitted); non-positive reads as 1.
+         * @returns The level now in force.
+         */
+        static Apply(engine: BABYLON.AbstractEngine, devicePixelRatio?: number): number;
+        /**
+         * The engine's recorded path, decided on the first call. A watched engine is on the default path whatever its level: it
+         * was created at the default level of the previous scene's Render Scale, which the new scene's value no longer matches.
+         * @param engine The engine.
+         * @param ratio The display ratio (positive).
+         * @returns The engine's path.
+         */
+        private static ResolvePath;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** HDRP transmission state carried by HdrpLitPlugin (hdrp-raster-parity-followup D5-D8). */
+    interface IHdrpTransmission {
+        /** Diffusion profile scattering distance x multiplier, millimetres (RGB). */
+        distanceMm: number[];
+        /** Profile transmission tint (RGB, not premultiplied). */
+        tint: number[];
+        /** Profile thickness remap [minimum, maximum], millimetres. */
+        thicknessRemap: number[];
+        /** `_Thickness` (0-1), used without a thickness map. */
+        thicknessValue: number;
+        /** HDRP thickness map, sampled in its R channel; null without one. */
+        thicknessTexture: BABYLON.BaseTexture;
+        /** HDRP transmission mode. */
+        mode: "thin" | "thick";
+        /** `_TransmissionMask` (0-1). */
+        mask: number;
+        /** The transmission mask texture, or null. */
+        maskTexture: BABYLON.BaseTexture;
+        /** Which channel of `maskTexture` holds the mask: "r" (HDRP `_TransmissionMaskMap`) or "a" (SpeedTree8 metallic alpha). */
+        maskChannel: "r" | "a";
+        /** The scene's directional transmission multiplier (thick mode, HDShadowSettings.directionalTransmissionMultiplier). */
+        directionalMultiplier: number;
+    }
+    /** The exported `hdrprefraction` block (hdrp-raster-parity-followup D10). */
+    interface IHdrpRefractionBlock {
+        /** HDRP refraction model. */
+        model: "planar" | "sphere" | "thin";
+        /** Index of refraction. */
+        ior: number;
+        /** Thickness, metres. */
+        thickness: number;
+        /** Linear transmittance colour at `atdistance` (RGB). */
+        transmittancecolor: number[];
+        /** Absorption reference distance, metres. */
+        atdistance: number;
+    }
+    /** HDRP refraction state carried by HdrpLitPlugin (hdrp-raster-parity-followup D11). */
+    interface IHdrpRefraction {
+        /** 1 = planar / thin (HDRP RefractionModelBox), 2 = sphere (RefractionModelSphere). */
+        model: number;
+        /** Index of refraction. */
+        ior: number;
+        /** Thickness, metres. */
+        thickness: number;
+        /** Per-channel absorption coefficient, 1/m (RGB). */
+        absorption: number[];
+    }
+    /** The exit of a view ray through an HDRP refraction model (HdrpLitMaterials.RefractionExit). */
+    interface IHdrpRefractionExit {
+        /** Where the refracted ray leaves the shape (world space). */
+        position: number[];
+        /** The direction of the ray after it leaves the shape (unit length unless the exit refraction fails). */
+        direction: number[];
+        /** The distance travelled inside the shape, metres (drives the absorption). */
+        distance: number;
+    }
+    /**
+     * hdrp-complete-parity D18 - the shader half of an HDRP/Lit material on a stock Babylon PBR material.
+     *
+     * Everything Babylon PBR already does (specular workflow, subsurface, alpha mode, depth pre-pass, mesh alphaIndex) is set
+     * on the material directly by `HdrpLitMaterials.Apply`. This plugin carries only what PBR cannot express:
+     * - the Mirror / None double-sided normal modes (Flip is Babylon's own `twoSidedLighting`),
+     * - the HDRP detail map (`LitDataIndividualLayer.hlsl` `_DETAIL_MAP` blocks: albedo overlay, RNM normal blend,
+     *   smoothness overlay - mask = mask-map B, which the exporter packs into the metallic-roughness texture's R channel),
+     * - HDRP/Unlit emission (`tkHdrpUnlitEmissive`, pre-exposure weighted by `hdrpemissiveweight`).
+     *
+     * Attached at intake, before the material's first compile (a plugin cannot join a material that has been used). Every
+     * injected line is gated behind its own define, so an inactive feature compiles to Babylon's stock code, and the detail
+     * sampler is declared only under TK_HDRP_DETAIL (one sampler, never more - the WebGPU 16-sampler guard).
+     * @class HdrpLitPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpLitPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PluginName: string;
+        static readonly Priority: number;
+        static readonly DetailSampler: string;
+        /** The HDRP thickness map sampler (R channel, transmission). */
+        static readonly ThicknessSampler: string;
+        /** The HDRP transmission mask sampler (R channel, or A for the SpeedTree8 packed surface). */
+        static readonly TransmissionMaskSampler: string;
+        /** HDRP's Lit transmission uniforms (vec4 each, see bindTransmission). */
+        static readonly TransmissionUniforms: string[];
+        /** HDRP's Lit refraction uniforms (vec4 each): (ior, thickness m, model, unused), absorption (rgb), proxy sphere (world centre, radius). */
+        static readonly RefractionUniforms: string[];
+        /** The rendering view-projection (mat4) the refraction's on-screen test projects its sample with (the PBR fragment declares none of its own on every path). */
+        static readonly RefractionViewProjection: string;
+        /** "flip" | "mirror" | "none" (flip never needs the plugin). */
+        normalMode: string;
+        /** The HDRP detail map (linear data: R albedo, A+G normal, B smoothness). */
+        detailTexture: BABYLON.BaseTexture;
+        /** True when the metallic-roughness texture's R channel carries the detail mask (else mask 1, as HDRP without a mask map). */
+        detailMasked: boolean;
+        /** albedoScale, normalScale, smoothnessScale, uvSet. */
+        detailParams: BABYLON.Vector4;
+        /** tiling.xy, offset.zw. */
+        detailST: BABYLON.Vector4;
+        /** HDRP/Unlit emissive colour (linear, physical), or null. */
+        unlitEmissive: BABYLON.Color3;
+        /** HDRP's anisotropic IBL roughness (GetGGXAnisotropicModifiedNormalAndRoughness) - active only when Babylon anisotropy is on. */
+        anisotropicIbl: boolean;
+        /** The pre-exposure factor applied to `unlitEmissive` (driven by an HdrpRendering binding). */
+        unlitEmissiveScale: number;
+        /** HDRP Disney transmission (D5-D7), or null when the material does not transmit. */
+        transmission: TOOLKIT.IHdrpTransmission;
+        /** HDRP refraction (D11), or null when the material keeps Babylon's own refraction (or does not refract). */
+        refraction: TOOLKIT.IHdrpRefraction;
+        /**
+         * Creates the plugin on a PBR material (use `Attach`). hardBindForSubMesh (the per-mesh refraction proxy) is an extra event, read
+         * when the plugin is enabled, so the plugin is constructed disabled, registers for extra events, then enables itself.
+         * @param material The PBR material.
+         */
+        constructor(material: BABYLON.Material);
+        /** Attach (or return the existing) plugin and apply `keys` ({ normalmode, detail: { texture, masked, params, st }, unlitemissive, anisotropicibl, transmission, refraction }). PBR only. */
+        static Attach(material: BABYLON.Material, keys: any): TOOLKIT.HdrpLitPlugin;
+        /** The plugin on this material, or null. */
+        static Get(material: BABYLON.Material): TOOLKIT.HdrpLitPlugin;
+        /** Set the detail texture once it has loaded (the defines are re-evaluated). */
+        setDetailTexture(texture: BABYLON.BaseTexture): void;
+        /**
+         * Sets the transmission thickness and mask textures once they have loaded (the defines are re-evaluated). Either may be null,
+         * which keeps the texture already assigned.
+         * @param thickness The HDRP thickness map (R channel), or null.
+         * @param mask The transmission mask texture, or null.
+         */
+        setTransmissionTextures(thickness: BABYLON.BaseTexture, mask: BABYLON.BaseTexture): void;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        private detailActive;
+        /**
+         * The transmission textures in use (thickness map, mask), each only when present.
+         * @returns The loaded transmission textures; empty without transmission.
+         */
+        private transmissionTextures;
+        isReadyForSubMesh(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): boolean;
+        /** The detail and transmission UV varyings read the mesh UV attribute, so ask PBR for UVs before it resolves its attributes. */
+        prepareDefinesBeforeAttributes(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /**
+         * HDRP's anisotropic GGX for direct light is Babylon's LEGACY anisotropy: roughnessT/B = roughness * (1 +/- anisotropy)
+         * (HDRP ConvertAnisotropyToRoughness). The IBL bent normal differs below perceptual roughness 0.444 (HDRP also scales the
+         * stretch by saturate(1.5 * sqrt(perceptualRoughness)), Babylon by |anisotropy| alone). The glTF-style model the
+         * KHR_materials_anisotropy loader selects (alphaT = mix(alphaG, 1, a^2), alphaB = alphaG) is far weaker - at roughness
+         * 0.75 / anisotropy 0.6 it gives 0.72 / 0.56 where HDRP has 0.90 / 0.22, so the HDRP streak vanished. Runs before the
+         * anisotropic plugin reads the flag (prepareDefinesBeforeAttributes), so it holds whichever loads first.
+         */
+        static UseHdrpAnisotropy(material: BABYLON.Material, enabled: boolean): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /**
+         * The value of TK_HDRP_REFRACTION: 0 without HDRP refraction (or when Babylon's refraction is off), else the model
+         * (1 box / thin, 2 sphere).
+         * @returns The refraction model define.
+         */
+        private refractionModel;
+        getSamplers(samplers: string[]): void;
+        getActiveTextures(activeTextures: BABYLON.BaseTexture[]): void;
+        hasTexture(texture: BABYLON.BaseTexture): boolean;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Every draw: the HDRP refraction proxy sphere, centred on the drawn mesh's world bounding sphere with HDRP's infinite
+         * projection radius (HdrpLitMaterials.RefractionInfiniteProjection). HDRP intersects the refracted ray with the reflection
+         * probe's proxy, and a probe without a proxy volume (every HDRP bed's realtime probe) or the sky projects to
+         * minProjectionDistance 65504, so the sample lands where the exit ray points. Also the rendering view-projection, for the
+         * shader's on-screen test (a probe or shadow pass renders with its own). Written per draw, not in bindForSubMesh, which keeps
+         * the first mesh's value for every mesh sharing the material.
+         * @param uniformBuffer The material's uniform buffer.
+         * @param scene The scene.
+         * @param engine The engine.
+         * @param subMesh The sub-mesh being drawn.
+         */
+        hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Writes the refraction uniforms (Interfaces table): (ior, thickness m, model, unused) and the per-channel absorption 1/m.
+         * @param uniformBuffer The material's uniform buffer being bound for the sub-mesh.
+         */
+        private bindRefraction;
+        /**
+         * Writes the transmission uniforms (Interfaces table): shape = HDRP S per mm (xyz) + thickness mm without a map (w), tint =
+         * tint x 0.25 (xyz) + the directional transmission multiplier (w), remap = (remap0, remap1 - remap0, unused, mask), ST = the
+         * base map's tiling and offset (HDRP samples the thickness and mask maps with the base UV mapping).
+         * @param uniformBuffer The material's uniform buffer being bound for the sub-mesh.
+         */
+        private bindTransmission;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** Every injected shader string, for the source-invariant tests (no `;` inside `//` comments). */
+        static AllCode(): string[];
+        static VertexDefinitions(wgsl: boolean): string;
+        static VertexMainEnd(wgsl: boolean): string;
+        /** Module-scope state: the detail texel and mask are sampled once (UPDATE_ALBEDO, where UVs and samplers are in scope) and read by the later hooks. */
+        static FragmentDefinitions(wgsl: boolean): string;
+        /**
+         * HDRP detail albedo (LitDataIndividualLayer.hlsl): detailAlbedo = R*2-1, speed = saturate(|detailAlbedo| * albedoScale),
+         * overlay = lerp(sqrt(base), detailAlbedo < 0 ? 0 : 1, speed^2)^2, base = lerp(base, saturate(overlay), mask).
+         */
+        static DetailAlbedo(wgsl: boolean): string;
+        /**
+         * HDRP detail smoothness: detailSmoothness = B*2-1, speed = saturate(|ds| * smoothnessScale),
+         * overlay = lerp(s, ds < 0 ? 0 : 1, speed), s = lerp(s, saturate(overlay), mask). Babylon's metallicRoughness.g is roughness = 1 - s.
+         * Inside reflectivityBlock (no UVs there) - it reads the texel stashed by DetailAlbedo. Metallic workflow only.
+         */
+        static DetailSmoothness(wgsl: boolean): string;
+        /**
+         * Detail normal (RNM blend in tangent space, needs Babylon's TBN - a material with a normal map) then the HDRP
+         * double-sided normal mode: Mirror reflects a back face's normal about the geometric surface (tangent-space z
+         * mirrored), None leaves it untouched (twoSidedLighting is off for both).
+         */
+        static NormalCode(wgsl: boolean): string;
+        /**
+         * The injection point: Babylon's reflectionBlock call (regex key, matched on the expanded shader). Group 1 is the position
+         * argument, group 2 the whitespace after normalW - the replacement passes tkHdrpIblAlphaG where Babylon passes alphaG.
+         */
+        static readonly AnisoIblPoint: string;
+        /**
+         * HDRP anisotropic IBL (core ImageBasedLighting.hlsl GetGGXAnisotropicModifiedNormalAndRoughness): the environment is
+         * fetched with iblPerceptualRoughness = perceptualRoughness * saturate(1.2 - |anisotropy|). Babylon bends the normal the
+         * same way but samples at the full roughness, which blurs the anisotropic streak away. Only the IBL fetch changes - the
+         * direct lights, the BRDF lookup and every later use of alphaG keep the material roughness.
+         */
+        static AnisoIbl(wgsl: boolean): string;
+        /** Per light, PBR branch of `lightFragment`: the Lambert line of a punctual or directional light (group 2 = the light index). */
+        static readonly TransmissionDiffusePoint: string;
+        /** Per directional light, `lightFragment`: the start of its pre-lighting call. */
+        static readonly TransmissionDirectionalPoint: string;
+        /** Per light, `lightFragment`: the shadowed direct-diffuse accumulation. */
+        static readonly TransmissionShadowPoint: string;
+        /** `pbrBlockFinalUnlitComponents`: the direct-diffuse definition (GLSL `vec3`, WGSL `var : vec3f`). */
+        static readonly TransmissionFinalDiffusePoint: string;
+        /** `pbrBlockFinalLitComponents`: the indirect-diffuse definition (GLSL `vec3`, WGSL `var : vec3f`). */
+        static readonly TransmissionIrradiancePoint: string;
+        /** The transmission UV varying (base UV set, tiled in the fragment by tkHdrpTransmissionST). */
+        static TransmissionVertexDefinitions(wgsl: boolean): string;
+        /** Writes the transmission UV varying from the mesh's first UV set (0 without one). */
+        static TransmissionVertexMainEnd(wgsl: boolean): string;
+        /**
+         * Module-scope transmission state and functions (D6):
+         * - tkHdrpTransmittanceDisney: HDRP ComputeTransmittanceDisney (DiffusionProfile.hlsl), tint already x 0.25.
+         * - tkHdrpTransmitLight: one light's transmitted diffuse W(-NdotL) x T x lightColor x attenuation / PI, W = HDRP's
+         *   wrapped Lambert with TRANSMISSION_WRAP_LIGHT = sin 15 degrees. Albedo is applied once, later, by finalDiffuse x surfaceAlbedo.
+         * - tkHdrpTransmissionShadow: thin mode keeps the light's shadow; thick mode replaces it on the back of a directional light
+         *   by the scene's directional transmission multiplier.
+         * - tkHdrpBackIrradiance: the environment irradiance along -N, scaled as Babylon scales the front irradiance.
+         */
+        static TransmissionDefinitions(wgsl: boolean): string;
+        /**
+         * Before the lights: the pixel's HDRP transmittance (thickness from the map's R through the profile remap, else the baked
+         * thickness; x `_TransmissionMask`, x the mask map's R or A) and the per-pixel accumulators reset.
+         */
+        static TransmissionSetup(wgsl: boolean): string;
+        /** Per light: its transmitted diffuse, right after Babylon's Lambert line (identical in GLSL and WGSL). */
+        static TransmissionDiffuse(): string;
+        /** Per directional light: flags it for the thick-mode shadow rule (identical in GLSL and WGSL). */
+        static TransmissionDirectional(): string;
+        /**
+         * Per light: accumulates the transmitted diffuse with its shadow rule, then resets the light's state. The reset also covers
+         * hemispheric and area lights, which never reach the Lambert anchor.
+         */
+        static TransmissionShadow(wgsl: boolean): string;
+        /** The transmitted direct light joins diffuseBase before Babylon applies the albedo (identical in GLSL and WGSL). */
+        static TransmissionFinalDiffuse(): string;
+        /**
+         * HDRP keeps the front irradiance and adds the back irradiance x T (Lit.hlsl). Ray-traced GI replaces indirect diffuse, as HDRP's
+         * RTGI does, so the back term is skipped under TK_RTGI (identical in GLSL and WGSL).
+         */
+        static TransmissionIrradiance(): string;
+        /** `pbrBlockSubSurface` (inside subSurfaceBlock): the start of Babylon's single refraction sample, up to its view argument. */
+        static readonly RefractionSamplePoint: string;
+        /**
+         * Module-scope refraction state and functions (D11, HDRP core Refraction.hlsl):
+         * - tkHdrpRefractionProxyDistance: the far root of a ray against the proxy sphere (centre xyz, radius w), 0 on a miss.
+         * - tkHdrpRefractionModel: HDRP's RefractionModelSphere (TK_HDRP_REFRACTION 2) or RefractionModelBox (1) - the exit point,
+         *   the exit ray, the hit distance against the proxy sphere (HDRP's infinite projection around the mesh) and the absorption
+         *   exp(-absorption x distance inside). A proxy hit behind the camera or off screen samples at the exit point instead (hit
+         *   distance 0): HDRP rejects the first (ScreenSpaceProxyRaycastRefraction) and fades the second to zero weight
+         *   (EdgeOfScreenFade), where Babylon would read a mirrored or edge-clamped texel.
+         *   A sphere exit whose refraction fails (zero-thickness sphere) keeps the entry ray.
+         */
+        static RefractionDefinitions(wgsl: boolean): string;
+        /** Before the lights: the pixel's HDRP refraction exit, from the final shading normal, the view direction and the position. */
+        static RefractionSetup(wgsl: boolean): string;
+        /**
+         * HDRP's model replaces Babylon's single refraction (identical in GLSL and WGSL). The sample starts at the exit point and goes
+         * the hit distance along the exit ray: passing -direction as both the normal and the view vector makes Babylon's
+         * refract(-view, normal, 1.0) return the exit ray itself (screen-space: P1 + R2 x hit distance projected, cube: R2).
+         */
+        static RefractionSample(): string;
+        /** HDRP absorbs the refracted light by exp(-absorption x distance inside) and never tints it by the albedo. */
+        static RefractionAbsorption(wgsl: boolean): string;
+        /** HDRP/Unlit emission, added to the final colour (already pre-exposure scaled on the CPU). */
+        static UnlitEmissive(wgsl: boolean): string;
+    }
+    /**
+     * hdrp-complete-parity D17-D19 - intake of the `hdrp*` material keys onto a stock PBR material (called from
+     * CanvasTools._parseCommonConstantProperties on parity exports only, before the material's first compile).
+     * @class HdrpLitMaterials - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpLitMaterials {
+        /** Babylon's SubSurfaceConfiguration holds 5 diffusion profiles (its own neutral white one included). */
+        static readonly MaxDiffusionProfiles: number;
+        /** A glTF texture index (or `{ index }`) as an ITextureInfo, or null. */
+        static TextureInfo(value: any): any;
+        static BlendMode(blend: string, materialName: string): number;
+        static NormalMode(mode: string, materialName: string): string;
+        /** True when this device can run Babylon's prepass subsurface (MRT + a float or half-float colour target). */
+        static SupportsPrePassSubsurface(scene: BABYLON.Scene): boolean;
+        /**
+         * One Babylon diffusion profile per distinct HDRP profile (D19). Babylon holds five (its neutral white one included):
+         * a profile past that reuses the nearest registered colour, with one report. Returns the colour to assign.
+         */
+        static RegisterDiffusionProfile(config: any, name: string, color: BABYLON.Color3): BABYLON.Color3;
+        /**
+         * Read the hdrp* keys and set the PBR state; attach HdrpLitPlugin when a key needs shader work; register the emission
+         * binding (one per material, D8). `loadTexture(info, linear, assign)` resolves exported texture indices (the loader's
+         * loadTextureInfoAsync); without it, texture keys are skipped.
+         */
+        static Apply(material: BABYLON.PBRMaterial, constant: any, scene: BABYLON.Scene, loadTexture?: (info: any, linear: boolean, assign: (texture: BABYLON.BaseTexture) => void) => void): void;
+        /** HDRP RefractionModelBox: the planar and thin models (TK_HDRP_REFRACTION 1). */
+        static readonly RefractionModelBox: number;
+        /** HDRP RefractionModelSphere (TK_HDRP_REFRACTION 2). */
+        static readonly RefractionModelSphere: number;
+        /**
+         * HDRP's projection distance for a reflection probe without a proxy volume, and for the sky (EnvLightData
+         * minProjectionDistance, VolumeProjection.hlsl): the refraction proxy radius, metres.
+         */
+        static readonly RefractionInfiniteProjection: number;
+        /** The smallest transmittance and distance the absorption conversion divides by or takes the log of. */
+        private static readonly RefractionEpsilon;
+        /** HDRP's guard on the box model's cos(refracted ray, -normal). */
+        private static readonly RefractionBoxMinimumCosine;
+        /** The smallest squared length normalised as the sphere model's exit normal (HDRP SafeNormalize). */
+        private static readonly RefractionMinimumSquaredLength;
+        /** A squared exit-ray length below this means the exit refraction failed (total internal reflection or a zero normal). */
+        private static readonly RefractionFailedRaySquaredLength;
+        /**
+         * Applies an exported `hdrprefraction` block (D11): HDRP absorbs by its transmittance colour and never by the albedo, so Babylon's
+         * albedo and volume tints are neutral; Babylon's refraction samples at the plugin's hit distance (thickness as depth), and the
+         * plugin carries HDRP's model and absorption.
+         * @param material The PBR material, refraction already enabled by its glTF transmission.
+         * @param block The exported block.
+         */
+        static ApplyRefraction(material: BABYLON.PBRMaterial, block: TOOLKIT.IHdrpRefractionBlock): void;
+        /**
+         * Converts the exported block to the plugin's refraction state: planar and thin map to HDRP's box model, sphere to the sphere
+         * model, and the transmittance colour at its distance to an absorption coefficient.
+         * @param block The exported `hdrprefraction` block.
+         * @returns The plugin's refraction state.
+         */
+        static RefractionFromBlock(block: TOOLKIT.IHdrpRefractionBlock): TOOLKIT.IHdrpRefraction;
+        /**
+         * HDRP TransmittanceColorAtDistanceToAbsorption: absorption = -ln(max(T, 1e-6)) / max(distance, 1e-6) per channel.
+         * @param transmittance The linear transmittance colour at `atDistance` (RGB).
+         * @param atDistance The absorption reference distance, metres.
+         * @returns The absorption coefficient, 1/m (RGB).
+         */
+        static RefractionAbsorption(transmittance: number[], atDistance: number): number[];
+        /**
+         * HDRP refraction model exit (core Refraction.hlsl) - the CPU mirror of the shader's tkHdrpRefractionModel.
+         * - Sphere: R1 = refract(-V, N, 1/ior), C = P - N x thickness / 2, dist = -dot(N, R1) x thickness, P1 = P + R1 x dist,
+         *   R2 = refract(R1, normalize(C - P1), ior) (the entry ray when that exit refraction fails).
+         * - Box: R = refract(-V, N, 1/ior), dist = thickness / max(dot(R, -N), 1e-5), P1 = P + R x dist, R2 = -V.
+         * @param model 1 box (planar / thin) or 2 sphere.
+         * @param position The surface position (world space).
+         * @param normal The unit surface normal.
+         * @param view The unit vector from the surface to the eye.
+         * @param ior The index of refraction.
+         * @param thickness The model's thickness, metres.
+         * @returns The exit position, the exit direction and the distance travelled inside.
+         */
+        static RefractionExit(model: number, position: number[], normal: number[], view: number[], ior: number, thickness: number): TOOLKIT.IHdrpRefractionExit;
+        /**
+         * GLSL / WGSL refract(incident, normal, eta): 0 on total internal reflection.
+         * @param incident The unit incident direction.
+         * @param normal The unit normal.
+         * @param eta The ratio of indices of refraction.
+         * @returns The refracted direction, or the zero vector.
+         */
+        private static Refract;
+        /**
+         * The dot product of two 3-vectors.
+         * @param left The first vector.
+         * @param right The second vector.
+         * @returns left . right
+         */
+        private static Dot;
+        /**
+         * A 3-vector scaled.
+         * @param vector The vector.
+         * @param scale The scale.
+         * @returns vector x scale
+         */
+        private static ScaleVector;
+        /**
+         * A 3-vector plus another scaled.
+         * @param origin The base vector.
+         * @param offset The vector to add.
+         * @param scale The scale of `offset`.
+         * @returns origin + offset x scale
+         */
+        private static AddScaledVector;
+        /**
+         * HDRP/Nature/SpeedTree8's TransmissionMask (saturate(_SubsurfaceScale x luminance(_SubsurfaceTex)), baked by the exporter into
+         * the metallic-roughness texture's ALPHA): it becomes the HDRP transmission mask texture (channel "a"), bound once the
+         * metallic-roughness texture loads. `mask: false` is HDRP's black default map - nothing transmits, so the transmission is
+         * dropped. A generated graph class is left alone: it evaluates the graph's own TransmissionMask.
+         */
+        static ApplyTranslucencyMask(material: BABYLON.PBRMaterial, translucency: any): void;
+        /** Fresnel0 of a dielectric of index `ior` (Babylon's own reflectivity default). */
+        static IorFresnel0(ior: number): number;
+        /**
+         * HDRP SSS / Translucent surfaces have no metallic (Lit.hlsl: "There is no metallic with SSS", the diffuse uses metallic 0)
+         * and their fresnel0 is the diffusion profile's (FillMaterialSSS / FillMaterialTransmission: _TransmissionTintsAndFresnel0.a,
+         * exported as hdrpsss.fresnel0) with f90 still 1. Babylon: metallic factor 0 (the mask-map metallic multiplies it away), and
+         * the dielectric F0 scaled to the profile's through metallicReflectanceColor - which keeps Babylon's f90 at 1 like HDRP.
+         */
+        static ApplyProfileSpecular(material: BABYLON.PBRMaterial, sss: any): void;
+        /**
+         * Babylon's SSS pass is HDRP's (EvalBurleyDiffusionProfile, the 0.997 filter radius) but uploads the profile colour itself as
+         * the shape parameter S, where HDRP uses S = 1 / scatteringDistance (DiffusionProfileSettings.cs:129, clamped to 2^24).
+         * The two agree only for a distance of 1. HDRP's default profile (0.749, 0, 0.749) x 80.6 turned into S = 60 with d = 60 -
+         * a kernel with no weight anywhere, so the sphere went black. The S slots of the uploaded array are rewritten with HDRP's
+         * value; d (max distance) and the filter radius already follow HDRP. The profile colour list keeps the scattering distance,
+         * so lookups by colour still match.
+         */
+        static WriteHdrpShape(config: any, index: number, distance: BABYLON.Color3): void;
+        /** HDRP shape parameter per channel: min(2^24, 1 / scatteringDistance). */
+        static ShapeParam(distance: number[]): number[];
+        /** HDRP uploads the profile transmission tint x 0.25 (DiffusionProfileSettings: the Disney transmittance's 1/4 folded in). */
+        static readonly TransmissionTintScale: number;
+        /** HDRP TRANSMISSION_WRAP_LIGHT = cos(PI / 2 - TRANSMISSION_WRAP_ANGLE) = sin 15 degrees. */
+        static readonly TransmissionWrapLight: number;
+        /**
+         * HDRP Disney transmittance (DiffusionProfile.hlsl:9-19): T = tint x 0.25 x e x (e^2 + 3), e = exp(-S x thickness / 3),
+         * S = min(2^24, 1 / distance) per channel.
+         * @param distanceMm The profile's scattering distance x multiplier, millimetres (RGB).
+         * @param tint The profile's transmission tint (RGB, not premultiplied).
+         * @param thicknessMm The remapped thickness, millimetres.
+         * @returns The transmittance (RGB).
+         */
+        static TransmittanceDisney(distanceMm: number[], tint: number[], thicknessMm: number): number[];
+        /**
+         * HDRP's transmission wrap W(x) = saturate((x + w) / (1 + w)^2), w = sin 15 degrees (ComputeWrappedDiffuseLighting).
+         * @param negativeNdotL x = -NdotL (signed): positive on the side facing away from the light.
+         * @returns The wrapped Lambert weight (0-1, without the 1 / PI).
+         */
+        static TransmissionWrap(negativeNdotL: number): number;
+        /**
+         * One light's transmitted diffuse (D6): W(-NdotL) x T x lightColor x attenuation / PI, RGB - the CPU mirror of the shader's
+         * tkHdrpTransmitLight. The albedo is applied once, afterwards, as Babylon applies it to all direct diffuse.
+         * @param ndotL The signed N.L of the light.
+         * @param transmittance The pixel's transmittance (RGB).
+         * @param lightColor The light colour x intensity (RGB).
+         * @param attenuation The light's distance / cone attenuation (1 for a directional light).
+         * @returns The transmitted light (RGB).
+         */
+        static TransmittedLight(ndotL: number, transmittance: number[], lightColor: number[], attenuation: number): number[];
+        /**
+         * Builds the HDRP transmission state from an `hdrpsss` block (D6, D8): the profile's distance, tint and remap, the material's
+         * baked thickness and mask, the profile's transmission mode and the scene's directional transmission multiplier.
+         * @param sss The exported `hdrpsss` block.
+         * @param scene The scene (its `hdrp` block carries the directional multiplier).
+         * @returns The transmission state, textures not yet assigned.
+         */
+        static TransmissionFromBlock(sss: any, scene: BABYLON.Scene): TOOLKIT.IHdrpTransmission;
+        /** HDRP's default diffusion profile as uploaded (DiffusionProfileSettings.UpdateCache): multipliers 1 / 1, lobe mix 0.5, diffuse power 1 - 1. */
+        static readonly DefaultTubeProfile: number[];
+        /**
+         * HDRP tube lights: hands a material's diffusion-profile terms to TOOLKIT.HdrpTubeLightPlugin.SetProfile - the exported
+         * `duallobe` / `dualLobe` array { smoothness multiplier A, multiplier B, lobe mix, diffuse power - 1 } exactly as HDRP uploads
+         * it, each missing or invalid entry read as HDRP's default profile. Does nothing when the tube-light module is not loaded.
+         * @param material The SSS material (an HDRP/Lit stand-in or a generated graph class).
+         * @param dualLobe The exported terms, or null on an export older than tube lights.
+         */
+        static ApplyTubeProfile(material: BABYLON.Material, dualLobe: any): void;
+        /** Per channel 1 when HDRP's SSS kernel carries it (scattering distance above HDRP's 1 / 2^24 clamp), else 0. */
+        static ScatteredChannels(distance: number[]): number[];
+        /** HDRP SSS / Translucent: prepass subsurface scattering with one diffusion profile per HDRP profile, and HDRP transmission (ApplyTransmission). */
+        static ApplySubsurface(material: BABYLON.PBRMaterial, sss: any, scene: BABYLON.Scene, loadTexture?: (info: any, linear: boolean, assign: (texture: BABYLON.BaseTexture) => void) => void): void;
+        /**
+         * True for a transpiled Shader Graph class (its constructor carries `SgInfo`): such a class evaluates its graph's own
+         * translucency and transmission mask, so the HDRP/Lit transmission intake leaves it alone.
+         * @param material The material being loaded.
+         * @returns True for a generated graph class.
+         */
+        static IsGeneratedGraphClass(material: BABYLON.Material): boolean;
+        /**
+         * HDRP transmission (D5): HdrpLitPlugin evaluates HDRP's Disney transmittance per light and on the back irradiance, and
+         * Babylon's own translucency stays off (its ambient composition drops the front irradiance, which HDRP keeps). A generated
+         * graph class keeps its transpiled translucency. Without a profile colour nothing transmits (one report).
+         */
+        static ApplyTransmission(material: BABYLON.PBRMaterial, sss: any, scene: BABYLON.Scene, loadTexture?: (info: any, linear: boolean, assign: (texture: BABYLON.BaseTexture) => void) => void): void;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** One radiance source bound to the scene's HDRP pre-exposure (hdrp-complete-parity D7). */
+    interface IHdrpRadianceBinding {
+        physical: number;
+        weight: number;
+        apply: (scaled: number) => void;
+    }
+    /**
+     * hdrp-complete-parity groups A + B - the HDRP parity foundation.
+     *
+     * HDRP renders in PHYSICAL units (a 130,000 lux sun, a 2^14-nit sky) and multiplies every radiance source by one
+     * scalar, the pre-exposure (`GetCurrentExposureMultiplier`, `ShaderVariables.hlsl`), before anything reaches a
+     * render target. The toolkit does the same on the CPU: every radiance source registers a binding (its physical
+     * value, its exposure weight and a setter) and `SetPreExposure` re-applies all of them synchronously, so an edit
+     * lands in the same frame with no shader recompile. Image-processing exposure stays 1 on a parity scene.
+     *
+     * Every HDRP behaviour is gated on ONE predicate, `IsParity(scene)` (D6): exported `renderpipeline` "hdrp" AND a
+     * `hdrp` scene block with `version >= 1`. A "hdrp" export without the block is a legacy HDRP export - today's
+     * behaviour plus one warning. Built-in and URP scenes never leave pre-exposure 1, so every bound value equals its
+     * physical value exactly.
+     *
+     * Timing (D7): material and light intake run BEFORE `preProcessSceneProperties` stores `scene.metadata.toolkit`,
+     * so `Bind` always registers and applies at the current pre-exposure (1 until primed) and `Prime` - idempotent,
+     * called from every intake path - marks the scene parity and re-applies everything registered so far.
+     *
+     * Per-scene state lives on `scene._tkHdrp` and is dropped on `scene.onDisposeObservable`.
+     * @class HdrpRendering - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpRendering {
+        static readonly BlockVersion: number;
+        /** The sanitize ceiling: below half-float max (65504), so no later pass ever reads Inf. */
+        static readonly MaxRadiance: number;
+        static readonly LegacyWarning: string;
+        static readonly SanitizeShaderName: string;
+        /** The exposure weight of the camera background: 0 - HDRP clears with the raw backgroundColorHDR (see BackgroundColor). */
+        static readonly BackgroundExposureWeight: number;
+        /** Raised after every accepted `SetPreExposure` (the scene whose pre-exposure changed). */
+        static OnPreExposureChanged: BABYLON.Observable<BABYLON.Scene>;
+        /** "birp" | "urp" | "hdrp" (lower-case); an absent field reads as "birp". */
+        static RenderPipelineOf(metadata: any): string;
+        /** True when the export came from an HDRP project (parity or legacy). */
+        static IsHdrpExport(metadata: any): boolean;
+        /** True for an HDRP export that carries the parity scene block (version >= 1). */
+        static IsParityExport(metadata: any): boolean;
+        /** True when the scene is a parity HDRP scene (primed, or its stored toolkit metadata says so). */
+        static IsParity(scene: BABYLON.Scene): boolean;
+        /** The scene's `hdrp` block, or null. */
+        static Block(scene: BABYLON.Scene): any;
+        /** One warning per session for a legacy HDRP export (exported before the parity block existed). */
+        static WarnLegacyOnce(scene: BABYLON.Scene): void;
+        /** `p * (1 + (pe - 1) * clamp01(w))` = lerp(p, p * pe, w) - HDRP's exposure weight (LitBuiltinData.hlsl). */
+        static Scaled(physical: number, weight: number, pe: number): number;
+        /** The scene's pre-exposure; 1 when the scene is not a parity scene. */
+        static GetPreExposure(scene: BABYLON.Scene): number;
+        /**
+         * Sets the scene's pre-exposure and re-applies every binding in the same call. A non-finite or non-positive
+         * value is ignored (the previous one stays) with one warning; a non-parity scene never leaves 1.
+         */
+        static SetPreExposure(scene: BABYLON.Scene, pe: number): void;
+        /**
+         * Idempotent. Metadata null reads `scene.metadata.toolkit` (nothing happens when it is not there yet). A parity
+         * export marks the scene parity and applies `hdrp.preexposure` to every binding registered so far. Returns parity.
+         */
+        static Prime(scene: BABYLON.Scene, metadata: any): boolean;
+        /** ALWAYS registers; applies `Scaled(physical, weight, current pe)` immediately (pe 1 until primed). Never null. */
+        static Bind(scene: BABYLON.Scene, physical: number, weight: number, apply: (scaled: number) => void): IHdrpRadianceBinding;
+        /** Removes a binding (its last applied value stays). */
+        static Unbind(scene: BABYLON.Scene, binding: IHdrpRadianceBinding): void;
+        /**
+         * HDRP distance fade on a light binding: `saturate((fade - d) / (0.1 * fade))`, d = camera to light, multiplied
+         * into the applied value every frame by one onBeforeRender observer per scene.
+         */
+        static TrackLightFade(scene: BABYLON.Scene, binding: IHdrpRadianceBinding, light: BABYLON.Light, fadeDistance: number): void;
+        /** HDRP `DistanceFade`: saturate((fadeDistance - d) / (0.1 * fadeDistance)). */
+        static DistanceFade(distance: number, fadeDistance: number): number;
+        /** IndirectLightingController multipliers on a parity scene; {1,1,1} when absent. */
+        static Indirect(scene: BABYLON.Scene): {
+            diffuse: number;
+            reflection: number;
+            probes: number;
+        };
+        /**
+         * hdrp-complete-parity T23 (D25): the scene's `hdrp.lightmapscale` - the exporter divided every HDRP lightmap by it before
+         * the RGBD pack, so the lightmap texture level multiplies it back. 1 off parity, absent, or not a positive finite number.
+         */
+        static LightmapScale(scene: BABYLON.Scene): number;
+        /**
+         * hdrp-complete-parity T23 (FR-I3): an HDRP light's realtime shadow distance is `hdrp.shadows.maxdistance` (HDShadowSettings).
+         * The shadowmask combine (min(realtime, baked)) then hands every fragment beyond it to the baked shadowmask - HDRP's
+         * Distance Shadowmask. `fallback` (the light's own `shadowdistance`) off parity or when the block has no positive distance.
+         */
+        static ShadowDistance(scene: BABYLON.Scene, fallback: number): number;
+        /**
+         * hdrp-complete-parity T23 (D25): binds a lightmap texture's level on a parity scene to `level x lightmapscale x
+         * indirect.diffuse` (x pe through the registry); off parity the level is set as given. Returns the binding or null.
+         */
+        static BindLightmapLevel(scene: BABYLON.Scene, texture: BABYLON.BaseTexture, level: number): IHdrpRadianceBinding;
+        /**
+         * The `level` that scales a texture's LINEAR radiance by `linearLevel` on a BABYLON.StandardMaterial reflection.
+         * StandardMaterial converts a linear reflection (gammaSpace false) to gamma BEFORE multiplying by the level and
+         * back to linear at the end, so the effective linear factor is level^2.2 - the level is gamma-encoded here
+         * (toGammaSpace = pow(x, 1 / 2.2), exactly inverted by toLinearSpace). A gamma-space texture keeps its level.
+         */
+        static StandardReflectionLevel(linearLevel: number, texture: BABYLON.BaseTexture): number;
+        /**
+         * HDRP light layers are per RENDERER, but a Babylon InstancedMesh draws with its source mesh's light list. An instance whose
+         * `_tkRenderingLayers` differ from its source's therefore gets its own drawable: a geometry-sharing clone of the source parented
+         * under the instance at an identity local transform (the instance node, its scripts and children stay; it is only hidden), with
+         * the instance's layers, and the clone replaces the instance in every shadow map it was cast into. Parity scenes only; returns
+         * how many instances were split. Called before the light selector is installed.
+         */
+        static SplitLayerInstances(scene: BABYLON.Scene): number;
+        /** HDRP light layers: absent keys mean every layer. */
+        static LayersOverlap(light: any, mesh: any): boolean;
+        /**
+         * The clear colour of a parity scene, from the active camera's `hdrpclearmode` / `hdrpbackground`
+         * (`camera.metadata.hdrp`): "color" (or "sky" with no sky) -> background.rgb, alpha 1; "none" -> black; "sky" with
+         * a sky -> null (leave clearColor). Null off-parity or without camera data.
+         *
+         * NOT pre-exposed: HDRP clears its pre-exposed colour buffer with the raw `backgroundColorHDR`
+         * (HDRenderPipeline.RenderGraphUtils.cs `GetColorBufferClearColor`, consumed as the CameraColor clear colour), so
+         * the background reaches the tone mapper unexposed. `BackgroundExposureWeight` (0) is the weight the clear-colour
+         * binding uses.
+         */
+        static BackgroundColor(scene: BABYLON.Scene, hasSky: boolean): BABYLON.Color4 | null;
+        /**
+         * hdrp-complete-parity T25: HDRP clears its pre-exposed buffer with the RAW background, and its pre-exposure is the live
+         * exposure - so the background displays raw and meters as background / exposure (the feedback that drives a dark Solid
+         * Color camera to its exposure limit). Here the chain is pre-exposed by the static `pe` and the meter's apply pass
+         * multiplies by exposure / pe, so the clear colour carries pe / liveExposure. 1 without a live meter (static modes).
+         */
+        static BackgroundScale(pe: number, liveExposure: number): number;
+        /** The active camera's parsed HDRP background `{ mode, color[3] }`, or null (not parity / no data). */
+        static CameraBackground(scene: BABYLON.Scene): {
+            mode: string;
+            color: number[];
+        };
+        /** Registers the GLSL + WGSL sanitize fragments once. */
+        static RegisterShaders(): void;
+        /** The head-of-chain pass that writes min(c, MaxRadiance) and replaces NaN with 0 (WGSL on WebGPU). */
+        static CreateSanitizePass(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number): BABYLON.PostProcess;
+        private static SceneMetadata;
+        private static State;
+        private static ApplyBinding;
+    }
+    /**
+     * hdrp-raster-parity-followup D1: closes a baked HDRP sky's gamma round trip in the shader.
+     *
+     * StandardMaterial gamma-encodes a linear reflection (`IS_REFLECTION_LINEAR`) before it multiplies by the level, and
+     * converts back to linear only under `IMAGEPROCESSING` / `IMAGEPROCESSINGPOSTPROCESS`. A parity scene grades through
+     * the toolkit LUT chain instead, so without this plugin the sky stays gamma-encoded and reads too bright. The plugin
+     * re-linearizes the colour exactly when neither image-processing branch will, which makes
+     * `HdrpRendering.StandardReflectionLevel` correct in every mode. Attach it before the material's first compile.
+     */
+    class HdrpBakedSkyPlugin extends BABYLON.MaterialPluginBase {
+        /** The plugin's registered name. */
+        static readonly PluginName: string;
+        /** Runs after every built-in StandardMaterial plugin. */
+        static readonly Priority: number;
+        /**
+         * Registers the plugin on `material`. Use `HdrpBakedSkyPlugin.Attach`, which never attaches a second copy.
+         * @param material The baked-sky StandardMaterial.
+         */
+        constructor(material: BABYLON.StandardMaterial);
+        /**
+         * Attaches the plugin to `material` once.
+         * @param material The baked-sky StandardMaterial (before its first compile).
+         * @returns The plugin now on the material - the existing one when it was already attached.
+         */
+        static Attach(material: BABYLON.StandardMaterial): TOOLKIT.HdrpBakedSkyPlugin;
+        /**
+         * The guarded re-linearization injected at `CUSTOM_FRAGMENT_BEFORE_FOG`, where StandardMaterial's output is `color`.
+         * @param wgsl True for the WGSL body (WGSL's `toLinearSpace` takes a scalar, so it uses `toLinearSpaceVec3`).
+         * @returns The shader snippet.
+         */
+        static FragmentCode(wgsl: boolean): string;
+        /** @returns The plugin's class name. */
+        getClassName(): string;
+        /**
+         * The plugin injects GLSL and WGSL alike.
+         * @param shaderLanguage The material's shader language.
+         * @returns True for GLSL and WGSL.
+         */
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /**
+         * Supplies the fragment re-linearization; the vertex stage is untouched.
+         * @param shaderType "vertex" or "fragment".
+         * @param shaderLanguage The material's shader language.
+         * @returns The custom code map, or null for the vertex stage.
+         */
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): {
+            [pointName: string]: string;
+        };
     }
 }
 declare namespace TOOLKIT {
@@ -3513,6 +4668,64 @@ declare namespace TOOLKIT {
          */
         static BakedShadowStrength(maskValue: number, shadowStrength: number): number;
         /**
+         * True when the export should be encoded with Unity's exact sRGB transfer: a Linear colour space project on Built-in or
+         * URP. HDRP keeps Babylon's pow(2.2) approximation, BY MEASUREMENT: against the Unity HDRP references the approximation
+         * matches better on every HDRP bed (HdrpMaterialProbe mean |diff| 1.09 vs 4.89, SampleScene 5.38 vs 6.48, OutdoorsScene
+         * 6.24 vs 6.96) with identical exposure (EV 13.5 in both engines), while Built-in GarageOne only reaches Unity with the
+         * exact curve (car body 17 -> 9.5 vs Unity 9.3).
+         */
+        static UsesExactSrgb(colorSpace: any, pipeline?: string): boolean;
+        /**
+         * Unity's Linear colour space encodes the frame (and decodes sRGB textures) with the exact piecewise sRGB curve;
+         * Babylon's default is the pow(2.2) approximation, which lifts dark tones by up to ~8 levels (GarageOne: car body
+         * 17 vs Unity 10). The engine flag is global, so a scene that exports a colour space sets it in BOTH directions
+         * (Linear on, Gamma off - and off for HDRP, see UsesExactSrgb), restores the previous value when the scene is disposed, and marks its materials dirty
+         * when the value changes (the effect cache key includes the engine's global defines). A scene with no colour space
+         * (an older export) leaves the engine as it is. The RGBD helpers are pinned first (InstallRgbdPin). Returns true
+         * when the engine value changed.
+         */
+        static ApplyExactSrgb(scene: BABYLON.Scene, colorSpace: any, pipeline?: string): boolean;
+        /**
+         * Rewrites Babylon's RGBD helpers in one helperFunctions source so they keep the pow(2.2) APPROXIMATION whatever
+         * USE_EXACT_SRGB_CONVERSIONS says. RGBD stores gamma-encoded rgb with that approximation by convention - the
+         * exporter's lightmaps (GLTFEncodeLightmap.shader toRGBD) and reflection .env files, Babylon's BRDF lookup table and
+         * .env assets - but fromRGBD / toRGBD route through toLinearSpace / toGammaSpace, which turn exact under the define
+         * and lift every dark RGBD texel (measured: lightmap 0.0105 decoded as 0.0144, +3 levels on the GarageOne walls).
+         * Without the define the pinned helpers compute exactly what the originals did. Idempotent.
+         */
+        static PinRgbdSource(source: string, wgsl: boolean): string;
+        /** True when a helperFunctions source carries both pinned RGBD helpers. */
+        static IsRgbdPinned(source: string, wgsl: boolean): boolean;
+        /**
+         * Pins the GLSL and WGSL helperFunctions includes (PinRgbdSource) now AND whenever they are registered later: the ESM
+         * build registers shader includes lazily (on the first import of a shader that uses them), so the key is replaced
+         * by an accessor whose setter pins every source written to it. Returns how many of the two includes are pinned now
+         * (a lazily-registered one is pinned on arrival). Never throws.
+         */
+        static InstallRgbdPin(): number;
+        /**
+         * Does Unity attenuate Mixed lights on NON-lightmapped (probe-lit) meshes by the light probe occlusion?
+         * Built-in and URP (HDRP keeps its previous rendering), and only where Unity's realtime shadow map holds no static
+         * casters: Subtractive and plain Shadowmask. Built-in shades dynamic objects there with the probe occlusion
+         * (UnityShadowLibrary.cginc), URP through Shadows.hlsl (SAMPLE_SHADOWMASK is unity_ProbesOcclusion on a
+         * non-lightmapped object). That is the only thing keeping a dynamic car in a lightmapped garage out of the sun.
+         * Distance Shadowmask uses realtime shadows inside the shadow distance instead, so it is left alone.
+         */
+        static ProbeOcclusionApplies(pipeline: string, bakeMode: string, shadowmaskMode: string): boolean;
+        /**
+         * How the probe occlusion combines with a light's realtime shadow: 1.0 MULTIPLIES (Built-in Subtractive -
+         * UnityShadowLibrary attenuates the light colour on the CPU, and the realtime shadow then multiplies that light),
+         * 0.0 takes the MIN (Built-in Shadowmask: UnityMixRealtimeAndBakedShadows; URP: MixRealtimeAndBakedShadows under
+         * LIGHTMAP_SHADOW_MIXING, Subtractive and plain Shadowmask alike).
+         */
+        static ProbeOcclusionMultiplies(pipeline: string, bakeMode: string): boolean;
+        /**
+         * The light attenuation a probe-lit mesh takes from its interpolated occlusion Vector4 for a light whose exported
+         * `probeocclusionindex` is `index`: the clamped component (URP: LerpWhiteTo by the shadow strength), or exactly 1.0
+         * when there is no occlusion data or the light has no slot (-1).
+         */
+        static ProbeOcclusionTerm(occlusion: ArrayLike<number>, index: number, strength?: number): number;
+        /**
          * The sRGB electro-optical transfer function, per channel:
          * c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4).
          *
@@ -3564,6 +4777,22 @@ declare namespace TOOLKIT {
         /** Keys already warned about, so a per-parse or per-frame code path reports each problem once. */
         private static Warned;
         /**
+         * Records the scene's realtime shadow distance fade, exported per light as `shadowfade` = [scale, bias] (URP's
+         * ShadowUtils.GetScaleAndBiasForLinearDistanceFade from the asset's shadow distance and last cascade border). URP fades
+         * every realtime shadow - main and additional lights alike - by `saturate(distanceToCamera² * scale + bias)` with the
+         * same pair, so one value per scene serves every light. ShadowmaskPlugin applies it to each light's `shadow`.
+         * @param scene The scene being loaded.
+         * @param fade The exported [scale, bias]; anything else leaves the scene unchanged.
+         */
+        static SetShadowFade(scene: BABYLON.Scene, fade: any): void;
+        /**
+         * The scene's realtime shadow distance fade as (scale, bias, 0, 0) over the squared camera distance, or null when the
+         * export carries none (shadows then end at the shadow distance as before).
+         * @param scene The scene.
+         * @returns The fade, or null.
+         */
+        static GetShadowFade(scene: BABYLON.Scene): BABYLON.Vector4;
+        /**
          * shadergraph-transpiler-complete-coverage T8 fix loop: Unity PANCAKES directional shadow casters - a caster between the
          * light and a cascade is clamped onto the cascade's near plane (the URP / Built-in ShadowCaster pass clamps to
          * UNITY_NEAR_CLIP_VALUE), so each cascade's depth range is the cascade itself. Babylon's CascadedShadowGenerator without
@@ -3572,6 +4801,27 @@ declare namespace TOOLKIT {
          * LightSettings.setDepthClamps (default false) is a Babylon knob Unity does not have, so a cascade always clamps.
          */
         static ApplyUnityCascadeClamp(generator: BABYLON.CascadedShadowGenerator): void;
+        /** Unity Built-in's directional shadow-map size limit (4096 on any GPU with 512 MB or more, which every web target here has). */
+        static readonly BuiltInMaxShadowMapSize: number;
+        /** Unity Built-in's directional shadow-map screen factor (shadow-resolution-birp: NextPowerOfTwo(pixels x multiplier x 3.8)). */
+        static readonly BuiltInShadowScreenFactor: number;
+        /**
+         * The smallest power of two that is at least `value` (1 for values of 1 or less). Pure.
+         * @param value Any number.
+         * @returns The power of two.
+         */
+        static NextPowerOfTwo(value: number): number;
+        /**
+         * Unity Built-in's directional shadow map per cascade (terrain-performance D7): one atlas of
+         * NextPowerOfTwo(larger screen side x quality multiplier x 3.8) - or NextPowerOfTwo(custom resolution) when the light sets one -
+         * clamped to 4096; two or four cascades share it as tiles of half its side.
+         * @param screenPixels The larger render-target side in pixels.
+         * @param qualityMultiplier Built-in shadow-resolution multiplier: Low 0.125, Medium 0.25, High 0.5, Very High 1.
+         * @param customResolution Light.shadowCustomResolution; 0 or less means none.
+         * @param cascadeCount The light's cascade count (1, 2 or 4).
+         * @returns One cascade's map size in texels, at least 1.
+         */
+        static BuiltInCascadeTileSize(screenPixels: number, qualityMultiplier: number, customResolution: number, cascadeCount: number): number;
         /**
          * shadergraph-transpiler-complete-coverage X4: Unity renders a spot or point light's realtime shadow map only from the
          * casters that can reach it - the casters culled to the light (a spot light's shadow frustum, the light's range
@@ -3592,10 +4842,62 @@ declare namespace TOOLKIT {
          *    sphere dropped it).
          * A mesh whose bounds Babylon itself does not trust for culling (alwaysSelectAsActiveMesh: skinned, particle and
          * terrain instancing hosts) and anything without a bounding box always stays, the same rule the camera's frustum culling
-         * applies. The result is the same shadow map. Directional lights keep Babylon's own path (their casters toward the
-         * light still matter). A list installed earlier (e.g. the terrain's per-pass culling) is chained in front.
+         * applies. The result is the same shadow map.
+         *
+         * A directional light (each cascade of a CascadedShadowGenerator, or its single map) is culled like Unity culls a
+         * cascade's casters: a caster is dropped only when its box lies entirely outside one of the pass's four SIDE planes or
+         * beyond its FAR plane - the near side stays open, so every caster between the light and the cascade still casts (the
+         * cascades clamp, LightingConversions.ApplyUnityCascadeClamp). Without it every scene caster - rocks hundreds of metres
+         * away, kilometre-sized skybox mountains - was drawn into all four cascades. Casters that cull themselves per pass
+         * (`_tkOwnCasterCulling`, the terrain's) pass through untouched. A list installed earlier is chained in front.
          */
         static ApplyUnityCasterCulling(generator: BABYLON.ShadowGenerator): void;
+        /**
+         * Fragment-stage cascade coordinates for every receiver of a CascadedShadowGenerator. Babylon's shadowsVertex projects
+         * EACH vertex into ALL cascades (4 mat4 transforms) and ships 4 light-space positions, 4 depth metrics and the view
+         * position to the fragment stage (9 varyings, ~24 floats per vertex) although a pixel samples one cascade. On
+         * vertex-dense receivers - terrain detail grass - that per-vertex work and varying traffic was ~3 ms of a 2880x1620
+         * frame. These `!`-regex replacements (applied by ShadowmaskPlugin on every toolkit PBR material and by
+         * TerrainGrassPlugin on the texture grass, matched against the include-expanded shader where {X} is already the light
+         * index) drop the vertex block and the varyings, and project the pixel's world position into the SELECTED cascade only:
+         * `lightMatrix[index] * vec4(vPositionW, 1)`. A cascade projection is affine, so the interpolated per-vertex value
+         * equals the per-pixel one - the shadow is unchanged. Text that is not present (no CSM light) matches nothing.
+         * @param shaderType "vertex" or "fragment".
+         * @param wgsl True for WGSL, false for GLSL.
+         * @returns Regex keys (with the leading `!`) and their replacements.
+         */
+        static FragmentCascadeRewrites(shaderType: string, wgsl: boolean): {
+            [key: string]: string;
+        };
+        /** The fragment definitions the cascade rewrite reads (FragmentCascadeRewrites): the camera depth and the depth metric. */
+        static FragmentCascadeDefinitions(wgsl: boolean): string;
+        private static _viewDepthRow;
+        /**
+         * The view matrix's depth row (view-space z = dot(row.xyz, world) + row.w) of the scene's current view, written into the
+         * material's `tkViewZ` uniform for the GLSL cascade selection (FragmentCascadeBeforeLights). Correct in either handedness.
+         * @param material The material carrying a `tkViewZ` vec4 uniform.
+         * @param scene The scene whose current view matrix is used.
+         */
+        static SetViewDepthRow(material: any, scene: BABYLON.Scene): void;
+        /** The per-pixel camera depth for cascade selection (Babylon's vPositionFromCamera.z), once before the lights. */
+        static FragmentCascadeBeforeLights(wgsl: boolean): string;
+        /** World-space slack added to every directional culling plane: the filter footprint and normal bias reach just past a pass's box. */
+        static readonly DIRECTIONAL_CASTER_MARGIN: number;
+        private static _directionalPlanes;
+        /**
+         * The casters of `renderList[0..count)` that can write into one directional pass (ApplyUnityCasterCulling), into `out`:
+         * the pass is the cascade's transform (CascadedShadowGenerator.getCascadeTransformMatrix) or the single map's; a caster
+         * whose world box lies entirely outside a side plane or beyond the far plane (each widened by DIRECTIONAL_CASTER_MARGIN)
+         * is dropped. Casters with untrusted bounds (alwaysSelectAsActiveMesh, no bounding box) and casters that cull themselves
+         * (`_tkOwnCasterCulling`) always stay; disabled or hidden ones are dropped, as the render target would skip them anyway.
+         * @param generator The directional shadow generator.
+         * @param pass The cascade index (0 for a single map).
+         * @param renderList The shadow map's render list, or the list a chained custom list returned.
+         * @param count How many entries of renderList to consider.
+         * @param out The reused output array for this pass (cleared first).
+         * @returns out, filled with the casters to draw in this pass.
+         */
+        static CullDirectionalCasters(generator: any, pass: number, renderList: BABYLON.AbstractMesh[], count: number, out: BABYLON.AbstractMesh[]): BABYLON.AbstractMesh[];
         private static _cullPlanes;
         private static _cullLightPos;
         /** The casters of `renderList[0..count)` a spot / point light's shadow map can receive (ApplyUnityCasterCulling), into `out`. */
@@ -3617,6 +4919,27 @@ declare namespace TOOLKIT {
         static hasWarned(key: string): boolean;
         /** Forget every warned key. Used by the tests and by a scene reload. */
         static resetWarnings(): void;
+        /** The environment units a physical-unit (baked HDRP sky) export declares (hdrp-sky D19). */
+        static readonly PhysicalUnits: string;
+        /** The environment units every other export means, written or not (hdrp-sky D19). */
+        static readonly RelativeUnits: string;
+        /**
+         * Normalises `skybox.environment.units` (hdrp-sky D19). Absent means "relative" - every export made before
+         * the key existed. An unknown value warns once and is treated as relative, so it can never unclamp a level.
+         * @param value The raw metadata value.
+         */
+        static EnvironmentUnits(value: any): string;
+        /**
+         * The specular environment level before `scale` (hdrp-sky D19). Relative: clamped to [0, levelMax] exactly as
+         * BABYLON.Scalar.Clamp did. Physical: floored at 0 only - a baked HDRP sky is in nits and the camera exposure,
+         * not a clamp, brings it to the display.
+         */
+        static SpecularEnvironmentLevel(reflection: number, units: string, levelMax: number): number;
+        /**
+         * Warns once when an export marks its sky as baked but carries no environment block (hdrp-sky D19) - the
+         * silent failure this feature closed. Returns true when it warned. The skybox fallback still runs.
+         */
+        static WarnBakedSkyWithoutEnvironment(skybox: any): boolean;
         /**
          * The Babylon intensity mode to use when the glTF carries NO `intensitymode` - i.e. the mapping every
          * export produced before that field existed was baked for (plan D23).
@@ -3655,6 +4978,17 @@ declare namespace TOOLKIT {
         /** Floats per probe in Unity's layout: [R0..R8, G0..G8, B0..B8], coefficient order L00, L1-1, L10, L11, L2-2, L2-1, L20, L21, L22. */
         static readonly UnitySHStride: number;
         /**
+         * An ambient polynomial from pre-scaled harmonics times `scale` (an environment's or a probe cube's diffuse SH). Both forms agree: the polynomial terms are the
+         * exact expansion of the pre-scaled evaluation (what `EvaluatePolynomial` and the water read), and the scaled
+         * harmonics ride along as the polynomial's own, so the PBR SH path renders exactly them. Rebuilding harmonics
+         * through `SphericalHarmonics.FromPolynomial` would not round-trip: it treats the polynomial as Babylon's
+         * double-convolved form and would re-apply the basis scale to Unity's already pre-scaled coefficients.
+         * @param harmonics Pre-scaled harmonics (not modified).
+         * @param scale Multiplier applied to every band.
+         * @returns A new polynomial carrying a scaled copy of the harmonics.
+         */
+        static PolynomialFromPreScaled(harmonics: BABYLON.SphericalHarmonics, scale: number): BABYLON.SphericalPolynomial;
+        /**
          * Builds a BABYLON.SphericalHarmonics from 27 Unity floats at `offset` (Unity layout above), scaled by
          * `scale` (the ambient diffuseIbl for the global probe, `lightprobes.scale` for a light probe). This is the
          * ONE conversion the global ambient path (CanvasTools.generateSphericalHarmonics) and the tests use.
@@ -3682,6 +5016,228 @@ declare namespace TOOLKIT {
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
+     * Cooperative time slicing for heavy load work (terrain heightfields, texture-array mip chains): a job runs until its slice
+     * budget is used, then gives the page a task boundary (input, paint, other jobs) before it continues. The work and its order
+     * are unchanged, only spread over tasks, so a load never holds the page for one long block.
+     *
+     *     const slicer = new TOOLKIT.LoadSlicer();
+     *     for (...) { ...; if (slicer.expired) await slicer.next(); }
+     *
+     * @class LoadSlicer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class LoadSlicer {
+        /** Default time budget (ms) of one slice. */
+        static SliceMs: number;
+        private static _channel;
+        private static _waiting;
+        private _budget;
+        private _start;
+        /** A slicer whose first slice starts now. `budgetMs` defaults to LoadSlicer.SliceMs. */
+        constructor(budgetMs?: number);
+        /** Milliseconds from performance.now() (Date.now() where performance is missing). */
+        static Now(): number;
+        /** True once the current slice has used its budget. */
+        get expired(): boolean;
+        /** Ends the current slice: resolves in a new task, where the next slice starts. */
+        next(): Promise<void>;
+        /** Ends the current slice only when it has used its budget (else resolves at once, in the same task). */
+        breathe(): Promise<void>;
+        /**
+         * Resolves in a new task: a MessageChannel message (not clamped like nested setTimeout(0)), else setTimeout, else at once
+         * (no timers: headless tests).
+         */
+        static NextTask(): Promise<void>;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** One loading-job update, published on LoadingProgress.OnProgressObservable (custom splash screens may subscribe). */
+    interface ILoadingJobProgress {
+        /** The scene being loaded. */
+        scene: BABYLON.Scene;
+        /** Unique job key within the scene, e.g. "terrain:Terrain_0_0" or "skins". */
+        key: string;
+        /** Display group, e.g. "Terrain" ("LOADING TERRAIN 45%"). */
+        title: string;
+        /** What the job is doing now, e.g. "Loading terrain textures". */
+        stageLabel: string;
+        /** Progress of this job, 0 to 1 (never goes back). */
+        jobProgress: number;
+        /** Combined progress of every job with this title in the scene, 0 to 1. */
+        groupProgress: number;
+        /** Weighted progress of every job in the scene, 0 to 1 (what the splash bar shows). */
+        sceneProgress: number;
+        /** True on the job's final update. */
+        complete: boolean;
+    }
+    /** One weighted part of a job's progress (LoadingProgress.Blend). */
+    interface ILoadingProgressPart {
+        /** Share of the job, 0 to 1 (the parts of one job add up to 1). */
+        weight: number;
+        /** Units done. */
+        done: number;
+        /** Units in total; 0 means nothing to do (the part counts as complete). */
+        total: number;
+    }
+    /** @hidden Per-scene posting state of LoadingProgress. */
+    interface ILoadingPostState {
+        /** Title on the status line now ("" before the first post). */
+        shownTitle: string;
+        /** When shownTitle was first shown (ms, LoadingProgress.Clock). */
+        shownSince: number;
+        /** When the loader was last posted to (ms). */
+        lastPostTime: number;
+        /** Signature of the last post (status|details|progress per mille). */
+        lastPosted: string;
+        /** Stage label of the newest report of the shown group (the detail line once the whole group is complete). */
+        latestDetails: string;
+        /** Stage label on the detail line now ("" before the shown group's first label). */
+        shownDetails: string;
+        /** When shownDetails was first shown (ms, LoadingProgress.Clock). */
+        shownDetailsSince: number;
+        /** Labels the shown group already showed and left (the detail line never returns to them; reset when the group changes). */
+        leftDetails: string[];
+        /** Pending trailing post, or null. */
+        pendingTimer: ReturnType<typeof setTimeout>;
+        /** Pending post for when a held detail label may change, or null. */
+        detailTimer: ReturnType<typeof setTimeout>;
+    }
+    /**
+     * One heavy loading job of a scene (a terrain, the scene's skins, the navigation mesh, ...). Created by LoadingProgress.BeginJob.
+     * The job keeps the highest progress it has reported, fires LoadingProgress.OnProgressObservable on every update and, while the
+     * scene's asset preloader owns it, posts the scene's combined state to the page loader / splash screen.
+     */
+    class LoadingJob {
+        /** Unique key within the scene. */
+        readonly key: string;
+        /** Display group title. */
+        readonly title: string;
+        /** Share of the scene total (LoadingProgress.WEIGHTS). */
+        readonly weight: number;
+        /** The scene the job belongs to. */
+        readonly scene: BABYLON.Scene;
+        /** True when the job posts to the page loader / splash. */
+        readonly postsToLoader: boolean;
+        private _progress;
+        private _stageLabel;
+        private _isComplete;
+        /** @hidden Use LoadingProgress.BeginJob. */
+        constructor(scene: BABYLON.Scene, key: string, title: string, weight: number, postsToLoader: boolean);
+        /** Progress of this job, 0 to 1 (monotonic). */
+        get progress(): number;
+        /** The stage label of the last report. */
+        get stageLabel(): string;
+        /** True once complete() was called. */
+        get isComplete(): boolean;
+        /**
+         * Reports a stage and its progress; the job keeps the highest fraction it has reported. Ignored once the job is complete.
+         * @param stageLabel - What the job is doing now (sentence style, e.g. "Decoding skin textures").
+         * @param fraction - Progress of the whole job, 0 to 1 (clamped; non-numbers count as 0).
+         */
+        report(stageLabel: string, fraction: number): void;
+        /**
+         * Marks the job complete (progress 1) and posts a final update immediately. Calling it again does nothing.
+         * @param stageLabel - Final label (default title + " ready").
+         */
+        complete(stageLabel?: string): void;
+        /** Fires OnProgressObservable with the job's state, then posts to the page loader when this job owns it. */
+        private publish;
+    }
+    /**
+     * Per-scene registry of heavy loading jobs that drives the splash screen during the asset preloader. The status line names one
+     * group at a time ("LOADING TERRAIN 45%"), the detail line shows the stage of that group's least-advanced job (held for
+     * DETAIL_HOLD_MS, forward only) and the bar is always the weighted progress of every job of the scene. Entries are dropped on scene dispose and when a new toolkit scene load starts.
+     */
+    class LoadingProgress {
+        /** Every job update of every scene. */
+        static readonly OnProgressObservable: BABYLON.Observable<TOOLKIT.ILoadingJobProgress>;
+        /** Minimum time (ms) a group keeps the status line unless it completes. */
+        static GROUP_HOLD_MS: number;
+        /** Minimum time (ms) between two posts to the page loader per scene. */
+        static POST_INTERVAL_MS: number;
+        /** Minimum time (ms) the detail line keeps a stage label unless the shown group completes. */
+        static DETAIL_HOLD_MS: number;
+        /** Job weights by title. */
+        static readonly WEIGHTS: {
+            readonly [title: string]: number;
+        };
+        /** Page loading state of the asset preloader (Utilities.GetLoadingState): the only state the tracker posts in. */
+        private static readonly PRELOADER_LOADING_STATE;
+        /** Weight of a job whose title is not in WEIGHTS. */
+        private static readonly DEFAULT_WEIGHT;
+        /** Clock in milliseconds (tests replace it). */
+        static Clock: () => number;
+        private static Jobs;
+        private static PostStates;
+        private static DisposeHooks;
+        /**
+         * Opens (or returns the job already opened with this key in the current load) a job for the scene.
+         * @param scene - The scene being loaded.
+         * @param key - Unique key within the scene.
+         * @param title - Display group title (a WEIGHTS key; unknown titles weigh 1).
+         * @param postsToLoader - True while the scene's asset preloader owns the job (default: a toolkit scene load is in flight).
+         * @returns The job.
+         */
+        static BeginJob(scene: BABYLON.Scene, key: string, title: string, postsToLoader?: boolean): TOOLKIT.LoadingJob;
+        /** True when the scene has at least one job in the current load. */
+        static HasJobs(scene: BABYLON.Scene): boolean;
+        /** Weighted progress of every job of the scene, 0 to 1 (1 when there are none). */
+        static GetSceneProgress(scene: BABYLON.Scene): number;
+        /** Combined progress of the scene's jobs with this title, 0 to 1 (1 when there are none). */
+        static GetGroupProgress(scene: BABYLON.Scene, title: string): number;
+        /** The scene's jobs of the current load (a copy; empty when there are none). */
+        static GetJobs(scene: BABYLON.Scene): TOOLKIT.LoadingJob[];
+        /** Forgets the scene's jobs and posting state (called by SceneManager.NoteSceneLoadStarted when no load is in flight). */
+        static Reset(scene: BABYLON.Scene): void;
+        /**
+         * Weighted fraction of a job made of parts: Σ weight × (total > 0 ? min(done / total, 1) : 1).
+         * @param parts - The job's parts.
+         * @returns 0 to 1.
+         */
+        static Blend(parts: TOOLKIT.ILoadingProgressPart[]): number;
+        /** @hidden Posts the scene's current loading state to the page loader, at most once per POST_INTERVAL_MS (latest values win). */
+        static PostScene(scene: BABYLON.Scene, reportingTitle: string, details: string, forceNow: boolean): void;
+        /**
+         * Posts the scene's current loading state to the page loader at once (no throttle), for when the asset preloader starts and
+         * reports made before it were held back. Does nothing without posting jobs, when AutoUpdateProgress is off or outside the
+         * preloader state.
+         * @param scene - The scene being loaded.
+         */
+        static FlushScene(scene: BABYLON.Scene): void;
+        /** @hidden The scene's posting state (created on first use). */
+        static GetPostState(scene: BABYLON.Scene): TOOLKIT.ILoadingPostState;
+        /** Clears the detail line and its history (the shown group changed). */
+        private static ResetShownDetails;
+        /**
+         * Moves the detail line to the shown group's candidate label when the rules allow it: the label differs, it was not shown and
+         * left before, and the group is complete, nothing is shown yet or the current label has been shown for DETAIL_HOLD_MS. A change
+         * held back by the hold time schedules a trailing post for when the hold ends, so the line does not stall once reports stop.
+         */
+        private static UpdateShownDetails;
+        /**
+         * The label the group is waiting on: the stage of its least-advanced incomplete posting job that has reported a label (ties go
+         * to the earliest opened job); the given fallback (the reporting job's final label) when the whole group is complete.
+         */
+        private static GetDetailCandidate;
+        /** Schedules one post of the scene's latest state for when the detail hold ends (delay in ms) unless one is already pending. */
+        private static ScheduleHeldDetailPost;
+        /** The scene's posting job with the lowest progress (ties go to the earliest opened), or null when it has none. */
+        private static GetLeastCompletePostingJob;
+        /** Σ(weight × progress) / Σ(weight) over the jobs; 1 when there are none. */
+        private static WeightedProgress;
+        /** The weight of a title (WEIGHTS, or DEFAULT_WEIGHT for unknown titles). */
+        private static GetWeight;
+        /** The scene's live job list (created, with its dispose hook, on first use). */
+        private static GetOrCreateJobList;
+        /** Registers (once per scene) the dispose observer that drops the scene's entries. */
+        private static HookSceneDispose;
+        /** Drops the scene's jobs and posting state and cancels pending trailing / held-detail posts. */
+        private static ForgetScene;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
      * Babylon toolkit metadata parser class (Internal use only)
      * @class MetadataParser - All rights reserved (c) 2024 Mackey Kinard
      */
@@ -3691,6 +5247,8 @@ declare namespace TOOLKIT {
         private _freezeList;
         private _scriptList;
         private _babylonScene;
+        /** A cascade blend at or below this fraction is treated as no blending (Babylon's SHADOWCSMNOBLEND path). */
+        static readonly CascadeBlendEpsilon: number;
         constructor(scene: BABYLON.Scene);
         /** Unity `Light.shadowStrength` (0 = no shadow, 1 = full) -> Babylon shadow-generator DARKNESS
          *  (1 = black, 0 = the light's contribution fully removed), scaled by
@@ -3701,6 +5259,22 @@ declare namespace TOOLKIT {
          *  `strength = 0` still means "no shadow" at every scale and only the depth of a real shadow moves.
          *  Both the strength and the product are clamped, so no scale can produce a darkness outside 0..1. */
         static GetShadowDarkness(shadowstrength: number): number;
+        /**
+         * A URP spot light's caster bias (`urpshadowbias`, [depth, normal] in metres from ShadowUtils.GetShadowBias) as Babylon's.
+         * Babylon's normal bias is already in world units. Its depth bias is added to the depth metric, which spans the light's
+         * shadow depth range linearly (`(z + minZ) / (minZ + maxZ)` over a projection from shadowMinZ to shadowMaxZ, one unit =
+         * maxZ - minZ metres on WebGL and WebGPU alike), so the depth bias is the metres over that span. The legacy factor
+         * (Unity bias x 0.1) read a Depth Bias of 10 as 1.0, the whole range, and the light cast no shadow at all.
+         */
+        static ApplyUrpShadowBias(generator: BABYLON.ShadowGenerator, light: BABYLON.ShadowLight, urpshadowbias: number[]): void;
+        /**
+         * hdrp-complete-parity T16 (D26, D27): the HDRP light keys of a parity export. `hdrplightlayers` rides on the light for the
+         * light selector (HdrpRendering.LayersOverlap), affect diffuse / specular off blacken that term (the live PhysicallyBasedSky
+         * keeps the blackened colour as its base), a fade distance below 1e4 multiplies HDRP's distance fade into the light's
+         * pre-exposure binding every frame, and a non-black shadow tint is reported once (Babylon shadows darken toward black).
+         * The `rtshadows` block (hdrp-raytracing-polyfill T1) is kept on the light as `_tkRtShadows` for RayTracingContract.Read.
+         */
+        static ApplyHdrpLightKeys(scene: BABYLON.Scene, light: BABYLON.Light, binding: TOOLKIT.IHdrpRadianceBinding, component: any): void;
         /**
          * Unity cascade splits (URP m_Cascade2Split / m_Cascade4Split: cumulative fractions of the shadow distance, measured
          * from the camera) onto a CascadedShadowGenerator (unity-terrain-system-parity D44). Babylon only offers the lambda
@@ -3726,6 +5300,16 @@ declare namespace TOOLKIT {
         private static DoProcessPendingPhysics;
         private static DoProcessPendingFreezes;
         private static SetupCameraComponent;
+        /**
+         * Creates the Babylon light for an exported Unity light component on `entity`: its type, colour and intensity in the
+         * scene's lighting mode, range and spot cone, render list and culling, and - when the light casts realtime shadows and
+         * the quality allows it - its shadow generator. A directional light's map size per cascade follows its pipeline
+         * (terrain-performance D7: the exported cascademapsize for URP and HDRP, Built-in's screen-dependent tile computed here
+         * from shadowscreenmultiplier); point and spot lights and older exports keep shadowmapsize.
+         * @param scene The scene being loaded.
+         * @param entity The exported node that carries the light component.
+         * @param component The exported light component metadata.
+         */
         private static SetupLightComponent;
     }
 }
@@ -3921,11 +5505,235 @@ declare namespace TOOLKIT {
         /**
          * shadergraph-transpiler-complete-coverage T20 (D24): binds a generated class's diffusion profile uniforms from the scene's
          * exported profiles - g_sgSssShape (scattering distance in mm, the multiplier applied; a = filter radius in mm), g_sgSssRemap
-         * (thickness remap min / max in mm, world scale, 1 = bound) and g_sgSssTint (transmission tint). Called once per frame by
-         * update(); a profile is resolved once per material and hash (the scene metadata arrives after awake()).
+         * (thickness remap min / max in mm, world scale, 1 = bound) and g_sgSssTint (transmission tint), and hands the profile's dual
+         * lobe / diffuse power to the HDRP tube lights (HdrpLitMaterials.ApplyTubeProfile). Called once per frame by update(); a
+         * profile is resolved once per material and hash (the scene metadata arrives after awake()).
+         * @param material The generated graph class.
+         * @param hashValue The Diffusion Profile block / property value (asfloat of the profile's uint hash).
+         * @returns True when the scene's profile with that hash is bound.
          */
         static BindDiffusionProfile(material: BABYLON.Material, hashValue: number): boolean;
         getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** Result of a scene shader warm-up (SceneShaderWarmup.RunAsync). */
+    interface ISceneShaderWarmupResult {
+        /** Units ready when the warm-up ended. */
+        ready: number;
+        /** Units counted. */
+        total: number;
+        /** True when the warm-up stopped at its timeout. */
+        timedOut: boolean;
+    }
+    /**
+     * Compiles every effect the scene's first frames need (meshes with their shadow passes and levels of detail, camera post
+     * processes) and counts them, so the splash screen can show a real "Compiling shaders" stage instead of a fixed wait.
+     * A unit is one enabled, visible mesh with a material (ready when `mesh.isReady(true)` and every texture its material binds
+     * has loaded) or one post process of an active camera (ready when `postProcess.isReady()`).
+     */
+    class SceneShaderWarmup {
+        /** Upper bound of a warm-up (ms). */
+        static TIMEOUT_MS: number;
+        /** Pause between two polls (ms): long enough for the splash to paint a frame, short enough to keep the stage quick. */
+        static POLL_MS: number;
+        /**
+         * Time budget of one poll (ms): a poll stops checking units once it is spent (at least one unit is checked per poll), so
+         * engines that compile synchronously (WebGPU) spread the work over several polls, the page stays responsive and the bar climbs.
+         */
+        static POLL_BUDGET_MS: number;
+        /**
+         * Compiles the scene's shaders behind the splash without blocking the browser, in two stages:
+         * 1. **Effects**: polls every unit until all are ready (a few milliseconds per poll), the timeout passes or the scene is
+         *    disposed. While a toolkit scene load holds draws (BeginSceneLoad) nothing else prepares them, then the hold lifts.
+         * 2. **Pipelines** (WebGPU scene loads): the scene draws every mesh (frustum clipping off) and each draw's GPU pipeline is
+         *    built asynchronously, until no draw requests a new one (PIPELINE_SETTLE_FRAMES) or the timeout passes.
+         * Never rejects. `onProgress` gets `ready < total` until both stages are done, then one final `ready === total`.
+         * @param scene - The scene to warm up.
+         * @param onProgress - Called after each poll / frame with the ready and total unit counts (pipelines count as units in stage 2)
+         * and the overall fraction, 0 to 1, which never goes back (stage 1 fills EFFECT_STAGE_SHARE of it when a pipeline stage follows).
+         * @returns The final counts ({ ready: 0, total: 0, timedOut: false } at once when the scene has no units).
+         */
+        static RunAsync(scene: BABYLON.Scene, onProgress?: (ready: number, total: number, fraction?: number) => void): Promise<TOOLKIT.ISceneShaderWarmupResult>;
+        /** Stage 1 of RunAsync: polls every effect unit until all are ready, the deadline passes or the scene is disposed. */
+        private static PrepareEffectsAsync;
+        /**
+         * True when every texture the material binds has finished loading or failed to load. A non-blocking texture still
+         * downloading lets a material report ready and recompile when it arrives (visible pop-in), so warm-ups wait for it.
+         * @param material - The material to check (null counts as loaded).
+         * @returns True when no bound texture is still loading.
+         */
+        static TexturesLoaded(material: BABYLON.Material): boolean;
+        /** The scene's mesh units: enabled, visible meshes with sub-meshes and a material. */
+        private static CollectMeshes;
+        /** The scene's post-process units: every post process of every active camera (activeCameras, else activeCamera). */
+        private static CollectPostProcesses;
+        /**
+         * Checks the mesh units not ready yet under the active camera's render pass and marks the newly ready ones, until the
+         * poll deadline passes (at least one unit is checked). A mesh disposed during the warm-up, or one whose check throws,
+         * counts as ready (it can never be warmed).
+         * @returns How many units became ready in this check.
+         */
+        private static CheckMeshes;
+        /** True when the mesh's effects (sub-meshes, shadow passes, levels of detail) are compiled and its textures loaded. */
+        private static IsMeshReady;
+        /**
+         * Checks the post-process units not ready yet and marks the newly ready ones (a throwing check counts as ready), until the
+         * poll deadline passes (at least one unit is checked).
+         * @returns How many units became ready in this check.
+         */
+        private static CheckPostProcesses;
+        /** Milliseconds from performance.now() (Date.now() where performance is missing). */
+        private static NowMs;
+        /** Share of the warm-up fraction the effect stage fills when a pipeline stage follows (RunAsync). */
+        static EFFECT_STAGE_SHARE: number;
+        /** Consecutive frames without a new pipeline request (and none pending) that end the pipeline stage of a warm-up. */
+        static PIPELINE_SETTLE_FRAMES: number;
+        /** Consecutive quiet frames after the scene load completed that end the asynchronous pipeline mode. */
+        static PIPELINE_QUIET_FRAMES: number;
+        /** Upper bound (ms) of the draw hold and the asynchronous pipeline mode of one scene load. */
+        static LOAD_MODE_TIMEOUT_MS: number;
+        private static readonly SkipDraw;
+        private static LoadStates;
+        private static PipelineStates;
+        private static MeshDrawHook;
+        /**
+         * Starts the non-blocking load mode of a toolkit scene load (called by the toolkit scene loader while the splash covers the
+         * canvas). Two things keep the browser responsive until the shader stage has run:
+         * - **Draw hold**: the scene draws no mesh, so no frame prepares every material's shaders at once on the page thread. The
+         *   shader stage (RunAsync) prepares them instead, a few milliseconds per poll, and lifts the hold when done. During the
+         *   hold `scene.isReady()` skips the material sweep and material dirty marking is blocked (one pass over the meshes catches
+         *   up when the hold lifts), so neither scales with materials x meshes while the load applies its settings.
+         * - **Asynchronous pipelines (WebGPU)**: a draw whose GPU pipeline is not built yet requests it with
+         *   `GPUDevice.createRenderPipelineAsync` (built on the GPU process's worker threads) and is skipped for that frame,
+         *   instead of `createRenderPipeline`, which compiles on the GPU process's main thread and freezes every tab and the
+         *   browser window while it runs. Only scene mesh draws (drawn again every frame) are skipped - never one-time internal
+         *   draws such as the GPU decode of a loading .env texture or mipmap generation. Behind the splash a skipped draw is
+         *   invisible; the mode ends once the load completed and the scene rendered PIPELINE_QUIET_FRAMES frames without a new request.
+         * Both end at the latest after LOAD_MODE_TIMEOUT_MS or when the scene load completes without a shader stage (load error).
+         * @param scene - The scene being loaded.
+         */
+        static BeginSceneLoad(scene: BABYLON.Scene): void;
+        /** True while the scene draws no mesh because its load has not finished the shader stage (BeginSceneLoad). */
+        static IsHoldingDraws(scene: BABYLON.Scene): boolean;
+        /** GPU pipelines of the scene's engine still compiling asynchronously (0 outside the asynchronous pipeline mode or on WebGL). */
+        static PendingPipelineCount(scene: BABYLON.Scene): number;
+        /**
+         * `scene.executeWhenReady` that does not run during a toolkit scene load. executeWhenReady checks every mesh of the scene
+         * every 100 ms and prepares every not-ready material in that one call, which blocks the page for seconds on a large scene;
+         * during a load the shader stage prepares them in small slices, so the action waits until the load completed (then the
+         * check finds everything prepared). Outside a toolkit load it is plain executeWhenReady.
+         * @param scene - The scene.
+         * @param action - Called once the scene is ready.
+         */
+        static ExecuteWhenReady(scene: BABYLON.Scene, action: () => void): void;
+        /** Lifts the draw hold of the scene (the scene draws its meshes again). */
+        private static ReleaseDrawHold;
+        /** Lifts the scene's draw hold: meshes draw again, isReady checks materials again, material dirty marking resumes. */
+        private static LiftHold;
+        /**
+         * Blocks Babylon's material dirty marking during the hold (`scene.blockMaterialDirtyMechanism`). Each dirty call - an image
+         * processing change, a reflection probe's box size, the pre-pass renderer - makes every material scan every mesh of the scene
+         * for its own sub-meshes, so one call costs materials x meshes checks: seconds per call on a scene with thousands of each,
+         * repeated by every post-processing setting and probe applied during the load. During the hold almost no material is
+         * prepared yet, so the scans mark next to nothing. Left alone when something else already blocks it.
+         */
+        private static BlockMaterialDirtying;
+        /**
+         * Resumes material dirty marking after the hold. Babylon's own unblock marks every material dirty with one more materials x
+         * meshes scan; this marks every sub-mesh prepared so far as fully dirty in one pass over the meshes instead (a superset of
+         * what the blocked calls would have marked), so prepared materials re-check their defines before their next draw.
+         */
+        private static UnblockMaterialDirtying;
+        /** Marks the material defines of every prepared sub-mesh of the scene (every render pass) as fully dirty. */
+        private static MarkPreparedSubMeshesDirty;
+        /**
+         * Chains, once per scene (so providers chained later - a selection octree, terrain filters - keep working):
+         * - a mesh-candidate provider that returns no mesh while the scene holds draws and the previous provider otherwise;
+         * - a `scene.isReady` that, while the scene holds draws, only checks that no scene data is still loading. Babylon's isReady
+         *   prepares every not-ready material in one call - polled every 100 ms by each executeWhenReady / whenReadyAsync (host
+         *   pages start their render loop from one, SceneLoader registers one for its loading screen) and each frame by some
+         *   systems - which blocks the page for seconds on a large scene. During the hold the shader stage prepares the materials
+         *   behind the splash instead, a few milliseconds at a time.
+         */
+        private static InstallDrawHold;
+        /** After-render check of a scene load: lifts the hold when the load completed without a shader stage, ends the mode when quiet. */
+        private static CheckSceneLoadEnd;
+        /** Ends the non-blocking load mode of the scene: hold lifted, asynchronous pipelines released, skipped render targets refreshed. */
+        private static EndSceneLoad;
+        /** Makes every render target of the scene render again on its next frame. */
+        private static RefreshRenderTargets;
+        /** Draws every mesh regardless of the camera frustum (the pipeline stage builds the pipelines of the whole scene, not only the first view). */
+        private static SkipFrustumClipping;
+        /** Restores the frustum clipping SkipFrustumClipping changed (left alone when something else changed it meanwhile). */
+        private static RestoreFrustumClipping;
+        /**
+         * Renders frames (the render loop keeps running) until the scene's draws request no new pipeline for PIPELINE_SETTLE_FRAMES
+         * frames and none is still compiling, or the deadline passes. Reports `onProgress(compiled, requested)` after each frame.
+         */
+        private static WaitForPipelines;
+        /**
+         * Switches the engine to asynchronous pipeline creation for draws (WebGPU only; shared by the engine's scenes, counted).
+         * @returns The engine's pipeline state, or null on WebGL or when this Babylon version lacks the hooks.
+         */
+        private static AcquireAsyncPipelines;
+        /** Releases one user of the engine's asynchronous pipeline mode; the last one restores Babylon's synchronous path. */
+        private static ReleaseAsyncPipelines;
+        /**
+         * Wraps BABYLON.Mesh.prototype._draw (every mesh, instance and thin-instance draw of a scene pass) so the asynchronous pipeline
+         * mode of the mesh's engine knows a scene mesh is drawing. Installed while any engine uses the mode.
+         * @returns False when this Babylon version has no Mesh._draw (the mode is then not used).
+         */
+        private static InstallMeshDrawHook;
+        /** Restores BABYLON.Mesh.prototype._draw once no engine uses the asynchronous pipeline mode (left alone when replaced meanwhile). */
+        private static RemoveMeshDrawHook;
+    }
+    /** @hidden Per-scene state of SceneShaderWarmup's non-blocking load mode. */
+    interface ISceneLoadShaderState {
+        /** True while the scene draws no mesh. */
+        holding: boolean;
+        /** True while the hold blocks Babylon's material dirty marking (set by the hold, not by someone else). */
+        blockedDirty: boolean;
+        /** The engine's asynchronous pipeline state (null on WebGL or after the mode ended). */
+        pipelines: TOOLKIT.IAsyncPipelineState;
+        /** Consecutive quiet frames since the load completed. */
+        quietFrames: number;
+        /** Pipeline request count at the previous frame. */
+        lastRequested: number;
+        /** When the mode ends at the latest (ms). */
+        deadline: number;
+        /** The after-render check. */
+        observer: BABYLON.Observer<BABYLON.Scene>;
+        /** scene.skipFrustumClipping before the pipeline stage changed it (null when unchanged). */
+        previousSkipFrustumClipping: boolean;
+    }
+    /** @hidden Per-engine state of asynchronous WebGPU pipeline creation (SceneShaderWarmup). */
+    interface IAsyncPipelineState {
+        /** Scenes using the mode. */
+        users: number;
+        /** Pipeline cache tokens whose pipeline is compiling. */
+        pending: Map<any, boolean>;
+        /** Pipeline cache tokens whose asynchronous creation failed (Babylon's path builds them). */
+        failed: Set<any>;
+        /** Pipelines requested asynchronously. */
+        requested: number;
+        /** Requested pipelines that finished compiling (or failed). */
+        compiled: number;
+        /** Draws skipped because their pipeline was compiling. */
+        skippedDraws: number;
+        /** Nesting depth of engine._draw calls. */
+        drawDepth: number;
+        /** Nesting depth of scene mesh draws (BABYLON.Mesh._draw) of this engine. */
+        meshDrawDepth: number;
+        /** True when the engine had its own _draw property before the mode. */
+        ownDraw: boolean;
+        /** True when the cache had its own getRenderPipeline property before the mode. */
+        ownGet: boolean;
+        /** engine._draw before the mode. */
+        originalDraw: (...args: any[]) => void;
+        /** cache.getRenderPipeline before the mode. */
+        originalGet: (fillMode: number, effect: BABYLON.Effect, sampleCount: number, textureState?: number) => any;
     }
 }
 declare namespace TOOLKIT {
@@ -5509,6 +7317,30 @@ declare namespace TOOLKIT {
          * material) or a material that cannot be cloned keeps the hard switch.
          */
         private static PrepareFade;
+        /** Makes every (material, level) clone of a group's cross-fade; false when one material cannot be cloned. */
+        private static MakeFadeClones;
+        /**
+         * Cross-fade groups registered while a toolkit scene load still holds the splash make their material clones in slices of
+         * FadeCloneSliceMs, a task each, instead of one block at setup (a large scene's LOD groups make thousands of clones: over a
+         * second of work). A fade that starts before its group's slice ran makes its clones on the spot (AcquireClone), and a group
+         * whose material cannot be cloned drops back to the hard switch when its slice runs. The reveal waits for every slice
+         * (PendingFadeClones). Groups registered after the load make their clones at once as before. Default true.
+         */
+        static DeferLoadFadeClones: boolean;
+        /** Time budget (ms) of one fade-clone slice task. */
+        static FadeCloneSliceMs: number;
+        private static _cloneQueues;
+        private static _clonePumps;
+        /** Cross-fade groups of the scene whose clones are still waiting for their slice (0 when none). */
+        static PendingFadeClones(scene: BABYLON.Scene): number;
+        /** True while a toolkit scene load of `scene` is still in flight (and DeferLoadFadeClones is on). */
+        private static CanDeferFadeClones;
+        private static QueueFadeClones;
+        private static ScheduleFadeCloneSlice;
+        /** One slice task: makes queued groups' clones until FadeCloneSliceMs passed (at least one group), then schedules the next slice. */
+        static RunFadeCloneSlice(scene: BABYLON.Scene): void;
+        /** A group whose material cannot be cloned keeps the hard switch: any fade in progress is undone, its current level shown. */
+        private static DropFade;
         /**
          * unity-export-parity-gaps T19 fix: a single-renderer, non-fading group on regular meshes keeps Babylon's NATIVE LOD
          * (`master.addLODLevel`), exactly as before coverages were preferred. Leaving that path cost Oasis +27% frame time:
@@ -5625,6 +7457,19 @@ declare namespace TOOLKIT {
         static Install(scene: BABYLON.Scene, perObjectLimit?: number): TOOLKIT.UnityLightSelector;
         /** The scene's selector, or null when none was installed. */
         static Get(scene: BABYLON.Scene): TOOLKIT.UnityLightSelector;
+        /** Meshes whose full light resync waits, per deferring scene (BeginDeferredResync). */
+        private static _deferredResync;
+        private static _originalResync;
+        /**
+         * Babylon's scene.addLight resyncs EVERY mesh against EVERY light, so creating a scene's lights one by one costs
+         * meshes x lights^2 (the 41 lights of a 3,945-mesh scene: 3.4 million canAffectMesh calls, half a second). Between
+         * Begin and EndDeferredResync a mesh's full resync only records the mesh; EndDeferredResync runs it once per recorded
+         * mesh - or not at all for a mesh the selector has taken over since, whose list the selector computed from scratch.
+         * Single-light resyncs (include / exclude lists, enable) still run at once.
+         */
+        static BeginDeferredResync(scene: BABYLON.Scene): void;
+        /** Ends BeginDeferredResync: one full resync for every mesh that asked for one meanwhile. */
+        static EndDeferredResync(scene: BABYLON.Scene): void;
         constructor(scene: BABYLON.Scene);
         private watch;
         /** Takes over one mesh's light list. An InstancedMesh shares its source's list: its source is re-evaluated. */
@@ -5998,6 +7843,8 @@ declare namespace TOOLKIT {
          * the heavy VAT GPU textures and release them by reference count.
          */
         private static _globalTextureCache;
+        /** How often (ms) preloadTexturesAsync re-checks textures that may have loaded or failed without an onLoad event. */
+        static PRELOAD_POLL_INTERVAL_MS: number;
         /** Look up an existing controller by controller guid. Returns null if none. */
         static Find(guid: string): TOOLKIT.VertexAnimationController;
         /**
@@ -6072,6 +7919,10 @@ declare namespace TOOLKIT {
         private _textureCacheKeys;
         /** Maps renderer GUID → the specific Mesh/InstancedMesh node for THIS animator instance. */
         private _instanceMeshes;
+        /** The one scene-load texture preload of this controller (preloadTexturesAsync); null until it starts. */
+        private _preloadPromise;
+        /** True once dispose() ran; ends a pending preload. */
+        private _disposed;
         /** Register the specific scene mesh node that this controller drives.
          *  Called once per renderer GUID during AnimationState setup.
          *  The mesh may be a source Mesh or an InstancedMesh — both support instancedBuffers. */
@@ -6102,6 +7953,16 @@ declare namespace TOOLKIT {
          * all renderers on one controller are expected to share the same packing.
          */
         loadAnimations(settings: TOOLKIT.IVertexAnimationSettings[]): void;
+        /**
+         * Acquires the VAT textures of the given settings through this controller's cache (the same textures loadAnimations and
+         * play() use, released by dispose()) and resolves once every one has loaded or failed. The first call owns the work; later
+         * calls return the same promise. Never rejects; resolves at once when the controller is disposed.
+         * @param settings - The renderer × clip settings whose position (and separate normal) textures to load.
+         * @param onTextureLoaded - Called once with (0, textureCount) when the texture list is known, then after each texture
+         *   finishes (loaded or failed) with the running count. Not called by later calls that return the existing promise.
+         * @returns A promise resolved when every texture is ready or failed.
+         */
+        preloadTexturesAsync(settings: TOOLKIT.IVertexAnimationSettings[], onTextureLoaded?: (loadedCount: number, textureCount: number) => void): Promise<void>;
         /**
          * Start playback of a named clip. If blendDuration > 0 and a different clip
          * is currently playing, crossfade from the current clip to the new one. (Default 0.1)
@@ -6147,6 +8008,15 @@ declare namespace TOOLKIT {
          */
         private _wrapTime;
         private _ensureClipTexturesLoaded;
+        /**
+         * The unique, non-null textures loadAnimations would acquire for the settings (position, plus normal when packing is
+         * "separate"), acquired now through the controller cache.
+         * @param settings - The renderer × clip settings.
+         * @returns The acquired textures, without duplicates.
+         */
+        private _acquirePreloadTextures;
+        /** True when the texture finished loading or failed to load. */
+        private static _isTextureSettled;
         private _getOrAcquireTexture;
         private static _acquireVATTexture;
         private static _releaseVATTexture;
@@ -14929,6 +16799,8 @@ declare namespace TOOLKIT {
         static IsPointerLocked(): boolean;
         private static LockMousePointerObserver;
         static IsPointerLockHandled(): boolean;
+        /** Is user input enabled. Check this before calling EnableUserInput, which resets and re-registers every input handler. */
+        static IsUserInputEnabled(): boolean;
         /** Get user input state from the scene. */
         static GetUserInput(input: TOOLKIT.UserInputAxis, player?: TOOLKIT.PlayerNumber): number;
         /** Set a keyboard up event handler. */
@@ -15317,12 +17189,14 @@ declare namespace TOOLKIT {
         static ShowSceneLoader(): void;
         /** Hides the default page scene loader. */
         static HideSceneLoader(): void;
-        /** Update the default page scene loader full status. */
-        static UpdateLoaderStatus(status: string, details: string, state: number): void;
-        /** Update the default page scene loader details only. */
-        static UpdateLoaderDetails(details: string, state: number): void;
+        /** Update the default page scene loader full status (progress: optional 0-1 fraction of the current loading phase, for SceneManager.OnLoaderStatusObservable). */
+        static UpdateLoaderStatus(status: string, details: string, state: number, progress?: number): void;
+        /** Update the default page scene loader details only (progress: optional 0-1 fraction of the current loading phase). */
+        static UpdateLoaderDetails(details: string, state: number, progress?: number): void;
         /** Update the default page scene loader progress only. */
         static UpdateLoaderProgress(progress: string, state: number): void;
+        /** Forwards a loader update to SceneManager.OnLoaderStatusObservable (page splash screens without the window.update* globals). */
+        private static NotifyLoaderStatus;
         /** Show the default page error message. */
         static ShowPageErrorMessage(message: string, title?: string, timeout?: number): void;
         /** Delays a function call using browser window timeout. Returns a handle object (Milliseconds) */
@@ -15349,7 +17223,8 @@ declare namespace TOOLKIT {
          * `scripts/babylon.inspector-v2.js`) exposes `ShowInspector` and `ConvertOptions`, the Babylon `IInspectorOptions` are
          * converted with the Inspector's own `ConvertOptions` and the toolkit's service definitions
          * (`PostProcessingInspector.GetServiceDefinitions()`: the "Unity Post Processing" properties section, or `[]` when
-         * `PostProcessor.InspectorSection` is false / the global lacks a required export) are appended to whatever the
+         * `PostProcessor.InspectorSection` is false / the global lacks a required export; then
+         * `LightProbeInspector.GetServiceDefinitions()`: the "Light Probes" section and its Scene Explorer toggle) are appended to whatever the
          * conversion produced; the returned token is kept per scene so HideInspector can dispose it, and
          * `PostProcessor.InspectorState.available` is recorded. Without that global (Inspector v1, no Inspector) the call is
          * exactly the debug layer's own show with the same options object. Nothing is logged on either path.
@@ -15389,21 +17264,23 @@ declare namespace TOOLKIT {
         static SetVirtualRealityEnabled(enabled: boolean): void;
         /** Set the Windows Runtime preferred launch windowing mode. (Example: Windows.UI.ViewManagement.ApplicationViewWindowingMode.fullScreen = 1) */
         static SetWindowsLaunchMode(mode?: number): void;
-        /** Gets the default window hardware scaling level (1 / window.devicePixelRatio) */
+        /** Gets the default window hardware scaling level: 1 / (window.devicePixelRatio x the scene's URP Render Scale), see TOOLKIT.DisplayScaling. */
         static GetHardwareScalingLevel(): number;
         /** The engines whose default hardware scaling level follows `window.devicePixelRatio` (see WatchDevicePixelRatio). */
         private static devicePixelRatioWatches;
         /** True when the engine's default hardware scaling level is re-applied on every devicePixelRatio change. */
         static IsDevicePixelRatioWatched(engine: any): boolean;
         /**
-         * Re-apply the DEFAULT hardware scaling level (1 / window.devicePixelRatio) whenever the ratio changes, then
-         * resize the engine (post-processing final-verification finding F-9.8). The level used to be set exactly once,
+         * Re-apply the DEFAULT hardware scaling level (TOOLKIT.DisplayScaling.DefaultLevel: 1 / devicePixelRatio at Render
+         * Scale 1) whenever the ratio changes, then resize the engine (post-processing final-verification finding F-9.8). The level used to be set exactly once,
          * when the engine was created; a window moved between displays of different density, or a browser zoom, then
          * left the scene rendering at 4x or 1/4 the necessary pixels until the page was reloaded (measured: DPR 2 -> 1
          * kept `hardwareScaling 0.5` and drew 3746x1814 for a 1873x907 canvas). A `resize` event does not fire for a
          * ratio change on its own; the reliable signal is a `matchMedia("(resolution: <n>dppx)")` query that fires once
          * when the ratio LEAVES the value it was armed on, so it is re-armed after every change. Only the default path
-         * tracks: an explicit `options.hardwareScalingLevel` is the caller's choice and is never overridden. Returns
+         * tracks: an explicit `options.hardwareScalingLevel` is the caller's choice and is never overridden unless the
+         * caller opts in with `options.trackDevicePixelRatio`. A watched engine is on TOOLKIT.DisplayScaling's default
+         * path too, so a scene load and this watcher always agree on the level. Returns
          * the stop function (also called when the engine is disposed); a second call for the same engine is a no-op.
          */
         static WatchDevicePixelRatio(engine: any, onChange?: (ratio: number, level: number) => void): () => void;
@@ -15427,6 +17304,12 @@ declare namespace TOOLKIT {
         static KEEP_PHASE: number;
         /** Upper bound, per layer per advance, on loop-observable fires and on repeat fires of each animation event (animation events fire in skeleton mode only; skeleton blend trees raise no loop events). A huge external delta wraps many cycles; the phase and animationLoopCount stay exact. */
         static MAX_LOOP_EVENTS_PER_ADVANCE: number;
+        /** How long (ms) the scene preloader waits for an animator's vertex animation textures before the splash is released (they keep loading after). */
+        static VAT_PRELOAD_TIMEOUT_MS: number;
+        /** Stage label of the "Animations" loading job. */
+        private static readonly VAT_PRELOAD_LABEL;
+        /** Per-scene vertex animation preload counters (keyed by scene.uniqueId; dropped on scene dispose). Each controller is preloaded and counted once per scene. */
+        private static VatPreloads;
         private _looptime;
         private _loopblend;
         private _frametime;
@@ -15627,6 +17510,14 @@ declare namespace TOOLKIT {
         protected update(): void;
         protected destroy(): void;
         /**
+         * Joins the scene's asset preloader so the splash waits for this animator's vertex animation textures (TerrainBuilder
+         * pattern). Opens the scene's "Animations" loading job and preloads each VAT controller once per scene; the task never
+         * rejects and gives up after VAT_PRELOAD_TIMEOUT_MS. Lazily loaded controllers preload only their default clip. Does
+         * nothing for an animator without vertex animation.
+         * @param assetsManager - The scene's preload assets manager.
+         */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        /**
          * Plays the layer's entry state (same rules as playAnimation). transitionDuration is the crossfade in seconds (not positive = no
          * crossfade). VAT: the fade advances by |deltaSeconds × state.speed × speedRatio| per tick and frameRate is ignored. Skeleton mode
          * converts it to a fixed blending step of 1 / (rate × transitionDuration), added once per tick with a non-zero scaled step, where
@@ -15797,6 +17688,27 @@ declare namespace TOOLKIT {
         private updateAnimationGroups;
         private setupSourceAnimationGroups;
         private awakeStateMachine;
+        /**
+         * Reads what this animator needs to drive vertex animation textures from its exported properties without changing any
+         * state: the controller guid, every renderer × clip setting flattened (e.g. Joints×Idle, Surface×Idle, Joints×Walk), the
+         * lazy-load flag and the first clip name.
+         * @returns The setup, or null when the animator has no vertex controller, no clips or no renderer settings.
+         */
+        protected readVertexAnimationSetup(): TOOLKIT.IVertexAnimationSetup;
+        /**
+         * The settings whose textures the scene preload loads: all of them, or only the default clip's when the export asked for
+         * lazily loaded clip textures (the other clips still load on their first play).
+         * @param setup - The animator's vertex animation setup.
+         * @returns The settings to preload.
+         */
+        private static SelectPreloadSettings;
+        /**
+         * The scene's vertex animation preload counters, created with the scene's "Animations" loading job on first use and dropped
+         * when the scene is disposed.
+         * @param scene - The scene being loaded.
+         * @returns The scene's counters.
+         */
+        private static GetOrCreateVatPreload;
         /**
          * Resolves the scene node for a serialized vertex animation renderer entry.
          *
@@ -16188,6 +18100,30 @@ declare namespace TOOLKIT {
         maskType: string;
         transformCount: number;
         transformPaths: string[];
+    }
+    /** What an AnimationState needs to drive vertex animation textures (AnimationState.readVertexAnimationSetup). */
+    interface IVertexAnimationSetup {
+        /** The VertexAnimationController guid. */
+        controllerId: string;
+        /** Every renderer × clip setting, flattened. */
+        settings: TOOLKIT.IVertexAnimationSettings[];
+        /** True when the export asked for lazily loaded clip textures. */
+        lazyLoadTextures: boolean;
+        /** The first clip name, the default clip. */
+        defaultClip: string;
+    }
+    /** @hidden Per-scene vertex animation preload counters (AnimationState.addPreloaderTasks). */
+    interface IVertexAnimationPreloadState {
+        /** Controllers already registered with the scene preloader. */
+        controllerIds: Set<string>;
+        /** Registered controllers whose preload settled. */
+        settledCount: number;
+        /** Textures finished (loaded or failed) across the registered controllers. */
+        loaded: number;
+        /** Textures known so far across the registered controllers. */
+        total: number;
+        /** The scene's "Animations" loading job. */
+        job: TOOLKIT.LoadingJob;
     }
     /** Result of AnimationState.resolveVertexAnimationClips — the top-2 clips the VAT controller is driven with. */
     interface IVertexAnimationClipSelection {
@@ -16683,8 +18619,39 @@ declare namespace TOOLKIT {
         speedUp: number;
         speedDown: number;
     }
+    /**
+     * hdrp-complete-parity T19 (D22): HDRP's Exposure as exported in the scene block `hdrp.exposure` (all 23 fields, lower-case keys,
+     * enums as ints, curves as `{keys:[...]}`), plus the export-time converged `preexposure`. Read every frame by the `hdrp` variant.
+     */
+    interface IAutoExposureHdrpSettings {
+        mode: number;
+        meteringmode: number;
+        fixedexposure: number;
+        compensation: number;
+        limitmin: number;
+        limitmax: number;
+        curvemap: any;
+        limitmincurvemap: any;
+        limitmaxcurvemap: any;
+        adaptationmode: number;
+        adaptationspeeddarktolight: number;
+        adaptationspeedlighttodark: number;
+        weighttexturemask: string;
+        histogrampercentages: number[];
+        histogramusecurveremapping: boolean;
+        targetmidgray: number;
+        centeraroundexposuretarget: boolean;
+        proceduralcenter: number[];
+        proceduralradii: number[];
+        maskminintensity: number;
+        maskmaxintensity: number;
+        proceduralsoftness: number;
+        preexposure: number;
+    }
     /** The last value read back from a camera's 1x1 state (Inspector read-outs and test tools only, D17). */
     interface IAutoExposureReadout {
+        /** hdrp variant: the current EV100 (state red); the multiplier is then `exposure` = 1 / (1.2 * 2^ev). */
+        ev?: number;
         exposure: number;
         /** Metered average luminance after the percentile filter and the min / max clamp; -1 when the histogram was empty. */
         average: number;
@@ -16726,11 +18693,26 @@ declare namespace TOOLKIT {
         frames: number;
         resets: number;
         waitFrames: number;
+        /** hdrp-complete-parity T25: consecutive valid metered frames counted while the scene loader holds (HdrpExposureSettle). */
+        settleFrames?: number;
         readout: IAutoExposureReadout;
         reading: boolean;
         readAt: number;
         observer: BABYLON.Observer<BABYLON.Effect>;
         released: boolean;
+        /** hdrp variant only (T19): the live settings, its side passes and targets (null on ppv2). */
+        hdrp?: IAutoExposureHdrpSettings;
+        hdrpLumPass?: BABYLON.EffectWrapper;
+        hdrpMeanPass?: BABYLON.EffectWrapper;
+        hdrpAdaptPass?: BABYLON.EffectWrapper;
+        mean?: BABYLON.RenderTargetWrapper;
+        curve?: BABYLON.RawTexture;
+        curveKey?: string;
+        curveRange?: number[];
+        mask?: BABYLON.Texture;
+        white?: BABYLON.RawTexture;
+        /** Camera physical keys of the exposure target (`centeraroundexposuretarget`): a node to project, or null. */
+        exposureTarget?: BABYLON.TransformNode;
     }
     /**
      * PPv2 automatic exposure for one camera (auto-exposure-parity). GPU-only: two owned head passes at
@@ -16774,12 +18756,20 @@ declare namespace TOOLKIT {
         static readonly Epsilon: number;
         static readonly ReadIntervalMs: number;
         static readonly ShaderWaitFrames: number;
+        /** Histogram EV ranges. `hdrp` is HDRP's default limits; an hdrp camera uses its own limits (or curve range) per frame (`HdrpRange`). */
         static readonly Variants: {
             [variant: string]: {
                 minEV: number;
                 maxEV: number;
             };
         };
+        static readonly HdrpLumShaderName: string;
+        static readonly HdrpMeanShaderName: string;
+        static readonly HdrpAdaptShaderName: string;
+        /** HDRP `ColorUtils.lensImperfectionExposureScale` and the Automatic prepass size (`Exposure.compute` PREPASS_TEX_SIZE). */
+        static readonly HdrpLensScale: number;
+        static readonly HdrpPrepassSize: number;
+        static readonly HdrpCurvePrecision: number;
         static StateTextureType(engine: any): number;
         static IsSupported(engine: any): boolean;
         static DefaultSettings(settings?: any): IAutoExposureUnitySettings;
@@ -16807,19 +18797,123 @@ declare namespace TOOLKIT {
             average: number;
             target: number;
         };
+        /** HDRP `ExposureMode`: Fixed 0, Automatic 1, CurveMapping 2, UsePhysicalCamera 3, AutomaticHistogram 4. */
+        static HdrpIsDynamic(mode: number): boolean;
+        /** Sanitised HDRP settings (HDRP's defaults for missing keys); the same object is returned (edits stay live). */
+        static HdrpDefaultSettings(settings?: any): IAutoExposureHdrpSettings;
+        /** `HDCamera` TargetMidGray K: Grey125 12.5, Grey14 14, Grey18 18. */
+        static HdrpMidGreyK(targetMidGray: number): number;
+        /** `ColorUtils.ConvertEV100ToExposure`: 1 / (1.2 * 2^ev). */
+        static HdrpExposureFromEV100(ev: number): number;
+        /** Inverse of `HdrpExposureFromEV100` (the EV100 a multiplier stands for). */
+        static HdrpEV100FromExposure(exposure: number): number;
+        /** `ComputeEV100FromAvgLuminance(L, K)` = log2(L * 100 / K). */
+        static HdrpEV100FromLuminance(luminance: number, k: number): number;
+        /** core `ComputeEV100(aperture, shutter, ISO)` = log2(N^2 / t * 100 / S). */
+        static HdrpPhysicalEV100(aperture: number, shutterSpeed: number, iso: number): number;
+        /** core `ComputeLuminanceAdaptation` in EV (dark-to-light speed when the EV rises). */
+        static HdrpAdapt(previous: number, current: number, dt: number, speedDarkToLight: number, speedLightToDark: number): number;
+        /** The apply multiplier: the frame is already exposed by the static pre-exposure `pe`, so it is corrected by exposure / pe (D7). */
+        static HdrpApplyGain(exposure: number, pe: number): number;
+        /** True when the mode remaps through the curve (CurveMapping, or AutomaticHistogram with curve remapping). */
+        static HdrpUsesCurve(s: IAutoExposureHdrpSettings): boolean;
+        /** Unity `AnimationCurve.Evaluate` for non-weighted keys (Hermite, clamped). Accepts `{keys:[{time,value,intangent,outtangent}]}`. */
+        static HdrpEvaluateCurve(curve: any, t: number): number;
+        /** `PrepareExposureCurveData`: 128 RGBA texels (R curve, G min limit or -100, B max limit or +100) over the curve's time range. */
+        static HdrpCurveTable(s: IAutoExposureHdrpSettings): {
+            data: Float32Array;
+            min: number;
+            max: number;
+        };
+        /** `CurveRemap`: the table sampled like a bilinear clamped 128x1 texture at saturate((ev - min) / (max - min)). */
+        static HdrpCurveRemap(table: {
+            data: Float32Array;
+            min: number;
+            max: number;
+        }, ev: number): {
+            ev: number;
+            min: number;
+            max: number;
+        };
+        /** The histogram / clamp range: the limits, or the curve's time range when the mode uses the curve (`PrepareExposurePassData`). */
+        static HdrpRange(s: IAutoExposureHdrpSettings): {
+            minEV: number;
+            maxEV: number;
+        };
+        /** `HistogramExposure.compute`: scale / bias of the 128-bin EV histogram (`1 / max(1e-5, range)`, `-min * scale`). */
+        static HdrpHistogramScaleBias(s: IAutoExposureHdrpSettings): number[];
+        /**
+         * `ExposureCommon.hlsl` `WeightSample` (lines 55-111): metering weight of a pixel (top-down pixel coordinates in a
+         * `w` x `h` source) - 0 Average 1, 1 Spot (a 0.075 * diag disc with a one-pixel edge), 2 Centre-weighted
+         * `1 - saturate(dist / diag)`, 3 Mask (`mask(u, v)` callback), 4 Procedural (ellipse, softness exponent, nits window).
+         * `procedural` = [centreX px, centreY px, radiusX px, radiusY px, 1 / softness, min nits, max nits].
+         */
+        static HdrpWeight(mode: number, px: number, py: number, w: number, h: number, luminance: number, procedural?: number[], mask?: (u: number, v: number) => number): number;
+        /** `ComputeProceduralMeteringParams`: [centre px, centre px, radius px, radius px, 1 / softness, min nits, max nits] (target UV added when given). */
+        static HdrpProceduralParams(s: IAutoExposureHdrpSettings, width: number, height: number, targetUV?: number[]): number[];
+        /** `KHistogramReduce` `ProcessBin`: the percentile-filtered mean EV of a 128-bin weight histogram. */
+        static HdrpHistogramAverage(bins: ArrayLike<number>, lowFraction: number, highFraction: number, scale: number, bias: number): number;
+        /**
+         * One HDRP evaluation (CPU reference of the adapt shader): curve remap (when used), compensation, adaptation from
+         * `previousEV` (snap on reset / Fixed adaptation), clamp to the limits (or the curve's limits). Returns EV100 values.
+         */
+        static HdrpStep(previousEV: number, averageEV: number, s: IAutoExposureHdrpSettings, dt: number, snap: boolean): {
+            ev: number;
+            average: number;
+            target: number;
+        };
         static GetShaders(): {
             [name: string]: string;
         };
         static RegisterShaders(): void;
+        /**
+         * `options.variant` "hdrp" (hdrp-complete-parity T19): `options.settings` is the scene's `hdrp.exposure` block
+         * (`IAutoExposureHdrpSettings`, kept live), `options.maskUrl` the resolved weight-mask url and `options.exposureTarget`
+         * the node procedural metering centres on. The state then holds EV100 and the apply pass multiplies exposure / pe.
+         */
         static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
             textureType?: number;
             settings?: any;
             variant?: string;
+            maskUrl?: string;
+            exposureTarget?: BABYLON.TransformNode;
         }): BABYLON.PostProcess;
+        /** The static pre-exposure the frame was rendered with (D7): `HdrpRendering.GetPreExposure` on a live scene, else the export's. */
+        static PreExposureOf(state: IAutoExposureCameraState): number;
+        private static CreateHdrpState;
+        /** (Re)builds the 128x1 curve texture when the curve fields changed (Inspector edits stay live). CPU upload only, no read-back. */
+        static UpdateHdrpCurve(state: IAutoExposureCameraState): void;
+        /** The exposure target's screen UV (top-down, HDRP's convention) or null. */
+        private static HdrpTargetUV;
+        private static BindHdrpSidePasses;
         private static BindSidePasses;
         static MeterSource(pass: any): BABYLON.RenderTargetWrapper;
         static SidePassesReady(state: IAutoExposureCameraState): boolean;
         static Meter(state: IAutoExposureCameraState): void;
+        /** hdrp-complete-parity T25: consecutive valid metered frames (each snapped) the scene loader waits for before it reveals. */
+        static readonly HdrpSettleFrames: number;
+        /** True when the scene is a parity HDRP scene whose evaluated exposure is dynamic (a meter will run). */
+        static HdrpExposureIsLive(scene: BABYLON.Scene): boolean;
+        /**
+         * hdrp-complete-parity T25: ONE call per rendered frame while the scene loader holds its overlay. Every hdrp-variant meter
+         * on the active cameras snaps (HDRP's reset) on each frame until its camera's passes are all ready and it has metered
+         * `HdrpSettleFrames` frames in a row - so the exposure revealed comes from a fully rendered frame, never from the
+         * chain's first (possibly black) frame. True when settled, when a meter can never meter (released, switched off,
+         * shaders given up), when the scene has no dynamic HDRP exposure, or when no meter is attached after 2 frames.
+         * `dynamic` overrides the scene check (tests).
+         */
+        static HdrpExposureSettle(scene: BABYLON.Scene, framesWaited: number, dynamic?: boolean): boolean;
+        /**
+         * hdrp-complete-parity T25: calls `done` once the scene's dynamic HDRP exposure has settled (`HdrpExposureSettle`, one
+         * call per DISTINCT rendered frame) or after `maxFrames` frames; synchronously when the scene has no dynamic HDRP
+         * exposure. Safe to start from inside an onAfterRender notification (that same frame is not counted).
+         */
+        static WaitForHdrpExposure(scene: BABYLON.Scene, maxFrames: number, done: () => void): void;
+        /**
+         * hdrp-complete-parity T25: the live HDRP exposure multiplier of the scene's active camera (the hdrp-variant meter's last
+         * GPU read-back, at most every `ReadIntervalMs`), or NaN when there is no metered hdrp state yet.
+         */
+        static HdrpLiveExposure(scene: BABYLON.Scene): number;
         static ResetHistory(apply: BABYLON.PostProcess): boolean;
         static Release(apply: BABYLON.PostProcess): void;
         static ReadState(apply: BABYLON.PostProcess, minIntervalMs?: number): IAutoExposureReadout;
@@ -17181,6 +19275,10 @@ declare namespace TOOLKIT {
      * stored sRGB-encoded so shadows do not band); this pass decodes them after sampling and outputs display-linear
      * colour, alpha untouched. The image-processing pass that follows stays neutral and only performs the gamma encode.
      *
+     * On an LDR camera (`displayEncodedChain`) Babylon's DefaultRenderingPipeline gamma-encodes inside the materials and
+     * runs no image-processing pass, so the pass decodes its input before the LogC lookup and returns display-encoded
+     * colour. Unity grades an LDR camera through the same LUT; its 8-bit target only clamps the input to [0, 1].
+     *
      * The LUT texture is created by the orchestrator through its existing loader (`requestLutTexture` ->
      * `finalizeLutTexture`, 3D repack when supported); the plugin never loads. It samples a `RawTexture3D` volume
      * (`use3D`) or falls back to Unity's `ApplyLut2D` on the N*N x N strip. The static factory follows the
@@ -17222,7 +19320,8 @@ declare namespace TOOLKIT {
         };
         /**
          * The GLSL fragment source (registered once under `ShaderKey`). Compiled with `#define LUT3D` for the volume
-         * path and `#define LUT_DECODE_SRGB` when the strip samples are sRGB-encoded (PostProcess `defines`).
+         * path, `#define LUT_DECODE_SRGB` when the strip samples are sRGB-encoded, and `#define DISPLAY_ENCODED_CHAIN`
+         * on an LDR chain, whose input and output are display-encoded (PostProcess `defines`).
          */
         static GetFragmentShader(): string;
         /**
@@ -17232,6 +19331,7 @@ declare namespace TOOLKIT {
          * @param options.use3D Sample the volume with `sampler3D`; false = Unity's `ApplyLut2D` on the strip.
          * @param options.postExposure Unity post exposure in EV (`2^ev` is the uniform); 0 for SRP volumes.
          * @param options.decodeSrgb The strip samples are sRGB-encoded (`lutencoding: "srgb"`): decode after sampling.
+         * @param options.displayEncodedChain The camera chain is LDR (gamma-encoded by the materials): read and write display-encoded colour.
          * @param options.samplingMode Post-process sampling mode (bilinear by default).
          */
         static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options: {
@@ -17242,6 +19342,7 @@ declare namespace TOOLKIT {
             use3D?: boolean;
             postExposure?: number;
             decodeSrgb?: boolean;
+            displayEncodedChain?: boolean;
             samplingMode?: number;
         }): BABYLON.PostProcess;
         /** N from the option, else from the texture (3D: depth / height, strip: height), else Unity's 32. */
@@ -17281,6 +19382,11 @@ declare namespace TOOLKIT {
         downscale?: number;
         /** URP `Bloom.maxIterations` 2..8 (default 6). */
         maxIterations?: number;
+        /** hdrp-complete-parity T20: HDRP `Bloom.dirtIntensity` (multiplied by the composite intensity, as HDRP's Uber). */
+        dirtIntensity?: number;
+        /** hdrp-complete-parity T20: HDRP `Bloom.anamorphic` and the camera's `anamorphism` (-1..1, Unity default 0). */
+        anamorphic?: boolean;
+        anamorphism?: number;
     }
     /**
      * The derived state of a Built-in bloom pyramid chain (final-verification T15, F-7): what Unity's `BloomRenderer.Render`
@@ -17322,6 +19428,12 @@ declare namespace TOOLKIT {
         tint: number[];
         /** 1 when highQualityFiltering (13-tap prefilter), else 0. */
         hq: number;
+        /** hdrp-complete-parity T20: the HDRP branch (`TK_BLOOM_HDRP`): `_BloomThreshold` (written in place), the lens-dirt
+         *  intensity (`dirtIntensity * intensity`) and the anamorphic blur-radius multipliers. Absent on URP chains. */
+        hdrp?: boolean;
+        hdrpThreshold?: number[];
+        dirtIntensity?: number;
+        anamorphic?: number[];
         width: number;
         height: number;
         tw: number;
@@ -17437,6 +19549,21 @@ declare namespace TOOLKIT {
          * PPv2 pyramid uses. No helper takes a `sampler2D` PARAMETER (F-9.27: Babylon's WebGPU GLSL path rejects it) and no
          * line carries a `//` comment (the shader processor splits on the `;` inside one).
          */
+        /**
+         * The render-target type of a bloom chain's INTERNAL buffers (every pass after the prefilter's scene input, up to and including
+         * the composite's bloom input): half-float wherever the engine can render it, whatever the chain's own type. Unity renders every
+         * bloom pyramid in an HDR format, and thresholded, blurred light stored in 8 bits steps into visible contour rings.
+         */
+        static LadderTextureType(engine: any, textureType: number): number;
+        /** The exact sRGB transfer functions (GLSL) used by an LDR chain's ladder, which reads and writes display-encoded colour. */
+        static SrgbFunctions(): string;
+        /**
+         * URP's SampleTexture2DBicubic (Core Filtering.hlsl BicubicFilter: a cubic B-spline in four bilinear taps) as a GLSL function
+         * named `fn` reading the global sampler `sampler` (WebGPU takes no sampler parameters); `size` is (w, h, 1 / w, 1 / h).
+         * URP's High Quality Filtering samples the low mip of every upsample and the final bloom with it, which is what keeps the
+         * edge of the blur kernels' reach invisible (bilinear left a faint ring around bright objects).
+         */
+        static BicubicFunction(fn: string, sampler: string): string;
         static GetUrpPyramidShaders(): {
             prefilter: string;
             blurH: string;
@@ -17482,12 +19609,149 @@ declare namespace TOOLKIT {
             softKnee?: number;
             iterations?: number;
             sampleScale?: number;
+            /** hdrp-complete-parity T20: the HDRP lens-dirt texture (`TK_BLOOM_DIRT`), already loaded. */
+            dirtTexture?: BABYLON.BaseTexture;
+            /** URP ladder: the chain is LDR, so its colour is display-encoded (`TK_BLOOM_DISPLAY_ENCODED`): decode, bloom in linear, re-encode. */
+            displayEncodedChain?: boolean;
             /** Pyramid: called after the ladder was rebuilt for a new iteration count, with the passes removed and added, so the owner can re-track and re-order them. */
             onRebuild?: (chain: any, removed: BABYLON.PostProcess[], added: BABYLON.PostProcess[]) => void;
         }): any;
         private static createPyramid;
         private static createBlurChain;
         private static createUrpPyramid;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Fly camera ported from the Render Pipeline Core utility FreeCamera (UnityEngine.Rendering.FreeCamera).
+     *
+     * The exporter emits it for any GameObject carrying Unity's FreeCamera, with the same tuning values and the input
+     * mode Unity compiled it for (`inputSystem`). It moves and turns its own node the way Unity does:
+     * - Move: W A S D / arrow keys, or the gamepad left stick.
+     * - Up / down: E and Q, Page Up and Page Down, or the gamepad right and left shoulder buttons.
+     * - Look, Input System projects: click the scene to capture the mouse (pointer lock: no window edges, Esc releases it)
+     *   and move it, or drag with the right mouse button, or the gamepad right stick. Unity's Game view turns with any
+     *   mouse movement; a browser cursor stops at the window edge and loses the aim, so the capture stands in for it.
+     * - Look, legacy Input Manager projects: drag with the right mouse button (or move the mouse while the pointer is
+     *   locked), or the gamepad right stick.
+     * - Turbo: hold the left mouse button or the gamepad X button; legacy projects also Shift while right-dragging.
+     * - Speed up / down: Home and End, or the gamepad d-pad up and down.
+     *
+     * Keys and buttons come from TOOLKIT.InputController, which this component enables when the host has not. Mouse look
+     * reads raw pointer movement from the scene, because the controller reports mouse movement only while a button is held.
+     *
+     * @example
+     * const freeCamera = TOOLKIT.SceneManager.GetComponent<TOOLKIT.FreeCameraController>(cameraNode, "TOOLKIT.FreeCameraController");
+     * freeCamera.moveSpeed = 25;
+     */
+    class FreeCameraController extends TOOLKIT.ScriptComponent {
+        /** Unity's k_MouseSensitivityMultiplier. */
+        private static readonly MOUSE_SENSITIVITY_MULTIPLIER;
+        /** Unity's legacy Input Manager "Mouse X" / "Mouse Y" sensitivity: axis units per pixel of mouse movement. */
+        private static readonly LEGACY_MOUSE_AXIS_PER_PIXEL;
+        /** The Input System binding's `scaleVector2(x=15, y=15)` processor on the gamepad right stick. */
+        private static readonly INPUT_SYSTEM_STICK_SCALE;
+        /** Right-stick dead zones: the legacy axis entry's 0.2, the Input System's default 0.125. */
+        private static readonly LEGACY_STICK_DEAD_ZONE;
+        private static readonly INPUT_SYSTEM_STICK_DEAD_ZONE;
+        /** Unity applies stick look and speed changes once per frame; scaling to this rate keeps them the same at any frame rate. */
+        private static readonly REFERENCE_FRAME_RATE;
+        /** Pitch limit in degrees, above or below the horizon. */
+        private static readonly PITCH_LIMIT;
+        /** Rotation speed when using a controller. */
+        lookSpeedController: number;
+        /** Rotation speed when using the mouse. */
+        lookSpeedMouse: number;
+        /** Movement speed in meters per second. */
+        moveSpeed: number;
+        /** Value added to the movement speed per speed step (Home / End). Also the lowest allowed movement speed. */
+        moveSpeedIncrement: number;
+        /** Movement speed multiplier while turbo is held. */
+        turbo: number;
+        /** Unity compiled the FreeCamera for the Input System (mouse look without a button) rather than the legacy Input Manager. */
+        inputSystem: boolean;
+        private pointerObserver;
+        private contextMenuCanvas;
+        private ownsPointerLock;
+        private wasPointerLocked;
+        private pendingMousePixelsX;
+        private pendingMousePixelsY;
+        private readonly localEulerAngles;
+        private readonly forwardDirection;
+        private readonly rightDirection;
+        private readonly worldPosition;
+        /** Cancels the browser context menu on the canvas so a right-drag can look around (legacy mode). */
+        private readonly suppressContextMenu;
+        /**
+         * Creates the component on the exported node. The toolkit calls this for every node whose metadata
+         * names TOOLKIT.FreeCameraController.
+         * @param transform The node to fly, usually the camera.
+         * @param scene The scene the node belongs to.
+         * @param properties The exported property bag (the Unity FreeCamera's tuning fields and input mode).
+         * @param alias The registered class name.
+         */
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Reads the exported tuning values and input mode. */
+        protected awake(): void;
+        /**
+         * Enables toolkit user input when the host has not, makes a click capture the mouse (Input System projects, unless
+         * the host already handles pointer lock), and starts collecting raw mouse movement for look.
+         */
+        protected start(): void;
+        /** Applies this frame's speed change, rotation and movement, as Unity's FreeCamera.Update does. */
+        protected update(): void;
+        /** Releases the pointer observer, the click-to-capture handler it installed and the context-menu listener. */
+        protected destroy(): void;
+        /**
+         * Adds a pointer move to this frame's mouse look, while the mouse is captured (pointer lock) or the right button
+         * is held. A free cursor never turns the camera: it would stop at the window edge and lose the aim. The first
+         * move after the capture starts is dropped, because browsers can report one large jump at that moment.
+         * @param pointerInfo A scene POINTERMOVE event.
+         */
+        private collectMouseMovement;
+        /**
+         * Converts this frame's mouse movement to degrees: Unity's Input System uses `delta * lookSpeedMouse * 0.01`, the
+         * legacy Input Manager `delta * 0.1 * lookSpeedMouse`.
+         * @param pixels Mouse movement this frame in CSS pixels (positive right / up).
+         * @returns Rotation in degrees.
+         */
+        private getMouseLookDegrees;
+        /**
+         * Converts a right-stick value to this frame's rotation in degrees. Input System: `stick * 15 * lookSpeedMouse * 0.01`
+         * per frame; legacy: `stick * lookSpeedController * 0.01` per frame. Both are scaled to the frame time.
+         * @param stick Stick deflection after the dead zone, -1..1.
+         * @param deltaTime Frame time in seconds.
+         * @returns Rotation in degrees.
+         */
+        private getStickLookDegrees;
+        /** The gamepad right stick's horizontal deflection (positive right), zero inside the dead zone. */
+        private readRightStickX;
+        /** The gamepad right stick's vertical deflection (positive up, unlike Babylon's stick), zero inside the dead zone. */
+        private readRightStickY;
+        /** Zeroes a stick value inside the dead zone of the active input mode. */
+        private applyStickDeadZone;
+        /** Speeds up with Home / d-pad up and slows down with End / d-pad down, never below one increment. */
+        private updateMoveSpeed;
+        /** Returns world-up movement input: E / Page Up / right shoulder up, Q / Page Down / left shoulder down. */
+        private getVerticalMoveInput;
+        /**
+         * Turbo is the left mouse button or the gamepad X button. Legacy projects also accept Shift while right-dragging;
+         * the Input System build never sets that boost, so Shift does nothing there, as in Unity.
+         */
+        private isTurboHeld;
+        /**
+         * Turns the node in local Euler angles, keeping its roll, with the pitch held within 90 degrees of the horizon.
+         * @param yawDegrees Turn to the right, in degrees.
+         * @param pitchDegrees Look up, in degrees.
+         */
+        private applyLook;
+        /**
+         * Moves the node in world space along its own forward and right axes and the world up axis.
+         * @param forwardDistance Meters along the node's forward axis.
+         * @param rightDistance Meters along the node's right axis.
+         * @param upDistance Meters along world up.
+         */
+        private applyMove;
     }
 }
 declare namespace TOOLKIT {
@@ -17859,6 +20123,8 @@ declare namespace TOOLKIT {
             typeMultiplier?: number;
             /** URP: `IntensityScaleURP * PostProcessingConversions.FilmGrainAmplitudeScaleURP`; omitted on PPv2 / HDRP, which keep `IntensityScale` (20). */
             intensityScale?: number;
+            /** hdrp-complete-parity T20: Unity's own grain texture (HDRP `filmGrainTex[type]` / Custom), loaded; sampled with `TK_GRAIN_DECODE`, one texel per pixel. */
+            grainTexture?: BABYLON.BaseTexture;
             samplingMode?: number;
         }): BABYLON.PostProcess;
         private static halfBuffer;
@@ -18217,6 +20483,3007 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * hdrp-complete-parity T14 (D8, D20) - an HDRP/Decal material (the projector's `material.hdrpdecal` block) as a PBR decal
+     * material for TOOLKIT.DecalProjector's projected mesh: alpha blended over the receiver (zOffset -2, no depth write), base colour
+     * x map with the map's alpha, the projector fade on `alpha`, the angle fade in the decal mesh's vertex alpha, the normal map when
+     * the decal affects normals and the emission (E x lerp(1, pe, weight), HDRP DecalData.hlsl) when it affects emission. An
+     * emission-only decal adds (ALPHA_ADD) over the receiver. At most `Budget` HDRP decal projectors draw per scene (one report).
+     * @class HdrpDecals - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpDecals {
+        static Budget: number;
+        private static _claimed;
+        /** Counts one HDRP decal projector of the scene: false (and one report) past the budget. */
+        static Claim(scene: BABYLON.Scene, projectorName: string): boolean;
+        /** The number of HDRP decal projectors the scene has claimed (drawn or not). */
+        static Claimed(scene: BABYLON.Scene): number;
+        /** The decal PBR material of an `hdrpdecal` block; null when the decal changes nothing a single blended pass can draw. */
+        static CreateMaterial(scene: BABYLON.Scene, block: any, name?: string): BABYLON.PBRMaterial;
+        /** The projector fade (fade factor x distance fade) on the decal material's alpha. */
+        static ApplyFade(material: BABYLON.Material, fade: number): void;
+        /**
+         * Unity's angle fade per vertex of a decal mesh (its alpha): fade = saturate(a + b d (d - 2)), d = dot(world normal, -projector
+         * forward); the mesh's normals are in its own (decal) space, so they go to world through the inverse-transpose of `world`.
+         * Angle (0, 0) = disabled: no vertex colours.
+         */
+        static ApplyAngleFade(mesh: BABYLON.Mesh, world: BABYLON.Matrix, towardProjector: BABYLON.Vector3, angle: number[]): void;
+        /** HDRP: a material with Receive Decals off (`hdrpsurface.receivedecals` false) is never a decal receiver. */
+        static ReceivesDecals(material: BABYLON.Material): boolean;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * hdrp-complete-parity T17 (D21, D38): HDRP height fog, sky-colour (mip) fog, the analytic volumetric approximation and the
+     * PhysicallyBasedSky aerial perspective, ported from `AtmosphericScattering.hlsl` (`EvaluateAtmosphericScattering`,
+     * `GetFogColor`), `VolumeRendering.hlsl` (`OpticalDepthHeightFog`) and `Fog.cs` (`UpdateShaderVariablesGlobalCBFogParameters`).
+     *
+     * - `HdrpFogMath` - the pure maths (tests pin it; the shaders below are its GLSL / WGSL twins).
+     * - `HdrpFogPass` - the head-of-chain post pass (`PostProcessor.HeadSlots.hdrpFog`): reads the prepass depth (requested like
+     *   `TaaPlugin`), fogs opaque AND sky pixels (sky at `maxfogdistance`, as HDRP's opaque fog pass does) and composites the
+     *   height fog over the aerial perspective with HDRP's `CompositeOver` (opaque pixels only - the sky pass already carries it).
+     * - `HdrpFogPlugin` - the same height fog per pixel on transparent PBR / Standard materials of parity scenes (`vPositionW`).
+     *
+     * Documented deviations: volumetric fog is the analytic Henyey-Greenstein in-scatter of the main directional light (no
+     * shadowed shafts, no local volumes - one report each); transparent materials take the height fog with the environment's
+     * horizon colour (no mip fog, no aerial perspective); particles are fogged by the pass at the opaque depth behind them.
+     */
+    class HdrpFogMath {
+        /** HDRP `ScaleHeightFromLayerDepth`. */
+        static readonly LayerDepthScale: number;
+        /** HDRP's top convolution mip used by mip fog (ENVCONSTANTS_CONVOLUTION_MIP_COUNT - 1). */
+        static readonly ConvolutionTopMip: number;
+        /**
+         * Babylon's real SH basis constants with their signs, Babylon harmonic order (l00, l1_1, l10, l11, l2_2, l2_1, l20, l21,
+         * l22) - the polynomial they multiply is 1, y, z, x, xy, yz, 3z^2 - 1, xz, x^2 - y^2.
+         */
+        private static readonly SignedBasisConstants;
+        /** The SH band of each coefficient, Babylon harmonic order. */
+        private static readonly CoefficientBands;
+        /** Undoes Babylon's cosine convolution and divide by pi per band (pi / A_l: 1, 3/2, 4), giving the radiance SH. */
+        private static readonly RadianceBandScales;
+        /** 1 / meanFreePath (HDRP clamps the mean free path to 1 m). */
+        static Extinction(meanFreePath: number): number;
+        /** `_HeightFogExponents` = (1/H, H), H = max(0.01, maximumHeight - baseHeight) * 0.144765 (Fog.cs). */
+        static HeightExponents(baseHeight: number, maximumHeight: number): number[];
+        /** Fog extinction at a world height: homogeneous below the base, exponential above it (ComputeHeightFogMultiplier). */
+        static Density(heightWS: number, base: number, maxHeight: number, meanFreePath: number): number;
+        /** VolumeRendering.hlsl `OpticalDepthHeightFog` (finite interval). */
+        static OpticalDepth(baseExtinction: number, baseHeight: number, exponents: number[], cosZenith: number, startHeight: number, intervalLength: number): number;
+        /**
+         * Transmittance of the height fog from a camera at `cameraY` along a ray with vertical component `rayDirY` over `distance`
+         * metres. A sky ray (distance not finite, or <= 0) is evaluated at `maxfogdistance`, as HDRP's opaque fog pass does.
+         */
+        static Transmittance(params: any, cameraY: number, rayDirY: number, distance: number): number;
+        /** `GetFogColor` without the texture: constant mode -> `color`, sky mode -> the environment colour x `tint`. */
+        static FogColor(fog: any, environmentColor: number[]): number[];
+        /** "sky" | "constant" (unknown -> "sky" + one warning, Error policy). */
+        static ColorMode(fog: any): string;
+        /** HDRP mip fog: LOD = (1 - mipFogMaxMip * saturate((d - near) / (far - near))) * maxLod (near fog is the blurriest). */
+        static MipFogLod(fog: any, distance: number, maxLod: number): number;
+        /**
+         * The shader's fog for one ray (grey: scalar colours): volumetric on -> the lit in-scatter (`ambient * probeDimmer + sunTerm`)
+         * inside `depthextent`, HDRP's analytic fog (`fogColor`) beyond it; off -> analytic over the whole ray. `fogColor` is
+         * already x pe. `ambient` (the volumetric ambient probe along the ray, x pe) replaces `fogColor` in the volumetric term
+         * only; omitted, the volumetric term uses `fogColor`. Returns { color, opacity } (EvaluateAtmosphericScattering's
+         * height-fog half).
+         */
+        static Evaluate(fog: any, cameraY: number, dirY: number, distance: number, fogColor: number, sunTerm: number, ambient?: number): {
+            color: number;
+            opacity: number;
+        };
+        /**
+         * HDRP's Cornette-Shanks zonal harmonics (`GetCornetteShanksPhaseFunction`, SphericalHarmonics.cs) - the phase function
+         * the volumetric ambient probe is convolved with.
+         * @param anisotropy The fog anisotropy g, in (-1, 1).
+         * @returns [zh0, zh1, zh2].
+         */
+        static CornetteShanksZonal(anisotropy: number): number[];
+        /**
+         * HDRP's volumetric ambient probe (D2): the environment's radiance SH convolved with the Cornette-Shanks phase
+         * (`SphericalHarmonicMath.Convolve`), with Babylon's signed basis constants folded in, so `EvaluateAmbient` is a plain
+         * polynomial. Babylon's polynomial holds the cosine-convolved, divided-by-pi SH, so each band is first scaled back to
+         * radiance.
+         * @param polynomial The environment's spherical polynomial (null gives no ambient).
+         * @param anisotropy The fog anisotropy g.
+         * @returns 27 numbers - nine RGB coefficients, Babylon harmonic order - or 27 zeros when `polynomial` is null.
+         */
+        static VolumetricAmbientCoefficients(polynomial: BABYLON.SphericalPolynomial, anisotropy: number): number[];
+        /**
+         * CPU mirror of the fog shader's `hdrpFogAmbient(direction)`: the volumetric ambient radiance along a unit direction
+         * given in the environment's frame (the shader rotates by the environment matrix first).
+         * @param coefficients The 27 numbers from `VolumetricAmbientCoefficients`.
+         * @param x The direction's x component.
+         * @param y The direction's y component.
+         * @param z The direction's z component.
+         * @returns The RGB radiance.
+         */
+        static EvaluateAmbient(coefficients: number[], x: number, y: number, z: number): number[];
+        /** Henyey-Greenstein phase (the analytic volumetric in-scatter of the main light). */
+        static PhaseHG(g: number, cosTheta: number): number;
+        /** HDRP `CompositeOver`: c = cF + (1 - oF) * cB, o = oF + (1 - oF) * oB (per channel when the opacities are arrays). */
+        static CompositeOver(colorFront: number[], opacityFront: number, colorBack: number[], opacityBack: number): {
+            color: number[];
+            opacity: number;
+        };
+        /**
+         * True when the scene's sky renders HDRP's aerial perspective: a PhysicallyBasedSky with atmospheric scattering (and no
+         * volumetric clouds - those fall back to the bake). Accepts the `hdrp.sky` block or the live `HdrpPhysicallyBasedSky`
+         * (which must be live, not showing its bake).
+         */
+        static HasAerialPerspective(sky: any): boolean;
+        /** The pass is registered when the height fog or the aerial perspective is on. */
+        static PassNeeded(fog: any, sky: any): boolean;
+        /** Babylon alpha mode -> the plugin's fog blend: 0 alpha (c(1-o) + fog), 1 premultiplied (c(1-o) + fog * a), 2 additive (c(1-o)). */
+        static BlendMode(alphaMode: number): number;
+        /** The average of a sphericalPolynomial over horizontal directions ((xx + zz) / 2) - the transparent fog's sky colour. */
+        static HorizonColor(polynomial: any): number[];
+        static Rgb(value: any, fallback: number[]): number[];
+    }
+    /** Per-scene, per-frame fog inputs shared by the pass and the transparent plugin. */
+    interface IHdrpFogFrame {
+        renderId: number;
+        pe: number;
+        a: number[];
+        b: number[];
+        c: number[];
+        d: number[];
+        e: number[];
+        sunDir: number[];
+        sun: number[];
+        env: number[];
+        sky: number[];
+        environment: BABYLON.BaseTexture;
+        envMatrix: BABYLON.Matrix;
+        skyDepth: number;
+        /** Volumetric ambient coefficients x envScale (27 numbers, `HdrpFogMath.VolumetricAmbientCoefficients`). */
+        ambient: number[];
+    }
+    class HdrpFogPass {
+        static readonly ShaderName: string;
+        static readonly Uniforms: string[];
+        static readonly Samplers: string[];
+        /** The volumetric ambient probe's vec4 uniforms (`fogAmb0`...`fogAmb8`, one SH coefficient each, w unused). */
+        static readonly AmbientVectors: number;
+        /** Every uniform the GLSL effect resolves: the fog's own plus the atmosphere (pb*) the aerial perspective reads (GLSL looks up only listed names). */
+        static AllUniforms(): string[];
+        private static AllUniformsBase;
+        private static registered;
+        /** The scene's `hdrp.fog` block (parity scenes only), or null. */
+        static FogBlock(scene: BABYLON.Scene): any;
+        /** The sky the aerial perspective comes from: the live PhysicallyBasedSky when it runs, else the `hdrp.sky` block. */
+        static SkyOf(scene: BABYLON.Scene): any;
+        /** The fog inputs of this frame (computed once per render id). */
+        static Frame(scene: BABYLON.Scene, fog: any): IHdrpFogFrame;
+        /** The view depth at and beyond which a pixel is sky: the nearest face of an infinite-distance sky mesh (none -> 1e30). */
+        static SkyDepth(scene: BABYLON.Scene): number;
+        /** Registers the GLSL and WGSL fragments once. */
+        static RegisterShaders(): void;
+        /** GLSL height fog helpers (prefix keeps the pass and the plugin apart). */
+        /** The most Local Volumetric Fog boxes the fog pass evaluates per pixel (HDRP voxelizes any number - nearest by priority here). */
+        static readonly MaxLocalVolumes: number;
+        /** Packed vec4s per local volume (center + extinction, right + blend, up + invert, extents + falloff, albedo + g, rcp + fades). */
+        static readonly LocalVolumeVectors: number;
+        /** The local volume uniform names (`fogL<i>_<k>`). */
+        static LocalUniformNames(): string[];
+        /**
+         * HDRP LocalVolumetricFog -> the packed vectors: extinction 1 / max(0.05, meanFreePath) (VolumeRendering.hlsl
+         * ExtinctionFromMeanFreePath), rcp face fades (LocalVolumetricFogArtistParameters.ConvertToEngineData), distance fade
+         * rcp length and end x rcp length.
+         */
+        static LocalVolumeVectorsOf(v: any): number[][];
+        /** VolumeRendering.hlsl ComputeVolumeFadeFactor (pure mirror of the shader, for tests): coordNDC in [0, 1]^3. */
+        static LocalVolumeFade(pv: number[][], coordNDC: number[], dist: number): number;
+        /** The local volumes of the fog block, HDRP order (priority), at most MaxLocalVolumes. */
+        static LocalVolumes(fog: any): any[];
+        /**
+         * Local Volumetric Fog inside the volumetric range: each box (HDRP's OBB, faded by ComputeVolumeFadeFactor, blended with
+         * the global medium by its blending mode) is marched over its ray segment and scatters the same light the global fog does
+         * (ambient sky x global light probe dimmer + the main light x its own Henyey-Greenstein phase), seen through the global
+         * fog in front of it. Returns (in-scatter rgb, local transmittance).
+         */
+        static LocalGlsl(): string;
+        static LocalWgsl(): string;
+        /**
+         * The `fogAmb<i>` uniform declarations (D2).
+         * @param wgsl True for WGSL syntax.
+         * @returns One declaration per line.
+         */
+        static AmbientDeclarations(wgsl: boolean): string;
+        /**
+         * GLSL `hdrpFogAmbient(dir)` - the volumetric ambient probe (D2) along a world direction, rotated into the environment's
+         * frame exactly as `hdrpFogColor` does. Main pass only (not in the shared helpers the transparent plugin uses).
+         */
+        static AmbientGlsl(): string;
+        /** WGSL twin of `AmbientGlsl`. */
+        static AmbientWgsl(): string;
+        static GlslHelpers(prefix: string): string;
+        static WgslHelpers(prefix: string): string;
+        private static Glsl;
+        private static Wgsl;
+        /** Every registered source (tests scan them for `;` inside `//` comments and for WGSL sampler declarations). */
+        static AllSources(): string[];
+        /** The defines this frame needs (env cube present, aerial perspective bound). */
+        static Defines(hasEnv: boolean, hasAp: boolean, locals?: number): string;
+        /**
+         * The fog pass for `camera` (head slot `hdrpFog`). Null when the prepass (depth) is unavailable - one warning. `fog` is
+         * the scene's `hdrp.fog` block, read every frame (Inspector edits land live).
+         */
+        static Create(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number, fog: any): BABYLON.PostProcess;
+    }
+    /**
+     * T17 step 3: the HDRP height fog on transparent PBR / Standard materials of parity scenes - the pass's function per pixel at
+     * `vPositionW` (after the final colour composition, before Babylon's own fog). Blend-aware: alpha c(1-o) + fog, premultiplied
+     * c(1-o) + fog * a, additive c(1-o) (HDRP `EvaluateAtmosphericScattering` on transparents).
+     */
+    class HdrpFogPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PluginName: string;
+        fog: any;
+        constructor(material: BABYLON.Material);
+        /** The plugin on this material, or null. */
+        static Get(material: BABYLON.Material): TOOLKIT.HdrpFogPlugin;
+        /** Attaches (once) the fog plugin to a PBR / Standard material with `fog` (the scene's `hdrp.fog` block). */
+        static Attach(material: BABYLON.Material, fog: any): TOOLKIT.HdrpFogPlugin;
+        /** Attaches when the material's scene is a parity HDRP scene with fog enabled and the material blends. */
+        static AttachIfParity(material: BABYLON.Material): void;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        static Definitions(wgsl: boolean): string;
+        /** The fog applied to `target` (PBR `finalColor`, Standard `color`). */
+        static Apply(wgsl: boolean, target: string): string;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * hdrp-complete-parity T13 (D17, D18) - the pure half of HDRP/LayeredLit: the layer weights, ported verbatim from HDRP's
+     * `Runtime/Material/LayeredLit/LayeredLitData.hlsl` (`GetBlendMask`, `ApplyHeightBlend`, `ComputeMaskWeights`,
+     * `ComputeLayerWeights`). The shader code HdrpLayeredLitPlugin generates is the same arithmetic, unrolled per layer count.
+     * Masks are rgba (layer 1 r, layer 2 g, layer 3 b, main layer a), weights are [w0, w1, w2, w3].
+     * @class HdrpLayeredLitMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpLayeredLitMath {
+        static readonly MaxLayers: number;
+        /** HDRP `_LayerCount` (2..4 in the Inspector) clamped to 1..4. */
+        static LayerCount(count: number): number;
+        /** `GetBlendMask`: `_LAYER_MASK_VERTEX_COLOR_MUL` multiplies by saturate(vc), `_ADD` is saturate(mask + vc * 2 - 1). */
+        static BlendMask(mask: number[], vertexColor: number[], mode: string): number[];
+        /** `ApplyHeightBlend(heights, blendMask)`: heights [h0..h3] (main layer first), blendMask rgba; returns the new rgba mask. */
+        static ApplyHeightBlend(heights: number[], blendMask: number[], layerCount: number, transition: number): number[];
+        /** `ComputeMaskWeights`: the top layer has priority, the remainder flows down to the main layer. */
+        static ComputeMaskWeights(blendMask: number[], layerCount: number): number[];
+        /**
+         * `ComputeLayerWeights`: the height blend runs only when `_HEIGHT_BASED_BLEND` and at least one layer has a height map
+         * (`LAYERS_HEIGHTMAP_ENABLE`); `heights` null = no height map, which is HDRP's plain mask blend.
+         */
+        static ComputeLayerWeights(blendMask: number[], heights: number[], layerCount: number, heightBlend: boolean, transition: number): number[];
+        private static MinHeight;
+        private static MaxHeight;
+        private static Saturate;
+        private static Vec4;
+        /** The `hdrplayered.vertexcolormode` key as the shader index (0 none, 1 multiply, 2 add). */
+        static VertexColorIndex(mode: string): number;
+    }
+    /**
+     * hdrp-complete-parity T13 (D17, D18) - HDRP/LayeredLit on a toolkit PBR material. Each map kind of the layers (base colour,
+     * normal, mask, height) is ONE Texture2DArray (only the layers that have the map get a slice), and the layer mask is a
+     * one-slice array, so the material stays inside the WebGPU 16-sampler budget whatever the layer count. The glTF base
+     * material underneath supplies the tangent frame (its normal map, when any layer has one) and every stock PBR feature.
+     * Created by the loader (CanvasTools.createMaterial) for a parity material carrying `hdrplayered`; configured by
+     * HdrpLitMaterials.Apply through `configure` + `loadLayersAsync`.
+     * @class HdrpLayeredLitMaterial - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpLayeredLitMaterial extends TOOLKIT.CustomShaderMaterial {
+        /** Fields read by HdrpLayeredLitPlugin (set by configure / loadLayersAsync). */
+        layerCount: number;
+        vertexColorMode: number;
+        heightBlend: boolean;
+        influence: boolean;
+        layerMaskUv: number;
+        /** Per layer: uv set (0 / 1) and the slice of each array (-1 = the layer has no such map). */
+        layers: Array<{
+            uv: number;
+            albedo: number;
+            normal: number;
+            mask: number;
+            height: number;
+        }>;
+        hasLayerMask: boolean;
+        /** True once every array is built and registered: the plugin emits its code only then. */
+        layersReady: boolean;
+        private _block;
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+        /** Unity `_ST` (tiling xy, offset zw) as the glTF / Babylon layer transform (the exporter's KHR_texture_transform: v offset negated). */
+        static LayerST(tiling: number[], offset: number[]): BABYLON.Vector4;
+        /**
+         * Registers every uniform of the block synchronously (before the material's first compile) and assigns each layer's
+         * array slices. Reports what the port does not carry once per material.
+         */
+        configure(block: any): void;
+        /**
+         * Builds the arrays (`resolveUrl(textureIndex)` gives each exported texture's image URL) and registers them. Resolves
+         * false (and the material stays the plain base layer, one report) when any array fails.
+         */
+        loadLayersAsync(resolveUrl: (textureIndex: number) => string): Promise<boolean>;
+        /** True when the array of `kind` ("albedo" | "normal" | "mask" | "height") has at least one slice. */
+        hasArray(kind: string): boolean;
+    }
+    /**
+     * The HDRP/LayeredLit shader code (T13): blend mask, height blend, mask weights, the per-layer surface (LitDataIndividualLayer:
+     * base colour x map, normal map with its scale, mask-map remaps or the scalar metallic / smoothness, AO 1) and the weighted
+     * blend, plus HDRP's main-layer influence (base colour and normal). GLSL and WGSL are generated from one line list.
+     * @class HdrpLayeredLitPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpLayeredLitPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        constructor(material: TOOLKIT.HdrpLayeredLitMaterial, shaderName: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        getSamplers(samplers: string[]): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        /** The code-generation options of a configured material. */
+        static Options(mat: TOOLKIT.HdrpLayeredLitMaterial): any;
+        private static readonly UNIFORMS;
+        /** GLSL line → WGSL line (declarations, constructors, uniforms, varyings). */
+        private static ToWGSL;
+        /** Generated per shader build from the material's fields (no state outlives one build). */
+        static BuildCode(o: any, wgsl: boolean): {
+            [hook: string]: string;
+        };
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * hdrp-complete-parity T8 / T9 (D32-D38): the GLSL + WGSL sources of the live HDRP PhysicallyBasedSky - a port of HDRP 17.5's
+     * `SkyLUTGenerator.compute` (MultiScatteringLUT, SkyViewLUT), `PhysicallyBasedSkyCommon.hlsl`, `PhysicallyBasedSkyEvaluation.hlsl`,
+     * `PhysicallyBasedSkyRendering.hlsl` (celestial bodies), `PhysicallyBasedSky.shader` (camera-space RenderSky) and the colour terms
+     * of `CloudLayer.shader` / `CloudLayerCommon.hlsl` with `BakeCloudTexture.compute`'s cloud lighting evaluated per pixel.
+     * Every shader is registered in `ShaderStore` (GLSL) and `ShaderStoreWGSL` (WGSL). No `;` inside `//` comments of a shader string.
+     * @class HdrpPbSkyShaders - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpPbSkyShaders {
+        static readonly MsLutName: string;
+        static readonly SkyViewName: string;
+        static readonly SkyName: string;
+        static readonly CloudBakeName: string;
+        static readonly AerialName: string;
+        /** The atmosphere uniforms every pass binds (vec4 each, `pbBody` = 6 vec4 per celestial body x MaxBodies). */
+        static readonly AtmosphereUniforms: string[];
+        static readonly CloudUniforms: string[];
+        static readonly BodyVec4s: number;
+        static readonly MaxBodies: number;
+        private static registered;
+        /** Registers every PBSky shader once (GLSL in ShadersStore, WGSL in ShadersStoreWGSL). */
+        static Register(): void;
+        /** Every registered source (tests scan them for `;` inside `//` comments). */
+        static AllSources(): string[];
+        static GlslUniforms(): string;
+        /** PhysicallyBasedSkyCommon.hlsl + the integration helpers of PhysicallyBasedSkyEvaluation.hlsl (camera-space subset). */
+        static GlslCommon(): string;
+        private static GlslMsLut;
+        private static GlslSkyView;
+        /**
+         * SkyLUTGenerator `AtmosphericScatteringLUTCamera`: one froxel slice per draw (layer = pbApCamera.w) of the 32 x 32 x 64 aerial
+         * perspective LUT, the prefix product / postfix sum of the compute kernel evaluated as a loop over the slices up to this one
+         * (no shadowed in-scatter), x colour saturation x intensity multiplier x pre-exposure, as HDRP stores it.
+         */
+        private static GlslAerial;
+        private static GlslSkyVertex;
+        /** The cloud functions of one layer (`X` = A or B), generated per sampler (no sampler parameters - WebGPU rule). */
+        private static GlslCloudUniforms;
+        /** BakeCloudTexture.compute: (scattering, opacity) of layer A in rg and layer B in ba, per lat-long texel of resolution x resolution / 2. */
+        private static GlslCloudBake;
+        private static GlslCloudHelpers;
+        private static GlslCloudColor;
+        private static GlslCloudLayer;
+        private static GlslSkyFragment;
+        static WgslUniforms(): string;
+        static WgslCommon(): string;
+        private static WgslMsLut;
+        private static WgslSkyView;
+        private static WgslAerial;
+        private static WgslSkyVertex;
+        private static WgslCloudUniforms;
+        private static WgslCloudBake;
+        private static WgslCloudHelpers;
+        private static WgslCloudColor;
+        private static WgslCloudLayer;
+        private static WgslSkyFragment;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * hdrp-complete-parity T8 (D33): the TS twin of the exporter's `HdrpPbSkyMath` (same names, same constants) plus the CPU
+     * transmittance HDRP uses for the sun colour on surfaces - `PhysicallyBasedSky.cs:182-322` (coefficients) and `:438-607`
+     * (Chapman optical depth, `EvaluateAtmosphericAttenuation`), `SkySettings.cs:205-223` (intensity multiplier).
+     * @class HdrpPbSkyMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpPbSkyMath {
+        static readonly DefaultEarthRadius: number;
+        static readonly DefaultAirScattering: number[];
+        static readonly DefaultAirScaleHeight: number;
+        static readonly DefaultAerosolScaleHeight: number;
+        static readonly DefaultOzoneMinimumAltitude: number;
+        static readonly DefaultOzoneLayerWidth: number;
+        static readonly OzoneExtinction: number[];
+        static ScaleHeightFromLayerDepth(d: number): number;
+        static LayerDepthFromScaleHeight(h: number): number;
+        static ExtinctionFromZenithOpacityAndScaleHeight(alpha: number, h: number): number;
+        static ZenithOpacityFromExtinctionAndScaleHeight(ext: number, h: number): number;
+        static AirScaleHeight(m: number, airMaximumAltitude: number): number;
+        static AirExtinction(m: number, airDensityRGB: number[], airMaximumAltitude: number): number[];
+        static AirScattering(m: number, airDensityRGB: number[], airMaximumAltitude: number, airTint: number[]): number[];
+        static AerosolScaleHeight(m: number, aerosolMaximumAltitude: number): number;
+        static AerosolExtinction(m: number, aerosolDensity: number, aerosolMaximumAltitude: number): number;
+        static AerosolScattering(m: number, aerosolDensity: number, aerosolMaximumAltitude: number, aerosolTint: number[]): number[];
+        static OzoneExtinctionFor(m: number, ozoneDensityDimmer: number): number[];
+        static MaximumAltitude(m: number, airMaximumAltitude: number, aerosolMaximumAltitude: number): number;
+        static OzoneMinimumAltitude(m: number, value: number): number;
+        static OzoneLayerWidth(m: number, value: number): number;
+        static OzoneScaleOffset(minimumAltitude: number, width: number): number[];
+        /** SkySettings.GetIntensityFromSettings: Exposure (0) → 2^ev / 1.2, Lux (1) → desired / upper-hemisphere lux, Multiplier (2) → multiplier. */
+        static IntensityMultiplier(mode: number, exposure: number, multiplier: number, desiredLux?: number, upperHemisphereLux?: number): number;
+        /** PhysicallyBasedSkyRenderer.CornetteShanksPhasePartConstant. */
+        static CornetteShanksPhasePartConstant(g: number): number;
+        /** PhysicallyBasedSkyRenderer.ComputeExponentialInterpolationParams (horizon / zenith shift). */
+        static ExponentialInterpolationParams(k: number): number[];
+        /** The coefficients block: the exported one when present, else recomputed from `params` with the formulas above. */
+        static Coefficients(sky: any): any;
+        /** HDRP's precomputation hash inputs (PhysicallyBasedSky.GetPrecomputationHashCode + planet radius / rendering space) - the multiple-scattering LUT key. */
+        static PrecomputationHash(sky: any): string;
+        /** The sky-view LUT key: direction, colour and intensity of every interacting light (PhysicallyBasedSkyRenderer.GetLightsHash). */
+        static LightHash(lights: BABYLON.DirectionalLight[]): string;
+        static ChapmanUpperApprox(z: number, cosTheta: number): number;
+        static ChapmanHorizontal(z: number): number;
+        static OzoneDensity(height: number, ozoneScaleOffset: number[]): number;
+        static IntersectSphere(sphereRadius: number, cosChi: number, radialDistance: number, rcpRadialDistance: number): number[];
+        static ComputeCosineOfHorizonAngle(r: number, R: number): number;
+        static ComputeOzoneOpticalDepth(R: number, r: number, cosTheta: number, ozoneMinimumAltitude: number, ozoneLayerWidth: number): number;
+        /** PhysicallyBasedSky.cs:523 - RGB optical depth from radius r at zenith cosine cosTheta (HDRP's own `b` term, verbatim). */
+        static ComputeAtmosphericOpticalDepth(coeffs: any, R: number, r: number, cosTheta: number, alwaysAboveHorizon: boolean): number[];
+        /** PhysicallyBasedSky.cs:580 - transmittance along the light path from X towards L (C planet centre, R planet radius). */
+        static EvaluateAtmosphericAttenuation(coeffs: any, planetCenter: BABYLON.Vector3, planetRadius: number, dirToSun: BABYLON.Vector3, cameraWorld: BABYLON.Vector3, out: BABYLON.Color3): BABYLON.Color3;
+        /** Babylon's SphericalPolynomial irradiance at a direction (harmonicsFunctions `computeEnvironmentIrradiance`, polynomial form). */
+        static EvaluatePolynomial(sp: BABYLON.SphericalPolynomial, n: BABYLON.Vector3): BABYLON.Color3;
+    }
+    /**
+     * hdrp-complete-parity T8 / T9 (D32-D38): HDRP 17.5's PhysicallyBasedSky rendered LIVE - not `ADDONS.Atmosphere` (D33). The
+     * multiple-scattering LUT (32 x 32) and the sky-view LUT (256 x 144) are HDRP's Hillaire 2020 kernels run as fragment passes;
+     * the sky mesh draws HDRP's camera-space `RenderSky` (sky-view LUT above the horizon, the Lambert ground below, celestial
+     * bodies with their flare, the artistic overrides, the CloudLayer with its sun lighting) x the intensity multiplier x the scene
+     * pre-exposure. Every interacting directional light's colour on surfaces is attenuated each frame by the atmosphere at the
+     * camera (HDRP's PrecomputedAtmosphericAttenuation path). The baked sky stays the fallback (D35).
+     * @class HdrpPhysicallyBasedSky - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpPhysicallyBasedSky {
+        static readonly MaxSuns: number;
+        static readonly MsLutSize: number;
+        static readonly SkyViewSize: number[];
+        static readonly AerialPerspectiveSize: number[];
+        static readonly AerialMaxDistance: number;
+        static readonly MeshName: string;
+        /** Raised after every environment capture + prefilter (+ SH read-back). */
+        static OnEnvironmentUpdated: BABYLON.Observable<BABYLON.Scene>;
+        /** WebGL2 or WebGPU with a (half) float colour target. */
+        static IsSupported(engine: BABYLON.AbstractEngine): boolean;
+        static Get(scene: BABYLON.Scene): TOOLKIT.HdrpPhysicallyBasedSky;
+        /**
+         * The intake decision (plan Design Reference › PBSky fallback table): `{ live, key, reason }`. `key` names the one report
+         * the baked fallback raises (null when the fallback is silent - not parity, no sky block, another sky type).
+         */
+        static Decide(metadata: any, engine: BABYLON.AbstractEngine): {
+            live: boolean;
+            key: string;
+            reason: string;
+        };
+        /**
+         * Creates the live sky when `Decide` says so (one report for a reported fallback) and returns it; null keeps the baked sky.
+         * `root` resolves the cloud map urls; `options.bakedSky` rebuilds the baked sky mesh for the Inspector A/B switch.
+         */
+        static TryCreate(scene: BABYLON.Scene, metadata: any, root: string, options?: {
+            bakedSky?: () => BABYLON.AbstractMesh;
+            rendergroup?: number;
+        }): TOOLKIT.HdrpPhysicallyBasedSky;
+        /** Creates (or returns) the scene's live sky. `lights` null = every enabled interacting directional light, resolved each frame. */
+        static Create(scene: BABYLON.Scene, sky: any, lights: BABYLON.DirectionalLight[], options?: any): TOOLKIT.HdrpPhysicallyBasedSky;
+        /** OnDemand update mode (D36): the next frame re-captures the environment. */
+        static RequestEnvironmentUpdate(scene: BABYLON.Scene): void;
+        /**
+         * D36 - HDRP's environment update rules (SkyManager): `updateMode` 0 OnChanged → when the precomputation or the light hash
+         * differs from the last capture's, 1 OnDemand → the first frame, then only after `RequestEnvironmentUpdate`, 2 Realtime →
+         * every `updatePeriod` seconds (0 → at most once per 9 frames, RealtimeReflection.RefreshRateFor). Pure.
+         */
+        static ShouldRecapture(state: {
+            lastTime: number;
+            lastFrame: number;
+            lastPrecompute: string;
+            lastLight: string;
+            requested: boolean;
+            captured: boolean;
+        }, nowSeconds: number, frame: number, precomputationHash: string, lightHash: string, updateMode: number, updatePeriod: number): boolean;
+        /** D34: the ambient SH - Dynamic (1) → the live read-back once it exists, else the exported static SH; Static (0) → the exported SH. */
+        static SelectAmbientSh(skyAmbientMode: number, readback: BABYLON.SphericalHarmonics, exported: BABYLON.SphericalHarmonics): BABYLON.SphericalHarmonics;
+        /** The polynomial scale that leaves diffuse = SH x indirect.diffuse after the environment level (pe x indirect.reflection) multiplies it. */
+        static AmbientShScale(diffuse: number, reflection: number): number;
+        /** The environment level binding value: pe x indirect.reflection (D8, D15). */
+        static EnvironmentLevel(pe: number, reflection: number): number;
+        static readonly RealtimeMinFrames: number;
+        /** The face size the capture is box-downsampled to before its SH projection: the ambient is low frequency, so 64² keeps the integral at 1/64 of the 512² cost. */
+        static readonly ShProjectionFaceSize: number;
+        /** The faces of a cube capture, in +X, -X, +Y, -Y, +Z, -Z order. */
+        private static readonly CaptureFaceCount;
+        /** The colour channels (RGB) of an RGBA capture texel that carry radiance. */
+        private static readonly ColorChannelCount;
+        /**
+         * Projects the six raw faces of an HDRP sky capture onto the pre-scaled (render-ready) L2 SH, in the capture's
+         * physical units - what HDRP's ambient probe convolution produces from the same sky.
+         * Babylon's `ConvertCubeMapTextureToSphericalPolynomial` is not usable here: it clamps every channel at
+         * `MAX_HDRI_VALUE` (4096) while physical sky radiance reaches 10^4 (the sunlit PBSky ground alone ~8400), and for a
+         * render target it swaps only the ±Y faces while the side faces keep their rows, which mixes two orientations into
+         * a nearly isotropic, upside-down ambient. Here the faces are scaled under the clamp, projected in their storage
+         * orientation, and mirrored in Y once when the capture is stored INVCUBIC (a ReflectionProbe target on WebGL2 and WebGPU).
+         * @param faces The +X, -X, +Y, -Y, +Z, -Z RGBA float data as `readPixels` returns it (scaled in place by the fit).
+         * @param size The face width in texels.
+         * @param mirroredY True when the capture is stored Y-mirrored (sampled INVCUBIC).
+         * @returns Pre-scaled harmonics (`preScaled` true): ambient(n) = l00 + l1_1·y + l10·z + l11·x + … in capture units.
+         */
+        static PreScaledShFromCaptureFaces(faces: Float32Array[], size: number, mirroredY: boolean): BABYLON.SphericalHarmonics;
+        /** Mirrors pre-scaled harmonics in Y in place (a Y-mirrored capture): the y-odd bands l1_1 (y), l2_2 (xy) and l2_1 (yz) change sign. */
+        static MirrorPreScaledY(harmonics: BABYLON.SphericalHarmonics): void;
+        static readonly MaxEnvironmentSize: number;
+        /** The world direction a directional light travels (its parent's rotation applied). */
+        static LightDirection(light: BABYLON.DirectionalLight): BABYLON.Vector3;
+        /** The light's exported colour (kept on `_tkHdrpBaseColor` before the per-frame attenuation rewrites `diffuse`). */
+        static BaseColor(light: BABYLON.Light): BABYLON.Color3;
+        readonly scene: BABYLON.Scene;
+        readonly sky: any;
+        readonly mesh: BABYLON.Mesh;
+        readonly material: BABYLON.ShaderMaterial;
+        /** The live environment (GGX-prefiltered sky capture) installed as `scene.environmentTexture` (D34). */
+        envCube: BABYLON.BaseTexture;
+        /** The last capture time (seconds since load) and count - Inspector read-outs. */
+        lastCaptureTime: number;
+        captureCount: number;
+        preExposure: number;
+        disposed: boolean;
+        coefficients: any;
+        readonly updateState: {
+            lastTime: number;
+            lastFrame: number;
+            lastPrecompute: string;
+            lastLight: string;
+            requested: boolean;
+            captured: boolean;
+        };
+        private readonly fixedLights;
+        private readonly options;
+        private readonly textureType;
+        private readonly renderer;
+        private readonly msPass;
+        private readonly viewPass;
+        private readonly msLut;
+        private readonly skyViewLut;
+        private readonly cloudMaps;
+        private cloudPass;
+        private cloudTex;
+        private cloudHash;
+        private readonly binding;
+        private readonly uniforms;
+        private beforeRender;
+        private cameraObserver;
+        private disposeObserver;
+        private msHash;
+        private viewHash;
+        private activeLights;
+        private attenuated;
+        private bakedMesh;
+        private useBaked;
+        private bakedReason;
+        private readonly scratch;
+        private probe;
+        private envTarget;
+        private envBinding;
+        private filtering;
+        private pendingFilter;
+        private capturing;
+        private shReading;
+        /** The live capture's ambient, pre-scaled harmonics in physical units (Dynamic ambient), null until the first read-back. */
+        private readbackHarmonics;
+        /** The exported static ambient (Unity's pre-scaled ambient probe), null when the export carries none. */
+        private exportedHarmonics;
+        /** The ambient installed on the live environment (the selected harmonics x the indirect-diffuse scale). */
+        private appliedPolynomial;
+        /** The selected ambient before the indirect-diffuse scale, physical - the cloud layer's ambient source. */
+        private ambientPolynomial;
+        private bakedEnvironment;
+        private apPass;
+        private apTarget;
+        private apTexture;
+        private apRequested;
+        private apCamera;
+        private readonly startTime;
+        private constructor();
+        /** "live" or "baked: <reason>" (Inspector read-out). */
+        get mode(): string;
+        /** The Inspector A/B switch (D35): shows the baked sky mesh instead of the live sky. */
+        get useBakedSky(): boolean;
+        set useBakedSky(value: boolean);
+        /** The interacting directional lights driving the sky this frame (lights with intensity first, max 4). */
+        resolveLights(): BABYLON.DirectionalLight[];
+        /** The light's `hdrpsky` export block (celestial body fields), or null. */
+        static SkyBlock(light: BABYLON.Light): any;
+        /** Per frame: LUT re-renders on their hashes (D36), uniforms, and the attenuated sun on surfaces (D37). */
+        update(): void;
+        private renderLuts;
+        /** The constant buffer of PhysicallyBasedSkyRenderer.UpdateGlobalConstantBuffer + the celestial bodies (FillCelestialBodyData). */
+        private writeUniforms;
+        /** CloudLayerRenderer's per-layer parameters (opacities, rotation, steps, sigma, altitude, sun colour x layer colour, ambient dimmer). */
+        private writeCloudUniforms;
+        /** The cloud ambient: the sky's ambient SH at (0, -1, 0), physical (CloudLayerCommon `SampleSH9(_AmbientProbeBuffer, down)`). */
+        private cloudAmbient;
+        private cloudLayers;
+        private loadCloudMap;
+        private bindEffect;
+        /**
+         * Switches the sky mesh into (true) or out of (false) a reflection-probe capture. HDRP renders a probe's sky from the
+         * sky cubemap, which carries the sun disk only with "include sun in baking", so a capture drawing the disk would fold
+         * a 10^4-nit spot into the probe (a white smear on rough receivers once roughness reads the mips). Pre-exposure stays:
+         * the probe captures the pre-exposed scene around the sky.
+         * @param capturing True before the probe renders its faces, false after.
+         */
+        setProbeCapture(capturing: boolean): void;
+        private applyMaterialUniforms;
+        /** D37: the colour of every interacting light on surfaces x HDRP's atmospheric attenuation at the camera. */
+        private attenuateSuns;
+        private static RestoreLight;
+        /** One report per unsupported input (fallback table): Material rendering mode, ground / space textures, cloud distortion, celestial textures. */
+        private reportOnce;
+        /** The aerial perspective froxel LUT (32 x 32 x 64, 2D array) - built every frame once a consumer (the T17 fog pass) asked for it. */
+        get aerialPerspective(): BABYLON.BaseTexture;
+        /**
+         * T17 (D38): binds what `HdrpFogPass` needs to read the aerial perspective - the atmosphere uniforms (pb*), the LUT on
+         * `samplerName` and `cameraUniform` = (camera - planet centre, 1). False (nothing bound) until the LUT exists.
+         */
+        bindAerialPerspective(effect: BABYLON.Effect, samplerName: string, cameraUniform: string): boolean;
+        /** "on" / "off" / "requested" - Inspector read-out. */
+        get aerialStatus(): string;
+        /** The capture (HDRP SkyManager.GenerateSkyCubemap): a float ReflectionProbe of the sky mesh only, drawn with the baking variant. */
+        private setupEnvironment;
+        /** The exported static ambient (Unity's 27 pre-scaled ambient probe floats in `options.environmentSh`) as harmonics, or null. */
+        private parseExportedAmbient;
+        /** Re-captures by the update rules, prefilters the capture into the live environment and reads its SH back (Dynamic ambient). */
+        private updateEnvironment;
+        /** GGX prefilter of the capture into the persistent environment cube - BABYLON.HDRFiltering._prefilterInternal, into our own target. */
+        private prefilter;
+        private installEnvironment;
+        /**
+         * Reads the capture's six faces back and projects them onto the physical ambient SH (PreScaledShFromCaptureFaces).
+         * @returns The pre-scaled harmonics, or null when the capture is gone or a face could not be read.
+         */
+        private readCaptureAmbient;
+        /** D34: the ambient SH on the live environment, scaled so diffuse = SH x indirect.diffuse after the level (pe x reflection). */
+        private applyPolynomial;
+        /** D38: the 32 x 32 x 64 froxel LUT (SkyLUTGenerator AtmosphericScatteringLUTCamera), every frame once requested. */
+        private renderAerialPerspective;
+        /** Inspector edits (T9 step 6): a `params` key changes, the coefficients are recomputed and the LUTs + environment follow. */
+        setParam(key: string, value: any): void;
+        dispose(): void;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** hdrp-complete-parity T22: the live Unity values of one Panini projection pass (the Inspector edits them in place). */
+    interface IHdrpPaniniSettings {
+        distance: number;
+        cropToFit: number;
+        enabled: boolean;
+    }
+    /** hdrp-complete-parity T22: the live Unity values of one Screen Space Lens Flare pair (Unity field names). */
+    interface IHdrpLensFlareSettings {
+        intensity: number;
+        tintColor: number[];
+        bloomMip: number;
+        firstFlareIntensity: number;
+        secondaryFlareIntensity: number;
+        warpedFlareIntensity: number;
+        warpedFlareScale: number[];
+        samples: number;
+        sampleDimmer: number;
+        vignetteEffect: number;
+        startingPosition: number;
+        scale: number;
+        streaksIntensity: number;
+        streaksLength: number;
+        streaksOrientation: number;
+        streaksThreshold: number;
+        resolution: number;
+        chromaticAbberationIntensity: number;
+        chromaticAbberationSampleCount: number;
+        enabled: boolean;
+    }
+    /** hdrp-complete-parity T22: the live Unity values of one SSGI (ray marching) pair. */
+    interface IHdrpSsgiSettings {
+        enable: boolean;
+        tracing: number;
+        maxRaySteps: number;
+        depthBufferThickness: number;
+        fullResolution: boolean;
+        denoise: boolean;
+        denoiserRadius: number;
+        halfResolutionDenoiser: boolean;
+        secondDenoiserPass: boolean;
+        rayMiss: number;
+        enabled: boolean;
+    }
+    /**
+     * SSGI temporal accumulation (HDRP `HDTemporalFilter` as `HDRenderPipeline.DenoiseSSGI` drives it): the per-camera history
+     * targets (two ping-pong pairs, one per temporal pass, plus the previous frame's normal + linear depth) and the reset state.
+     */
+    interface IHdrpSsgiHistoryState {
+        frameIndex: number;
+        frames: number;
+        reset: boolean;
+        resets: number;
+        lastReason: string;
+        released: boolean;
+        supported: boolean;
+        width: number;
+        height: number;
+        historyType: number;
+        pingpong: number;
+        history1: any[];
+        history2: any[];
+        geometry: any;
+        color: any[];
+        colorValid: boolean;
+        exposureRatio: number;
+        lastFrameId: number;
+        lastPosition: any;
+        lastForward: any;
+        lastStep: number;
+        key: string;
+        wasLive: boolean;
+        historyValidity: number;
+        exposure: number;
+        exposureScale: number;
+        exposureValid: boolean;
+        velocityMode: number;
+        view: any;
+        projection: any;
+        prevView: any;
+        prevProjection: any;
+        observers: any;
+    }
+    /** The uniform vectors of the lens flare generation pass (`LensFlareCommonSRP.DoLensFlareScreenSpaceCommon` adjustments applied). */
+    interface IHdrpLensFlareUniforms {
+        p1: number[];
+        p2: number[];
+        p3: number[];
+        p4: number[];
+        p5: number[];
+        streak: number[];
+        tint: number[];
+    }
+    /**
+     * hdrp-complete-parity T22 (D23) - HDRP's Panini projection, Screen Space Lens Flare and SSGI ray marching as passes of the
+     * ONE post chain (`PostProcessor.HeadSlots.panini` / `lensFlare` / `hdrpSsgi`), each GLSL + WGSL like
+     * `HdrpRendering.CreateSanitizePass`:
+     *
+     * - **Panini** - `PaniniProjection.compute` (`Panini_Generic` / `Panini_UnitDistance`), `_Params` from
+     *   `HDRenderPipeline.PostProcess.cs` (`CalcViewExtents`, `CalcCropExtents`, `cropToFit` lerp).
+     * - **Lens flare** - `LensFlareScreenSpaceCommon.hlsl` (`FragmentComposition`, `GetFlareTexture`, HDRP branch) reading the
+     *   bloom ladder's `mipUp[bloomMip]` at the authored `resolution`, then composited the way HDRP writes it into the bloom
+     *   texture: `scene + flare x bloom intensity x bloom tint`. The streak's prefilter / ping-pong down / up passes are folded
+     *   into one Gaussian along the streak direction with the same spread (sigma from the pass offsets; documented deviation),
+     *   sampled from the flare's bloom level with 97 jittered taps over +-4 sigma so a small source draws a continuous line.
+     * - **SSGI** - `tracing` RayMarching (1) only (Ray Tracing / Mixed are PLAN 2), HDRP `RenderSSGI`: TraceSSGI +
+     *   ReprojectGlobalIllumination trace one cosine ray per pixel through Babylon's `screenSpaceRayTrace` include on the
+     *   prepass depth + world normal; a hit reads the PREVIOUS frame's lit colour (HDRP's colour pyramid history: a per-camera
+     *   mip-mapped copy of the chain input taken where the SSGI chain starts, read at mip 1 after reprojecting the hit through
+     *   the prepass velocity, rejected on screen exit or a > 0.1 device-depth change), a miss / rejected hit the ambient
+     *   probe at the normal (`rayMiss` Sky bit). The signal is HDRP's non-negative indirect diffuse; the composite REPLACES
+     *   the ambient term with it: scene + albedo x (GI - SH(normal)). Albedo comes from the prepass ALBEDO_SQRT target squared.
+     * - **SSGI denoising** (HDRP `HDRenderPipeline.DenoiseSSGI`): one cosine ray per pixel with a 16-frame noise index
+     *   (`TraceSSGI` frameIndex = RayTracingFrameIndex(16)), then when `denoise` is on the temporal filter
+     *   (`TemporalFilter.compute` ValidateHistory + TemporalAccumulationColor: reprojection through the prepass velocity,
+     *   rejection on screen exit / background / world position / normal, accumulation factor `n >= 8 ? 0.93 : n/(n+1)`,
+     *   exposure control) and the diffuse denoiser (`DiffuseDenoiser.compute` BilateralFilterColor: 16 or 4 (half resolution
+     *   denoiser) world-space disk taps, gaussian x depth x normal x plane weights), a second temporal + diffuse pair at half
+     *   the radius when `secondDenoiserPass` (the first then jitters its taps over 4 frames). History is per camera, released
+     *   with the passes; it resets on the first frame, a camera cut, a skipped frame, a resize and any settings edit.
+     *
+     * Every switch NEUTRALISES (an `enabled` uniform), never detaches; a pass is created only when the effect is active
+     * (Panini distance > 0, flare intensity > 0, SSGI enable + RayMarching) or when the Inspector first activates it.
+     * @class HdrpPostEffects - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpPostEffects {
+        static readonly PaniniShaderName: string;
+        static readonly FlareShaderName: string;
+        static readonly FlareCompositeShaderName: string;
+        static readonly SsgiTraceShaderName: string;
+        static readonly SsgiCompositeShaderName: string;
+        /** HDRP `RayCastingMode.RayMarching` (the only GI mode rendered here). */
+        static readonly RayMarching: number;
+        static readonly SsgiTemporalShaderName: string;
+        static readonly SsgiSpatialShaderName: string;
+        static readonly SsgiGeometryShaderName: string;
+        /** Rays per pixel of the SSGI trace: HDRP's ray marching traces ONE ray per pixel at every quality level (TraceSSGI) and accumulates temporally. */
+        static readonly SsgiRays: number;
+        /** HDRP `RayTracingFrameIndex(hdCamera, 16)`: the trace noise repeats every 16 frames. */
+        static readonly SsgiFramePeriod: number;
+        /** ScreenSpaceGlobalIllumination.compute `SSGI_CLAMP_VALUE`: the exposed hit radiance is clamped to this value (HSV V). */
+        static readonly SsgiClampValue: number;
+        /** TemporalFilter.compute: `MAX_NORMAL_DIFFERENCE` (history normal rejection), DenoisingUtils.hlsl `MAX_REPROJECTION_DISTANCE` / `MAX_PIXEL_TOLERANCE`. */
+        static readonly SsgiMaxNormalDifference: number;
+        static readonly SsgiMaxReprojectionDistance: number;
+        static readonly SsgiMaxPixelTolerance: number;
+        /** HDTemporalFilter `HistoryRejectionFlags`. */
+        static readonly SsgiRejectDepth: number;
+        static readonly SsgiRejectReprojection: number;
+        static readonly SsgiRejectPreviousDepth: number;
+        static readonly SsgiRejectPosition: number;
+        static readonly SsgiRejectNormal: number;
+        static readonly SsgiRejectMotion: number;
+        /** Screen-space stride of the SSGI march, pixels (the refinement pass resolves the last stride). */
+        static SsgiStride: number;
+        /** Longest SSGI ray, view-space units (HDRP GlobalIllumination `rayLength` default). */
+        static SsgiMaxDistance: number;
+        private static num;
+        private static clamp;
+        private static fract;
+        private static enumValue;
+        /** HDRP `CalcViewExtents`: (tan(fovY/2) * aspect, tan(fovY/2)). */
+        static PaniniViewExtents(fovY: number, aspect: number): number[];
+        /** HDRP `CalcCropExtents`. */
+        static PaniniCropExtents(fovY: number, aspect: number, d: number): number[];
+        /** `_Params` of the Panini pass: (viewExtX, viewExtY, distance, scale) with scale = lerp(1, saturate(min crop / view), cropToFit). */
+        static PaniniParams(fovY: number, aspect: number, distance: number, cropToFit: number): number[];
+        /** CPU mirror of the shader: the source UV the Panini pass samples for output `uv` (null = outside, written black). */
+        static PaniniSample(uv: number[], params: number[]): number[];
+        /** Core RP `GetAnamorphism()` for the ALREADY divided orientation (orientation / 90). */
+        static Anamorphism(orientation: number): number[];
+        /**
+         * The streak spread: HDRP blurs the thresholded mip with floor(log2(max(w, h))) downsample passes (6 taps 1-2-3-3-2-1 /
+         * 12 at +-1, 3, 5 x `0.005 x streaksLength x (i + 1)` UV) and two upsample passes (1-2-1 / 4 at +-1.5 x the same step):
+         * one Gaussian with the summed variance replaces them. Returns sigma in UV units along the streak direction.
+         */
+        static StreakSigma(streaksLength: number, width: number, height: number): number;
+        /** `DoLensFlareScreenSpaceCommon`'s uniform vectors for a `width` x `height` viewport (HDRP parameter packing, then the common adjustments). */
+        static LensFlareUniforms(s: IHdrpLensFlareSettings, width: number, height: number): IHdrpLensFlareUniforms;
+        /** Unity `ScreenSpaceLensFlare.IsActive()`: intensity > 0 and at least one of its contributions on. */
+        static LensFlareActive(s: IHdrpLensFlareSettings): boolean;
+        /** The SSGI pass exists only for `enable` + RayMarching (the ray-traced modes are PLAN 2). */
+        static SsgiNeeded(s: IHdrpSsgiSettings): boolean;
+        /** HDRP `GetPixelSpreadTangent` (HDRaytracingManager.cs): tan(fov / 2) x 2 / min(width, height), fov vertical in radians. */
+        static SsgiPixelSpreadTangent(fovRadians: number, width: number, height: number): number;
+        /** DenoisingUtils.hlsl `ComputeMaxReprojectionWorldRadius`: max(maxDistance, pixel footprint / |n.v| x tolerance). */
+        static SsgiMaxReprojectionRadius(distance: number, nDotV: number, pixelSpreadTangent: number, maxDistance?: number, tolerance?: number): number;
+        /** DiffuseDenoiser.compute `ComputeMaxDenoisingRadius`: distance x radius / lerp(5, 50, saturate(distance / 500)). */
+        static SsgiDenoiserWorldRadius(distance: number, radius: number): number;
+        /**
+         * The previous-frame UV of `uv` from one prepass velocity texel (the TaaPlugin decode): `encoded` is
+         * PREPASS_VELOCITY_TEXTURE_TYPE (cube root, 0.5 biased: e = 2v - 1, uv - e^3; a saturated texel is unusable),
+         * otherwise PREPASS_VELOCITY_LINEAR_TEXTURE_TYPE (uv + v). HDRP: `historyUV = positionNDC - velocity`.
+         */
+        static SsgiReprojectUv(uv: number[], texel: number[], encoded: boolean): {
+            uv: number[];
+            valid: boolean;
+        };
+        /**
+         * TemporalFilter.compute `ValidateHistory` for one pixel -> HDRP's HistoryRejectionFlags bits (0 = history usable).
+         * `p`: depth / far (current linear depth, background at 0 or >= far), historyValidity (scene level 0 / 1), prevUv,
+         * historyDepth (previous linear depth at prevUv, 0 = background), distance (between the current and the reprojected
+         * history world positions), maxRadius (`SsgiMaxReprojectionRadius`), normalDot (current . history normal).
+         */
+        static SsgiValidateHistory(p: {
+            depth: number;
+            far: number;
+            historyValidity: number;
+            prevUv: number[];
+            historyDepth: number;
+            distance: number;
+            maxRadius: number;
+            normalDot: number;
+        }): number;
+        /** The validation mask SSGI uses (`receiverMotionRejection` false: the motion flag is masked out). */
+        static SsgiHistoryUsable(flags: number): boolean;
+        /**
+         * TemporalFilter.compute `TemporalAccumulationColor`: an invalid history or a zero sample count takes the current value
+         * only (count 1), else accumulationFactor = count >= 8 ? 0.93 : count / (count + 1) and count = min(count + 1, 8).
+         * Result = current x (1 - factor) + history x factor.
+         */
+        static SsgiAccumulate(sampleCount: number, historyUsable: boolean): {
+            factor: number;
+            count: number;
+        };
+        /**
+         * TemporalFilter.compute exposure control (`_EnableExposureControl`, on for SSGI): the history is re-exposed by
+         * current / previous exposure unless the exposure moved by 2x or more, which drops it (sample count 0).
+         */
+        static SsgiExposureControl(previous: number, current: number): {
+            scale: number;
+            valid: boolean;
+        };
+        /**
+         * One point of the diffuse denoiser's disk distribution (`GeneratePointDistribution`: SampleDiskCubic of a 2D
+         * low-discrepancy sequence, 64 points = 16 per jitter frame): the R2 sequence stands in for HDRP's Owen-scrambled
+         * Sobol, SampleDiskCubic is r = u1, phi = 2 pi u2. The shaders evaluate the same formula.
+         */
+        static SsgiDiskPoint(k: number): number[];
+        /**
+         * HDRP's Owen-scrambled Sobol sequence as `GeneratePointDistribution` reads it (`GetLDSequenceSampleFloat(index, dim)` =
+         * `_OwenScrambledTexture[dim, index]`, `OwenScrambledNoise256.png`, R8 unorm, Unity row 0 = the PNG's last row):
+         * dimension 0 and 1 of sample indices 0..63, as bytes.
+         */
+        static readonly SsgiOwenScrambled: number[][];
+        /** HDRP's (reversed-Z) device depth from a linear view depth: perspective n (f - d) / (d (f - n)), orthographic (f - d) / (f - n), background 0. */
+        static SsgiDeviceDepth(linear: number, near: number, far: number, ortho: boolean): number;
+        /**
+         * BilateralUpsample.compute `BilateralUpSampleColorHalf` for one full-resolution pixel: its four half-resolution taps
+         * (offsets from floor(p / 2)) and HDRP's `distanceBasedWeights_2x2` (exp(-distance^2) between the pixel and each tap in
+         * half-resolution units: 0.882497 / 0.535261 / 0.324652). Geometric, so it does not depend on the texture's row order.
+         */
+        static SsgiUpsampleTaps(px: number, py: number): {
+            dx: number;
+            dy: number;
+            w: number;
+        }[];
+        /** BilateralUpsample.hlsl `BilUpColor2x2_RGB`: weights / (|hiDepth - lowDepth| + 1e-5), plus the 0.99999999 noise-filter term. */
+        static SsgiUpsample(hiDepth: number, taps: {
+            value: number;
+            depth: number;
+            w: number;
+        }[]): number;
+        /**
+         * The view-space position the shaders rebuild from a post-process UV and the prepass linear depth (`invProj` = the
+         * inverse projection's Babylon `m` array): perspective rescales a point of the view ray to |z| = depth, orthographic keeps
+         * the ray's x / y and sets |z| = depth (HDRP supports both).
+         */
+        static SsgiViewPos(uv: number[], depth: number, invProj: ArrayLike<number>, ortho: boolean): number[];
+        /** The previous-frame UV of a world position through the previous view-projection (`m` array): the reprojection without velocity. */
+        static SsgiReprojectWorld(world: number[], prevViewProj: ArrayLike<number>): number[];
+        /**
+         * DiffuseDenoiser.compute sample window: 16 taps (or 4 with the half resolution denoiser, each pixel of a 2x2 quad
+         * taking its own 4), offset by 16 x (frame % 4) when the filter jitters (`jitterFilter` = the second pass is on).
+         */
+        static SsgiDenoiseSamples(halfResolution: boolean, quadIndex: number, jitterPeriod: number): {
+            count: number;
+            offset: number;
+        };
+        /** The per-frame Cranley-Patterson rotation of the trace noise (frame index mod 16, R2 sequence). */
+        static SsgiFrameNoise(frameIndex: number): number[];
+        /** The camera-cut heuristic the toolkit TAA uses (`TaaPlugin.IsCut`): a jump > max(1, 10 x last step) or a turn > 45 degrees. */
+        static SsgiIsCut(prevPosition: any, prevForward: any, position: any, forward: any, prevStep: number): boolean;
+        /** The settings that restart the history when edited (every Inspector-editable GI field). */
+        static SsgiSettingsKey(s: IHdrpSsgiSettings): string;
+        static SsgiNewState(): IHdrpSsgiHistoryState;
+        /**
+         * Once per camera frame, before the temporal passes: HDRP's scene-level history validity (`EvaluateHistoryValidity`:
+         * camera frame count > 1, plus the effect history flags for full resolution) and the exposure control ratio. The
+         * history restarts (validity 0) on the first live frame, a skipped frame, a camera cut, a target resize, a settings edit
+         * or an explicit `ResetSsgiHistory`. Returns the reasons (empty when the history carries on).
+         */
+        static SsgiBeginFrame(state: IHdrpSsgiHistoryState, input: {
+            frameId: number;
+            position: any;
+            forward: any;
+            width: number;
+            height: number;
+            key: string;
+            live: boolean;
+            exposure: number;
+        }): string[];
+        /** Unity values (`value(name)` reads the blended family) -> Panini settings. */
+        static PaniniFromUnity(value: (name: string) => any): IHdrpPaniniSettings;
+        /** Unity values -> lens flare settings (HDRP 17.5 defaults for anything absent). */
+        static LensFlareFromUnity(value: (name: string) => any): IHdrpLensFlareSettings;
+        /** Unity values -> SSGI settings. */
+        static SsgiFromUnity(value: (name: string) => any): IHdrpSsgiSettings;
+        /**
+         * A GlobalIllumination screen-space bool the exporter may not resolve: the exported value when present, else HDRP's
+         * `GlobalLightingQualitySettings` table at the exported `quality` level (Low / Medium / High - `SSGIHalfResDenoise`
+         * true / false / false, `SSGISecondDenoise` true / true / true), else the volume default (Custom level).
+         */
+        static SsgiQualityBool(exported: any, quality: any, table: boolean[], fallback: boolean): boolean;
+        /**
+         * The HDRP asset capability gate (`hdrp.features`, exported from `currentPlatformRenderPipelineSettings`): false only
+         * when a parity export says the HDRP asset does not support `feature` (`ssr`, `ssao`, `ssgi`, `motionvectors`,
+         * `screenspacelensflare`) - Unity renders nothing for it then. Older exports / other pipelines: true.
+         */
+        static Supported(scene: BABYLON.Scene, feature: string): boolean;
+        private static language;
+        private static type;
+        /** Panini projection at `HeadSlots.panini`; `settings` is read every frame (the Inspector edits it). */
+        static CreatePanini(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number, settings: IHdrpPaniniSettings): BABYLON.PostProcess;
+        /**
+         * The lens flare pair at `HeadSlots.lensFlare`: [generation (its input = the scene after bloom; renders the flare into
+         * the composite's input at 1 / resolution), composite (scene + flare x bloom intensity x bloom tint)]. `bloom()`
+         * returns the camera's bloom passes every frame: `mip` = the pass whose INPUT is mipUp[bloomMip], and the live
+         * composite intensity / tint; null -> nothing to flare (HDRP renders no flare without bloom).
+         */
+        static CreateLensFlare(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number, settings: IHdrpLensFlareSettings, bloom: (mip: number) => {
+            mip: BABYLON.PostProcess;
+            streak?: BABYLON.PostProcess;
+            intensity: number;
+            tint: number[];
+        }): BABYLON.PostProcess[];
+        /**
+         * The SSGI chain at `HeadSlots.hdrpSsgi` (HDRP `RenderSSGI`: TraceSSGI -> DenoiseSSGI -> UpscaleSSGI -> lighting):
+         * [colour (copies the chain input into this frame's mip-mapped colour target = next frame's colour pyramid history),
+         *  trace (one ray per pixel -> HDRP's indirect diffuse at full or half resolution), temporal 1 (history pair 1),
+         *  denoise 1 (diffuse denoiser, radius), temporal 2 (history pair 2), denoise 2 (radius / 2 when the second pass is on),
+         *  geometry (this frame's normal + linear depth into the composite's forced input = next frame's history geometry),
+         *  composite (HDRP's bilateral upsample when half resolution, then scene + albedo x (GI - SH ambient))]. Null when the
+         *  prepass (WebGL2 / WebGPU) or the ray-trace include is missing. Every switch neutralises (passes stay attached).
+         */
+        static CreateSsgi(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number, settings: IHdrpSsgiSettings): BABYLON.PostProcess[];
+        /** True when the scene's probe lighting comes from HDRP Adaptive Probe Volumes (the light probe network's `source` is "apv"). */
+        static SsgiUsesApv(scene: BABYLON.Scene): boolean;
+        /** The history target type (TaaPlugin.HistoryTextureType): half float, else float, else 8-bit (no temporal accumulation then). */
+        static SsgiHistoryTextureType(engine: any): number;
+        /** Disposes the denoiser history targets (both pairs + geometry) - they come back at the next frame's size. */
+        static SsgiReleaseHistory(state: IHdrpSsgiHistoryState): void;
+        /** Disposes every history target of one SSGI state (denoiser history + the colour pyramid pair). */
+        static SsgiReleaseTargets(state: IHdrpSsgiHistoryState): void;
+        /** The SSGI history state behind a pass list from `CreateSsgi` (null for any other list). */
+        static SsgiStateOf(passes: BABYLON.PostProcess[]): IHdrpSsgiHistoryState;
+        /** Releases the SSGI history (targets + scene observer) - teardown, scene dispose and the trace pass's dispose call it. Idempotent. */
+        static ReleaseSsgi(passes: BABYLON.PostProcess[]): boolean;
+        /** Restarts the SSGI history at the next frame (a scripted cut, `PostProcessor.ResetHistory`). */
+        static ResetSsgiHistory(passes: BABYLON.PostProcess[]): boolean;
+        /** The Inspector's fullResolution switch: the denoiser passes run at full or half resolution (the history follows, the trace traces at that size). */
+        static SetSsgiResolution(passes: BABYLON.PostProcess[], full: boolean): void;
+        /** The environment's irradiance polynomial (Babylon's `vSpherical*` layout) x its level x environmentIntensity, and its reflection matrix. */
+        private static BindSh;
+        static RegisterShaders(): void;
+        static PaniniGlsl(): string;
+        static PaniniWgsl(): string;
+        static FlareGlsl(): string;
+        static FlareWgsl(): string;
+        static FlareCompositeGlsl(): string;
+        static FlareCompositeWgsl(): string;
+        /**
+         * World position from a post-process UV and the prepass linear depth (perspective: a point of the view ray rescaled to
+         * |z| = depth, any handedness / clip range; orthographic: the ray's x / y at |z| = depth), the pixel footprint / |n.v|
+         * (HDRP ComputeMaxReprojectionWorldRadius before its tolerance: tan x distance for perspective, the world pixel size
+         * along the camera axis for orthographic) and HDRP's reversed-Z device depth.
+         */
+        private static SsgiPositionGlsl;
+        private static SsgiPositionWgsl;
+        private static SsgiDeviceGlsl;
+        private static SsgiDeviceWgsl;
+        /** HDRP's ambient probe at a direction (Babylon's irradiance polynomial layout), GLSL / WGSL. */
+        private static SsgiShGlsl;
+        private static SsgiShWgsl;
+        /** HDRP's 64-point denoiser disk (`SsgiDiskPoint`) as a shader constant table. */
+        private static SsgiDiskList;
+        /**
+         * DiffuseDenoiser.compute `BilateralFilterColor` over the GI sampler `gi` (baked in: no sampler parameters): HDRP's
+         * 64-point disk (16 taps, or 4 per 2x2 quad pixel with the half resolution denoiser, + 16 x jitter frame) on the centre's
+         * tangent plane, radius max(ComputeMaxDenoisingRadius, 2 pixel footprints), sigma 0.9 x radius, a tap is skipped off
+         * screen, on the background or when its depth is more than 0.1 from the disk point's, weight = gaussian x depth x normal
+         * x plane (BilateralFilter.hlsl ComputeBilateralWeight), no tap -> the centre value. `ssgiSpatial` = (on, radius, half
+         * resolution denoiser, jitter frame or -1), `ssgiSpatial2` = (pixel spread tangent, far, orthographic, ortho pixel size).
+         */
+        private static SsgiFilterGlsl;
+        private static SsgiFilterWgsl;
+        /** The most reflection probes one SSGI trace samples per frame (cube samplers: 6 + 6 stays inside WebGL2's 16). */
+        static readonly SsgiMaxProbes: number;
+        /** The per-probe vec4 uniforms (influence / blend / fade / proxy / capture, HDRP EnvLightData layout). */
+        static readonly SsgiProbeVectors: number;
+        /**
+         * Loads the scene-level HDRP reflection probe list (`hdrp.reflectionprobes`, exporter UnityTools_HdrpProbes.SceneProbeVolumes)
+         * as cube textures at `root`, their level bound like the per-renderer probes (multiplier x physical scale x
+         * hdrp.indirect.probes x pre-exposure). Idempotent per scene. Returns how many were queued.
+         */
+        static LoadSceneProbes(scene: BABYLON.Scene, hdrp: any, root: string): number;
+        /** HDRP's env-light order (LightLoop CalculateProbePriority): higher importance first, then the smaller influence volume. */
+        static SsgiProbeOrder(list: any[]): any[];
+        /** The 17 packed vec4s of one probe (shader layout a..q), level / RGBD filled in per frame. */
+        static SsgiProbeVectorsOf(d: any, level: number, rgbd: boolean): number[][];
+        /**
+         * HDRP EvaluateLight_EnvIntersection for one probe (pure mirror of the shader, packed vectors `pv`): the influence weight
+         * (InfluenceBoxWeight with per-face influence, influence normal and per-face fade / InfluenceSphereWeight, Smoothstep01,
+         * x probe weight) and the box / sphere projected sample direction (capture-relative).
+         */
+        static SsgiProbeEvaluate(pv: number[][], posW: number[], nW: number[], R: number[]): {
+            weight: number;
+            dir: number[];
+        };
+        /** Material.hlsl UpdateLightingHierarchyWeights: the weight that still fits under 1 and the new total. */
+        static SsgiHierarchyWeight(total: number, weight: number): {
+            total: number;
+            weight: number;
+        };
+        private static SsgiProbeEvalGlsl;
+        private static SsgiProbeEvalWgsl;
+        /** Per probe slot: the declarations (behind `#if SSGI_PROBES > i`) and the miss-path code (TraceReflectionProbes body). */
+        private static SsgiProbeSlotsGlsl;
+        private static SsgiProbeSlotsWgsl;
+        /**
+         * Per frame: the probes whose influence volume can reach the camera's view (HDRP builds its env-light list from the
+         * visible probes in priority order), at most `slots`, bound slot by slot; an unused slot repeats the last probe with
+         * weight 0 (WebGPU needs every declared texture bound).
+         */
+        static BindSsgiProbes(effect: BABYLON.Effect, camera: BABYLON.Camera, probes: any[], slots: number, live?: any): number;
+        /** The probe uniform / sampler names the trace pass declares (all slots, bound only while their define is on). */
+        static SsgiProbeUniformNames(): {
+            uniforms: string[];
+            samplers: string[];
+        };
+        /**
+         * The SSGI trace: HDRP TraceSSGI + ReprojectGlobalIllumination for `SsgiRays` cosine rays per pixel (HDRP traces one,
+         * SampleHemisphereCosine = normalize(n + uniform sphere point)) with a 16-frame noise rotation (`ssgiTrace2.w`). A hit
+         * reprojects into the previous frame's colour (velocity at the hit, or the previous view-projection), is rejected off
+         * screen or on a > 0.1 device-depth change, and reads the colour at mip 1 x current / previous exposure. A miss or a
+         * rejected hit takes the ambient probe at the normal when `rayMiss` has the Sky bit (else black). The value is clamped to
+         * `SsgiClampValue` (HSV V). `ssgiHistory` = (previous colour usable, exposure ratio, velocity mode, rayMiss), on the first
+         * frame / after a reset the hit reads the current frame. A hit on the sky is a miss (HDRP RayMarch: `_RayMarchingReflectsSky`
+         * stays 0 for SSGI - the C# sets `_RayMarchingReflectSky`, a different name). Output: the mean indirect diffuse (>= 0).
+         */
+        static SsgiTraceGlsl(): string;
+        static SsgiTraceWgsl(): string;
+        /**
+         * TemporalFilter.compute ValidateHistory + TemporalAccumulationColor in one pass. `ssgiTemporal` = (on, scene-level
+         * history validity, exposure ratio or -1 when the exposure jumped, velocity mode 2 encoded / 1 linear / 0 camera
+         * reprojection), `ssgiTemporal2` = (pixel spread tangent, far plane, orthographic, ortho pixel size). Output: rgb
+         * accumulated indirect diffuse, a = sample count. The history is clamped to >= 0 like HDRP's.
+         */
+        static SsgiTemporalGlsl(): string;
+        static SsgiTemporalWgsl(): string;
+        /** A diffuse denoiser pass (its input = the temporal pass's output, the GI keeps its sample count in alpha). */
+        static SsgiSpatialGlsl(): string;
+        static SsgiSpatialWgsl(): string;
+        /** This frame's world normal + linear depth (next frame's history geometry, HDRP's history normal / depth buffers). */
+        static SsgiGeometryGlsl(): string;
+        static SsgiGeometryWgsl(): string;
+        /**
+         * HDRP UpscaleSSGI + lighting: when the GI is half resolution (`ssgiComposite.y`), BilateralUpsample.compute
+         * `BilateralUpSampleColorHalf` (four half-resolution taps, distance weights exp(-d^2), / (|device depth delta| + 1e-5),
+         * the 0.99999999 noise-filter term), then the GI REPLACES the ambient probe term: scene + albedo x (GI - SH(normal)).
+         */
+        static SsgiCompositeGlsl(): string;
+        static SsgiCompositeWgsl(): string;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * HDRP realtime TUBE lights (design `_specs/hdrp-tube-light_design.md`).
+     *
+     * HDRP 17.5 renders a Tube light (UnityEngine.LightType.Tube, GPULightType.Tube) as a LINE light: a segment of length
+     * `Light.areaSize.x` along the light's right axis, radiance in nits, integrated per pixel with Linearly Transformed Cosines.
+     * Every HDRP material evaluates it in its own area-light branch:
+     *  - Lit: EvaluateBSDF_Area (Disney-diffuse LTC + diffuseFGD, GGX LTC + specularFGD, clear coat, transmission, SSS dual lobe,
+     *    diffuse power, GGX energy compensation in PostEvaluateBSDF),
+     *  - Hair: EvaluateBSDF_Line (Lambert + transmission, GGX LTC, F0 0.0465, FGD at the secondary roughness, light-facing normal),
+     *  - Eye: EvaluateBSDF_Area2 twice (iris basis for diffuse, cornea for specular; the cinematic caustic transform + caustic LUT),
+     *  - Fabric: Charlie LTC + Charlie/FabricLambert FGD (cotton / wool), Disney + GGX (silk), transmission,
+     *  - StackLit: two GGX lobes + coat lobe through the vertical-layering statistics (ComputeAdding), Lambert diffuse x diffuseEnergy,
+     *  - Six Way: EvaluateBSDF_Line = a point light at the closest point of the segment with the segment's flat angle.
+     * It casts no shadow (HDShadowLoop skips GPULIGHTTYPE_TUBE), has no cookie / IES, and HDRP's volumetric lighting never
+     * evaluates it (VolumetricLighting.compute EvaluateVoxelLightingLocal processes punctual and box lights only).
+     *
+     *  - `HdrpTubeLightMath` - the CPU twin of every shader function (unit-tested against HDRP's sources and brute force),
+     *  - `HdrpTubeLight` / `HdrpTubeLights` - the exported tube, its registry, per-mesh selection and HDRP's emissive cylinder,
+     *  - `HdrpTubeLightPlugin` - the GLSL + WGSL injection on every PBR / Standard material of a scene that has a tube.
+     * @class HdrpTubeLightMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpTubeLightMath {
+        /** HDRP's LTC / FGD table resolution. */
+        static readonly LutSize: number;
+        /** At most this many tubes light one draw (uniform array size). */
+        static readonly MaxPerMesh: number;
+        /** HDRP's smallest area-light size (HDAdditionalLightData.k_MinAreaWidth). */
+        static readonly MinLength: number;
+        /** Core RP ClampNdotV. */
+        static readonly MinNdotV: number;
+        /** The atlas table rows (64 each): GGX LTC, Disney LTC, Charlie LTC, FGD GGX / Disney, FGD Charlie / FabricLambert. */
+        static readonly TableGgx: number;
+        static readonly TableDisney: number;
+        static readonly TableCharlie: number;
+        static readonly TableFgd: number;
+        static readonly TableFgdCharlie: number;
+        static readonly TableCount: number;
+        /** HDRP CLEAR_COAT_F0 / CLEAR_COAT_PERCEPTUAL_ROUGHNESS (sqrt(CLEAR_COAT_ROUGHNESS 0.01)) / DEFAULT_HAIR_SPECULAR_VALUE. */
+        static readonly CoatF0: number;
+        static readonly CoatPerceptualRoughness: number;
+        static readonly HairF0: number;
+        private static _cache;
+        static HalfToFloat(h: number): number;
+        static FloatToHalf(v: number): number;
+        /** A dependency-free base64 decoder (environments without atob). */
+        static DecodeBase64(text: string): Uint8Array;
+        private static U16;
+        private static U32;
+        /** An LTC table (4096 texels x (m00, m02, m11, m20)) as FP16 or float. */
+        static LtcHalf(table: number): Uint16Array;
+        /** An FGD table (4096 texels, 10-bit r / g / b) decoded to float rgb (k / 1023). */
+        static FgdFloat(table: number): Float32Array;
+        /** The 64 x 320 RGBA atlas of the five tables, as FP16 (what the GPU samples) - every table texel exactly as HDRP holds it. */
+        static AtlasHalf(): Uint16Array;
+        /** The atlas as float (the CPU twin samples exactly what the GPU holds). */
+        static AtlasFloat(): Float32Array;
+        /** The eye caustic LUT (128 x 32 x 16 FP16, slice-major, v from the bottom of each cell). */
+        static EyeCausticHalf(): Uint16Array;
+        /** Bilinear fetch of table `t` at table uv (the GPU path: clamp-to-edge in x, the v clamped inside the table's rows). */
+        static SampleTable(t: number, u: number, v: number): number[];
+        /** HDRP SampleLtcMatrix (Remap01ToHalfTexelCoord((perceptualRoughness, sqrt(1 - NdotV)))): (s00, s02, s11, s20), m22 = 1. */
+        static SampleLtc(table: number, perceptualRoughness: number, clampedNdotV: number): number[];
+        /** EvaluateBSDF_Area passes transpose(sample) to EvaluateLTC_Area: the sparse (a, b, c, d) = (s00, s20, s11, s02). */
+        static InvM(sample: number[]): number[];
+        /** The transposed sparse LTC matrix of a table at (perceptualRoughness, NdotV). */
+        static LtcM(table: number, perceptualRoughness: number, clampedNdotV: number): number[];
+        /** GetPreIntegratedFGDGGXAndDisneyDiffuse's fetch: (x, y, z) at Remap01ToHalfTexelCoord((sqrt(NdotV), perceptualRoughness)) (z still - 0.5). */
+        static SampleFgd(clampedNdotV: number, perceptualRoughness: number): number[];
+        /** GetPreIntegratedFGDCharlieAndFabricLambert's fetch at (NdotV, perceptualRoughness) (no half-texel remap). */
+        static SampleFgdCharlie(clampedNdotV: number, perceptualRoughness: number): number[];
+        /** _PreIntegratedEyeCaustic trilinear (clamp) at (u, v, w). */
+        static SampleEyeCaustic(u: number, v: number, w: number): number;
+        static MulSparse(m: number[], v: number[]): number[];
+        static DistanceWindowing(distSquare: number, scale: number, bias: number): number;
+        static SmoothDistanceWindowing(distSquare: number, scale: number, bias: number): number;
+        /** PillowWindowing with halfHeight 0 = CapsuleWindowing (`unL` = light centre - shaded point). */
+        static CapsuleWindowing(unL: number[], axis: number[], halfLength: number, scale: number, bias: number): number;
+        /** Core RP EllipsoidalDistanceAttenuation(unL, axis, invAspectRatio, ...) (Six Way lines). */
+        static EllipsoidalAttenuation(unL: number[], axis: number[], invAspectRatio: number, scale: number, bias: number): number;
+        /** HDGpuLightsBuilder: applyRangeAttenuation -> (1 / r^2, 1), else (4096 / r^2, 2^24). */
+        static RangeAttenuation(range: number, applyRangeAttenuation: boolean): {
+            scale: number;
+            bias: number;
+        };
+        /** Core RP I_diffuse_line. */
+        static IDiffuseLine(C: number[], A: number[], hl: number): number;
+        /** Core RP ComputeLineWidthFactor for the sparse invM (a, b, c, d). */
+        static LineWidthFactor(m: number[], ortho: number[], orthoSq: number): number;
+        /** LightEvaluation.hlsl EvaluateLTC_Area, line branch (Core RP I_ltc_line). */
+        static LtcLine(m: number[], center: number[], axis: number[], hl: number): number;
+        /** GetOrthoBasisViewNormal rows [normalize(V - N NdotV), cross(N, row0), N] (any frame when V == N). */
+        static OrthoBasis(V: number[], N: number[]): number[][];
+        /** The line integral of light (unL, axis) with matrix `m` in a basis (the shader's tkTubeLine), optionally flipped (transmission). */
+        static Line(m: number[], unL: number[], axis: number[], basis: number[][], hl: number, flip?: boolean): number;
+        static Dot(a: number[], b: number[]): number;
+        static Cross(a: number[], b: number[]): number[];
+        static Normalize(a: number[]): number[];
+        /** F_Schlick(f0, 1, u). */
+        static Schlick(f0: number, u: number): number;
+        /** Core RP ConvertF0ForAirInterfaceToF0ForClearCoat15. */
+        static CoatF0Remap(f0: number): number;
+        static IorToFresnel0(ior: number): number;
+        /** Core RP FastACos. */
+        static FastACos(x: number): number;
+        /** HDRP ModifyDisneyLTCTransformForDiffusePower on the transposed sparse matrix (a = s00, b = s20, c = s11, d = s02). */
+        static DiffusePower(m: number[], diffusePower: number, perceptualRoughness: number, clampedNdotV: number): number[];
+        /** Core RP Rotate(pivot, position, axis, angle). */
+        static Rotate(pivot: number[], position: number[], axis: number[], angle: number): number[];
+        /** GLSL / HLSL refract(I, N, eta). */
+        static Refract(I: number[], N: number[], eta: number): number[];
+        /** HDRP EyeCausticLUT.hlsl ComputeCausticFromLUT. */
+        static EyeCaustic(irisPlanePosition: number[], irisHeight: number, lightPosOS: number[], intensityMultiplier: number): number;
+        static RoughnessToLinearVariance(a: number): number;
+        static LinearVarianceToRoughness(v: number): number;
+        static LinearVarianceToPerceptualRoughness(v: number): number;
+        /** StackLit FresnelUnpolarized(ct1, n1, n2). */
+        static FresnelUnpolarized(ct1: number, n1: number, n2: number): number;
+        /**
+         * ComputeAdding (calledPerLight false, single normal) over the coat / media / base interfaces. `bottomR12` is the base
+         * interface's R12 at its angle (F_Schlick(fresnel0, cti), with iridescence) - a function of that angle.
+         * Returns the per-interface energy coefficients, the layered perceptual roughnesses of lobes A / B, Ti0 and the base angle.
+         */
+        static StackLitAdding(cti0: number, coatPerceptualRoughness: number, coatIor: number, coatMask: number, coatThickness: number, coatExtinction: number[], perceptualRoughnessA: number, perceptualRoughnessB: number, bottomR12: (cti: number) => number[]): any;
+        /**
+         * HDRP Lit EvaluateBSDF_Area for one tube: `diffuse` (x diffuseColor in PostEvaluateBSDF) and `specular` per unit light
+         * colour, with the coat, transmission, dual lobe, diffuse power and GGX energy compensation (s: surface).
+         * s = { P, N, V, pr, f0 (post-iridescence, rgb), coatMask, transmittance (rgb), lobeA, lobeB, lobeMix, diffusePower }.
+         */
+        static EvaluateLit(s: any, center: number[], axis: number[], hl: number, scale: number, bias: number): {
+            diffuse: number[];
+            specular: number[];
+        };
+        /** HDRP Hair EvaluateBSDF_Line (s = { P, N, V, pr, prSecondary, T, facing, transmittance }). */
+        static EvaluateHair(s: any, center: number[], axis: number[], hl: number, scale: number, bias: number): {
+            diffuse: number[];
+            specular: number[];
+        };
+        /** HDRP Fabric EvaluateBSDF_Area (s = { P, N, V, pr, f0 (rgb), cotton, transmittance }). */
+        static EvaluateFabric(s: any, center: number[], axis: number[], hl: number, scale: number, bias: number): {
+            diffuse: number[];
+            specular: number[];
+        };
+        /**
+         * HDRP Eye EvaluateBSDF_Area (non-anisotropic, s = { P, N (cornea), Nd (iris), Ng (geometric), V, pr, ior, cinematic, mask,
+         * causticBlend, causticIntensity, causticFromLut, irisPlaneOffset, irisRadius, worldToObject(p, isDir) }).
+         */
+        static EvaluateEye(s: any, center: number[], axis: number[], hl: number, scale: number, bias: number): {
+            diffuse: number[];
+            specular: number[];
+        };
+        /**
+         * HDRP StackLit EvaluateBSDF_Area (no area-light anisotropy): s = { P, N, V, prA, prB, lobeMix, f0 (bsdfData.fresnel0),
+         * f0Fgd (with iridescence, uncoated), coatMask, coatPr, coatIor, coatThickness, coatExtinction, bottomR12(cti), transmittance,
+         * coatN }. coatN is the coat normal (HDRP's COAT_NORMAL_IDX, default N): the vertical layering, the coat FGD and the coat LTC
+         * lobe use it, the base lobes use N.
+         */
+        static EvaluateStackLit(s: any, center: number[], axis: number[], hl: number, scale: number, bias: number): {
+            diffuse: number[];
+            specular: number[];
+        };
+        /** HDRP SixWay EvaluateBSDF_Line geometry: the light direction and the factor on the light colour (flat angle x attenuation). */
+        static SixWayLine(P: number[], center: number[], axis: number[], hl: number, range: number, scale: number, bias: number): {
+            L: number[];
+            factor: number;
+        };
+        /** LightUnitUtils.GetAreaFromTubeLight: |length| * 4 * PI. */
+        static TubeArea(length: number): number;
+        static LumenToNits(lumen: number, length: number): number;
+        static NitsToLumen(nits: number, length: number): number;
+        /** The candela of the legacy point-light degrade (HdrpLightUnits.TubeToPointCandela): nits x |length|. */
+        static PointCandela(nits: number, length: number): number;
+        static ClampLength(length: number): number;
+        static SegmentDistanceSq(point: number[], center: number[], axis: number[], halfLength: number): number;
+        /** Selection score: luminance x radiance x length / gap^2 (0 when the bounding sphere is beyond the range). */
+        static Score(luminance: number, radiance: number, length: number, sphereCenter: number[], sphereRadius: number, center: number[], axis: number[], halfLength: number, range: number): number;
+        /** HDAdditionalLightData.UpdateAreaLightEmissiveMesh: the emissive child's size (length, k_MinAreaWidth, k_MinAreaWidth). */
+        static EmissiveMeshSize(length: number): number[];
+        /** HDRP's emissive mesh triangles: the FBX polygons of Cylinder.fbx fanned (Unity's import triangulation of convex polygons). */
+        static CylinderTriangles(): number[];
+    }
+    /** One exported HDRP tube light (registered with `HdrpTubeLights`). */
+    class HdrpTubeLight {
+        private static _nextId;
+        readonly id: number;
+        readonly name: string;
+        /** The light's transform: the segment is centred on it, along its local X (Unity's light right axis). */
+        readonly node: BABYLON.TransformNode;
+        /** Segment length in metres (HDRP shapeWidth / Light.areaSize.x, clamped to 0.01). */
+        length: number;
+        /** HDRP shapeRadius - HDRP does not use it in the tube's evaluation (it only feeds the punctual minRoughness). */
+        radius: number;
+        /** Radiance in nits (physical, light dimmer folded in by the exporter). */
+        nits: number;
+        /** The linear colour (HDRP `color.linear` x colour temperature). */
+        color: BABYLON.Color3;
+        range: number;
+        applyRangeAttenuation: boolean;
+        affectDiffuse: boolean;
+        affectSpecular: boolean;
+        enabled: boolean;
+        _tkLightLayers: number;
+        /** nits x pre-exposure x distance fade, written by the pre-exposure binding. */
+        radiance: number;
+        binding: TOOLKIT.IHdrpRadianceBinding;
+        /** HDRP's "Display Emissive Mesh" cylinder (null when the light has none). */
+        emissiveMesh: BABYLON.Mesh;
+        centerW: number[];
+        axisW: number[];
+        constructor(name: string, node: BABYLON.TransformNode);
+        /** HdrpRendering.TrackLightFade measures the camera distance to this. */
+        getAbsolutePosition(): BABYLON.Vector3;
+        isActive(): boolean;
+        /** Re-reads the world centre / axis (the segment ignores node scale, as HDRP's normalised right vector does). */
+        refresh(): void;
+        /** Sets the physical radiance (nits); the binding keeps it under the scene pre-exposure and the distance fade. */
+        setNits(nits: number): void;
+        dispose(): void;
+    }
+    /**
+     * The per-scene tube-light registry: builds tubes from the exported light component, keeps their world state, selects the
+     * tubes of each draw, installs `HdrpTubeLightPlugin` on the scene's PBR / Standard materials and builds HDRP's emissive mesh.
+     * @class HdrpTubeLights - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpTubeLights {
+        static readonly MaxPerMesh: number;
+        static Registry(scene: BABYLON.Scene): any;
+        static GetLights(scene: BABYLON.Scene): TOOLKIT.HdrpTubeLight[];
+        static GetLight(node: BABYLON.Node): TOOLKIT.HdrpTubeLight;
+        /** True when the exported light component is an HDRP tube carrying the `hdrptube` block. */
+        static IsTubeComponent(component: any): boolean;
+        /**
+         * Builds the tube of an exported light component (`hdrpshape: "tube"` + `hdrptube: { length, radius, nits,
+         * rangeattenuation, emissivemesh?: { castshadows } }`, plus color / colortemperature / range / hdrplightlayers /
+         * hdrpaffectdiffuse / hdrpaffectspecular / hdrpfadedistance). Binds the radiance to the scene pre-exposure and the fade.
+         */
+        static CreateFromComponent(scene: BABYLON.Scene, node: BABYLON.TransformNode, component: any): TOOLKIT.HdrpTubeLight;
+        /** HDRP `finalColor` without the intensity: the authored sRGB colour linearised, the colour temperature factor kept linear. */
+        static LinearColor(color: any, temperature: any): BABYLON.Color3;
+        /**
+         * HDRP "Display Emissive Mesh": Cylinder.fbx (unit length along X, unit diameter) scaled to (length, 0.01, 0.01) under the
+         * light, an HDRP/Unlit material whose _EmissiveColor is colour.linear x intensity (nits) x dimmer, fully pre-exposed
+         * (_EmissiveExposureWeight 1), and the light's emissive-mesh shadow casting mode (castshadows: 0 Off, 1 On, 2 TwoSided,
+         * 3 ShadowsOnly). The material is an unlit PBR material carrying the HDR emissive colour, excluded from tube lighting
+         * (HDRP/Unlit is unlit).
+         */
+        static CreateEmissiveMesh(scene: BABYLON.Scene, light: TOOLKIT.HdrpTubeLight, options: any): BABYLON.Mesh;
+        /** The emissive mesh follows the light: size against the node's world scale (HDRP divides by lossyScale), radiance x colour. */
+        static UpdateEmissive(light: TOOLKIT.HdrpTubeLight): void;
+        static Add(scene: BABYLON.Scene, light: TOOLKIT.HdrpTubeLight): void;
+        static Remove(light: TOOLKIT.HdrpTubeLight): void;
+        static MarkDefinesDirty(scene: BABYLON.Scene): void;
+        static Refresh(scene: BABYLON.Scene): void;
+        /**
+         * Material.OnEventObservable (MaterialPluginEvent.Created = 1), the hook Babylon's RegisterMaterialPlugin uses; installed once
+         * per Babylon instance (on BABYLON.Material), it dispatches to the scene registry's own attach.
+         */
+        private static InstallMaterialObserver;
+        /** Attaches (once) the tube plugin to a lit PBR or Standard material (Babylon 9 rebuilds a material that was already used). */
+        static Attach(material: BABYLON.Material): TOOLKIT.HdrpTubeLightPlugin;
+        static AnyFor(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): boolean;
+        /** The tubes of one draw (cached per mesh per frame): active, sharing a light layer, in range, the MaxPerMesh strongest. */
+        static Select(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): {
+            lights: TOOLKIT.HdrpTubeLight[];
+            sig: string;
+        };
+        /** Packs the selection: A centre + half length, B axis + window scale, C diffuse colour + window bias, D specular colour + range. */
+        static Pack(lights: TOOLKIT.HdrpTubeLight[], a: Float32Array, b: Float32Array, c: Float32Array, d: Float32Array): number;
+        /** The 64 x 320 RGBA16F atlas (GGX / Disney / Charlie LTC, GGX-Disney FGD, Charlie-FabricLambert FGD), one per scene. */
+        static LtcTexture(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        /** HDRP's _PreIntegratedEyeCaustic as a 128 x 512 R16F texture (16 slices of 128 x 32), one per scene. */
+        static EyeCausticTexture(scene: BABYLON.Scene): BABYLON.BaseTexture;
+    }
+    /** HdrpTubeLightPlugin settings a material received before its plugin was attached. */
+    interface IHdrpTubePendingSettings {
+        /** The diffusion-profile terms (lobe A, lobe B, lobe mix, diffuse power - 1), or null when none were set. */
+        profile: BABYLON.Vector4;
+        /** Whether the eye caustic LUT is bound. */
+        eyeCausticLut: boolean;
+    }
+    /**
+     * The tube-light shading: HDRP's area-light branch of the material model in force, for every selected tube, added to Babylon's
+     * direct lighting before the final colour composition (PBR) or before fog (Standard).
+     *
+     * The model is chosen by the defines already in the effect: PIPELINELIGHTING_SIXWAY (Six Way), SGLIGHTEXT_HAIR / _EYE /
+     * _FABRIC / _STACKLIT (GraphLightingExtension) and Lit otherwise. Inputs Babylon holds are read from its own fragment state
+     * (normalW, roughness, specularEnvironmentR0, reflectivityOut, clearcoatOut, subSurfaceOut, iridescenceOut, anisotropicOut);
+     * inputs it does not hold come from the contract globals a generated graph class writes in its early hook under
+     * TK_TUBELIGHTS (`ContractGlobals`), and from the material's diffusion-profile uniform (`setProfile`).
+     *
+     * The per-draw tube data is written in hardBindForSubMesh into the material's uniform buffer, the way Babylon writes its own
+     * per-draw `cameraInfo` there (PBR flushes the buffer after every bind), so a tube-lit draw never forces a material rebind.
+     * @class HdrpTubeLightPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpTubeLightPlugin extends BABYLON.MaterialPluginBase {
+        static readonly PluginName: string;
+        static readonly Priority: number;
+        static readonly LutSampler: string;
+        static readonly EyeLutSampler: string;
+        /** Samplers the plugin adds to a PBR draw (the toolkit sampler guard counts them as required, like environmentBrdfSampler). */
+        static RequiredSamplers(material: BABYLON.Material, defines?: any): number;
+        /** HDRP diffusion profile of the material: dual-lobe multipliers A / B, lobe mix, diffuse power (0 neutral) - neutral default. */
+        profile: BABYLON.Vector4;
+        /** An HDRP Eye graph that samples the caustic LUT (EyeCausticFromLUT): binds _PreIntegratedEyeCaustic. */
+        eyeCausticLut: boolean;
+        private _a;
+        private _b;
+        private _c;
+        private _d;
+        private _lastKey;
+        private _lastEffect;
+        private _lastBuffer;
+        private static _wgslCache;
+        /** PBR (vs Standard), read from the material on every call: the base constructor collects the hooks before this body runs. */
+        private get _pbr();
+        constructor(material: BABYLON.Material);
+        /**
+         * Material settings that arrived before the material had its plugin: a material loads (and binds its diffusion profile or
+         * eye LUT) before the scene's first tube attaches the plugin, so SetProfile / SetEyeCausticLut park the values here and
+         * the plugin's constructor applies them. Weakly keyed, so a disposed material never stays alive through it.
+         */
+        static readonly PendingSettings: WeakMap<BABYLON.Material, TOOLKIT.IHdrpTubePendingSettings>;
+        /**
+         * The pending settings of a material without its plugin yet, created on first use.
+         * @param material The material SetProfile / SetEyeCausticLut was called for.
+         * @returns The material's pending settings entry.
+         */
+        private static PendingFor;
+        static Get(material: BABYLON.Material): TOOLKIT.HdrpTubeLightPlugin;
+        /**
+         * Sets the HDRP diffusion profile terms of a material (GetDualLobeParameters / GetDiffusePower). A material without its plugin
+         * yet (no tube in the scene so far) keeps them pending until the plugin attaches.
+         * @param material The SSS material.
+         * @param lobeA Smoothness multiplier of lobe A.
+         * @param lobeB Smoothness multiplier of lobe B (equal to A: no dual lobe).
+         * @param lobeMix The weight of lobe B (0..1).
+         * @param diffusePower Diffuse shading power - 1 (0 is Lambert / neutral).
+         */
+        static SetProfile(material: BABYLON.Material, lobeA: number, lobeB: number, lobeMix: number, diffusePower: number): void;
+        /**
+         * Turns the eye caustic LUT on for an HDRP Eye graph material with EyeCausticFromLUT. A material without its plugin yet keeps
+         * the switch pending until the plugin attaches.
+         * @param material The Eye graph material.
+         * @param enabled True to bind HDRP's pre-integrated eye caustic LUT.
+         */
+        static SetEyeCausticLut(material: BABYLON.Material, enabled: boolean): void;
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** False for an unlit material (HDRP/Unlit stand-ins: the emissive mesh, a Standard material with disableLighting) - flagged after construction. */
+        private lit;
+        prepareDefinesBeforeAttributes(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        isReadyForSubMesh(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): boolean;
+        getSamplers(samplers: string[]): void;
+        static UniformNames: string[];
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /**
+         * Every draw: this mesh's tubes, its inverse world (eye caustic) and the material profile into the material's uniform buffer
+         * (written only when they differ from what the buffer / effect already holds). PBR flushes the buffer at the end of its bind.
+         */
+        hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /** Every injected shader string (source-invariant tests). */
+        static AllCode(): string[];
+        /** The contract globals a generated graph class may write in its early hook (under TK_TUBELIGHTS); declared with defaults here. */
+        static readonly ContractGlobals: string[];
+        /** Converts the plugin's GLSL subset (typed locals, braces on every block, no ternaries, no out params) to WGSL. */
+        static ToWgsl(src: string): string;
+        private static Lang;
+        /** Shared helpers (both materials): the line integrals, the windows, HDRP's frames and fast trig. */
+        private static HelpersGlsl;
+        /** PBR-only helpers: the table atlas reads, HDRP's coat / Fresnel / diffuse-power / rotation / caustic / six-way functions. */
+        private static PbrHelpersGlsl;
+        /** The definitions block: samplers, contract globals, uniforms-free helpers (PBR: + the table / material helpers). */
+        static Definitions(wgsl: boolean, pbr: boolean): string;
+        /** The per-light loop head shared by the kernels (the selected tube `tkTi`: centre, axis, colours, window). */
+        private static LoopHead;
+        /** The PBR kernel source (GLSL subset). */
+        private static PbrGlsl;
+        /**
+         * StackLit ComputeAdding (calledPerLight false, one normal, VLAYERED_ANISOTROPY_SCALAR_ROUGHNESS, VLAYERED_DIFFUSE_ENERGY_HACKED_TERM)
+         * unrolled over the coat / media / base interfaces, then the coat FGD, the layered lobe roughnesses, the refracted base angle,
+         * the FGD Fresnel blend and diffuseEnergy.
+         */
+        private static StackLitAddingGlsl;
+        /** The PBR kernel in the requested language. */
+        static PbrCode(wgsl: boolean): string;
+        /**
+         * StandardMaterial (not an HDRP material - legacy / Built-in shaders on an HDRP scene): the Lambert line form factor in
+         * Babylon's Standard light convention (no 1 / PI), x diffuseColor x baseColor.
+         */
+        static StandardCode(wgsl: boolean): string;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * HDRP 17.5's area-light lookup tables for the tube-light port (design `_specs/hdrp-tube-light_design.md`), GENERATED by
+     * scratchpad/tube/gen-tables.js - do not edit by hand.
+     *  - LtcGgx / LtcDisney / LtcCharlie: LTCAreaLight.s_LtcMatrixData_BRDF_GGX / _BRDF_Disney / _BRDF_Charlie verbatim
+     *    (64 x 64 x (m00, m02, m11, m20) FP16 little-endian, index = roughness + 64 * theta, u = perceptual roughness,
+     *    v = sqrt(1 - cos theta)).
+     *  - FgdGgxDisney: _PreIntegratedFGD_GGXDisneyDiffuse regenerated with Core RP IntegrateGGXAndDisneyDiffuseFGD (4096 Hammersley
+     *    samples, the texel centre through RemapHalfTexelCoordTo01: x = sqrt(NdotV), y = perceptual roughness), z already - 0.5.
+     *  - FgdCharlie: _PreIntegratedFGD_CharlieAndFabric regenerated with IntegrateCharlieAndFabricLambertFGD (4096 cone strata,
+     *    texel centre: x = NdotV, y = perceptual roughness), x / y without the 2 PI the reader applies.
+     *  Both FGD tables are quantised to 10 bits per channel exactly as HDRP's A2B10G10R10_UNormPack32 targets store them and packed
+     *  as uint32 (r | g << 10 | b << 20).
+     */
+    class HdrpTubeLightTables {
+        static readonly LtcGgx: string[];
+        static readonly LtcDisney: string[];
+        static readonly LtcCharlie: string[];
+        static readonly FgdGgxDisney: string[];
+        static readonly FgdCharlie: string[];
+        /**
+         * HDRP RenderPipelineResources/Texture/EyeCausticLUT16R.exr (the Texture3D _PreIntegratedEyeCaustic: 128 x 32 x 16, R16 half),
+         * re-ordered to slice-major, v from the bottom of each flipbook cell (Unity's texel order), FP16 little-endian.
+         */
+        static readonly EyeCaustic: string[];
+        /** HDRP RenderPipelineResources/Mesh/Cylinder.fbx as Unity imports it (metres, x mirrored): the emissive tube mesh, unit length along X. */
+        static readonly CylinderPositions: number[];
+        /** FBX PolygonVertexIndex (a negative index -i - 1 ends a polygon). */
+        static readonly CylinderPolygons: number[];
+    }
+}
+declare namespace TOOLKIT {
+    /** The water decal region's textures (contract §3, `_specs/hdrp-water_contracts.md`). */
+    interface IHdrpWaterDecalTextures {
+        region?: {
+            center: number[];
+            size: number[];
+        };
+        deformation?: BABYLON.BaseTexture;
+        deformationSG?: BABYLON.BaseTexture;
+        foam?: BABYLON.BaseTexture;
+        mask?: BABYLON.BaseTexture;
+        current0?: BABYLON.BaseTexture;
+        current1?: BABYLON.BaseTexture;
+        maxDeformation?: number;
+        complete?: boolean;
+    }
+    /** FillWaterSurfaceProfile + the per-surface values of the underwater pass (contract §2). */
+    interface IHdrpWaterProfile {
+        albedo: number[];
+        extinction: number[];
+        extinctionMultiplier: number;
+        underwaterColor: number[];
+        upDirection: number[];
+        maxRefractionDistance: number;
+        absorptionDistance: number;
+        envPerceptualRoughness: number;
+        tipScatteringHeight: number;
+        bodyScatteringHeight: number;
+        roughnessEndValue: number;
+        smoothnessFadeStart: number;
+        smoothnessFadeDistance: number;
+        disableIOR: number;
+        foamColor: number[];
+        causticsIntensity: number;
+        causticsPlaneBlendDistance: number;
+        causticsRegionSize: number;
+        causticsMaxLOD: number;
+        causticsTilingFactor: number;
+        causticsTexture: BABYLON.BaseTexture;
+        underWater: boolean;
+        volumeDepth: number;
+        volumeHeight: number;
+        volumePriority: number;
+        volumeBounds: {
+            center: number[];
+            size: number[];
+            rotation: number[];
+        } | null;
+        absorptionDistanceMultiplier: number;
+        maxWaveHeight: number;
+        scatteringWaveHeight: number;
+        surfaceIndex: number;
+    }
+    /** HDRP WaterSearchParameters (positions as Vector3 or [x, y, z]). */
+    interface IHdrpWaterSearchParameters {
+        targetPositionWS: BABYLON.Vector3 | number[];
+        startPositionWS?: BABYLON.Vector3 | number[];
+        error?: number;
+        maxIterations?: number;
+        includeDeformation?: boolean;
+        excludeSimulation?: boolean;
+        outputNormal?: boolean;
+        /** internal: the GPU displacement (camera height / readback mode) instead of the CPU simulation */
+        gpu?: boolean;
+    }
+    /** HDRP WaterSearchResult. */
+    interface IHdrpWaterSearchResult {
+        projectedPositionWS: BABYLON.Vector3;
+        normalWS: BABYLON.Vector3;
+        candidateLocationWS: BABYLON.Vector3;
+        currentDirectionWS: BABYLON.Vector3;
+        numIterations: number;
+        error: number;
+    }
+    /**
+     * HDRP 17.5 water surfaces in the browser (design: `_specs/hdrp-water_design.md`, contracts: `_specs/hdrp-water_contracts.md`).
+     *
+     * - `HdrpWaterMath`        the pure maths of `Runtime/Water/**` (C# twin `Core/Libraries/HdrpWaterMath.cs`, tests pin both).
+     * - `HdrpWaterShaders`     GLSL + WGSL of the simulation, FGD, caustics-mesh, decal-combine and water-depth passes.
+     * - `HdrpWaterSimulation`  the FFT ocean of one surface (fragment passes, half / float as HDRP, a mipped 2D-array band target).
+     * - `HdrpWaterMaterial`    + `HdrpWaterMaterialPlugin` - the water Shader Graph surface + HDRP's water BSDF on a toolkit PBR material.
+     * - `HdrpWaterSystem`      per scene: the `hdrp.water` block, foam / FGD / neutral textures, the per-camera refraction inputs, draw order.
+     * - `HdrpWaterSurface`     the script component the exporter writes for every `WaterSurface` (geometry, uniforms, decals, CPU queries).
+     *
+     * Every number is HDRP's own (file names in the comments).
+     * @class HdrpWaterMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterMath {
+        static readonly HighBandCount: number;
+        static readonly Gravity: number;
+        static readonly MaxChoppiness: number;
+        static readonly KmhToMs: number;
+        static readonly MsToKmh: number;
+        static readonly SwellMaximumWindSpeed: number;
+        static readonly SwellMaximumWindSpeedMpS: number;
+        static readonly TessellatedMeshResolution: number;
+        static readonly SwellMaxPatchSize: number;
+        static readonly SwellMinPatchSize: number;
+        static readonly SwellMinRatio: number;
+        static readonly SwellMaxRatio: number;
+        static readonly RipplesBandSize: number;
+        static readonly MinScatteringAmplitude: number;
+        static readonly EnvRoughnessWindSpeed: number;
+        static readonly ScatteringRange: number;
+        static readonly TableResolution: number;
+        static readonly PhillipsAmplitudeScalar: number;
+        static readonly NoiseFunctionOffset: number;
+        static readonly WaterIor: number;
+        static readonly WaterFresnelZero: number;
+        static readonly BackgroundAbsorptionDistance: number;
+        /** WaterSurfaceType */
+        static readonly OceanSeaLake: number;
+        static readonly River: number;
+        static readonly Pool: number;
+        /** WaterGeometryType */
+        static readonly Quad: number;
+        static readonly Custom: number;
+        static readonly InstancedQuads: number;
+        static readonly Infinite: number;
+        /** WaterSurface.FadeMode */
+        static readonly FadeNone: number;
+        static readonly FadeAutomatic: number;
+        static readonly FadeCustom: number;
+        /** WaterSystemDef.cs k_MaximumAmplitudeTable (32 x 32: x = wind speed / 250 km/h, y = (patch - 25) / 4975). */
+        static readonly MaximumAmplitudeTable: number[];
+        private static num;
+        private static bool;
+        private static saturate;
+        private static lerp;
+        /** HDRenderPipeline.WaterSystem.Utilities.cs NormalizeAngle (degrees, C# % keeps the sign). */
+        static NormalizeAngle(degrees: number): number;
+        /** OrientationToDirection (degrees, C# side). */
+        static OrientationToDirection(degrees: number): number[];
+        /** EvaluateBandCount. */
+        static BandCount(surfaceType: number, ripples: boolean): number;
+        /** EvaluateSwellSecondPatchSize - the ratio between the first and the second swell band. */
+        static SwellSecondPatchRatio(maxPatchSize: number): number;
+        /** SampleMaxAmplitudeTable (clamped taps). */
+        static SampleMaxAmplitudeTable(x: number, y: number): number;
+        /** EvaluateMaxAmplitude (PrepareCoordinates with resolution 31, bilinear). Wind in km/h. */
+        static EvaluateMaxAmplitude(patchSize: number, windSpeedKmh: number): number;
+        /**
+         * WaterSurface.Simulation.cs EvaluateSpectrumParams: { patchGroup, patchSizes, patchOrientation (deg), groupOrientation (deg),
+         * patchWindSpeed (m/s), patchWindDirDampener } (4 slots, unused ones 0).
+         */
+        static Spectrum(p: any): any;
+        /** ComputeDistanceFade: { a, b, max } for one band (mode 0 None, 1 Automatic, 2 Custom). */
+        static DistanceFade(mode: number, index: number, customStart: number, customDistance: number, patchSizes: number[]): {
+            a: number;
+            b: number;
+            max: number;
+        };
+        /**
+         * EvaluateRenderingParams: { amplitude[4], currentSpeed[4] (m/s), fadeA[4], fadeB[4], maxFadeDistance }. Unused bands keep
+         * fadeA 0 / fadeB 1 (WaterRenderingParameters' reset values), as HDRP leaves them.
+         */
+        static Rendering(p: any, spectrum: any): any;
+        /** PackBandData: [1/L, cos(θ)·s, sin(θ)·s, amplitude] with s = currentSpeed · t / L. */
+        static PackBand(spectrum: any, rendering: any, simulationTime: number, band: number): number[];
+        /** _MaxWaveHeight = EvaluateMaxAmplitude(patchSizes.x, patchWindSpeed.x · 3.6). */
+        static MaxWaveHeight(spectrum: any): number;
+        /** _ScatteringWaveHeight = max(H · 0.75, 1) + maximumHeightOverride. */
+        static ScatteringWaveHeight(maxWaveHeight: number, heightOverride: number): number;
+        /** WaterSurface.extinction = −ln(0.02) / absorptionDistance · max(1 − refractionColor, 0.01). */
+        static Extinction(absorptionDistance: number, refractionColor: number[]): number[];
+        /** _MaxRefractionDistance = min(absorptionDistance, maxRefractionDistance). */
+        static MaxRefractionDistance(absorptionDistance: number, maxRefractionDistance: number): number;
+        /** _SimulationFoamAmount (the Jacobian offset depends on the band count). */
+        static SimulationFoamAmount(bandCount: number, amount: number): number;
+        /** _FoamPersistenceMultiplier = 1 / lerp(0.05, 1, m). */
+        static FoamPersistence(multiplier: number): number;
+        /** WaterSurfaceProfile.envPerceptualRoughness: Pool 0, else lerp(0, 0.15, saturate(largeWindSpeed / 30)). */
+        static EnvPerceptualRoughness(surfaceType: number, largeWindSpeedKmh: number): number;
+        /** HasSimulationFoam: foam && simulationFoamAmount > 0 && surfaceType != Pool. */
+        static HasSimulationFoam(p: any): boolean;
+        /** EvaluateCausticsMaxLOD. */
+        static CausticsMaxLOD(resolution: number): number;
+        /** SanitizeCausticsBand. */
+        static CausticsBand(band: number, bandCount: number): number;
+        /** EvaluateNormalMipOffset (the caustics normals LOD). */
+        static NormalMipOffset(simulationResolution: number): number;
+        /** EvaluateWaterNoiseSampleOffset. */
+        static NoiseSampleOffset(simulationResolution: number): number;
+        /** DistanceFade (SampleWaterSurface.hlsl): smoothstep01(saturate(d·A + B)²). */
+        static FadeValue(distance: number, a: number, b: number): number;
+        /** ComputeScreenSpaceSize: |P00 · size / distance| · 0.5 · width (pixels). */
+        static ScreenSpaceSize(p00: number, width: number, cameraDistance: number, sizeWS: number): number;
+        /** UpdataPerCameraConstantBuffer: the instanced grid size. */
+        static GridSize(p00: number, width: number, cameraDistance: number, triangleSize: number): number;
+        /** UpdataPerCameraConstantBuffer: the snapped patch offset (water space xz). */
+        static PatchOffset(waterPositionXZ: number[], cameraWaterXZ: number[], gridSize: number): number[];
+        /** Everything the runtime derives from the exported fields (the export's `derived` block is the C# twin of this). */
+        static Derived(p: any, simulationResolution: number): any;
+        /** WaterHashFunctionUInt4 (uint32 arithmetic). */
+        static HashUInt4(x: number, y: number, z: number): number[];
+        /** WaterHashFunctionFloat4: uint4 / (float)0xffffffff (float32 conversions). */
+        static HashFloat4(x: number, y: number, z: number): number[];
+        /** GaussianDis. */
+        static GaussianDis(u: number, v: number): number;
+        /** Phillips (k, wind direction w, wind speed V m/s, direction dampener, 1 / patch size). */
+        static Phillips(kx: number, ky: number, wx: number, wy: number, V: number, dampener: number, invPatchSize: number): number;
+        /** InitializePhillipsSpectrum at texel (x, y) of band `band`: [re, im]. `spectrum` from Spectrum(), N the resolution. */
+        static H0(x: number, y: number, band: number, N: number, spectrum: any): number[];
+        /** Bit reversal of `value` within `bits` bits (reversebits_uint2 >> (32 - BUTTERFLY_COUNT) & (N - 1)). */
+        static BitReverse(value: number, bits: number): number;
+        /** GetButterflyValues: { i0, i1, wr, wi } with the twiddle e^{+iθ} the shader multiplies by. */
+        static Butterfly(stage: number, x: number, bits: number): {
+            i0: number;
+            i1: number;
+            wr: number;
+            wi: number;
+        };
+        /**
+         * The CPU twin of the GPU pipeline for one band (tests): dispersion, the row / column butterflies and the sign correction.
+         * Returns [height, Dx, Dz] per texel (index x + y·N), float64 (the GPU stores half float).
+         */
+        static CpuDisplacement(h0: number[][], N: number, invPatchSize: number, time: number): number[][];
+        /** EvaluateNormals[Jacobian] at one texel of a CpuDisplacement result: [sgX, sgZ, jacobian]. */
+        static CpuNormal(disp: number[][], N: number, x: number, y: number, invPatchSize: number, amplitude: number): number[];
+        /**
+         * Unity AnimationCurve.Evaluate (clamped wrap): cubic Bezier per segment with the keys' tangents; a non-weighted key uses
+         * Unity's implicit 1/3 weights, which makes the segment the cubic Hermite. keys: { time, value, inTangent, outTangent,
+         * inWeight?, outWeight?, weightedMode? } (weightedMode 1 In, 2 Out, 3 Both).
+         */
+        static EvaluateCurve(keys: any[], t: number): number;
+        /** UpdatePerSurfaceConstantBuffer: saturate(simulationFoamWindCurve.Evaluate(patchWindSpeed.x / 250 km/h in m/s)). */
+        static FoamWindAttenuation(curveKeys: any[], windSpeedMs: number): number;
+        /** WaterSurface's default simulationFoamWindCurve: (0,0) (0.2,0) (0.3,1) (1,1), all tangents 0. */
+        static readonly DefaultFoamWindCurve: any[];
+        /**
+         * GetTessellationFactors (WaterVertexTessellation.hlsl): max(maxFactor x saturate(1 − (d − start) / range)², 1) for an edge at
+         * camera distance d (GetDistanceBasedTessFactor squared, x _WaterMaxTessellationFactor).
+         */
+        static TessellationFactor(distance: number, maxFactor: number, fadeStart: number, fadeRange: number): number;
+        /** The integer subdivision of a patch edge for a tessellation factor (fractional_odd rounds up to the next odd count). */
+        static TessellationSegments(factor: number): number;
+        /** fractional_odd: the odd segment count of a factor (2·ceil((f − 1)/2) + 1). */
+        static OddCeil(f: number): number;
+        /**
+         * fractional_odd point k (0..n) along an edge of factor f split into n = OddCeil(f) segments: n − 2 segments of 1/f and two
+         * shorter ones of (f − (n − 2))/(2f) flanking the middle segment (they grow from 0 to 1/f as f goes from n − 2 to n). Pure.
+         */
+        static FractionalOddPoint(k: number, n: number, f: number): number;
+        /** UpdataPerCameraConstantBuffer: _MaxLOD of the instanced grid (8 when there is no fade). */
+        static MaxLOD(maxFadeDistance: number, cameraHeightAboveMaxWave: number, maxPatchOffset: number, gridSize: number): number;
+        /** UpdataPerCameraConstantBuffer for non-infinite instanced quads: { gridSize: [x, z], patchOffset: [x, z] } aligned on the region. */
+        static AlignInstancedRegion(waterPositionXZ: number[], extent: number[], gridSize: number, patchOffset: number[]): {
+            gridSize: number[];
+            patchOffset: number[];
+            regionExtent: number[];
+        };
+        /** FGDTEXTURE_RESOLUTION. */
+        static readonly FgdResolution: number;
+        /** Hammersley2dSeq(i, n) = (i / n, VanDerCorputBase2(i)). */
+        static Hammersley(i: number, n: number): number[];
+        /** ImageBasedLighting.hlsl IntegrateGGXAndDisneyDiffuseFGD (V_SmithJointGGX, Lambert sampling for Disney): [x, y, z − 0.5]. */
+        static IntegrateFGD(NdotVIn: number, roughness: number, sampleCount?: number): number[];
+        /** The LUT texel (x, y) → (NdotV, roughness): RemapHalfTexelCoordTo01 of the texel centre, NdotV = x², roughness = y². */
+        static FgdTexelInputs(x: number, y: number, res?: number): number[];
+        /** A2B10G10R10_UNorm storage of a LUT value. */
+        static Unorm10(v: number): number;
+        /** GetPreIntegratedFGDGGXAndLambert coordinates: Remap01ToHalfTexelCoord(sqrt(NdotV), perceptualRoughness). */
+        static FgdCoord(NdotV: number, perceptualRoughness: number, res?: number): number[];
+        /** WaterSystemDef.cs k_SectorSwizzlePacked (the _WaterSectorData texture, 16 x float4). */
+        static readonly SectorSwizzlePacked: number[][];
+        /** WaterCurrentUtilities.hlsl EvaluateAngle / DecompressDirection: { quadrant, proportion, angle } (GPU variant, flipDir). */
+        static DecompressDirection(cmp: number[], orientationRad: number, influence: number, flip: number[]): {
+            quadrant: number;
+            proportion: number;
+            angle: number;
+        };
+        /** WaterSystemDef.cs k_SectorSwizzle (the CPU sector data: 8 sampling bases, then 8 "other" bases, dir0 / dir1 each). */
+        static readonly SectorSwizzle: number[][];
+        /** HDRenderPipeline.WaterSystem.SimulationCPU.Utilities.cs DecompressDirection (CPU variant: no flip, quadrant % 8). */
+        static DecompressDirectionCPU(cmp: number[], orientationRad: number, influence: number): {
+            quadrant: number;
+            proportion: number;
+            angle: number;
+        };
+        /** EvaluateSurfaceGradients(p0, p1, p2) → surface gradient (x, z). */
+        static SurfaceGradients(p0: number[], p1: number[], p2: number[]): number[];
+        /**
+         * One texel (x, y) of a band's GPU displacement (height, Dx, Dz) evaluated directly: the inverse DFT the GPU's radix-2 passes compute
+         * (dispersion of H0, e^{+i}, sign correction folded in), O(N²) for one texel - the GPU readback / camera-height path without a stall.
+         * `h0` = H0 of the band (re, im per texel), `cache` holds the dispersion of the current time.
+         */
+        static PointDisplacement(spectrum: any, band: number, N: number, time: number, x: number, y: number, h0: Float32Array, cache: any): number[];
+        /** Float → IEEE half bits (round to nearest even). */
+        static ToHalf(value: number): number;
+        private static f32;
+        private static u32;
+        /**
+         * The HDRP CPU simulation (WaterSystem.SimulationCPU, used when the asset's script-interactions mode is CPU simulation): the band's
+         * displacement (height, Dx, Dz) at the CPU resolution, Float32 per channel (index (x + y·N)·4). Uses the GPU's H0, dispersion,
+         * butterflies and sign correction (CpuDisplacement) with typed arrays.
+         */
+        static CpuBandDisplacement(spectrum: any, band: number, N: number, time: number): Float32Array;
+        /** HDRP SampleTexture2DArrayBilinear on a (height, Dx, Dz, _) Float32Array of N x N (repeat). */
+        static SampleBilinearRepeat(data: Float32Array | Uint16Array | number[], N: number, u: number, v: number, channel: number, stride?: number, half?: boolean): number;
+        /** IEEE half bits → float. */
+        static FromHalf(h: number): number;
+    }
+    /**
+     * GLSL + WGSL of the simulation passes (D2): every pass is a full-screen EffectWrapper over a half-float target, texels are
+     * addressed through vUV (NEAREST reads at texel centres) so the row order is the same on WebGL2 and WebGPU. No `;` inside a
+     * `//` comment of a shader string.
+     * @class HdrpWaterShaders - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterShaders {
+        static readonly H0Name: string;
+        static readonly DispersionName: string;
+        static readonly FftName: string;
+        static readonly ResolveName: string;
+        static readonly NormalsName: string;
+        private static registered;
+        static Register(): void;
+        /** Every source string (the tests scan them for `;` inside `//` comments and for balanced braces). */
+        static AllSources(): string[];
+        private static GlslHeader;
+        /** InitializePhillipsSpectrum (atlas N·bands x N). hwRes = (N, bands, sampleOffset, 0), hwBandK = (1/L, θ rad, V m/s, chaos). */
+        private static GlslH0;
+        /** EvaluateDispersion. hwTime = (t, select 0 = (ht, Dx) / 1 = (Dz, 0), 0, 0), hwInv = 1/L per band. */
+        private static GlslDispersion;
+        /**
+         * One radix-2 butterfly stage of FourierTransform.compute (twiddle e^{+iθ}, bit reversal at stage 0). hwFft = (stage,
+         * vertical, log2N, 0). The resolve variant runs the last column stage on A and B and writes the real parts x (−1)^(x+y).
+         */
+        private static GlslFft;
+        /** EvaluateNormals[Jacobian] into one band texture (N x N): (raw height, sgX, sgZ, jacobian). hwNrm = (band, 1/L, amplitude, 0). */
+        private static GlslNormals;
+        private static WgslHeader;
+        private static WgslH0;
+        private static WgslDispersion;
+        private static WgslFft;
+        private static WgslNormals;
+        static readonly FgdName: string;
+        static readonly CausticsMeshName: string;
+        static readonly ClearName: string;
+        static readonly CombineName: string;
+        static RegisterExtra(): void;
+        private static registeredExtra;
+        static ExtraSources(): string[];
+        /** preIntegratedFGD_GGXDisneyDiffuse.shader + IntegrateGGXAndDisneyDiffuseFGD (4096 samples), stored as A2B10G10R10 unorm. */
+        private static GlslFgd;
+        private static WgslFgd;
+        /**
+         * WaterCaustics.shader: the (res + 1)² grid of the caustics region (x 1.1), each vertex refracted through the caustics band's
+         * normal (EvaluateWaterSurfaceGradient_VS: bicubic at the normals mip offset) onto the virtual plane, rasterised in refracted
+         * space; the fragment writes the original / refracted triangle-area ratio (ddx / ddy), clamped to 5. No blending (last wins),
+         * no culling, as HDRP. hwCau = (region size, virtual plane, normals LOD, band layer), hwCauBand = (1/L, offX, offZ, N).
+         */
+        private static GlslCausticsVertex;
+        private static GlslCausticsFragment;
+        private static WgslCausticsVertex;
+        private static WgslCausticsFragment;
+        /** Packs the decal deformation surface gradient (RG) and the decal foam (RG) into one RGBA target (one material sampler). */
+        private static GlslCombine;
+        private static WgslCombine;
+        static readonly PackName: string;
+        /** (opaque camera-space z, water camera-space z, water coverage) - one sampler for the refraction depth and the fog-pass absorption. */
+        static RegisterPack(): void;
+    }
+    /**
+     * The water plugin (RULE 2 / 4 / 7, every line behind HDRPWATERMATERIAL): the contract functions of `_specs/hdrp-water_contracts.md`
+     * §4, the default Water.shadergraph surface, HDRP's water lighting per Babylon light (CUSTOM_LIGHT{X}_COLOR + the diffuse / specular
+     * accumulation of the unrolled light loop) and the environment / refraction composition. No `;` inside a `//` comment of a shader
+     * string; no sampler parameters; every sampler read by name.
+     * @class HdrpWaterMaterialPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterMaterialPlugin extends TOOLKIT.CustomShaderMaterialPlugin {
+        static readonly PRIORITY: number;
+        static readonly DiffuseKey: string;
+        static readonly SpecularKey: string;
+        constructor(customMaterial: TOOLKIT.CustomShaderMaterial, shaderName: string);
+        getClassName(): string;
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /** The full key set on every call (MaterialPluginManager freezes the key set at construction). */
+        getCustomCode(shaderType: string, shaderLanguage: BABYLON.ShaderLanguage): any;
+        getUniforms(shaderLanguage: BABYLON.ShaderLanguage): any;
+        getSamplers(samplers: string[]): void;
+        getAttributes(attributes: string[], scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /** The vertex definitions of the PBR material (declarations + varyings + displacement functions). */
+        static VertexDefinitions(wgsl: boolean): string;
+        /** The template attributes of a tessellated mesh (HW_TESSELLATION): control points, lattice weights, control normals. */
+        static readonly TessellationAttributes: string[];
+        /**
+         * The template attributes one tessellated mesh binds. The control normals only matter for custom meshes (HW_CUSTOM_MESH);
+         * HDRP's procedural grids are flat (normal up). Leaving them out keeps a thin-instanced grid within WebGL2's 16 vertex
+         * attributes once the velocity prepass adds the previous instance matrices (position, normal, world0-3, previousWorld0-3).
+         * @param customMesh True for a Custom geometry surface drawn with its own meshes.
+         * @returns The attribute names, in the interleaved buffer's order.
+         */
+        static TessellationAttributesFor(customMesh: boolean): string[];
+        /**
+         * HDRP's hull + domain stages (WaterVertexTessellation.hlsl HullConstant / GetTessellationFactors / Domain, partitioning
+         * fractional_odd) evaluated per vertex of a pre-built template: every base triangle carries its three control points and a
+         * lattice of M segments per edge. Edge factors come from the DISPLACED control points (edge midpoint distance to the camera,
+         * x _WaterMaxTessellationFactor x distFactor^2, frustum-culled edges 1, a fully culled triangle killed, clamp [1, 64]), the inside
+         * factor is their mean. An edge vertex lands on the edge's fractional_odd point (measured from the edge's canonical end, so both
+         * triangles of an edge compute the same bits - crack-free); interior vertices land on the inside factor's lattice.
+         */
+        static TessellationFunctions(wgsl: boolean): string;
+        /** The fragment helper / contract functions (§4 of the contracts). */
+        static FragmentDefinitions(wgsl: boolean): string;
+        /** The vertex displacement functions for another pass (contract §5). */
+        static VertexDisplacementCode(wgsl: boolean): string;
+        /** Thin-instance support for a ShaderMaterial pass over the water meshes: attribute declarations (INSTANCES / THIN_INSTANCES). */
+        static InstanceDeclarations(wgsl: boolean): string;
+        /** ... and the world matrix of the instance (`finalWorld`, declared by this code). */
+        static InstanceWorld(wgsl: boolean): string;
+        static readonly VertexVec4: string[];
+        static readonly VertexMat4: string[];
+        static readonly VertexSamplers: string[];
+        /** k_SectorSwizzlePacked as a shader constant (the _WaterSectorData texture). */
+        private static SectorConstant;
+        /** Vertex-stage declarations (GLSL: every vertex uniform + sampler by hand, RULE 6; WGSL: the samplers, the UBO carries the rest). */
+        static VertexDeclarations(wgsl: boolean): string;
+        /** WGSL uniform declarations of the vertex uniforms (a ShaderMaterial pass that reuses the displacement - the PBR UBO needs none). */
+        static WgslUniformDeclarations(): string;
+        /**
+         * SampleWaterSurface.hlsl EvaluateWaterDisplacement (vertex): the simulation's vertical displacement per band (with the local current
+         * sector swizzle when HW_LOCAL_CURRENT), x the water mask, + the decal deformation; the horizontal displacement is the deformation's.
+         */
+        static DisplacementFunctions(wgsl: boolean): string;
+        private static GlslCurrentFunctions;
+        private static GlslDisplacement;
+        /** The per-band vertical displacement, unrolled (no dynamic vector indexing). */
+        private static GlslBandHeights;
+        /**
+         * The vertex body (PBR UPDATE_WORLDPOS hook or a ShaderMaterial main): `worldPos` holds the undisplaced world position in, the
+         * displaced one out; with `pbr` the PBR varyings are rewritten (vPositionW was written before the hook) and HDRP's uv0 / uv1 packing
+         * goes to vHwSim / vHwSim2.
+         */
+        static VertexBody(wgsl: boolean, pbr: boolean): string;
+        private static WgslCurrentFunctions;
+        private static WgslBandHeights;
+        private static WgslDisplacement;
+        /** SampleSimulation_PS, unrolled per pass / band (bands NUM-1 .. 0 as HDRP), samples first (implicit derivatives), then the sums. */
+        private static GlslAdditionalBands;
+        private static GlslFragment;
+        private static WgslAdditionalBands;
+        private static WgslFragment;
+    }
+    /**
+     * The HDRP water material (design D6-D8): a toolkit PBR material whose plugin replaces the surface with the water Shader Graph's
+     * surface description, Babylon's per-light diffuse / specular with HDRP's water BSDF (Water.hlsl EvaluateBSDF, phase term, wrapped
+     * diffuse, specular self occlusion), and the environment / ambient / refraction terms with Water.hlsl's. Drawn last in the
+     * alpha-test queue (after every opaque and alpha-tested surface, as HDRP draws the water after its GBuffer) so the colour copy
+     * the refraction reads holds the whole opaque scene.
+     * @class HdrpWaterMaterial - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterMaterial extends TOOLKIT.CustomShaderMaterial {
+        static readonly ShaderName: string;
+        static readonly Vec4Uniforms: string[];
+        static readonly MatrixUniforms: string[];
+        static readonly TextureUniforms: string[];
+        /** Samplers the vertex stage reads only: not declared in the fragment (keeps the fragment under WebGPU's 16 samplers). */
+        static readonly VertexOnlySamplers: string[];
+        private _lastCameraFrame;
+        constructor(name: string, scene: BABYLON.Scene);
+        getShaderName(): string;
+        needAlphaTesting(): boolean;
+        needAlphaBlending(): boolean;
+        getCustomVertexCode(wgsl: boolean): string;
+        /** The material's declarations without the vertex-only samplers. */
+        getCustomFragmentCode(wgsl: boolean): string;
+        /** Per bind (RULE 8): the matrices of the camera being drawn (a mirror / probe camera gets its own). */
+        update(): void;
+        static WriteCamera(target: any, scene: BABYLON.Scene, camera: BABYLON.Camera): void;
+    }
+    /**
+     * The FFT ocean of one surface (design D2-D4, D9). Precision as HDRP: H0 / Ht / the row-pass output / displacement / the band
+     * array in half float (HDRP's R16G16(B16A16)_SFloat), the butterfly stages between them in float (HDRP's groupshared float), float
+     * falling back to half when the device cannot render to float. The band data is a mipped 2D array (HDRP's Texture2DArray):
+     * layer b = (height, sgX, sgZ, jacobian). Caustics are HDRP's refracted grid rasterised into a mipped R16 target.
+     * @class HdrpWaterSimulation - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterSimulation {
+        readonly resolution: number;
+        readonly bandCount: number;
+        readonly bits: number;
+        bandArray: BABYLON.BaseTexture;
+        causticsTexture: BABYLON.RenderTargetTexture;
+        readonly floatStages: boolean;
+        private readonly scene;
+        private readonly renderer;
+        private causticsRenderer;
+        private readonly passes;
+        private readonly h0;
+        private readonly ht;
+        private readonly stagesA;
+        private readonly stagesB;
+        private readonly rowA;
+        private readonly rowB;
+        readonly displacement: BABYLON.RenderTargetTexture;
+        private bandTarget;
+        private current;
+        private spectrumHash;
+        private disposed;
+        /** WebGL2 or WebGPU with half-float render targets. */
+        static IsSupported(engine: BABYLON.AbstractEngine): boolean;
+        constructor(scene: BABYLON.Scene, resolution: number, bandCount: number, causticsResolution: number, causticsMeshResolution: number);
+        private target;
+        private pass;
+        private run;
+        /** True once every pass compiled (a frame is skipped until then). */
+        isReady(): boolean;
+        /** The number of shader passes of the simulation (FFT, normals, clear and, with caustics, the caustics mesh). */
+        getPassCount(): number;
+        /** The number of shader passes whose effect has compiled (the simulation steps once all of them have). */
+        getReadyPassCount(): number;
+        /** One simulation step (HDRenderPipeline.WaterSystem.Simulation.cs UpdateGPUWaterSimulation + EvaluateWaterCaustics). */
+        update(spectrum: any, bandData: number[][], time: number, caustics: any): boolean;
+        dispose(): void;
+    }
+    /**
+     * Per-scene water state (design D8, D15): the `hdrp.water` block, HDRP's foam texture, the preintegrated FGD LUT, the neutral
+     * textures HDRP binds for absent maps, the refraction inputs per camera (one colour copy of the opaque + alpha-tested scene taken
+     * between draws right before the first water draw, the opaque depth without the water, the water surface depth, packed), the draw
+     * order (water last in the alpha-test queue) and the optional sun depth map of the caustics shadow dimmer.
+     * @class HdrpWaterSystem - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterSystem {
+        private static readonly StoreKey;
+        /**
+         * Consecutive frames a camera must render its refraction colour by the fallback (the opaque scene rendered again) before the
+         * fallback is reported: a scene's first frames run before its post-process chain is attached (on WebGL2 while its shaders still
+         * compile, measured at well over 30 frames), which is no fallback to report.
+         */
+        static readonly FallbackReportFrames: number;
+        static Block(scene: BABYLON.Scene): any;
+        /** D15: why HDRP would draw no water for this block (null when it would draw). Pure. */
+        static GateReason(block: any): string;
+        static Resolution(block: any): number;
+        static Store(scene: BABYLON.Scene): any;
+        static SetRootUrl(scene: BABYLON.Scene, root: string): void;
+        static GetRootUrl(scene: BABYLON.Scene): string;
+        static Surfaces(scene: BABYLON.Scene): TOOLKIT.HdrpWaterSurface[];
+        static Register(scene: BABYLON.Scene, surface: TOOLKIT.HdrpWaterSurface, meshes: BABYLON.AbstractMesh[], materials: BABYLON.Material[]): void;
+        /** A water mesh: excluded from the opaque inputs, drawn into every camera's water-depth target with its depth material. */
+        static AddMesh(scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh, depth: BABYLON.Material): void;
+        private static AttachDepth;
+        /** A surface rebuilt its depth materials (a keyword changed): every camera's target switches. */
+        static ReplaceDepthMaterials(scene: BABYLON.Scene, previous: BABYLON.Material[], next: BABYLON.Material[]): void;
+        static Unregister(scene: BABYLON.Scene, surface: TOOLKIT.HdrpWaterSurface, meshes: BABYLON.AbstractMesh[], materials: BABYLON.Material[]): void;
+        /** HDRP draws the water after its GBuffer (opaque + alpha-tested): water submeshes last in every group's alpha-test queue. */
+        private static InstallOrder;
+        /** The neutral textures HDRP binds for an absent map: white (mask, foam mask) and black (current, deformation, decal foam / SG). */
+        static White(scene: BABYLON.Scene): BABYLON.Texture;
+        static Black(scene: BABYLON.Scene): BABYLON.Texture;
+        /** HDRP's FoamMask.png (exported losslessly, linear, wrap, mipped) or a no-foam 1x1 (warned once). */
+        static FoamTexture(scene: BABYLON.Scene): BABYLON.Texture;
+        /** An exported data texture ({ url } or a string), linear, with its Unity wrap mode (0 repeat, 1 clamp, 2 mirror). */
+        static DataTexture(scene: BABYLON.Scene, meta: any, wrapU: number, wrapV: number, fallback: BABYLON.Texture): BABYLON.Texture;
+        /**
+         * True once the engine's preintegrated FGD LUT has been rendered (FgdTexture renders it on the first frame its shader is ready).
+         * @param scene - Any scene of the engine.
+         * @returns False before FgdTexture was first requested or while its shader compiles.
+         */
+        static IsFgdReady(scene: BABYLON.Scene): boolean;
+        /** HDRP's preintegrated FGD (GGX + Disney diffuse, 64 x 64, 4096 samples, 10-bit) rendered once per engine. */
+        static FgdTexture(scene: BABYLON.Scene): BABYLON.RenderTargetTexture;
+        /**
+         * D8: the refraction inputs of a camera. `color` = the scene colour copied between draws right before the first water draw (the
+         * main pass renders into a post-process texture on every parity scene), or - when the camera draws straight to the canvas, so
+         * there is no texture to copy from - the opaque scene rendered into it once (the same fallback OpaqueSceneColor uses). `depth`
+         * = (opaque camera-space z without the water, water camera-space z, water coverage), packed after both depth targets render.
+         */
+        static CameraInputs(scene: BABYLON.Scene, camera: BABYLON.Camera): any;
+        /** The copy of the scene colour, between draws, right before the first water draw of the camera (OpaqueSceneColor.CopyNow's mechanics). */
+        private static HookCopy;
+        /** A 1x1 opaque black texture for any unbound slot (kept for the other water passes). */
+        static Neutral(scene: BABYLON.Scene): BABYLON.Texture;
+        /** The camera-space z of everything but the water (the camera's opaque depth input, cleared to the far plane). */
+        static DepthTexture(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.RenderTargetTexture;
+        /** The decal surface-gradient + foam buffers combined into one RGBA half target (SG.xy, foam.xy) for the fragment. */
+        static CreateCombine(scene: BABYLON.Scene): any;
+        /**
+         * HDRP's scene depth at the water pass holds the opaques only (the water draws after the depth pyramid): every scene depth map
+         * another system owns (the shared depth renderers, a graph's `__sgDepthRenderer`) skips the water meshes. Idempotent per map.
+         */
+        static ExcludeFromSceneDepth(scene: BABYLON.Scene): void;
+        /** The sun depth map of the caustics shadow dimmer (HDRP samples its directional shadow at the refracted point). */
+        static SunShadow(scene: BABYLON.Scene, light: BABYLON.DirectionalLight, camera: BABYLON.Camera, distance: number): any;
+        static Dispose(scene: BABYLON.Scene): void;
+    }
+    /**
+     * One HDRP WaterSurface (design D1-D15). Geometry as HDRP draws it: the 128 x 128 tessellable grid (a quad scaled by its extent,
+     * or the central patch of the instanced grid), the ring patch instanced per LOD (thin instances carrying ComputePatchBounds'
+     * rotation x scale, culled by region and frustum per camera as EVALUATE_INSTANCE_DATA), the flat low-res skirt (HW_LOW_RES pass),
+     * or the custom meshes. HDRP's hardware tessellation (fractional_odd, distance factor) becomes a per-patch subdivision of the same
+     * meshes by the factor at the patch's nearest point (no hull / domain stage in WebGL2 / WebGPU). Uniforms are written to every
+     * material of the surface (main, low-res, the water-depth materials) from one store.
+     * @class HdrpWaterSurface - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterSurface extends TOOLKIT.ScriptComponent {
+        /** The vertex budget of the tessellation template of one patch mesh (caps the template level M; HDRP's own cap is 64). */
+        static MaxPatchVertices: number;
+        /** HDRP's FindVerticalDisplacement / ProjectPointOnWaterSurface defaults. */
+        static readonly SearchIterations: number;
+        static readonly SearchError: number;
+        /** Upper bound (ms) the scene's asset preloader waits for a water surface before the splash is released anyway. */
+        static WATER_PRELOAD_TIMEOUT_MS: number;
+        /** Poll interval (ms) of the water preload task. */
+        static readonly WATER_PRELOAD_POLL_MS: number;
+        /** Loading job title of every water surface (LoadingProgress.WEIGHTS). */
+        static readonly WATER_JOB_TITLE: string;
+        /** Stage labels of the water loading job, in stage order. */
+        static readonly WATER_SIMULATION_LABEL: string;
+        static readonly WATER_TEXTURES_LABEL: string;
+        static readonly WATER_SHADERS_LABEL: string;
+        /** Shares of the water job: the simulation (passes, first step, FGD LUT), the surface textures, the surface shaders. */
+        private static readonly SIMULATION_WEIGHT;
+        private static readonly TEXTURES_WEIGHT;
+        private static readonly SHADERS_WEIGHT;
+        /** Simulation units beyond the compiled passes: the first simulation step and the FGD LUT. */
+        private static readonly SIMULATION_EXTRA_STEPS;
+        private m_awoken;
+        private m_skipped;
+        private m_destroyed;
+        private m_simulated;
+        private m_props;
+        private m_block;
+        private m_derived;
+        private m_simulation;
+        private m_material;
+        private m_lowMaterial;
+        private m_depthMain;
+        private m_depthLow;
+        private m_tessM;
+        private m_root;
+        private m_meshes;
+        private m_owned;
+        private m_central;
+        private m_ring;
+        private m_ringBuffer;
+        private m_low;
+        private m_custom;
+        private m_instanced;
+        private m_infinite;
+        private m_cameraObserver;
+        private m_preparedKey;
+        private m_time;
+        private m_lastFrame;
+        private m_resolution;
+        private m_triangleSize;
+        private m_dimmer;
+        private m_curve;
+        private m_bands;
+        private m_v4;
+        private m_m4;
+        private m_tex;
+        private m_defines;
+        private m_decal;
+        private m_decalRegion;
+        private m_decalCombine;
+        private m_maskTex;
+        private m_foamMaskTex;
+        private m_currentTex;
+        private m_foamBound;
+        private m_cpuSim;
+        private m_cpuTex;
+        private m_heights;
+        private m_h0Cache;
+        private m_htCache;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** The displacement functions for another pass over the water meshes (contract §5, guarded against a second declaration). */
+        static VertexDisplacementCode(wgsl: boolean): string;
+        /** The live (rendering) surfaces of a scene. */
+        static Surfaces(scene: BABYLON.Scene): TOOLKIT.HdrpWaterSurface[];
+        /** The exported property bag. */
+        getProperties(): any;
+        /** The live material (null when the surface does not render). */
+        getMaterial(): TOOLKIT.HdrpWaterMaterial;
+        /** Every mesh the surface draws (procedural meshes may carry thin instances). */
+        getMeshes(): BABYLON.AbstractMesh[];
+        /** The live simulation (null when the surface does not render). */
+        getSimulation(): TOOLKIT.HdrpWaterSimulation;
+        /** The evaluated band / spectrum data (HdrpWaterMath.Derived). */
+        getDerived(): any;
+        /** The simulation time in seconds (HDRP WaterSurface.simulationTime). */
+        get simulationTime(): number;
+        set simulationTime(value: number);
+        /** HDRP's waterToWorldMatrix (identity for custom meshes, which sample the simulation in world space). */
+        getWaterToWorld(): BABYLON.Matrix;
+        getWorldToWater(): BABYLON.Matrix;
+        /** WaterSurface.UpVector (world). */
+        getUpVector(): BABYLON.Vector3;
+        /** Per band [1/L, offX, offZ, amplitude] of the current frame. */
+        getBandData(): number[][];
+        /** The shader defines of this surface's passes (for another pass reusing the displacement, contract §5). */
+        getShaderDefines(lowRes?: boolean): string[];
+        /** WaterSurface.GetDecalRegion of this frame. */
+        getDecalRegion(): {
+            center: number[];
+            size: number[];
+        };
+        protected awake(): void;
+        protected update(): void;
+        protected destroy(): void;
+        /**
+         * Joins the scene's asset preloader so the splash waits for this surface (TerrainBuilder pattern; setup itself stays in
+         * awake()). Opens the scene's "Water" loading job and adds one promise task that polls every WATER_PRELOAD_POLL_MS ms, reports
+         * the water progress and resolves, completing the job, once the surface is ready. The task never rejects and gives up after
+         * WATER_PRELOAD_TIMEOUT_MS.
+         * @param assetsManager - The scene's preload assets manager.
+         */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        /**
+         * True when the first visible frame can show the finished water: the surface was skipped (gated off or an unsupported device)
+         * or destroyed, or it is awake with every simulation pass compiled, one simulation step run (the waves and foam exist), the
+         * FGD LUT rendered, every surface texture loaded or failed and every water mesh's material compiled for that mesh.
+         * @returns False before awake().
+         */
+        isWaterReady(): boolean;
+        /**
+         * Polls the surface until the splash no longer needs to wait for it, reporting the progress on the way. Never rejects: the job
+         * completes when the surface is ready, skipped, destroyed or disabled, when the scene is disposed, when a check throws and when
+         * WATER_PRELOAD_TIMEOUT_MS has passed.
+         * @param job - The surface's loading job.
+         * @returns Resolves once the job is complete.
+         */
+        private waitForWater;
+        /** True when the preload task can stop waiting: the water is ready, the scene is gone, or the surface never wakes (disabled). */
+        private isPreloadSettled;
+        /** Reports the water progress and the stage it waits on (the simulation stage at 0 until awake() has run). */
+        private reportWaterProgress;
+        /** The water job's progress, 0 to 1 (LoadingProgress.Blend of the simulation, texture and shader parts). */
+        private waterFraction;
+        /** The label of the first incomplete water stage (simulation, textures, shaders); the shader label once all are complete. */
+        private waterStageLabel;
+        /**
+         * The three weighted parts of the water job: the simulation (compiled passes plus the first simulation step and the FGD LUT),
+         * the surface textures loaded or failed, and the surface materials compiled for every mesh that uses them.
+         */
+        private waterProgressParts;
+        /** The surface's own textures (mask, foam mask, both current maps and, once bound, HDRP's foam texture), without duplicates. */
+        private surfaceTextures;
+        /** True when the material has compiled for every water mesh that draws with it (a material without meshes is ready). */
+        private isMaterialReady;
+        /** True when the texture has loaded or failed to load (a failed texture never holds the splash). */
+        private static IsTextureSettled;
+        /** Re-evaluates the spectrum / rendering after a property change (e.g. the wind speed): the foam curve follows. */
+        setWaterProperty(name: string, value: any): void;
+        getWaterProperty(name: string): any;
+        /** WaterSurface.largeWindSpeed (km/h). */
+        get largeWindSpeed(): number;
+        set largeWindSpeed(value: number);
+        /** WaterSurface.ripplesWindSpeed (km/h). */
+        get ripplesWindSpeed(): number;
+        set ripplesWindSpeed(value: number);
+        private materials;
+        private createMaterial;
+        private applyDefines;
+        /**
+         * The water-surface depth pass (HDRP's _RefractiveDepthBuffer, also the underwater mask): a clone of the surface material (the
+         * graph's own vertex, tessellation, instances and keywords) with HW_DEPTH_ONLY - camera-space z, 1, 0, 1 out. Its uniform values
+         * ARE the source material's (shared dictionaries), so graph properties and per-frame values follow. Lighting is off (depth only).
+         */
+        private buildDepthClones;
+        /** The depth-pass material of one of this surface's meshes (contract §5). */
+        getDepthMaterial(mesh: BABYLON.AbstractMesh): BABYLON.Material;
+        /** A flat grid in [-0.5, 0.5]² (x, z) of `resolution` cells, normals up (HDRP's tessellable mesh at 128). Pure. */
+        static GridData(resolution: number): {
+            positions: number[];
+            normals: number[];
+            indices: number[];
+        };
+        /** HDRP's ring mesh (one patch: the junction row doubles the vertex density towards the inner LOD). Pure. */
+        static RingData(): {
+            positions: number[];
+            normals: number[];
+            indices: number[];
+        };
+        /** HDRP's flat outer ring (ringMeshLow, 0.999 .. 1000). Pure. */
+        static LowData(): {
+            positions: number[];
+            normals: number[];
+            indices: number[];
+        };
+        /** The template level M: the odd cap of maxTessellationFactor (HDRP clamps to 64), within the vertex budget for `baseTriangles`. Pure. */
+        static TemplateLevel(maxFactor: number, baseTriangles: number): number;
+        /**
+         * The tessellation template: every triangle (A, B, C) becomes the lattice of M segments per edge (M² triangles, same winding);
+         * each vertex carries its triangle's control points (hwTessA/B/C), their normals (hwTessNA/NB/NC) and its lattice weights of A and
+         * B (hwTessIJ). `positions` are the plain lattice points (bounds, and the untessellated look). Pure.
+         */
+        static TessellationTemplate(data: {
+            positions: ArrayLike<number>;
+            normals: ArrayLike<number>;
+            indices: ArrayLike<number>;
+        }, M: number): any;
+        /**
+         * The template vertex HDRP's tessellator would emit, on the CPU (the shader's twin for the tests): control points in the
+         * canonical frame, per-edge factors e (x: B-C, y: C-A, z: A-B), the lattice (i, j) of level M. Returns the barycentric weights. Pure.
+         */
+        static TessellatedWeights(A: number[], B: number[], C: number[], e: number[], i: number, j: number, M: number): number[];
+        /** ComputePatchBounds (WaterSimulation.compute) in grid units: { center, size, rotation } of instanced patch `patch`. Pure. */
+        static PatchBounds(patch: number, gridSize: number[], patchOffset: number[], maxWaveDisplacement: number): {
+            center: number[];
+            size: number[];
+            rotation: number[];
+        };
+        private drawsLowRes;
+        private makeMesh;
+        private customTriangleCount;
+        private buildGeometry;
+        private findMesh;
+        private findNode;
+        /**
+         * Per camera (UpdataPerCameraConstantBuffer + DrawInstancedQuads + EVALUATE_INSTANCE_DATA): grid size, snapped patch offset,
+         * region alignment, _MaxLOD, the visible patches and their subdivision, the low-res skirt, the cull mode (two-sided only for the
+         * surface the camera is under) and the refraction inputs. Runs for every pass of a camera (its depth targets and its main pass).
+         */
+        prepareCamera(camera: BABYLON.Camera): void;
+        private num;
+        private v2;
+        private rgb;
+        private writeV4;
+        private writeM4;
+        private writeTex;
+        /** One warning when the export's C# numbers and this runtime's disagree (they are twins). */
+        private compareDerived;
+        /** The surface's own maps (partial decal workflow): water mask, simulation foam mask, current maps (lossless, linear). */
+        private loadSurfaceTextures;
+        private writeStaticUniforms;
+        /** The front-face convention of the meshes (1 flips gl_FrontFacing: the probe-verified orientation of Babylon's winding). */
+        static FrontFaceFlip: number;
+        private bindDecalAndMaskTextures;
+        /**
+         * The water decal region's textures (contract §3) - from the water decal system. A null slot falls back to HDRP's defaults. The
+         * surface-gradient and foam buffers are combined into one RGBA target (one fragment sampler: SG.xy, foam.xy).
+         */
+        setDecalTextures(textures: TOOLKIT.IHdrpWaterDecalTextures): void;
+        private combineDecals;
+        /**
+         * WaterSurface.UpdateDecalRegion, every frame: the region follows decalRegionAnchor, else the main camera. The decal system reads
+         * it (getDecalRegion) to render this frame's decal textures, so it is always computed here - taking it back from the decal
+         * textures would lock both at the first frame's region and the region would never follow the camera.
+         */
+        private updateDecalRegion;
+        /**
+         * The region the bound decal textures cover: the region the decal system rendered them for (contract section 3), else this
+         * frame's region when no decal textures are set. Sampling (shader and CPU queries) must use it so texels land where they were drawn.
+         * @returns The region centre (world x / z) and size in metres.
+         */
+        private decalTextureRegion;
+        /** Writes `hwDecal` (region centre, 1 / size) from the region the bound decal textures cover. */
+        private writeDecalRegionUniform;
+        /** WaterSurface.UpdateDecalRegion. Pure. */
+        static DecalRegion(regionSize: number[], anchorXZ: number[], clampToSurface: boolean, position: number[], extent: number[], foamResolution: number): {
+            center: number[];
+            size: number[];
+        };
+        private writeFrameUniforms;
+        /** Babylon's polynomial irradiance at a direction (the shader's computeEnvironmentIrradiance). Pure. */
+        static EvaluatePolynomial(sp: any, n: BABYLON.Vector3): number[];
+        /** D11: `scene.metadata.toolkit.mainlight` (the owner node id), else the first enabled directional light. */
+        static MainLight(scene: BABYLON.Scene): BABYLON.DirectionalLight;
+        /** FillWaterSurfaceProfile + the per-surface values the underwater pass needs. */
+        getProfile(): TOOLKIT.IHdrpWaterProfile;
+        /** The camera's height above the water surface (FindVerticalDisplacement at the camera, cached per frame). */
+        getCameraHeight(camera: BABYLON.Camera): number;
+        /** EvaluateUnderWaterSurface's rule for this surface alone (infinite: the band below the surface; else the volume box). */
+        isCameraUnderwater(camera: BABYLON.Camera): boolean;
+        /** HDRP 17.5 WaterSurface.ProjectPointOnWaterSurface (null when the surface cannot answer: not rendering, or script interactions off). */
+        ProjectPointOnWaterSurface(sp: TOOLKIT.IHdrpWaterSearchParameters): TOOLKIT.IHdrpWaterSearchResult;
+        /** HDRP 2022's name of the same query. */
+        FindWaterSurfaceHeight(sp: TOOLKIT.IHdrpWaterSearchParameters): TOOLKIT.IHdrpWaterSearchResult;
+        /** WaterSimSearchData: the CPU simulation (CPU mode, half or full resolution) or the GPU displacement (readback mode / camera height). */
+        private searchData;
+        /** Pixel data of a texture for the CPU queries (static maps read once, decal buffers re-read when the frame changed). */
+        private cpuTexture;
+        /** HDRP SampleTexture2DBilinear (repeat or clamp per the Unity wrap mode; mirror is treated as clamp, as HDRP does). Pure. */
+        static SampleBilinear(tex: any, u: number, v: number, channel: number, wrapU: number, wrapV: number): number;
+        private decalUV;
+        private cpuWaterMask;
+        private cpuDeformation;
+        /** EvaluateGroupXCurrentData (CPU). */
+        private cpuCurrent;
+        /** EvaluateSimulationDisplacement (CPU): { horizontal, dir, vertical[3] } at water-space (x, z). */
+        private cpuSimulationDisplacement;
+        /** SampleTexture2DArrayBilinear of one band's displacement (CPU simulation buffer, or the GPU buffer's texels in half precision). */
+        private cpuBandSample;
+        /** One displacement texel (repeat). CPU mode: the CPU simulation at its resolution. GPU readback: the GPU FFT's texel (point DFT, half). */
+        private cpuTexel;
+        private h0Of;
+        private htKey;
+        /** EvaluateNormal (CPU, unfiltered texel loads as HDRP). */
+        private cpuNormal;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * HDRP 17.5 water decals in the browser (contracts `_specs/hdrp-water_contracts.md` §3): the decal atlas, the per-surface decal
+     * regions (deformation + its filter and surface gradient, foam persistence / reprojection, simulation mask, large / ripples
+     * currents) and the hand-over to the water core (`TOOLKIT.HdrpWaterSurface.setDecalTextures`). Ported from
+     * Runtime/Water/HDRenderPipeline.WaterSystem.Decals.cs, Shaders/WaterDecal.shader, WaterDeformation.compute, WaterFoam.compute,
+     * WaterSurface.UpdateDecalRegion and Editor/Material/Water/ShaderGraph/WaterDecalShaderPass.template.
+     *
+     * A decal's material is a transpiled Water Decal Shader Graph (a Pass host data class, `SgPass.waterDecal`) rendered through
+     * TOOLKIT.ShaderGraphPass into its atlas slot (`sg_wdRect`, pass `sg_wdPass`, time `sg_wdTime` = HDRP _WaterDecalTimeParameters).
+     * Unity draws one quad per decal into each region with fixed-function blending (One One, Min); here every region is ONE fragment
+     * pass that gathers the visible decals per texel (identical coverage: a texel is inside a decal's rotated quad exactly when its
+     * centre maps into the quad's uv square), so WebGL2 and WebGPU need no blend-state support and read the same numbers.
+     * @class HdrpWaterDecalMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterDecalMath {
+        /** WaterDecal.PassType order: the atlas pass index (sg_wdPass.x). */
+        static readonly PassNames: string[];
+        /** The decals one region pass gathers (uniform array of 3 vec4 per decal: 192 vectors, under WebGL2's 224 minimum). */
+        static readonly MaxDecalsPerPass: number;
+        /** WaterSystem.k_FoamIntensityThreshold. */
+        static readonly FoamIntensityThreshold: number;
+        /** WaterDeformation.compute GaussianWeight sigma. */
+        static readonly FilterSigma: number;
+        /** WaterDecal.effectiveScale: lossyScale for InheritFromHierarchy, else one. */
+        static EffectiveScale(scaleMode: string, lossyScale: number[]): number[];
+        /**
+         * CullWaterDecals' WaterDecalData: [positionX, positionZ, cos a, sin a, sizeX, sizeZ, amplitude] with a = -eulerAngles.y (radians),
+         * size = 2 * regionSize * 0.5 * scale.xz and amplitude * scale.y.
+         */
+        static GpuData(positionWS: number[], eulerYDegrees: number, regionSize: number[], scale: number[], amplitude: number): number[];
+        /** CullWaterDecals' bounding-circle test of a decal against a region (centre xz, half size). */
+        static TouchesRegion(positionWS: number[], regionSize: number[], scale: number[], regionCenter: number[], regionHalf: number[]): boolean;
+        /** The decal uv of a world xz point (the inverse of WaterDecal.shader GetDecalVaryings), null outside the quad. */
+        static DecalUv(gpu: number[], worldX: number, worldZ: number): number[];
+        /** _FoamPersistenceMultiplier = 1 / lerp(0.05, 1, foamPersistenceMultiplier). */
+        static FoamPersistence(multiplier: number): number;
+        /** WaterDecal.shader FoamAttenuation: exp(-_DeltaTime * _FoamPersistenceMultiplier * 0.5). */
+        static FoamAttenuation(deltaTime: number, persistence: number): number;
+        /** Unity.Mathematics round (System.Math.Round: half to even). */
+        static RoundHalfEven(x: number): number;
+        /**
+         * WaterSurface.UpdateDecalRegion: the anchor's xz (no anchor: the origin, unsnapped); a procedural finite surface clips the
+         * region to its bounding square; the centre snaps to max(size) / foamResolution. Returns [centerX, centerZ, sizeX, sizeZ].
+         */
+        static DecalRegion(anchor: number[], regionSize: number[], foamResolution: number, proceduralFinite: boolean, waterPosition: number[], waterLossyScale: number[]): number[];
+        /** WaterDeformation.compute GaussianWeight(radius, sigma). */
+        static GaussianWeight(radius: number, sigma: number): number;
+        /** CPU twin of FilterDeformation (vertical channel): 3x3 Gaussian, border texels and out-of-range taps zero. */
+        static FilterDeformation(src: Float32Array, res: number): Float32Array;
+        /**
+         * CPU twin of EvaluateDeformationSurfaceGradient (vertical): EvaluateSurfaceGradients((0,h,0), (px,hr,0), (0,hu,py)) =
+         * SurfaceGradientFromPerturbedNormal(up, n).xz with n = normalize(cross(v1, v0)), n.y = max(|n.y|, 0.01).
+         */
+        static SurfaceGradient(h: number, hRight: number, hUp: number, pixelSize: number[]): number[];
+        /**
+         * The atlas layout: a shelf packer over a size x size atlas (HDRP's PowerOfTwoTextureAtlas packs differently - the layout only
+         * decides WHERE a slot lives, never its content). Returns key -> [x, y, w, h] in pixels, or null when the entries do not fit.
+         */
+        static PackAtlas(size: number, entries: {
+            key: string;
+            w: number;
+            h: number;
+        }[]): Map<string, number[]>;
+        /** HDRP's scaleBias of an atlas slot: (w, h, x, y) / atlas size. */
+        static ScaleOffset(rect: number[], atlasSize: number): number[];
+    }
+    /**
+     * The region passes, GLSL (ShaderStore) and WGSL (ShaderStoreWGSL). No `;` inside a `//` comment, no sampler parameters, every
+     * texture read by name, texel addressing through vUV (the same row order on both backends).
+     * @class HdrpWaterDecalShaders - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterDecalShaders {
+        static readonly Region: string;
+        static readonly Filter: string;
+        static readonly Gradient: string;
+        private static _registered;
+        static Register(): void;
+        /** Every source (the shader-rule tests read them). */
+        static AllSources(): string[];
+        static readonly RegionUniforms: string[];
+        static readonly RegionSamplers: string[];
+        static readonly FilterUniforms: string[];
+        static readonly GradientUniforms: string[];
+        static readonly SourceSamplers: string[];
+        /**
+         * The region gather. hwdRegion = (_DecalRegionOffset, _DecalRegionScale); hwdMode = (pass, decal count, _DeltaTime, foam attenuation);
+         * hwdPrevRegion = _PreviousFoamRegionScaleOffset; hwdFlags = (reproject foam, atlas half texel, 0, 0); hwdDecals = 3 vec4 per decal:
+         * (positionXZ, forwardXZ), (regionSize, data), (this pass's atlas scaleOffset - x below 0 when the slot is not cached).
+         */
+        static RegionGLSL(): string;
+        static RegionWGSL(): string;
+        /** FilterDeformation: hwdRes = (resolution, horizontal deformation 1/0, 0, 0). */
+        static FilterGLSL(): string;
+        static FilterWGSL(): string;
+        /** EvaluateDeformationSurfaceGradient: hwdRes = (resolution, horizontal 1/0, 0, 0), hwdRegion.zw = _DecalRegionScale. */
+        static GradientGLSL(): string;
+        static GradientWGSL(): string;
+    }
+    /**
+     * One HDRP WaterDecal (or legacy WaterDeformer / WaterFoamGenerator, exported as the decal it migrates to). Node component of the
+     * exporter's `UnityTools_HdrpWaterDecals.ComponentEntry`: { kind, regionsize, scalemode, amplitude, surfacefoamdimmer, deepfoamdimmer,
+     * resolution, updatemode, affects, material (portable graph block), materialid }.
+     * @class HdrpWaterDecal - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterDecal extends TOOLKIT.ScriptComponent {
+        /** WaterDecal.updateCount: the atlas re-renders this decal's slots when it changes (RequestUpdate, OnLoad, Realtime). */
+        updateCount: number;
+        private m_props;
+        private m_pass;
+        private m_passFailed;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected destroy(): void;
+        /** HDRP WaterDecal.RequestUpdate(): re-render the material into the atlas. */
+        requestUpdate(): void;
+        getProps(): any;
+        getUpdateMode(): string;
+        getMaterialId(): string;
+        getResolution(): number[];
+        /** WaterSystem.IsAffectingProperty per pass (WaterDecal.PassType order). */
+        affects(): boolean[];
+        /** IsValidMaterial: a material (the portable graph block) is present. */
+        isValid(): boolean;
+        /** Active in the hierarchy (WaterDecal.instances holds enabled decals only). */
+        isActive(): boolean;
+        /** The graph pass (TOOLKIT.ShaderGraphPass of the decal material's class), created once - null while missing. */
+        getPass(): any;
+        /** The decal's world position, Unity eulerAngles.y (degrees) and lossy scale (the transform's world matrix). */
+        getWorldPose(): {
+            position: number[];
+            eulerY: number;
+            lossyScale: number[];
+        };
+        /** CullWaterDecals' GPU data of this frame. */
+        gpuData(): number[];
+    }
+    /**
+     * The decal side of one HDRP WaterSurface (node component `TOOLKIT.HdrpWaterDecalSurface`, `UnityTools_HdrpWaterDecals.SurfaceEntry`):
+     * the asset's decal settings and the surface's decal regions. Its region targets are rendered by HdrpWaterDecalSystem.
+     * @class HdrpWaterDecalSurface - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterDecalSurface extends TOOLKIT.ScriptComponent {
+        private m_props;
+        private m_surface;
+        /** Region targets (created on demand, per resolution). */
+        targets: {
+            [name: string]: BABYLON.RenderTargetTexture;
+        };
+        /** WaterSurface.previousFoamRegionScaleOffset (scale xy, offset zw). */
+        previousFoamRegionScaleOffset: number[];
+        foamFront: number;
+        lastSimulationTime: number;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        protected awake(): void;
+        protected update(): void;
+        protected destroy(): void;
+        getProps(): any;
+        num(name: string, fallback: number): number;
+        flag(name: string): boolean;
+        /** The water core's TOOLKIT.HdrpWaterSurface on this node (contract §1), or null. */
+        getWaterSurface(): any;
+        /** The surface's decal region of this frame: the core's getDecalRegion (contract §1), else WaterSurface.UpdateDecalRegion here. */
+        getRegion(camera: BABYLON.Camera): {
+            center: number[];
+            size: number[];
+        };
+        /** The surface's _DeltaTime: the simulation time step (timeMultiplier 0 reads 1 so foam generators still show). */
+        simulationDelta(): number;
+    }
+    /**
+     * The scene's water decal system (HDRP WaterSystem's decal half): culls the decals against every surface region, keeps the atlas,
+     * renders each surface's regions and hands them to the water core. One per scene, cleared on dispose.
+     * @class HdrpWaterDecalSystem - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterDecalSystem {
+        private static _systems;
+        readonly scene: BABYLON.Scene;
+        decals: HdrpWaterDecal[];
+        surfaces: HdrpWaterDecalSurface[];
+        atlas: BABYLON.RenderTargetTexture;
+        atlasSize: number;
+        /** key (pass + materialid) -> { rect (pixels), updateCount rendered, requested this frame } */
+        private m_entries;
+        private m_renderer;
+        private m_wrappers;
+        private m_frame;
+        private m_maxInjectedFoam;
+        /** This frame's culling (CullWaterDecals). */
+        visible: {
+            decal: HdrpWaterDecal;
+            gpu: number[];
+            scaleOffsets: number[][];
+        }[];
+        active: boolean[];
+        maxDeformation: number;
+        private m_bind;
+        private constructor();
+        /** The scene's system (created on first use, disposed with the scene). */
+        static Get(scene: BABYLON.Scene): HdrpWaterDecalSystem;
+        registerDecal(decal: HdrpWaterDecal): void;
+        unregisterDecal(decal: HdrpWaterDecal): void;
+        registerSurface(surface: HdrpWaterDecalSurface): void;
+        unregisterSurface(surface: HdrpWaterDecalSurface): void;
+        dispose(): void;
+        /** The asset settings (any surface carries them). */
+        settings(): any;
+        /** HDRP's half-float render targets are needed (WebGL2 color-buffer-half-float, WebGPU always). */
+        static IsSupported(engine: BABYLON.AbstractEngine): boolean;
+        /** One frame: cull, refresh the atlas, render every surface's regions, hand them over (frame guarded). */
+        update(): void;
+        private cull;
+        private createAtlas;
+        /** A half-float RGBA target, clamped, never drawn by the scene's own render-target loop, cleared to `clear`. */
+        private makeTarget;
+        private clear;
+        private decalTime;
+        private processAtlas;
+        private target;
+        private wrapper;
+        /** Draws one region pass into `target`; false while its effect compiles. */
+        private draw;
+        /** hwdDecals for one pass: 3 vec4 per visible decal (position / forward, size / data, this pass's scaleOffset). */
+        private decalArray;
+        private updateSurface;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * HDRP 17.5 camera-UNDERWATER rendering for the browser (WebGL2 and WebGPU), ported from
+     * `Runtime/Water/HDRenderPipeline.WaterSystem.Underwater.cs` (EvaluateUnderWaterSurface, UpdateShaderVariablesGlobalWater,
+     * RenderWaterLine), `Runtime/Water/Shaders/WaterLine.compute` (ClearWaterLine, LineEvaluation1D, BoundsPropagation),
+     * `Runtime/Water/Shaders/UnderWaterUtilities.hlsl` (GetUnderWaterDistance, IsUnderWater, EvaluateSimulationCaustics,
+     * EvaluateUnderwaterAbsorption) and the underwater block of `Runtime/Lighting/AtmosphericScattering/AtmosphericScattering.hlsl`
+     * (extinction x multiplier, underwaterColor in-scatter, caustics, caustics sun-shadow dimmer), as HDRP applies it in the
+     * polychromatic opaque fog pass (`OpaqueAtmosphericScattering.shader` pass 2) and in the water fog kernel
+     * (`WaterLighting.compute` WaterFogIndirect, WATER_FOG_PASS) on the water surface's own pixels.
+     *
+     * - `HdrpUnderwaterMath`      pure maths + CPU twins of every GPU pass (the tests pin them).
+     * - `HdrpUnderwaterShaders`   GLSL + WGSL sources (ShaderStore / ShaderStoreWGSL) and the mask material sources.
+     * - `HdrpWaterUnderwater`     per camera: the water mask target (the water meshes displaced with the water core's contract
+     *                             vertex code, drawn into a small float target), the two water-line fragment passes, and the
+     *                             composite post pass (`Attach(scene, camera)` / `Detach(scene, camera)`).
+     *
+     * HDRP derives the water line from the water stencil + the depth buffer (closest water pixel per screen column, compute
+     * InterlockedMax). Here the stencil is the mask target: every water mesh drawn (two-sided) with the surface material's own
+     * displacement uniforms, occluded against the water-free depth map of the water core (`HdrpWaterSystem.DepthTexture`). The
+     * LineEvaluation scatter becomes an exact per-column gather (one texel per column), BoundsPropagation a second pass whose
+     * texels 0 and 1 carry HDRP's `_WaterLine[0]` / `_WaterLine[1]` bounds.
+     *
+     * Documented deviations (one report each): no normal buffer - the caustics triplanar weights use a normal reconstructed from
+     * the depth map; volumetric fog is not water-aware (HDRP's VBuffer switches to the water medium) - underwater pixels use the
+     * analytic path from the camera (volFogEnd = 0); transparents are fogged at the opaque depth behind them (post pass); the
+     * hole-patch reads the pre-patch line (HDRP's read races with the same kernel's writes); a rolled camera samples each
+     * column along its line (HDRP scatters every pixel to its rounded column).
+     * @class HdrpUnderwaterMath - All rights reserved (c) 2024 Mackey Kinard
+     */
+    interface IHdrpUnderwaterCandidate {
+        underWater: boolean;
+        infinite: boolean;
+        maxWaveHeight: number;
+        volumeHeight: number;
+        volumeDepth: number;
+        volumePriority: number;
+        up: number[];
+        position: number[];
+        bounds: {
+            center: number[];
+            size: number[];
+            rotation: number[];
+        } | null;
+    }
+    interface IHdrpWaterLineSetup {
+        up: number[];
+        right: number[];
+        boundsSS: number[];
+        stride: number;
+        reductionSize: number;
+        columns: number;
+        maxHeight: number;
+    }
+    interface IHdrpUnderwaterFog {
+        extinction: number[];
+        underwaterColor: number[];
+        exposure: number;
+    }
+    class HdrpUnderwaterMath {
+        /** WaterSystem k_MaxNumWaterSurfaceProfiles. */
+        static readonly MaxSurfaces: number;
+        /** 0xFFFFFFFF (an empty `_WaterLine[0]` reads back as this). */
+        static readonly UintMax: number;
+        /** float.Epsilon (Collider.ClosestPoint containment test). */
+        static readonly FloatEpsilon: number;
+        static dot3(a: number[], b: number[]): number;
+        static num(v: any, fallback: number): number;
+        /** HLSL round (round half to even, D3D round_ne). */
+        static RoundEven(x: number): number;
+        /** Packing.hlsl UnpackInt(f, 16) - the 16-bit depth key of LineEvaluation1D. */
+        static QuantizeDepth16(d: number): number;
+        /**
+         * The device depth HDRP packs (reversed Z: 1 at the near plane, 0 at the far plane) from a camera-space z.
+         * Perspective n(f - z) / (z (f - n)), orthographic (f - z) / (f - n).
+         */
+        static ReversedDeviceDepth(z: number, near: number, far: number, orthographic: boolean): number;
+        /** BoxCollider.ClosestPoint(p) == p: `p` inside (or on) the oriented box { center, size (full extents), rotation (x,y,z,w) }. */
+        static BoundsContain(bounds: {
+            center: number[];
+            size: number[];
+            rotation: number[];
+        }, p: number[]): boolean;
+        /**
+         * EvaluateUnderWaterSurface: the first / highest-priority surface whose volume holds the camera. Infinite surfaces test
+         * the slab [surface - volumeDepth, surface + max(max(2H, 0.1), volumeHeight)] along the up vector, the others their
+         * volume bounds (none -> never). Returns { index (-1 = none), upHeight (_UnderWaterUpHeight) }.
+         */
+        static EvaluateUnderWaterSurface(cameraPos: number[], surfaces: IHdrpUnderwaterCandidate[]): {
+            index: number;
+            upHeight: number[];
+        };
+        /** GetScreenSpaceBounds: min / max of dot(direction, corner) over the four screen corners. */
+        static ScreenSpaceBounds(direction: number[], width: number, height: number): number[];
+        /**
+         * UpdateShaderVariablesGlobalWater's water-line set-up. `clipUp` = viewProj.MultiplyVector(up) (the 3x3 part, no divide,
+         * HDRP's GPU projection: y flipped - pixel rows run up from the image bottom, Babylon's uv x size),
+         * `width` / `height` in pixels of the target the line is evaluated on.
+         */
+        static WaterLineSetup(clipUp: number[], width: number, height: number): IHdrpWaterLineSetup;
+        /** The constant set-up HDRP uses without an underwater surface (`_BoundsSS = (0,0,-1,1)`, up (0,1), stride 0). */
+        static NeutralSetup(): IHdrpWaterLineSetup;
+        /**
+         * LineEvaluation1D, exactly (the reference): every visible water pixel scatters its (16-bit reversed depth, height + 1)
+         * to its column, the larger pair wins (InterlockedMax). `water(x, y)` returns the pixel's camera-space z, or null.
+         * Returns the per-index height + 1 (0 = no water) of the `stride`-long buffer (indices 0 and 1 stay 0).
+         */
+        static LineEvaluationScatter(water: (x: number, y: number) => number, width: number, height: number, setup: IHdrpWaterLineSetup, near: number, far: number, orthographic: boolean): Float64Array;
+        /** The fragment-pass twin of LineEvaluation1D (what `toolkitHdrpUnderwaterLine` computes): a gather along each column. */
+        static LineEvaluationGather(water: (x: number, y: number) => number, width: number, height: number, setup: IHdrpWaterLineSetup, near: number, far: number, orthographic: boolean): Float64Array;
+        /**
+         * BoundsPropagation (+ ClearWaterLine): `line` from LineEvaluation (height + 1 per index), `cameraHeight` the camera height
+         * above the surface (GetWaterCameraHeight), `near` the near plane. Returns the final buffer: [0] leftmost water column
+         * (UintMax when none), [1] rightmost (0 when none), [c + 2] the column's water line + 1.
+         */
+        static BoundsPropagation(line: Float64Array, setup: IHdrpWaterLineSetup, cameraHeight: number, near: number): Float64Array;
+        /** GetUnderWaterDistance at the integer pixel `coord` (< 0 = under water). */
+        static UnderWaterDistance(buffer: Float64Array, setup: IHdrpWaterLineSetup, coord: number[]): number;
+        /** CommonMaterial.hlsl ComputeTriplanarWeights. */
+        static TriplanarWeights(n: number[]): number[];
+        /**
+         * EvaluateSimulationCaustics coordinates: { coord (xyz), uv0 (xz), uv1 (xy), uv2 (zy), weight, bias } for a world point
+         * `p` at `depth` below the surface. `worldToWater` is a 16-array (Babylon row-vector order, p * M).
+         */
+        static CausticsCoordinates(p: number[], depth: number, worldToWater: number[], tilingInv: number, regionSize: number, planeBlend: number, maxLod: number): any;
+        /** EvaluateSimulationCaustics' blend: 1 + dot(values, w.yzx) x weight x intensity. */
+        static CausticsValue(values: number[], weights: number[], weight: number, intensity: number): number;
+        /** SUPPORT_WATER_CAUSTICS_SHADOW: 1 + (caustics - 1) x lerp(dimmer, 1, sunShadow). */
+        static CausticsShadow(caustics: number, dimmer: number, sunShadow: number): number;
+        /**
+         * The underwater branch of EvaluateAtmosphericScattering (no volumetric fog: color = opacity = 0, volFogEnd = 0) for a
+         * pixel at ray distance `tFrag`, ray·up = `cosZenith` (= -dot(V, up)), `distanceToSurface` below the surface, `caustics`.
+         * Returns per channel { color, opacity } - the composite is color + (1 - opacity) x surface.
+         */
+        static UnderwaterFog(fog: IHdrpUnderwaterFog, tFrag: number, cosZenith: number, distanceToSurface: number, caustics: number): {
+            color: number[];
+            opacity: number[];
+        };
+        /** OutputFog(surfColor, volColor, volOpacity): volColor + (1 - volOpacity) x surfColor. */
+        static Composite(surface: number[], fog: {
+            color: number[];
+            opacity: number[];
+        }): number[];
+        /** max(-dot(P - C, up) - cameraHeight, 0): the pixel's depth below the surface (camera-relative, as HDRP's RWS). */
+        static DistanceToSurface(p: number[], eye: number[], up: number[], cameraHeight: number): number;
+    }
+    /**
+     * GLSL + WGSL of the underwater passes. No `;` inside a `//` comment of a shader string, no sampler parameters, every WGSL
+     * texture declared with its sampler.
+     * @class HdrpUnderwaterShaders - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpUnderwaterShaders {
+        static readonly LineName: string;
+        static readonly BoundsName: string;
+        static readonly CompositeName: string;
+        static readonly LineUniforms: string[];
+        static readonly CompositeUniforms: string[];
+        static readonly CompositeSamplers: string[];
+        private static registered;
+        static Register(): void;
+        /** Every registered source plus the mask sources (the tests scan them). */
+        static AllSources(): string[];
+        private static GlslLineUniforms;
+        private static WgslLineUniforms;
+        /** LineEvaluation1D as a gather: texel j >= 2 is column j - 2, the closest visible water pixel's height + 1 (0 = none). */
+        static LineGlsl(): string;
+        static LineWgsl(): string;
+        /** BoundsPropagation: texel 0 / 1 the leftmost / rightmost water column, texel c + 2 the patched water line + 1. */
+        static BoundsGlsl(): string;
+        static BoundsWgsl(): string;
+        /** The composite (opaque fog pass 2 + water fog kernel, underwater branch) - GLSL. */
+        static CompositeGlsl(): string;
+        /** The composite - WGSL (implicit-derivative samples stay in uniform control flow). */
+        static CompositeWgsl(): string;
+        /** Names declared by `source` (GLSL `uniform <type> <name>`, WGSL `uniform <name>:` / `var <name>:`). */
+        static DeclaredNames(source: string, wgsl: boolean): Set<string>;
+        /** The custom uniforms of `material` (a CustomShaderMaterial) that `source` references: [{ name, kind }]. */
+        static ReferencedUniforms(material: any, source: string): {
+            name: string;
+            kind: string;
+        }[];
+        /** Declarations for the referenced uniforms `source` does not declare itself. */
+        static ExtraDeclarations(refs: {
+            name: string;
+            kind: string;
+        }[], source: string, wgsl: boolean): string;
+        /**
+         * The mask vertex shader: the mesh's world position, moved into water space, displaced by the water core's
+         * `hwEvaluateWaterDisplacement` (contract section 5) when `displace`, back to world, camera-space z to the fragment.
+         */
+        static MaskVertex(wgsl: boolean, definitions: string, displacement: string, refs: {
+            name: string;
+            kind: string;
+        }[], displace: boolean): string;
+        /** The mask fragment: (camera-space z, 1 = water, 0, 1). */
+        static MaskFragment(wgsl: boolean): string;
+    }
+    /**
+     * The camera-underwater pass of one camera (post pass `hdrpUnderwater`, after `hdrpFog`). Every frame (onBeforeCameraRender):
+     * EvaluateUnderWaterSurface over `HdrpWaterSurface.Surfaces(scene)`; when a surface holds the camera, the water mask target
+     * joins the camera's custom render targets, and right after it the two water-line passes run; the post pass then fogs the
+     * pixels under the water line (opaque and sky: polychromatic opaque fog pass, water surface: water fog kernel) over the
+     * PRE-fog colour (HDRP skips the atmospheric fog under water), every other pixel passes through.
+     * @class HdrpWaterUnderwater - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class HdrpWaterUnderwater {
+        static readonly PassName: string;
+        /** The mask / water-line resolution relative to the render size. */
+        static MaskScale: number;
+        /** Contract section 2 delivers `underwaterColor` pre-exposed: the pass multiplies by 1 (HDRP's GetCurrentExposureMultiplier). */
+        static UnderwaterColorPreExposed: boolean;
+        private static readonly CameraKey;
+        readonly scene: BABYLON.Scene;
+        readonly camera: BABYLON.Camera;
+        pass: BABYLON.PostProcess;
+        /** This frame's state: { active, index, surface, setup, cameraHeight, upHeight, ... } (read by the water core for its cull mode). */
+        state: any;
+        private mask;
+        private lineA;
+        private lineB;
+        private renderer;
+        private linePass;
+        private boundsPass;
+        private materials;
+        private neutral;
+        private ownDepth;
+        private textureType;
+        private defines;
+        private observers;
+        private current;
+        private disposed;
+        /** The pass of `camera`, or null. */
+        static Get(camera: BABYLON.Camera): TOOLKIT.HdrpWaterUnderwater;
+        /** The water surface whose underwater volume holds `camera` this frame (null = none) - HDRP draws it Cull Off. */
+        static ActiveSurface(camera: BABYLON.Camera): any;
+        /** WebGL2 / WebGPU with half-float render targets (as the water core). */
+        static IsSupported(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * Creates (once) the underwater pass of `camera` and returns its post process (the caller places it in the chain, right
+         * after the HDRP fog pass). Null when the device cannot (one warning). `options.preFog` = the HDRP fog pass when known
+         * (found in the camera's chain otherwise).
+         */
+        static Attach(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
+            textureType?: number;
+            preFog?: BABYLON.PostProcess;
+        }): BABYLON.PostProcess;
+        /** Removes and disposes the pass of `camera`. */
+        static Detach(scene: BABYLON.Scene, camera: BABYLON.Camera): void;
+        /** The surfaces' candidate data for EvaluateUnderWaterSurface (contract sections 1 / 2, property bag fallbacks). */
+        static Candidates(surfaces: any[]): IHdrpUnderwaterCandidate[];
+        private static Warn;
+        private static UpOf;
+        private static Surfaces;
+        private constructor();
+        private observe;
+        private lineTarget;
+        private wrapper;
+        private neutralTexture;
+        /** The camera-space z of everything but the water (the water core's map, else an own one with the same rule). */
+        private depthMap;
+        private meshesOf;
+        /** onBeforeCameraRender: EvaluateUnderWaterSurface + UpdateShaderVariablesGlobalWater, gate the mask target. */
+        private evaluate;
+        private resize;
+        /** Every water mesh with its surface's mask material and this frame's uniform values. */
+        private prepareMask;
+        private maskMaterial;
+        private copyUniforms;
+        /** Right after the mask: LineEvaluation1D then BoundsPropagation (+ ClearWaterLine: every texel is written). */
+        private runLinePasses;
+        /** The defines of this frame: caustics, and the caustics sun-shadow dimmer (single / cascaded PCF map). */
+        private passDefines;
+        /** HDRP's _UnderWaterCaustics* of the surface, or null when it draws none. */
+        private causticsOf;
+        /** The main directional light's PCF / PCSS shadow map when the surface asks for the caustics sun-shadow dimmer. */
+        private shadowOf;
+        /** The pass's input rect inside a pre-pass target (as HdrpFogPass), else the full texture. */
+        private inputRect;
+        /** The HDRP fog pass ahead of this one in the camera's chain (its INPUT is the pre-fog colour). */
+        private fogPassOf;
+        private bindComposite;
+        dispose(): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
      * The public Unity-unit settings of a lens-distortion pass (inspector-truth T3, FR-9), exposed as `postProcess.unity`
      * and converted to the plugin's model coefficients by `LensDistortionPlugin.DeriveModel` every frame (through the
      * conversion table: `lensDistortionNormalised` / `lensDistortionIntensity` / `lensDistortionModelScale` /
@@ -18488,6 +23755,97 @@ declare namespace TOOLKIT {
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
+    /** One row of the "Light Probes" section: a read-out (`text`) or a live setting (`switch` / `number`) of the scene's light probe network. */
+    interface ILightProbeInspectorRow {
+        key: string;
+        label: string;
+        kind: string;
+        description: string;
+        /** Re-read every frame (attach counts, walk steps); every other row re-reads on LightProbeNetwork.OnNetworkChangedObservable. */
+        live?: boolean;
+        /** Whether the row is present for this network / scene header (default: always). */
+        present?: (network: TOOLKIT.LightProbeNetwork, header: any) => boolean;
+        get: (network: TOOLKIT.LightProbeNetwork, header: any) => any;
+        set?: (network: TOOLKIT.LightProbeNetwork, value: any) => void;
+        min?: number;
+        max?: number;
+        step?: number;
+        unit?: string;
+    }
+    /**
+     * The "Light Probes" properties section of Babylon's Inspector v2 and the Scene Explorer "Show Debug Probes"
+     * toggle (the runtime twin of CVPanel's "Debug Light Probes"), for the scene's TOOLKIT.LightProbeNetwork.
+     *
+     * Built like PostProcessingInspector: the plain-function property lines of the `INSPECTOR` UMD global are composed
+     * inside row components the Inspector mounts itself (no React shipped or referenced), one `addSectionContent` per row
+     * so presence is the registration predicate, never a null branch. The section shows when the Scene or the network's
+     * host node (`SceneRoot`) is selected; the toggle is an inline command on that node. Every export used is checked by
+     * name first, so a renamed export disables the section with one warning; an absent global registers nothing.
+     * `LightProbeNetwork.InspectorSection = false` opts out. Reached only through `WindowManager.ShowInspector`.
+     */
+    class LightProbeInspector {
+        /**
+         * The section identity (its title) and its order. The built-in Scene sections take their list position as order
+         * ("Rendering" 0, "Material Image Processing" 1, ...), so 0.5 places the section right after "Rendering".
+         */
+        static readonly SectionIdentity: string;
+        static readonly SectionOrder: number;
+        /** The Inspector v2 exports the section composes; each is checked by name before anything registers. */
+        static readonly RequiredExports: string[];
+        /** The Scene Explorer command's display name (its tooltip and context-menu label). */
+        static readonly ToggleCommandName: string;
+        /** The toggle's 20x20 icon: a probe tetrahedron (Fluent "regular" weight, currentColor). */
+        static readonly IconMarkup: string;
+        /** The section rows, in display order. Counts come from the scene header so a disabled network still shows what was exported. */
+        static get Rows(): ILightProbeInspectorRow[];
+        private static rows;
+        /** A count or measurement as text: integers as-is, other numbers to 4 significant digits. */
+        static Format(value: any): string;
+        /** The scene's network when `entity` is the Scene or the network's host node, else null. */
+        static ResolveNetwork(entity: any): TOOLKIT.LightProbeNetwork;
+        /** The network hosted by `entity` (a node the Scene Explorer lists), else null. */
+        static ResolveHostNode(entity: any): TOOLKIT.LightProbeNetwork;
+        /** The scene header (`scene.metadata.toolkit.lightprobes`) of a network, or null. */
+        static GetHeader(network: TOOLKIT.LightProbeNetwork): any;
+        /** Whether `row` is present for `entity`. */
+        static IsRowPresent(entity: any, row: ILightProbeInspectorRow): boolean;
+        /** The Inspector v2 UMD global (`INSPECTOR`) resolved at call time from `globalThis`, or null. */
+        static GetInspectorGlobal(): any;
+        /** Whether the section can register: the global exists and carries every `RequiredExports` name (one warning names a missing one). */
+        static IsAvailable(inspector?: any): boolean;
+        /**
+         * The service definitions the toolkit's show path passes to `INSPECTOR.ShowInspector`: `[]` when opted out or
+         * unavailable, else the properties section plus (when the global has the Scene Explorer service) the toggle command.
+         */
+        static GetServiceDefinitions(inspector?: any): IInspectorServiceDefinition[];
+        /** Notifies the network change observable (a setting the section edits changed). */
+        static Changed(network: TOOLKIT.LightProbeNetwork): void;
+        /**
+         * The section factory: one content per row (presence by predicate), plus an empty trigger content re-registered on
+         * every network change so the pane re-runs the predicates (a network created or loaded while the Inspector is open).
+         */
+        static Register(inspector: any, properties: any): {
+            dispose: () => void;
+        };
+        /** One row component: the hook first, unconditionally, then exactly one property line of the row's kind (never null). */
+        static RenderRow(inspector: any, context: any, row: ILightProbeInspectorRow): any;
+        /**
+         * The Scene Explorer factory: an inline toggle on the network's host node (the eye / bounding-box style buttons),
+         * bound to `setDebugVisible`, re-rendered on every network change.
+         */
+        static RegisterCommand(inspector: any, explorer: any): {
+            dispose: () => void;
+        };
+        /**
+         * The toggle's icon component. The Inspector renders it as an element type, so it must return a React element
+         * without a React reference: the element shape is copied from one the global's own `TextPropertyLine` returns (a
+         * hook-free factory), retyped to an inline SVG. Should that ever fail, the icon is a plain glyph (text is a valid node).
+         */
+        static CreateIcon(inspector: any): () => any;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /**
      * Tetrahedral light-probe lookup over typed arrays (plan lpn D30). No allocation after construction.
      *
@@ -18521,6 +23879,11 @@ declare namespace TOOLKIT {
         private _clampWeights;
         /** out[outOffset + k] = scale * sum_i weights[i] * probeSh[indices[tet*4+i]*27 + k], k in 0..26. */
         blend(tet: number, scale: number, out: Float32Array, outOffset: number): void;
+        /**
+         * Built-in light probe occlusion: out[0..3] = sum_i weights[i] * table[indices[tet*4+i]*4 + c] for the cell of the
+         * last sample(), or the nearest probe's own Vector4 when `tet` is -1 (no tetrahedra).
+         */
+        blendOcclusion(tet: number, px: number, py: number, pz: number, table: Float32Array, out: Float32Array): void;
         /** locate + blend; with tetraCount 0 copies the nearest probe. Returns the cell used (-1 for the nearest-probe fallback). */
         sample(px: number, py: number, pz: number, startTet: number, scale: number, out: Float32Array, outOffset: number): number;
     }
@@ -18536,6 +23899,10 @@ declare namespace TOOLKIT {
         static MaxWalkSteps: number;
         /** Show Debug Probes: diameter (metres) of the yellow sphere drawn at every probe position. Read when the spheres are built. */
         static DebugProbeSize: number;
+        /** Register the "Unity Light Probes" Inspector v2 section and the Scene Explorer "Show Debug Probes" toggle (LightProbeInspector); false opts out. */
+        static InspectorSection: boolean;
+        /** Notified when a network is created, loads, is disabled, shows / hides / rebuilds its debug probes, or is destroyed (the Inspector section re-renders on it). */
+        static readonly OnNetworkChangedObservable: BABYLON.Observable<TOOLKIT.LightProbeNetwork>;
         /** The binary's seven sections in file order (plan lpn D23); the header's `layout` names them. */
         private static readonly Sections;
         private _url;
@@ -18547,6 +23914,7 @@ declare namespace TOOLKIT {
         private _rendererSh;
         private _rendererOcclusion;
         private _rendererAnchor;
+        private _probeOcclusion;
         private _networkActive;
         private _networkReason;
         private _networkAwake;
@@ -18611,6 +23979,9 @@ declare namespace TOOLKIT {
         isDebugVisible(): boolean;
         /** Show Debug Probes: shows or hides a small yellow sphere at every probe position. Callable before the binary loads - the spheres appear once it has. */
         setDebugVisible(visible: boolean): void;
+        /** Show Debug Probes: disposes the built spheres so they are rebuilt with the current DebugProbeSize (at once while shown). */
+        rebuildDebugProbes(): void;
+        private disposeDebugProbes;
         /** Builds the debug spheres on first show (one unlit, unpickable, thin-instanced mesh - a single draw for any probe count) and toggles them. */
         private updateDebugProbes;
         /**
@@ -21432,6 +26803,1141 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
+    /** One planar probe's allocation entry (pure helpers / tests). */
+    interface IPlanarReflectionEntry {
+        props: any;
+        owner?: any;
+    }
+    /**
+     * hdrp-complete-parity T10 (D16): an HDRP PlanarReflectionProbe as a `BABYLON.MirrorTexture`. Per scene the probes are sorted by
+     * influence-volume size (largest first) and the first `Budget` become mirrors; the rest keep their cubes with one report
+     * (`hdrp:planar:budget`). Receivers are the meshes whose bounds centre lies inside the influence volume: their PBR material is
+     * cloned once with `reflectionTexture` = the mirror (half float, so the reflection keeps the scene's pre-exposed HDR radiance),
+     * the mirror's spherical polynomial is the scene environment's (x its level) so diffuse IBL survives. Dispose restores the
+     * original materials.
+     * @class PlanarReflection - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class PlanarReflection extends TOOLKIT.ScriptComponent {
+        static Budget: number;
+        static readonly BudgetWarning: string;
+        private static Registry;
+        private m_props;
+        private m_mirror;
+        private m_receivers;
+        private m_observer;
+        private m_swapObservers;
+        /** One persistent 1x1 black cube per scene - the environment while a planar mirror renders (see SwapEnvironment). */
+        private static BlackEnvironments;
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        getMirror(): BABYLON.MirrorTexture;
+        getReceivers(): BABYLON.AbstractMesh[];
+        protected awake(): void;
+        protected destroy(): void;
+        /** The influence volume's size: box x*y*z, sphere 4/3 pi r^3. */
+        static VolumeSize(props: any): number;
+        /** Splits the probes into the `budget` largest (mirrored) and the rest (degraded to cubes). */
+        static Allocate<T extends IPlanarReflectionEntry>(entries: T[], budget: number): {
+            mirrored: T[];
+            degraded: T[];
+        };
+        /** True when a world point lies inside the influence volume (box axis-aligned in world at the probe position, or sphere). */
+        static Contains(props: any, point: BABYLON.Vector3): boolean;
+        /** The receivers: meshes with a PBR material whose world bounds centre lies inside the influence volume. */
+        static SelectReceivers(meshes: BABYLON.AbstractMesh[], props: any): BABYLON.AbstractMesh[];
+        /** The Unity layer of a node: its own toolkit metadata, else the nearest ancestor's (glTF primitives carry none), else 0. */
+        static LayerOf(node: BABYLON.Node): number;
+        /** True when the node's layer bit is in the exported culling mask (Unity int, -1 = everything); no mask = everything. */
+        static PassesCullingMask(node: BABYLON.Node, mask: any): boolean;
+        /** The mirror's render list: enabled meshes passing the culling mask, minus the receivers. */
+        static BuildRenderList(meshes: BABYLON.AbstractMesh[], receivers: BABYLON.AbstractMesh[], mask: any): BABYLON.AbstractMesh[];
+        /**
+         * HDRP's reflection captures run without sky reflection (FrameSettingsDefaults: EnableSkyReflection is not in the
+         * planar / cube capture lists), so a surface lit only by the sky has NO specular inside a planar probe - only the
+         * ambient (SH) diffuse. While the mirror renders, the scene environment becomes a persistent 1x1 black cube carrying
+         * the real environment's spherical polynomial and level (diffuse survives, sky specular goes black). The swap writes
+         * the backing field so no material is marked dirty: the black cube keeps the same texture kind (cube) and defines,
+         * so the effects compiled for the real environment are reused. Materials with their own reflection cube ignore it.
+         * Returns the environment to restore (null when nothing was swapped).
+         */
+        static SwapEnvironment(scene: BABYLON.Scene, black: BABYLON.BaseTexture): BABYLON.BaseTexture;
+        /** Puts the environment SwapEnvironment returned back (backing field - no dirty marking). */
+        static RestoreEnvironment(scene: BABYLON.Scene, previous: BABYLON.BaseTexture): void;
+        /** The scene's persistent 1x1 black cube (alpha 1, so an RGBD decode is 0 too), created once. */
+        static GetBlackEnvironment(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        /** Clones each receiver's material once with the mirror as its reflection texture. */
+        static ApplyToReceivers(receivers: BABYLON.AbstractMesh[], mirror: BABYLON.BaseTexture): {
+            mesh: BABYLON.AbstractMesh;
+            original: BABYLON.Material;
+            clone: BABYLON.Material;
+        }[];
+        /** Puts every receiver's original material back and disposes the clones. */
+        static RestoreReceivers(entries: {
+            mesh: BABYLON.AbstractMesh;
+            original: BABYLON.Material;
+            clone: BABYLON.Material;
+        }[]): void;
+        /** Allocates the scene's budget: the largest probes mirror, the others report once and keep the cubes. */
+        static AllocateScene(scene: BABYLON.Scene): void;
+        private createMirror;
+        private release;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Plays a Unity Timeline baked at export: the runtime twin of Unity's PlayableDirector. The exporter bakes what Unity
+     * evaluated (the Cinemachine camera, animated objects, property curves, activations, audio, signals and control
+     * clips) and this component plays it back with Unity's clock, wrap modes, events and API names.
+     *
+     * The director owns the clock, the play state, the events, binding and release, and the shot API. Each track kind
+     * poses its own objects (see PlayableDirectorTracks.ts). Nothing is touched until the director binds: on its first
+     * play(), evaluate() or skipToEnd(), or when a parent Control clip drives it.
+     *
+     * @example
+     * const director: TOOLKIT.PlayableDirector = TOOLKIT.PlayableDirector.Find(scene);
+     * director.onStoppedObservable.add(() => showMenu());
+     * director.onShotChangedObservable.add((shotName: string) => console.info("Now showing", shotName));
+     * director.nextShot();                                   // jump to the next shot, keep playing or paused
+     * director.beginScrub(); director.time = 12.5; director.endScrub(); // drag a scrubber
+     * director.togglePlayback();
+     */
+    class PlayableDirector extends TOOLKIT.ScriptComponent {
+        /** Longest step the clock advances in one frame, in seconds (Unity's default Time.maximumDeltaTime), so a load hitch does not skip a shot. */
+        private static readonly MAX_FRAME_DELTA;
+        /** Converts the engine's millisecond frame delta to seconds. */
+        private static readonly MILLISECONDS_PER_SECOND;
+        /** Frame rate used when the export carries none. */
+        private static readonly DEFAULT_FRAME_RATE;
+        /** The exported property bag version this runtime plays (D4). */
+        private static readonly SUPPORTED_VERSION;
+        /** Every constructed director, per scene, in construction order (for Find). */
+        private static readonly directorsByScene;
+        /** Raised when the director starts playing: play(), and resume() from Paused. */
+        readonly onPlayedObservable: BABYLON.Observable<PlayableDirector>;
+        /** Raised when pause() pauses a playing director. Scrubbing raises nothing. */
+        readonly onPausedObservable: BABYLON.Observable<PlayableDirector>;
+        /** Raised by stop(), when a Hold timeline reaches its end (once; it stays Playing) and when a None timeline finishes and releases. */
+        readonly onStoppedObservable: BABYLON.Observable<PlayableDirector>;
+        /** Raised with the shot name whenever the camera enters another shot (including the first). */
+        readonly onShotChangedObservable: BABYLON.Observable<string>;
+        /** Raised for every signal the playhead fires, after its receiver reactions ran. */
+        readonly onSignalObservable: BABYLON.Observable<TOOLKIT.ITimelineSignalEvent>;
+        private wrapMode;
+        private updateMode;
+        /** Unity's initialTime: where play starts and where every release rewinds to, in seconds. */
+        private startTime;
+        /** The timeline duration in seconds. */
+        private timelineDuration;
+        /** The timeline's frame rate in frames per second. */
+        private frameRate;
+        /** Unity's playOnAwake. */
+        private autoPlay;
+        /** The playback speed multiplier, 0 or more. */
+        private speed;
+        /** The exported bake version. */
+        private exportedVersion;
+        private exportVersionSupported;
+        /** The key the baked animation groups carry in metadata.toolkit.timeline (D5). */
+        private timelineKey;
+        private currentTime;
+        private playState;
+        private isBound;
+        private scrubbing;
+        private resumeAfterScrub;
+        /** A Hold timeline reported its end (stopped raised) since it last played or moved. */
+        private holdEndReported;
+        private assetWarningShown;
+        /** A None child finished inside its parent's Control clip and stays released until the clip is left. */
+        private finishedInParentClip;
+        private parentDirector;
+        private unscaledObserver;
+        /** The one reusable frame description handed to every track (evaluation allocates nothing). */
+        private readonly frame;
+        /** The tracks in bind and evaluate order (D9): camera, animation, curves, activation, control, signals, audio. */
+        private tracks;
+        /** The tracks in release order (D9): audio, control, signals, activation, curves, animation, camera. */
+        private releaseTracks;
+        /** buildTracks() has run (in awake, or earlier from a parent's Control clip). */
+        private tracksBuilt;
+        private cameraTrack;
+        private signalTrack;
+        private audioTrack;
+        private controlTrack;
+        /**
+         * Creates the director on its exported node and reads the exported settings. The toolkit calls this for every
+         * node whose metadata names TOOLKIT.PlayableDirector.
+         * @param transform The node the Unity PlayableDirector was on.
+         * @param scene The scene the node belongs to.
+         * @param properties The exported property bag (DR-4).
+         * @param alias The registered class name.
+         */
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /**
+         * Finds a director in a scene.
+         * @param scene The scene to search.
+         * @param nameOrPath A node name or Unity hierarchy path (Parent/Child). Omit it to get the first playOnAwake director.
+         * @returns The director on the node at nameOrPath, or with no argument the scene's first registered director with
+         * playOnAwake; null when none.
+         */
+        static Find(scene: BABYLON.Scene, nameOrPath?: string): PlayableDirector;
+        /** The playhead position in seconds. Writing it seeks (clamped to 0..duration); before the director binds it only stores the value. */
+        get time(): number;
+        set time(seconds: number);
+        /** Where play starts and every release rewinds to, in seconds (Unity's initialTime). */
+        get initialTime(): number;
+        /** The timeline duration in seconds. */
+        get duration(): number;
+        /** Playing or Paused. A Hold timeline that reached its end stays Playing, as in Unity. */
+        get state(): TOOLKIT.DirectorPlayState;
+        /** What the director does at the end: Hold, Loop or None. */
+        get extrapolationMode(): TOOLKIT.DirectorWrapMode;
+        set extrapolationMode(mode: TOOLKIT.DirectorWrapMode);
+        /** The clock that advances the director: GameTime (and DSPClock), UnscaledGameTime or Manual. */
+        get timeUpdateMode(): TOOLKIT.DirectorUpdateMode;
+        set timeUpdateMode(mode: TOOLKIT.DirectorUpdateMode);
+        /** Whether the director plays as soon as the scene is ready. */
+        get playOnAwake(): boolean;
+        set playOnAwake(value: boolean);
+        /** The playback speed multiplier: 1 plays at the timeline's own speed, 0 freezes it (and silences audio). Negative values clamp to 0. */
+        get playbackSpeed(): number;
+        set playbackSpeed(speed: number);
+        /** true between beginScrub() and endScrub(). */
+        get isScrubbing(): boolean;
+        /** true while a parent director's Control clip drives this director (it then never advances itself). */
+        get isControlled(): boolean;
+        /**
+         * Warns once when the export is of another bake version; otherwise builds the tracks, unless a parent's Control
+         * clip already bound this director before its first enabled tick. Adds the unscaled-time observer.
+         */
+        protected awake(): void;
+        /** Plays when playOnAwake is set and no parent director controls this one. */
+        protected ready(): void;
+        /** Advances a Game Time (or DSP Clock) director by this frame's delta time. */
+        protected update(): void;
+        /** Re-applies the camera pose after every other update, so gameplay camera scripts cannot move it mid-cutscene. */
+        protected late(): void;
+        /** Releases a bound cutscene, frees every track, removes the observers and unregisters the director. */
+        protected destroy(): void;
+        /**
+         * Plays the timeline from the current time, binding it first when needed. A finished Hold or None timeline
+         * restarts from initialTime. While scrubbing, playback resumes when the scrub ends instead.
+         * @param timelineAsset Not supported: switching timelines at runtime is not possible (warns once and plays the exported timeline).
+         */
+        play(timelineAsset?: unknown): void;
+        /** Pauses a playing director, holding the current pose. While scrubbing, playback stays paused when the scrub ends. */
+        pause(): void;
+        /** Resumes a paused director from where it is; plays an unbound one. */
+        resume(): void;
+        /** Stops a bound director: every object goes back to its pre-play state and the time rewinds to initialTime. */
+        stop(): void;
+        /** Poses every track at the current time without advancing (binds first when needed). Manual-mode directors move only through this and time writes. */
+        evaluate(): void;
+        /** Plays when paused and pauses when playing: the one call behind a play / pause button. While scrubbing it decides whether playback resumes after the scrub. */
+        togglePlayback(): void;
+        /** Jumps to the end and completes per the wrap mode (Hold holds, Loop goes to 0, None releases). Fires no signals. */
+        skipToEnd(): void;
+        /**
+         * Starts a scrub, as when the user grabs a scrubber bar: playback pauses silently and remembers whether it was
+         * playing. Move the playhead with the time property while dragging, then call endScrub().
+         */
+        beginScrub(): void;
+        /** Ends a scrub and resumes playback from the scrubbed time if it was playing when the scrub began. */
+        endScrub(): void;
+        /** @returns The number of camera shots. Every hard cut starts a new shot; 0 without a baked camera. */
+        getShotCount(): number;
+        /**
+         * @param shotIndex Index of the shot, 0 is the first.
+         * @returns The shot's name (the Cinemachine shot clip's display name), or null when out of range.
+         */
+        getShotName(shotIndex: number): string;
+        /**
+         * @param shotIndex Index of the shot, 0 is the first.
+         * @returns The time in seconds at which the shot starts, or -1 when out of range.
+         */
+        getShotStartTime(shotIndex: number): number;
+        /** @returns The index of the shot currently shown (0 is the first), or -1 before the first pose. */
+        getCurrentShotIndex(): number;
+        /** @returns The name of the shot currently shown, or null before the first pose. */
+        getCurrentShotName(): string;
+        /**
+         * Jumps to the start of a shot. Playback keeps its state: when playing it carries on from there, when paused it
+         * holds the shot's first frame. An unbound director binds first.
+         * @param shotIndex Index of the shot, 0 is the first. Out-of-range indices are ignored.
+         */
+        setShot(shotIndex: number): void;
+        /**
+         * Jumps to the start of the first shot with the given name, as setShot does.
+         * @param shotName The shot name, as raised by onShotChangedObservable.
+         * @returns true when a shot with that name exists.
+         */
+        setShotByName(shotName: string): boolean;
+        /** Jumps to the start of the next shot. Past the last shot it wraps to the first when the wrap mode is Loop, else does nothing. */
+        nextShot(): void;
+        /** Jumps to the start of the previous shot. Before the first shot it wraps to the last when the wrap mode is Loop, else restarts the first. */
+        previousShot(): void;
+        /**
+         * Called by a parent's TimelineControlTrack (built in the parent's awake): this director stops self-advancing and
+         * skips playOnAwake; a director already playing standalone is stopped first.
+         * @param parent The director whose Control clip drives this one.
+         */
+        attachToParentDirector(parent: PlayableDirector): void;
+        /**
+         * Called by the parent's TimelineControlTrack each frame its clip is active (DR-6.8): binds when needed and plays
+         * at the parent's local clip time, mapped by this director's own wrap mode.
+         * @param localTime The clip-local time in seconds (clip-in plus scaled time since the clip start).
+         * @param kind How the parent's playhead got here.
+         * @param playing Whether the parent is playing (and not scrubbing).
+         */
+        evaluateFromParent(localTime: number, kind: TOOLKIT.TimelineUpdateKind, playing: boolean): void;
+        /**
+         * Called by the parent's TimelineControlTrack when its clip is left or the parent releases: releases like stop()
+         * without the stopped event, and clears finishedInParentClip.
+         */
+        releaseFromParent(): void;
+        /** Called when this director becomes the camera owner again: recomputes and writes only the camera pose at the current time. */
+        refreshCamera(): void;
+        /** Reads the exported settings (DR-4) into typed fields. */
+        private readSettings;
+        /** Builds one player per baked track kind that has data, in the D9 bind order, and the matching release order. */
+        private buildTracks;
+        /** Captures the pre-play state of every track's objects and claims them, in bind order (building the tracks first when awake has not run yet). */
+        private bindCutscene;
+        /** Reverts and unclaims every track's objects in release order, then rewinds to initialTime. */
+        private releaseCutscene;
+        /** Advances an Unscaled Game Time director on every rendered frame, including while the scene is paused (D23). */
+        private advanceUnscaled;
+        /** @returns true when the director's own clock may move it: bound, playing, not scrubbing and not controlled by a parent. */
+        private canAdvanceItself;
+        /** Moves the playhead by deltaSeconds of normal play and poses every track; at the end it wraps, holds or releases per the wrap mode. */
+        private advance;
+        /**
+         * Finishes a pass per the wrap mode: Loop wraps, Hold stays on the last frame and reports once, None releases and rewinds.
+         * @param previousTime The time evaluated before this pass ended, in seconds.
+         * @param nextTime The unwrapped time the playhead reached, in seconds.
+         * @param kind Play for normal playback (signals fire); Seek for skipToEnd (nothing fires).
+         */
+        private completeAtEnd;
+        /**
+         * Describes the frame in the reusable context and poses every track in bind order.
+         * @param time The time to evaluate, in seconds.
+         * @param kind How the playhead got there.
+         * @param previousTime The time evaluated before, in seconds.
+         * @param looped true when normal play wrapped past the end of a looping timeline on this frame.
+         */
+        private applyTime;
+        /** Refreshes the frame's time, play state and speed before a pause, resume or speed change is handed to the tracks. */
+        private syncFrameState;
+        /** Tells every track that playback paused (true) or resumed (false) without a seek. */
+        private notifyTracksPaused;
+        /**
+         * The single writer of playState (D8).
+         * @param state The new state.
+         * @param raiseEvent true to raise onPlayedObservable (Playing) or onPausedObservable (Paused).
+         */
+        private setPlayState;
+        /** Warns once that play(asset) cannot switch timelines at runtime. */
+        private warnAssetArgument;
+        /** @returns The non-null tracks of the list, in order. */
+        private static CollectTracks;
+        /** Adds a director to its scene's list (for Find). */
+        private static RegisterDirector;
+        /** Removes a director from its scene's list and deletes the scene key when the list is empty. */
+        private static UnregisterDirector;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * Per-scene ownership of timeline-driven objects and of the camera: the most recently bound director wins (D24).
+     * Every claim stack is kept per scene and empty entries are deleted, so a disposed scene is never retained.
+     */
+    class TimelineBindingRegistry {
+        /** Per scene, per claimed node, the directors claiming it; the last entry owns the node. */
+        private static readonly nodeClaims;
+        /** Per scene, the directors claiming the camera; the last entry owns it. */
+        private static readonly cameraClaims;
+        /**
+         * Moves the director to the top of the node's claim stack, so it owns the node from now on.
+         * @param node The timeline-driven node. A null node is ignored.
+         * @param director The director that binds it.
+         */
+        static Claim(node: BABYLON.Node, director: TOOLKIT.PlayableDirector): void;
+        /**
+         * Removes the director's claim on the node; deletes empty entries so no scene is retained.
+         * @param node The timeline-driven node. A null node is ignored.
+         * @param director The director that releases it.
+         */
+        static Unclaim(node: BABYLON.Node, director: TOOLKIT.PlayableDirector): void;
+        /**
+         * Tells whether the director may write the node this frame.
+         * @param node The timeline-driven node. A null node counts as owned.
+         * @param director The director asking.
+         * @returns true when the director holds the top claim on the node, or nobody claims it.
+         */
+        static IsOwner(node: BABYLON.Node, director: TOOLKIT.PlayableDirector): boolean;
+        /**
+         * Moves the director to the top of its scene's camera claim stack, so it drives the camera from now on.
+         * @param director The director whose camera track binds.
+         */
+        static ClaimCamera(director: TOOLKIT.PlayableDirector): void;
+        /**
+         * Removes the director's camera claim.
+         * @param director The director whose camera track releases.
+         * @returns The director now on top of the camera claim stack (the next camera owner), or null when none is left.
+         */
+        static UnclaimCamera(director: TOOLKIT.PlayableDirector): TOOLKIT.PlayableDirector;
+        /**
+         * Tells whether the director may write the camera this frame.
+         * @param director The director asking.
+         * @returns true when the director holds the top camera claim.
+         */
+        static IsCameraOwner(director: TOOLKIT.PlayableDirector): boolean;
+        /**
+         * Resolves an exported object reference to its node (D17). A director inside a prefab clone (its node carries
+         * metadata.toolkit.sourceid) resolves among its own instance: the root ancestor and its descendants, matched by
+         * their recorded design-time id. Any other director resolves by node id in the scene.
+         * @param director The director that owns the reference.
+         * @param reference The exported reference ({ id }), or null.
+         * @returns The node, or null when the reference is null or the node is missing.
+         */
+        static ResolveTarget(director: TOOLKIT.PlayableDirector, reference: TOOLKIT.IUnityTransform): BABYLON.TransformNode;
+        /** Removes every occurrence of the director from a claim stack. */
+        private static RemoveClaimant;
+        /** @returns The design-time id a prefab clone recorded on the node, or null for a node that is not a clone. */
+        private static GetSourceId;
+        /** @returns The topmost ancestor of the node (the node itself when it has no parent). */
+        private static FindRootAncestor;
+        /** @returns The transform node among the root and its descendants whose recorded design-time id is sourceId, or null. */
+        private static FindInInstance;
+    }
+    /**
+     * Plays the baked Cinemachine result on the brain camera: the local pose and lens per baked frame, blended between
+     * frames inside a shot and never across a hard cut. It also owns the shot list behind the director's shot API.
+     */
+    class TimelineCameraTrack implements TOOLKIT.ITimelineTrack {
+        /** Values per baked frame: local position xyz, local rotation xyzw, vertical field of view in degrees. */
+        private static readonly FRAME_STRIDE;
+        /** Offset of the rotation quaternion inside a frame. */
+        private static readonly ROTATION_OFFSET;
+        /** Offset of the field of view inside a frame. */
+        private static readonly FIELD_OF_VIEW_OFFSET;
+        /** Slack added before flooring a time to a frame, so a seek to a shot's exact start never rounds into the previous shot. */
+        private static readonly FRAME_SNAP_EPSILON;
+        /** Converts the baked degrees to the radians a Babylon camera uses. */
+        private static readonly DEGREES_TO_RADIANS;
+        private readonly director;
+        private readonly data;
+        /** Baked frames per second (the timeline's frame rate). */
+        private readonly frameRate;
+        /** Number of baked frames; 0 when the bake is empty or inconsistent. */
+        private readonly frameCount;
+        /** Per shot (segment), the index of its first baked frame. */
+        private readonly shotStartFrames;
+        private cameraNode;
+        private cameraRig;
+        private readonly originalPosition;
+        private readonly originalRotation;
+        /** The rig's pre-play field of view in radians. */
+        private originalFieldOfView;
+        private readonly framePosition;
+        private readonly nextFramePosition;
+        private readonly frameRotation;
+        private readonly nextFrameRotation;
+        /** The pose computed for the last evaluated time, re-applied in late(). */
+        private readonly posedPosition;
+        private readonly posedRotation;
+        /** The field of view computed for the last evaluated time, in degrees. */
+        private posedFieldOfView;
+        private hasPose;
+        /** The shot (segment) of the last evaluated time, or -1 before the first pose. */
+        private currentSegment;
+        /**
+         * Reads the baked camera frames and works out where each shot starts.
+         * @param director The director that plays this track.
+         * @param data The exported camera bake (DR-3 ITimelineCameraData).
+         * @param frameRate The timeline's frame rate in frames per second.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineCameraData, frameRate: number);
+        /** Resolves the camera node and its rig, captures their pre-play pose and lens, and claims the camera. */
+        bind(): void;
+        /**
+         * Poses the camera at the frame's time.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Camera poses do not depend on the play state, so pausing changes nothing. */
+        setPaused(): void;
+        /** Camera poses depend on time only, so a speed change changes nothing. */
+        setSpeed(): void;
+        /** Hands the camera to the next claimant, or restores the pre-play pose and lens when none is left. */
+        release(): void;
+        /** Drops the node references. */
+        dispose(): void;
+        /** Writes the last computed pose again when this director owns the camera, so nothing else moved it this frame. */
+        reapply(): void;
+        /**
+         * Recomputes and writes the camera pose at a time, as evaluate does.
+         * @param time The director time in seconds.
+         */
+        refresh(time: number): void;
+        /** @returns The number of shots. Every hard cut starts a new shot. */
+        getShotCount(): number;
+        /**
+         * @param shotIndex Index of the shot, 0 is the first.
+         * @returns The shot's name, or null when the index is out of range.
+         */
+        getShotName(shotIndex: number): string;
+        /**
+         * @param shotIndex Index of the shot, 0 is the first.
+         * @returns The time in seconds at which the shot starts, or -1 when the index is out of range.
+         */
+        getShotStartTime(shotIndex: number): number;
+        /** @returns The index of the shot shown at the last evaluated time, or -1 before the first pose. */
+        getCurrentShotIndex(): number;
+        /**
+         * @param shotName A shot name, as raised by onShotChangedObservable.
+         * @returns The index of the first shot with that name, or -1.
+         */
+        findShotByName(shotName: string): number;
+        /**
+         * Computes the pose at a time into the scratch fields, writes it when this director owns the camera and reports
+         * a shot change. Blends the two baked frames around the time, except across a cut, where the outgoing shot holds
+         * its last frame so the cut stays sharp.
+         */
+        private poseAt;
+        /** Writes the computed pose to the camera node and its rig. */
+        private writePose;
+        /** Copies one baked frame's local position and rotation into the given scratch values. */
+        private readFramePose;
+        /** @returns One baked frame's vertical field of view in degrees. */
+        private readFieldOfView;
+        /** Raises the director's onShotChangedObservable when the playhead enters another shot. */
+        private updateCurrentSegment;
+        /**
+         * Finds each shot's first baked frame. The Unity baker numbers segments 0, 1, 2... in timeline order, one per
+         * hard cut, so a segment is a shot.
+         * @returns The first frame index of every shot, indexed by segment.
+         */
+        private collectShotStartFrames;
+    }
+    /** Samples one baked glTF animation channel at a time in seconds and writes it straight into its target, allocation-free. */
+    class TimelineChannelSampler {
+        /** Scratch rotation of the key before the sample time. */
+        private static readonly scratchFrom;
+        /** Scratch rotation of the key after the sample time. */
+        private static readonly scratchTo;
+        /** Channel: TransformNode.position. */
+        private static readonly CHANNEL_POSITION;
+        /** Channel: TransformNode.scaling. */
+        private static readonly CHANNEL_SCALING;
+        /** Channel: TransformNode.rotationQuaternion. */
+        private static readonly CHANNEL_ROTATION;
+        /** Channel: MorphTarget.influence. */
+        private static readonly CHANNEL_INFLUENCE;
+        /** Values per key of a Vector3 channel. */
+        private static readonly VECTOR_WIDTH;
+        /** Values per key of a Quaternion channel. */
+        private static readonly QUATERNION_WIDTH;
+        /** Values per key of a Float channel. */
+        private static readonly FLOAT_WIDTH;
+        /** Key times in seconds (frame / animation.framePerSecond), ascending. */
+        private readonly keyTimes;
+        /** Key values, valueWidth per key (1, 3 or 4). */
+        private readonly keyValues;
+        private readonly valueWidth;
+        /** The target's pre-play value, valueWidth values. */
+        private readonly originalValue;
+        /** Which property the channel drives (one of the CHANNEL_ constants). */
+        private readonly channel;
+        /** The animated node (position, scaling and rotation channels). */
+        private readonly targetNode;
+        /** The animated morph target (influence channel). */
+        private readonly morphTarget;
+        /** The key index found by the last sample; the next search walks from here. */
+        private cursor;
+        /**
+         * Builds a sampler for one targeted animation.
+         * Supported: Vector3 "position" / "scaling", Quaternion "rotationQuaternion", Float "influence" (MorphTarget).
+         * @param targeted A targeted animation of a baked timeline animation group.
+         * @returns The sampler, or null when the channel is unsupported or has no keys.
+         */
+        static FromTargetedAnimation(targeted: BABYLON.TargetedAnimation): TimelineChannelSampler;
+        /**
+         * Creates the sampler; use FromTargetedAnimation.
+         * @param target The animated node or morph target.
+         * @param channel One of the CHANNEL_ constants.
+         * @param keyTimes Key times in seconds.
+         * @param keyValues Key values, valueWidth per key.
+         * @param valueWidth Values per key.
+         */
+        private constructor();
+        /**
+         * Writes the interpolated value at timeSeconds into the target. Times outside the keys clamp to the first or last key.
+         * @param timeSeconds The timeline time in seconds.
+         */
+        apply(timeSeconds: number): void;
+        /** Copies the target's current value as the pre-play value (a rotation channel gives the node a rotationQuaternion first). */
+        captureOriginal(): void;
+        /** Writes the pre-play value back. */
+        restoreOriginal(): void;
+        /**
+         * Finds the last key at or before the time, walking forward or backward from the previous result.
+         * @returns The key index, 0 when the time is before the first key.
+         */
+        private seekKey;
+        /** Writes the blend of two keys into the target: vectors by component lerp, rotations by slerp, influence by lerp. */
+        private writeBlended;
+        /** @returns The CHANNEL_ constant for a supported animation and target, or -1. */
+        private static GetChannel;
+        /** @returns The number of values per key of a channel. */
+        private static GetValueWidth;
+        /** Copies one key value (a number, Vector3 or Quaternion) into the flat value array. */
+        private static CopyKeyValue;
+    }
+    /**
+     * Plays Animation tracks: one baked glTF animation group per bound object (D5), sampled directly at the director's
+     * time. The object's TOOLKIT.AnimationState is suspended while the director is bound (D10).
+     */
+    class TimelineAnimationTrack implements TOOLKIT.ITimelineTrack {
+        private readonly director;
+        /** The key the baked groups carry in metadata.toolkit.timeline. */
+        private readonly timelineKey;
+        private readonly bindings;
+        /**
+         * Prepares one binding per baked animation.
+         * @param director The director that plays this track.
+         * @param data The exported animation entries.
+         * @param timelineKey The director's timelineKey.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineAnimationData[], timelineKey: string);
+        /** Resolves every bound object, finds its baked group, captures the pre-play values, claims it and suspends its Animator. */
+        bind(): void;
+        /**
+         * Samples every owned object's baked animation at the frame's time.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Baked poses depend on time only, so pausing changes nothing. */
+        setPaused(): void;
+        /** Baked poses depend on time only, so a speed change changes nothing. */
+        setSpeed(): void;
+        /** Writes every pre-play value back, then gives the Animator back its previous switch, then unclaims (D10). */
+        release(): void;
+        /** Drops the samplers. */
+        dispose(): void;
+        /**
+         * Finds the binding's baked group (metadata.toolkit.timeline and clip, D5) and builds its channel samplers.
+         * @returns The samplers, or null (with a one-time warning) when the group is missing.
+         */
+        private buildSamplers;
+        /** @returns The scene's animation group baked for this director and clip, or null. */
+        private findGroup;
+        /** Turns the bound object's Animator off while the timeline drives it, remembering its previous switch (D10). */
+        private suspendAnimator;
+    }
+    /**
+     * Plays the sparse per-frame property curves (D6): camera field of view, UI Graphic colour and CanvasGroup alpha.
+     * A curve is only written when it changes, so the UI is not redrawn for nothing.
+     */
+    class TimelinePropertyTrack implements TOOLKIT.ITimelineTrack {
+        /** Value changes smaller than this are not written. */
+        private static readonly PROPERTY_EPSILON;
+        /** Slack added before flooring a time to a frame. */
+        private static readonly FRAME_SNAP_EPSILON;
+        /** Converts baked degrees to Babylon radians. */
+        private static readonly DEGREES_TO_RADIANS;
+        private readonly director;
+        /** The timeline's frame rate in frames per second. */
+        private readonly frameRate;
+        private readonly records;
+        private isBound;
+        /** Retries unresolved UI elements when an interface finishes loading. */
+        private interfaceObserver;
+        /**
+         * Prepares one record per curve and flags its jump frames.
+         * @param director The director that plays this track.
+         * @param data The exported curves.
+         * @param frameRate The timeline's frame rate in frames per second.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelinePropertyData[], frameRate: number);
+        /** Resolves every curve's target, captures its pre-play value and claims it; unresolved UI elements are retried when an interface loads. */
+        bind(): void;
+        /**
+         * Writes every owned curve's value at the frame's time when it changed.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Curves depend on time only, so pausing changes nothing. */
+        setPaused(): void;
+        /** Curves depend on time only, so a speed change changes nothing. */
+        setSpeed(): void;
+        /** Writes every pre-play value back, then unclaims. */
+        release(): void;
+        /** Removes the interface observer. */
+        dispose(): void;
+        /**
+         * Finds the curve's camera rig or UI element and captures its pre-play value.
+         * @returns true when the target was found.
+         */
+        private resolveTarget;
+        /** Adds the one OnInterfaceLoaded observer that retries the unresolved UI curves. */
+        private watchInterfaceLoads;
+        /** Removes the OnInterfaceLoaded observer, if any. */
+        private stopWatchingInterfaceLoads;
+        /** Resolves the UI curves that were missing, poses them at the director's current time and stops watching once none is left. */
+        private retryUnresolvedElements;
+        /** Samples the curve at a time and writes it when any component changed by PROPERTY_EPSILON or more. */
+        private applyRecord;
+        /** Reads the target's current value (field of view in degrees, colour rgba or alpha). */
+        private readValues;
+        /** Writes values to the target: rig.fov in radians, Graphic.color in place, or the CanvasGroup alpha; UI is marked dirty. */
+        private writeValues;
+        /** Builds a curve record and flags its jump frames, indexed by frame - startFrame. */
+        private static CreateRecord;
+    }
+    /** Plays Activation tracks: each object is enabled exactly while the time lies in one of its [start, end) intervals (D11). */
+    class TimelineActivationTrack implements TOOLKIT.ITimelineTrack {
+        private readonly director;
+        private readonly records;
+        /**
+         * Prepares one record per activated object.
+         * @param director The director that plays this track.
+         * @param data The exported activation entries.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineActivationData[]);
+        /**
+         * Applies an activation's post-playback state when its cutscene releases (D11), calling setEnabled only on a change.
+         * @param node The activated object.
+         * @param postPlayback An ActivationPostPlayback value.
+         * @param originalEnabled The object's enabled state before the director bound (used by Revert).
+         */
+        static ApplyPostPlayback(node: BABYLON.TransformNode, postPlayback: number, originalEnabled: boolean): void;
+        /**
+         * Enables or disables a node only when its own enabled state differs.
+         * @param node The node.
+         * @param enabled The wanted state.
+         */
+        static SetEnabledIfChanged(node: BABYLON.TransformNode, enabled: boolean): void;
+        /** Resolves every object, captures its own enabled state and claims it. */
+        bind(): void;
+        /**
+         * Enables each owned object when the frame's time lies in one of its intervals, and disables it otherwise.
+         * Like Unity's activation mixer the state is re-asserted every frame, so a Control clip that switched the same object
+         * off on its exit (or any other writer) is overridden on the next frame; setEnabled runs only on a change.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Activations depend on time only, so pausing changes nothing. */
+        setPaused(): void;
+        /** Activations depend on time only, so a speed change changes nothing. */
+        setSpeed(): void;
+        /** Applies every object's post-playback state, then unclaims it. */
+        release(): void;
+        /** Nothing to free: the track creates nothing. */
+        dispose(): void;
+        /** @returns true when start <= time < end for one of the flat [start, end, ...] intervals. */
+        private static IsInsideIntervals;
+    }
+    /**
+     * Fires Signal Emitters as Unity's TimeNotificationBehaviour does (D12): every unfired signal the playhead crosses in
+     * normal play fires once, a loop restores them (Emit Once excepted), and seeks, scrubs and skips fire nothing.
+     */
+    class TimelineSignalTrack implements TOOLKIT.ITimelineTrack {
+        private readonly director;
+        /** The signals in time order. */
+        private readonly records;
+        /**
+         * Prepares one record per signal, in time order.
+         * @param director The director that plays this track.
+         * @param data The exported signals.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineSignalData[]);
+        /** Resolves the node every signal fires on and every reaction's target node. */
+        bind(): void;
+        /**
+         * Fires the signals normal play crossed: [previous, time], or across a loop wrap (previous, duration], restore,
+         * then [0, time]. Seeks and scrubs fire nothing.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Signals depend on the playhead only, so pausing changes nothing. */
+        setPaused(): void;
+        /** Signals depend on the playhead only, so a speed change changes nothing. */
+        setSpeed(): void;
+        /** Clears every fired flag, Emit Once included. */
+        release(): void;
+        /** Drops the resolved nodes. */
+        dispose(): void;
+        /**
+         * Fires, in time order, every unfired signal with from <= time <= to.
+         * @param from Range start in seconds.
+         * @param to Range end in seconds.
+         */
+        fireRange(from: number, to: number): void;
+        /**
+         * Clears the fired flags.
+         * @param keepEmitOnce true to leave Emit Once signals fired (a loop wrap); false to clear them too (a release).
+         */
+        restoreAll(keepEmitOnce: boolean): void;
+        /**
+         * Clears the fired flag of every non-Emit-Once signal at or after a time (a backwards seek).
+         * @param time The new playhead time in seconds.
+         */
+        restoreFrom(time: number): void;
+        /**
+         * Fires every unfired retroactive signal behind the playhead (on play()).
+         * @param time The playhead time in seconds.
+         */
+        fireRetroactive(time: number): void;
+        /** Marks a signal fired, runs its receiver reactions, then raises onSignalObservable. */
+        private fire;
+        /** Calls one reaction's component method with its argument, or warns once when the component or method is missing. */
+        private invokeReaction;
+    }
+    /**
+     * Plays Control tracks (DR-6.8): nested directors at the clip's local time, particle systems simulated to it, and
+     * objects switched on for the clip span.
+     */
+    class TimelineControlTrack implements TOOLKIT.ITimelineTrack {
+        /** ShurikenParticles.stop behaviour that stops emitting and clears the live particles. */
+        private static readonly PARTICLES_STOP_AND_CLEAR;
+        private readonly director;
+        private readonly records;
+        /**
+         * Prepares one record per controlled thing and attaches every nested director to this one (called from the parent's awake).
+         * @param director The parent director.
+         * @param data The exported control entries.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineControlData[]);
+        /** Resolves the particle systems and activated objects and captures the objects' own enabled state. */
+        bind(): void;
+        /**
+         * Drives every controlled thing at the clip-local time while the frame's time lies in its clip, and lets go of it when the time leaves.
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /**
+         * Pauses or resumes the particle systems inside their clips. Nested directors follow on the next evaluateFromParent.
+         * @param paused true when playback paused.
+         */
+        setPaused(paused: boolean): void;
+        /** Nested directors follow the parent's speed through evaluateFromParent, and particles run on their own clock. */
+        setSpeed(): void;
+        /** Releases every nested director, stops the particle systems that were inside, and applies the activation post-playback. */
+        release(): void;
+        /** Drops the references to the controlled things. */
+        dispose(): void;
+        /** Finds the nested director on a Director entry's node and attaches it to this track's director. */
+        private attachChild;
+        /** Plays the nested director at the local time while inside, and releases it when the clip is left. */
+        private evaluateChild;
+        /** Simulates the particle system to the local time on entering (or any jump inside), and stops and clears it on leaving. */
+        private evaluateParticles;
+        /**
+         * Unity's ActivationControlPlayable: the object is re-enabled every frame inside the clip, and disabled once when the
+         * clip is left (or on the first evaluation outside it), so an Activation track on the same object can keep it on
+         * afterwards. setEnabled runs only on a change.
+         */
+        private evaluateActivation;
+    }
+    /**
+     * Plays Audio tracks with one TOOLKIT.AudioSource per clip (D13): each clip sounds exactly while the playhead is
+     * inside it, at the matching offset into the file, shaped by its ease-in and ease-out. Scrubbing is silent and a
+     * playback speed of 0 silences the clips until the speed is positive again.
+     */
+    class TimelineAudioTrack implements TOOLKIT.ITimelineTrack {
+        /** A clip whose play() resolved after the director moved this far (audio unlock) restarts at the current offset. */
+        private static readonly AUDIO_RESYNC_SECONDS;
+        /** Volume changes smaller than this are not written. */
+        private static readonly VOLUME_EPSILON;
+        /** The registered class name of the exported AudioSource entries whose attenuation bound clips copy. */
+        private static readonly AUDIO_SOURCE_CLASS;
+        /** The exported AudioSource keys a bound clip copies (DR-6.6). */
+        private static readonly COPIED_SOURCE_KEYS;
+        private readonly director;
+        private readonly records;
+        /** The frame handed to evaluate when playback resumes, so a resume restarts the clips like a seek. */
+        private readonly resumeFrame;
+        /**
+         * Creates one source per clip, with playonawake off, on the bound AudioSource's node (with its attenuation) or on
+         * the director's node in 2D. Called from the director's awake.
+         * @param director The director that plays this track.
+         * @param data The exported audio clips.
+         */
+        constructor(director: TOOLKIT.PlayableDirector, data: TOOLKIT.ITimelineAudioData[]);
+        /** Sources are created once in the constructor, so binding captures nothing. */
+        bind(): void;
+        /**
+         * Starts, stops, restarts or re-levels each clip for the frame (DR-6.7).
+         * @param frame The frame being evaluated.
+         */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /**
+         * Pausing pauses every sounding source (a scrub stops them instead, since the playhead is about to move); resuming
+         * restarts the clips the playhead is inside at the current offset.
+         * @param paused true when playback paused.
+         * @param frame The director's frame, refreshed to the current time and play state.
+         */
+        setPaused(paused: boolean, frame: TOOLKIT.TimelineFrameContext): void;
+        /**
+         * Speed 0 pauses the sounding clips; a positive speed sets their rate and starts the active clips that are silent.
+         * @param speed The new playback speed.
+         * @param frame The director's frame, refreshed to the current time and play state.
+         */
+        setSpeed(speed: number, frame: TOOLKIT.TimelineFrameContext): void;
+        /** Stops every sounding or paused clip, so no source is left holding a stale position. */
+        release(): void;
+        /** Removes the ready observers and destroys the created sources. */
+        dispose(): void;
+        /** Creates a clip's source and record, and the observer that starts the clip once its source is ready. */
+        private createRecord;
+        /** Starts an active, silent clip at the director's current time when its source finishes loading while the director plays. */
+        private handleSourceReady;
+        /**
+         * Starts a clip at the offset matching a director time. A clip whose source is not ready, or at speed 0, stays
+         * silent until its ready observer or a speed change starts it.
+         */
+        private startClip;
+        /**
+         * Runs after play() resolved, when the source has just started a voice (AudioSource.play awaits the audio unlock).
+         * Rule: only the newest request's voice may survive. A stale voice is stopped at once when nothing should sound;
+         * when a newer request is sounding, the clip restarts cleanly from the newest resolution (at once if that one has
+         * already resolved). The newest request restarts in sync when the director moved on meanwhile.
+         */
+        private handlePlayStarted;
+        /** Deals with a voice started by a superseded request (see handlePlayStarted). */
+        private handleStaleVoice;
+        /** Stops every voice of the clip's source and starts one at the director's current time. */
+        private restartClip;
+        /** Stops a clip and invalidates its pending play() resolution. */
+        private stopClip;
+        /**
+         * Silences every sounding clip.
+         * @param stopVoices true to stop the sources (the playhead will move), false to pause them.
+         */
+        private silence;
+        /** Re-evaluates the director's current frame as a seek, which restarts the inside clips at the current offset. */
+        private evaluateAsSeek;
+        /** Writes the clip's envelope volume at a time when it changed by VOLUME_EPSILON or more. */
+        private updateVolume;
+        /** @returns The clip volume at a time: base volume x the ease-in ramp x the ease-out ramp (a zero ease contributes 1). */
+        private envelopeAt;
+        /** @returns Seconds into the audio file at a director time, wrapped by the file length when the clip loops. */
+        private offsetAt;
+        /** @returns The exported properties of the node's TOOLKIT.AudioSource entry, or null. */
+        private static FindExportedSourceProperties;
+    }
+}
+declare namespace TOOLKIT {
+    /** What a director does when its playhead reaches the end. Values match Unity's DirectorWrapMode. */
+    enum DirectorWrapMode {
+        Hold = 0,
+        Loop = 1,
+        None = 2
+    }
+    /** Which clock advances a director. Values match Unity's DirectorUpdateMode; DSPClock plays as GameTime. */
+    enum DirectorUpdateMode {
+        DSPClock = 0,
+        GameTime = 1,
+        UnscaledGameTime = 2,
+        Manual = 3
+    }
+    /** Whether a director's playhead is advancing. Values match Unity's PlayState. */
+    enum DirectorPlayState {
+        Paused = 0,
+        Playing = 1
+    }
+    /** What an activation leaves its object as when the cutscene releases. Values match Unity's ActivationTrack.PostPlaybackState. */
+    enum ActivationPostPlayback {
+        Active = 0,
+        Inactive = 1,
+        Revert = 2,
+        LeaveAsIs = 3
+    }
+    /** The property a baked curve drives. */
+    enum TimelinePropertyKind {
+        FieldOfView = 0,
+        GraphicColor = 1,
+        CanvasGroupAlpha = 2
+    }
+    /** What a Control clip drives. */
+    enum TimelineControlKind {
+        Director = 0,
+        Particles = 1,
+        Activation = 2
+    }
+    /** The argument type of an exported signal reaction. */
+    enum TimelineArgumentType {
+        None = 0,
+        Bool = 1,
+        Int = 2,
+        Float = 3,
+        String = 4
+    }
+    /** How the playhead reached the time being evaluated. */
+    enum TimelineUpdateKind {
+        /** Normal timed playback: signals fire, audio keeps playing. */
+        Play = 0,
+        /** A jump (time write, shot change, skip, evaluate): nothing fires, audio restarts at the new offset. */
+        Seek = 1,
+        /** A jump while scrubbing: like Seek, and audio stays silent. */
+        Scrub = 2
+    }
+    /** The baked Cinemachine result: the brain camera's local pose and lens per frame, and its hard cuts. */
+    interface ITimelineCameraData {
+        /** The camera node the CinemachineBrain drove. */
+        target: TOOLKIT.IUnityTransform;
+        /** 8 values per frame: local position xyz and local rotation xyzw in Unity space (applied as-is), vertical field of view in degrees. */
+        frameData: number[];
+        /** Per frame, the shot (segment) it belongs to; every hard cut starts the next segment. */
+        frameSegments: number[];
+        /** Per shot, the Cinemachine shot clip's display name. */
+        shotNames: string[];
+    }
+    /** One glTF animation baked for one bound object. */
+    interface ITimelineAnimationData {
+        /** The bound object (the Animator's GameObject). */
+        target: TOOLKIT.IUnityTransform;
+        /** The group key, matched against the animation group's metadata.toolkit.clip. */
+        clip: string;
+    }
+    /** A sparse per-frame property curve (D6). */
+    interface ITimelinePropertyData {
+        /** The node that owns the property (the camera node, or the UI element's node). */
+        target: TOOLKIT.IUnityTransform;
+        /** A TimelinePropertyKind value. */
+        kind: number;
+        /** The Unity UI path for TOOLKIT.UserInterface.FindElement (GraphicColor, CanvasGroupAlpha); "" otherwise. */
+        element: string;
+        /** The timeline frame index of values[0]. */
+        startFrame: number;
+        /** Values per frame: 1 (field of view in degrees, alpha) or 4 (colour rgba, 0..1). */
+        stride: number;
+        /** stride values per frame from startFrame on. */
+        values: number[];
+        /** Timeline frame indices that must never be interpolated into (D7), ascending. */
+        jumpFrames: number[];
+    }
+    /** One object's active intervals. */
+    interface ITimelineActivationData {
+        /** The object switched on and off. */
+        target: TOOLKIT.IUnityTransform;
+        /** Flat [start, end, start, end, ...] in seconds, ascending; active while start <= time < end. */
+        intervals: number[];
+        /** An ActivationPostPlayback value. */
+        postPlayback: number;
+    }
+    /** One Audio-track clip. */
+    interface ITimelineAudioData {
+        /** The bound AudioSource's node, or null for a 2D clip. */
+        target: TOOLKIT.IUnityTransform | null;
+        /** The audio file, relative to the scene root URL (the same naming as AudioSource "file"). */
+        file: string;
+        /** Clip start on the timeline, in seconds. */
+        start: number;
+        /** Clip duration on the timeline, in seconds. */
+        duration: number;
+        /** Seconds into the audio file at the clip's start. */
+        clipIn: number;
+        /** The audio file's length in seconds. */
+        clipLength: number;
+        /** Whether the clip loops the audio file. */
+        loop: boolean;
+        /** Clip volume x track volume, 0..1. */
+        volume: number;
+        /** Fade-in (ease or blend) length in seconds. */
+        easeIn: number;
+        /** Fade-out (ease or blend) length in seconds. */
+        easeOut: number;
+    }
+    /** One persistent Signal Receiver reaction that calls a web-side component method. */
+    interface ITimelineSignalReactionData {
+        /** The node holding the target component. */
+        target: TOOLKIT.IUnityTransform;
+        /** The component's registered class name, e.g. "PROJECT.DoorController". */
+        klass: string;
+        /** The method to call. */
+        method: string;
+        /** A TimelineArgumentType value. */
+        argumentType: number;
+        /** The argument, or null when argumentType is None. */
+        argument: boolean | number | string | null;
+    }
+    /** One Signal Emitter. */
+    interface ITimelineSignalData {
+        /** Seconds on the timeline. */
+        time: number;
+        /** The signal asset's name. */
+        name: string;
+        /** Fire on play() when the playhead is already past it. */
+        retroactive: boolean;
+        /** Fire on the first pass only of a looping timeline. */
+        emitOnce: boolean;
+        /** The node it fires on (the track's bound object, or the director's node for timeline markers). */
+        target: TOOLKIT.IUnityTransform;
+        /** The receiver reactions that run on the web. */
+        reactions: TOOLKIT.ITimelineSignalReactionData[];
+    }
+    /** One Control-track clip, one entry per thing it controls. */
+    interface ITimelineControlData {
+        /** The controlled node. */
+        target: TOOLKIT.IUnityTransform;
+        /** A TimelineControlKind value. */
+        kind: number;
+        /** Clip start in seconds. */
+        start: number;
+        /** Clip duration in seconds. */
+        duration: number;
+        /** Local time at the clip's start, in seconds. */
+        clipIn: number;
+        /** Local seconds per timeline second. */
+        timeScale: number;
+        /** For Activation entries: an ActivationPostPlayback value (Active, Inactive, Revert); ignored otherwise. */
+        postPlayback: number;
+    }
+    /** What onSignalObservable carries. */
+    interface ITimelineSignalEvent {
+        /** The signal asset's name. */
+        name: string;
+        /** The signal's time on its director's timeline, in seconds. */
+        time: number;
+        /** The node it fired on (null when that node did not export). */
+        target: BABYLON.TransformNode;
+        /** The director that fired it. */
+        director: TOOLKIT.PlayableDirector;
+    }
+    /** One track kind's player. The director calls these in the D9 orders. */
+    interface ITimelineTrack {
+        /** Captures the pre-play state of the track's objects and claims them. Called once per binding. */
+        bind(): void;
+        /** Poses the track for the frame described by the context. */
+        evaluate(frame: TOOLKIT.TimelineFrameContext): void;
+        /** Playback paused (true) or resumed (false) without a seek. */
+        setPaused(paused: boolean, frame: TOOLKIT.TimelineFrameContext): void;
+        /** The director's playback speed changed. */
+        setSpeed(speed: number, frame: TOOLKIT.TimelineFrameContext): void;
+        /** Reverts and unclaims the track's objects (D9). */
+        release(): void;
+        /** Frees everything the track created. Called once, from the director's destroy(). */
+        dispose(): void;
+    }
+    /** The one reusable description of the frame being evaluated, so evaluation allocates nothing. */
+    class TimelineFrameContext {
+        /** The time being evaluated, in seconds. */
+        time: number;
+        /** The time evaluated before this one, in seconds. */
+        previousTime: number;
+        /** How the playhead got here. */
+        kind: TOOLKIT.TimelineUpdateKind;
+        /** True when normal play wrapped past the end of a looping timeline on this frame. */
+        looped: boolean;
+        /** True while the director is Playing and not scrubbing. */
+        playing: boolean;
+        /** The timeline duration in seconds. */
+        duration: number;
+        /** The playback speed. */
+        speed: number;
+    }
+}
+declare namespace TOOLKIT {
     /** What the colour grading applier wrote for one camera (FR-19 .. FR-25), for read-backs and the drift check. */
     export interface IPostProcessColorGradingState {
         camera: string;
@@ -21486,9 +27992,9 @@ declare namespace TOOLKIT {
     export interface IPostProcessStackFlags {
         /** A Classic vignette with intensity > 0 is active: bloom must run through the head chain (never after the vignette). */
         vignetteActive: boolean;
-        /** Grading takes the HDR LogC LUT path (HDR-mode profile, LogC LUT exported, HDR pipeline). */
+        /** Grading takes the LogC LUT path (HDR-mode profile, LogC LUT exported), on an HDR or an LDR chain alike. */
         hdrGrading: boolean;
-        /** Why not (or "hdr"): "ldr" (LDR profile), "nolut" (no baked LUT), "lutspace" (older export without lutspace), "nohdr" (camera without allowhdr). */
+        /** Why not (or "hdr"): "ldr" (LDR profile), "nolut" (no baked LUT), "lutspace" (older export without lutspace). */
         hdrReason: string;
     }
     /**
@@ -21534,6 +28040,23 @@ declare namespace TOOLKIT {
         /** The `SetEffectEnabled` state (true until toggled off). */
         enabled: boolean;
         fields: IPostProcessInspectorField[];
+    }
+    /** hdrp-raytracing-polyfill T4: one camera's link to the scene's ray-tracing system (internal). */
+    interface IPostProcessRayTracingRecord {
+        /** The applied camera whose post chain receives the debug-view pass and whose Inspector listing shows the `rayTracing` row. */
+        camera: BABYLON.Camera;
+        /** The render-target type of that camera's post chain, so the debug-view pass renders in the same precision as the chain. */
+        textureType: number;
+        /** The scene's ray-tracing system (shared by every camera of the scene) that owns the backend and the traced debug image. */
+        system: TOOLKIT.RayTracingSystem;
+        /** The debug-view fullscreen pass this camera holds while a debug mode is on; null while it is off (the frame costs nothing). */
+        pass: BABYLON.PostProcess;
+        /** Subscription to the system's debug-mode changes, removed by `releaseStacks` so a released stack never re-adds a pass. */
+        observer: BABYLON.Observer<TOOLKIT.RayTracingSystem>;
+        /** Subscription to the system's effect changes (T7, T8): the camera's SSAO / SSR follow whether their traced twin renders. */
+        effectsObserver: BABYLON.Observer<TOOLKIT.RayTracingSystem>;
+        /** The path tracer's chain-head pass (T12) of a camera whose volume enables PathTracing; null otherwise. */
+        pathTracerPass: BABYLON.PostProcess;
     }
     /**
      * unity-export-parity-gaps T17 (F-a): one camera whose stack includes LOCAL volumes. The chain was built from `union`
@@ -21666,6 +28189,14 @@ declare namespace TOOLKIT {
         private static Registry;
         private static Warned;
         private static Scheduled;
+        /** Scenes whose stack the asset preloader applies (one preloader task per scene). */
+        private static PreloadScheduled;
+        /** Per scene: the volumes and cameras the preloader applied the stack for (see PreloadApply). */
+        private static PreloadKeys;
+        /** scene-loading-progress T8 (D8): the longest the preloader waits for the ray-tracing setup (ms); the setup keeps running after. */
+        static RAY_TRACING_PRELOAD_TIMEOUT_MS: number;
+        /** How often the preloader reads the ray-tracing setup progress (ms). */
+        private static readonly RAY_TRACING_POLL_INTERVAL_MS;
         /** The orchestrating instance (null once every volume is destroyed). */
         static get Instance(): PostProcessor;
         /** Every live PostProcessor instance, in awake order. */
@@ -21728,17 +28259,27 @@ declare namespace TOOLKIT {
          * Chain slots of the owned plugin passes, Unity's order (lower renders first, spit-and-polish FR-2): TAA (camera-antialiasing-taa, first like Unity), motion blur, auto exposure (auto-exposure-parity: PPv2 meters after motion blur and exposes before the Uber effects)
          * and lens distortion (Unity's separate passes before Uber), then the Uber order chromatic aberration, the tinted
          * bloom chain, vignette, grain, and the HDR grading pass or the LDR colour filter. Every owned pass registers its
-         * slot when created (`registerPass`); the whole group precedes the DefaultRenderingPipeline passes.
+         * slot when created (`registerPass`); the whole group precedes the DefaultRenderingPipeline passes. On HDRP parity scenes the
+         * sanitize, fog and camera-underwater passes (hdrp-water: `hdrpUnderwater` fogs under the water line, right after `hdrpFog`)
+         * come ahead of TAA. hdrp-raytracing-polyfill T12: a path-traced camera's chain starts with the path tracer's replacement pass
+         * (`pathTracer`, 0, before sanitize), so every pass after it runs on the traced radiance.
          */
         static readonly HeadSlots: {
+            pathTracer: number;
+            hdrpSanitize: number;
             graphBeforePost: number;
+            hdrpFog: number;
+            hdrpUnderwater: number;
             taa: number;
             smaa: number;
+            hdrpSsgi: number;
             motionBlur: number;
             autoExposure: number;
             lensDistortion: number;
             chromaticAberration: number;
             bloom: number;
+            lensFlare: number;
+            panini: number;
             vignette: number;
             grain: number;
             grading: number;
@@ -21755,12 +28296,15 @@ declare namespace TOOLKIT {
          * shadergraph-transpiler-complete-coverage D30 (T28): a Shader Graph fullscreen pass at URP AfterRenderingPostProcessing / HDRP
          * AfterPostProcess registers in `graphAfterPost` (100), after the post stack and BEFORE the final pass that applies FXAA / SMAA /
          * TAA sharpening (101, their order to each other unchanged); a BeforeRenderingPostProcessing pass is `HeadSlots.graphBeforePost` (2).
+         * hdrp-raytracing-polyfill T4: the ray-tracing debug view (`rtDebug`, 102) is the very last pass, so it shows the traced image
+         * untouched by the post stack.
          */
         static readonly TailSlots: {
             graphAfterPost: number;
             fxaa: number;
             smaa: number;
             taaSharpen: number;
+            rtDebug: number;
         };
         /** Whether `slot` belongs to the tail group (`TailSlots`) rather than the head group (`HeadSlots`). */
         static IsTailSlot(slot: number): boolean;
@@ -21786,6 +28330,7 @@ declare namespace TOOLKIT {
         private orchestrator;
         private applied;
         private readyCalled;
+        private registered;
         private cameraOwner;
         private stacks;
         private defaultRenderPipeline;
@@ -21835,6 +28380,14 @@ declare namespace TOOLKIT {
         private depthOfFields;
         private motionBlurs;
         private lensDistortions;
+        /** hdrp-complete-parity T22: the HdrpPostEffects records per camera (live settings; passes null until the effect first activates). */
+        private hdrpPaninis;
+        private hdrpLensFlares;
+        /**
+         * HDRP GlobalIllumination per camera: the live SSGI settings and passes; `rayTraced` holds the authored Ray Tracing / Mixed mode
+         * while the ray-tracing system renders it (null for ray marching), so the A/B switch can hand back to SSGI ray marching.
+         */
+        private hdrpSsgis;
         /** auto-exposure-parity: one record per camera whose PPv2 AutoExposure renders, and the gate outcome of every camera that carried one (listing reasons). */
         private autoExposures;
         private autoExposureGates;
@@ -21852,6 +28405,8 @@ declare namespace TOOLKIT {
         private effectListings;
         /** Inspector-truth T7: the enabled flag per (camera, family) written by `SetEffectEnabled` (absent = enabled). */
         private effectEnabled;
+        /** hdrp-complete-parity T20: cameras whose stack is HDRP (bloom / grading / vignette / grain toggles neutralise, never detach). */
+        private hdrpPostCameras;
         /** Inspector-truth T7: the dense FR-2 chain order per camera, recorded on the first toggle (every family on). */
         private toggleOrders;
         /** Inspector-truth T7: the passes detached per (camera, family), re-inserted by the next ON. */
@@ -21899,6 +28454,34 @@ declare namespace TOOLKIT {
             pipeline: BABYLON.DefaultRenderingPipeline;
         }[];
         protected awake(): void;
+        /** Reads the exported volume and joins the registry, once (awake or addPreloaderTasks, whichever runs first). */
+        private register;
+        /**
+         * Scene loads apply the stack inside the asset preloader, before the preloader's other work (terrains, skins) compiles
+         * its shaders. Building the pipeline moves image processing onto the post chain (and may change the prepass layout),
+         * which re-creates the effect of every material in the scene: applied at ready() instead, every shader compiled during
+         * the load is thrown away and compiled again in the first visible frames (multi-second freezes at the start of the
+         * scene). The task runs after every component of the load has registered here; ready() then keeps that stack unless
+         * the volumes or cameras changed since (see tryOrchestrate). scene-loading-progress T8: the task then holds the splash
+         * until the scene's ray-tracing setup has settled (WhenRayTracingSettled), at most RAY_TRACING_PRELOAD_TIMEOUT_MS.
+         */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
+        /**
+         * Applies the scene's stack from the preloader. Only for exports that flag their post-processing cameras: a legacy
+         * export targets the main camera, which game scripts may still be choosing, so it keeps the ready-time application.
+         * @param scene - The scene being loaded.
+         */
+        private static PreloadApply;
+        /**
+         * scene-loading-progress T8 (D10): waits for the scene's ray-tracing setup (gather, BVH builds, backend kernels) and reports
+         * it to the loading splash as the "Ray tracing" job. PreloadApply creates the system when the export asks for ray tracing;
+         * a scene without one (or a legacy export, whose stack applies at ready) resolves at once and opens no job. Never rejects.
+         * @param scene - The scene being loaded.
+         * @returns Resolves once the setup is ready, failed or has no backend, the scene is disposed or the preload timeout passed.
+         */
+        private static WhenRayTracingSettled;
+        /** Identifies what a stack was applied for: the scene's registered volumes and its cameras. */
+        private static ApplyKey;
         protected ready(): void;
         /**
          * The toolkit may run `ready` before `awake` (edit mode / ScenePlaying false), so orchestration starts from
@@ -21911,6 +28494,15 @@ declare namespace TOOLKIT {
          * arriving in one frame collapse into ONE re-application.
          */
         private tryOrchestrate;
+        /**
+         * hdrp-complete-parity T25: applies a pending prepass layout change NOW (Babylon's public `PrePassRenderer.update`, which
+         * marks every material prepass-dirty). Babylon otherwise applies it inside the next camera draw - after that frame's
+         * materials were made ready with the old layout - so one frame draws effects with fewer outputs than the MRT has
+         * (WebGL2 GL_INVALID_OPERATION "Active draw buffers with missing fragment shader outputs", a black frame).
+         */
+        static SyncPrePass(scene: BABYLON.Scene): void;
+        /** hdrp-complete-parity T25: the most frames shader hot swapping stays off after a prepass layout change (SyncPrePass). */
+        static PrePassSyncMaxFrames: number;
         protected destroy(): void;
         /**
          * Blends the registered volumes and applies them to every targeted camera. Re-entrant (review-fixes FR-9): calling it
@@ -21918,6 +28510,12 @@ declare namespace TOOLKIT {
          * arrived after the first apply contributes to the blend. Pipelines this instance did not create are left as found.
          */
         applyVolumes(): void;
+        /**
+         * Whether a `blendStack` ignore reason is the camera's volume layer mask (the volume may still reach another camera).
+         * @param reason - The reason `PostProcessingContract.blendStack` recorded.
+         * @returns True for the layer-mask reason.
+         */
+        private static IsLayerMaskReason;
         /**
          * Switches this volume on or off (Unity `Volume.enabled`). The orchestrator re-blends on the next frame, so a camera
          * inside the volume sees its contribution go (or come back) at once. A disabled node does the same.
@@ -22013,6 +28611,15 @@ declare namespace TOOLKIT {
          */
         reorderPluginPasses(pipeline: BABYLON.DefaultRenderingPipeline): number;
         /**
+         * The passes of `camera` whose chain position this component keeps: every owned pass plus the passes it registers
+         * in a slot without owning them (the hdrp-water camera-underwater pass belongs to its `TOOLKIT.HdrpWaterUnderwater`,
+         * so `releaseStacks` never disposes it). Without the latter a pipeline rebuild would leave the underwater pass where
+         * the rebuild put it - after the grading pass - instead of right after the HDRP fog pass.
+         * @param camera The camera whose chain is being ordered.
+         * @returns The passes to keep in slot order on that camera.
+         */
+        protected orderedPostProcesses(camera: BABYLON.Camera): BABYLON.PostProcess[];
+        /**
          * F-6: moves the owned tail passes of `camera` (`TailSlots` order) to the END of its chain when they are not already
          * its last live passes in that order -- a pipeline rebuild re-attaches the pipeline's own passes behind them, and a
          * toggle ON re-inserts them at the position the recorded order implies, which a rebuild in between may have made
@@ -22039,6 +28646,14 @@ declare namespace TOOLKIT {
          * name added there would silence the `param:` warning for Built-in AND HDRP volumes too (`clamp` is a Built-in bloom
          * field, `response` an HDRP grain one), and those warnings are verified behaviour.
          */
+        /**
+         * hdrp-complete-parity T20 (D23): fields consumed by the HDRP branches only (the same `extra` mechanism as `ConsumesUrp`):
+         * the bloom lens dirt and anamorphic flag, the Masked vignette, the HDRP film grain (`response`, the type-resolved
+         * `hdrptexture`, the Custom `texture`), and the Custom / External tone-curve inputs the exporter bakes into the HDRP strip.
+         */
+        static readonly ConsumesHdrp: {
+            [family: string]: string[];
+        };
         static readonly ConsumesUrp: {
             [family: string]: string[];
         };
@@ -22049,6 +28664,144 @@ declare namespace TOOLKIT {
          * ties in Unity's feature order. Any pass the runtime attached before this component took the camera over is released first.
          */
         protected applyGraphPasses(camera: BABYLON.Camera, textureType: number): void;
+        /**
+         * hdrp-complete-parity D9: a parity HDRP scene renders on an HDR chain with the PBR 30 clamp skipped, so the head of the
+         * chain (`HeadSlots.hdrpSanitize`) writes min(c, 65000) and replaces NaN with 0 - a 130,000-lux sun on a smooth metal
+         * never reaches bloom / TAA as Inf / NaN. Only with an HDR pipeline (half / float chain); legacy HDRP exports and every
+         * Built-in / URP scene never get it.
+         */
+        protected applyHdrpSanitize(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, textureType: number): void;
+        /**
+         * hdrp-complete-parity T17 (D21, D38): the HDRP fog pass (`TOOLKIT.HdrpFogPass`) at `HeadSlots.hdrpFog` - after sanitize,
+         * before TAA - on parity cameras when the height fog is enabled or the live PhysicallyBasedSky renders the aerial
+         * perspective. Babylon scene fog stays off on parity scenes.
+         */
+        protected applyHdrpFog(camera: BABYLON.Camera, textureType: number): void;
+        /** The HDRP fog pass per camera (T17). */
+        protected hdrpFogs: {
+            camera: BABYLON.Camera;
+            pass: BABYLON.PostProcess;
+            fog: any;
+        }[];
+        /**
+         * hdrp-water (design section 6): the camera-underwater pass (`TOOLKIT.HdrpWaterUnderwater`) at `HeadSlots.hdrpUnderwater`,
+         * right after the HDRP fog pass, whose input (the pre-fog colour) it fogs under the water line. Only on parity scenes whose
+         * `hdrp.water` block passes HDRP's two switches (supportWater, WaterRendering): a scene without water creates no pass,
+         * target or water system. The underwater object owns its pass, so `releaseStacks` detaches it instead of disposing the pass.
+         * @param camera The camera whose post chain gets the pass.
+         * @param textureType The render-target type of the camera's post chain.
+         */
+        protected applyHdrpUnderwater(camera: BABYLON.Camera, textureType: number): void;
+        /** The camera-underwater pass per camera (hdrp-water); each pass belongs to its `TOOLKIT.HdrpWaterUnderwater`. */
+        protected hdrpUnderwaters: {
+            camera: BABYLON.Camera;
+            pass: BABYLON.PostProcess;
+        }[];
+        /**
+         * hdrp-raytracing-polyfill T4 (D-L2): hands the camera's ray-tracing intent to the scene's `TOOLKIT.RayTracingSystem` and, while
+         * its debug view is on, shows the traced hit normals through a fullscreen pass at `TailSlots.rtDebug`. A scene that does not
+         * ask for ray tracing gets no system (`RayTracingSystem.Get` is null), no pass and no Inspector row.
+         * @param camera - The camera whose chain may show the debug view.
+         * @param model - The camera's blended volume model (null for a camera without a volume stack).
+         * @param textureType - The render-target type of the camera's post chain.
+         */
+        protected applyRayTracing(camera: BABYLON.Camera, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /** The ray-tracing record per camera (T4): the system, its debug-view observer and the debug pass while it is shown. */
+        protected rayTracings: IPostProcessRayTracingRecord[];
+        /**
+         * hdrp-raytracing-polyfill T12 (FR-L10, D-L13): a camera whose volume enables PathTracing gets the path tracer's replacement pass
+         * at `HeadSlots.pathTracer` (the chain head, before sanitize): it shows the traced image instead of the raster colour, and
+         * every pass after it - HDRP fog, exposure, bloom, tone mapping, grading - runs on it. The camera's thin lens comes from its
+         * physical properties and the volume's DepthOfField. Wherever a backend runs (the pass is WGSL on WebGPU, its GLSL twin on the
+         * WebGL2 backend, T13); another camera has no pass, so switching to it shows the raster image in the same frame.
+         * @param record - The camera's ray-tracing record.
+         * @param model - The camera's blended volume model (null for a camera without a volume stack).
+         */
+        private applyPathTracer;
+        /**
+         * hdrp-raytracing-polyfill T7 / T8: HDRP renders either the ray-traced or the screen-space branch of SSAO and SSR, never both.
+         * While the system traces ambient occlusion (or reflections) the camera's SSAO2 (SSR) pipeline is neutralised (strength 0, the
+         * chain never moves) and, since T14, made as cheap as its passes can be without detaching them (`RayTracedSsaoNeutral`,
+         * `RayTracedSsrNeutral`); when the effect stops tracing - not asked, the Inspector's screen-space fallback, the governor's
+         * hand-back or a failure - its settings come back.
+         * @param record - The camera's ray-tracing record.
+         */
+        private syncRayTracedScreenSpace;
+        /**
+         * hdrp-raytracing-polyfill T9: a GlobalIllumination authored as Ray Tracing / Mixed renders through the ray-tracing system; when
+         * that stops (the Inspector's A/B switch or tracing mode, the governor's hand-back, a failure) the camera's SSGI runs as ray marching - HDRP's fallback when ray tracing
+         * is unavailable - and when it traces again the SSGI pass is neutralised (its tracing mode back to the authored one, which
+         * the pass does not render; the chain head never moves).
+         * @param record - The camera's ray-tracing record.
+         */
+        private syncRayTracedGlobalIllumination;
+        /** WebGPU's colour attachments per render pass: Babylon's render-pipeline cache throws on a prepass with more targets. */
+        static readonly MaxPrePassTargets: number;
+        /** Number of Babylon prepass texture types (`PREPASS_*_TEXTURE_TYPE`, 0–16). */
+        private static readonly PrePassTextureTypeCount;
+        /** The prepass types `HdrpPostEffects.CreateSsgi` requests at most (its local positions only with probe volumes). */
+        private static readonly SsgiPrePassTypes;
+        /**
+         * Whether the scene's prepass can take more texture types without exceeding `MaxPrePassTargets` (the current layout plus the
+         * types not in it yet).
+         * @param scene - The scene.
+         * @param textureTypes - The prepass texture types a new pass would request.
+         * @returns True when the layout stays within the limit (or the scene has no prepass yet).
+         */
+        static PrePassHasRoomFor(scene: BABYLON.Scene, textureTypes: number[]): boolean;
+        /**
+         * hdrp-raytracing-polyfill T14: SSAO2 while its traced twin renders - no occlusion (strength 0), one occlusion sample and the
+         * blur passes bypassed (each a single fetch), so the four passes that stay in the chain cost next to nothing.
+         */
+        static readonly RayTracedSsaoNeutral: {
+            [property: string]: number | boolean;
+        };
+        /** hdrp-raytracing-polyfill T14: SSR while its traced twin renders - no reflection (strength 0) and a one-step ray march. */
+        static readonly RayTracedSsrNeutral: {
+            [property: string]: number | boolean;
+        };
+        /**
+         * Neutralises (or restores) one screen-space pipeline for its ray-traced twin: the properties of `neutral` take their neutral
+         * values and the values they held are remembered on the pipeline, then written back when the twin stops tracing. Only settings
+         * change - no pass is detached, so the chain head never moves (SPEC post-processing rule).
+         * @param pipeline - The SSAO2 or SSR pipeline.
+         * @param neutral - The neutral value of every property (`RayTracedSsaoNeutral`, `RayTracedSsrNeutral`).
+         * @param suppressed - True while the traced twin renders.
+         */
+        private static SuppressForRayTracing;
+        /**
+         * Adds the debug-view pass when the system's debug view is on and removes it when it is off (the frame then costs nothing).
+         * @param record - The camera's ray-tracing record.
+         * @param live - True when the Inspector toggled it after the stack applied (the chain head is re-checked).
+         */
+        private syncRayTracingDebug;
+        /** The scene's `hdrp.exposure` block on a parity scene (null otherwise). */
+        static HdrpExposureBlock(scene: BABYLON.Scene): any;
+        /** True when the parity scene's HDRP exposure is metered per frame (Automatic, CurveMapping, AutomaticHistogram). */
+        static HdrpExposureIsDynamic(scene: BABYLON.Scene): boolean;
+        /**
+         * The pre-exposure an HDRP Fixed / Use Physical Camera exposure resolves to (exact, no GPU pass): 1 / (1.2 * 2^(ev - compensation))
+         * with ev = fixedexposure, or the camera's log2(N^2 / t * 100 / S). NaN when the mode is dynamic or the camera keys are missing.
+         */
+        static HdrpStaticPreExposure(exposure: any, metadata: any): number;
+        /**
+         * hdrp-complete-parity T19 (D7, D22): HDRP Exposure on a parity camera, from the scene block `hdrp.exposure` (the evaluated
+         * stack, so a default-settings exposure with no scene volume is covered too). Automatic / CurveMapping /
+         * AutomaticHistogram run `AutoExposurePlugin`'s `hdrp` variant at `HeadSlots.autoExposure` (meter divided by the static
+         * pre-exposure, apply x exposure / pe; the first metered frame snaps, before it the frame shows the export's converged
+         * `hdrp.preexposure`). Fixed and Use Physical Camera create no pass: pe is exact, and an Inspector edit re-applies it
+         * through `HdrpRendering.SetPreExposure`. Off parity this does nothing.
+         */
+        protected applyHdrpAutoExposure(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, textureType: number, metadata: any): void;
+        /** The HDRP exposure per parity camera (T19): passes only for the dynamic modes. */
+        protected hdrpExposures: {
+            camera: BABYLON.Camera;
+            settings: TOOLKIT.IAutoExposureHdrpSettings;
+            meter: BABYLON.PostProcess;
+            apply: BABYLON.PostProcess;
+            metadata: any;
+            gate: string;
+        }[];
         /** Attaches every queued plugin pass (after all pipeline properties of the stack were written). */
         private drainPendingPlugins;
         /**
@@ -22080,9 +28833,9 @@ declare namespace TOOLKIT {
          *   other pass is image processing; the Inspector row switches None / FXAA / SMAA / TAA live and edits every TAA knob,
          *   and neutralises (never detaches) on the effect switch.
          * Accepted deviations: image processing moves into the post chain on AA-only cameras; the dither runs ahead of the
-         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; HDRP exports keep allowhdr false (an HDR chain
-         * renders HDRP's physical-unit exposure black until pre-exposure lands), so HDRP anti-aliasing runs on the 8-bit
-         * display-encoded chain; a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
+         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; legacy HDRP exports keep allowhdr false (an HDR chain
+         * renders HDRP's physical-unit exposure black without pre-exposure), so their anti-aliasing runs on the 8-bit
+         * display-encoded chain; parity exports run the HDR chain (hdrp-complete-parity D9); a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
          * the canvas MSAA of the project's Antialias Mode; URP's HDR-display FXAA branch and HDRP's alpha / dynamic-resolution
          * FXAA paths are not ported; TAA: URP runs DoF after TAA, URP mipBias is not applied (no sampler LOD bias), HDRP
          * anti-flicker / motion-vector rejection / anti-ringing / ringing reduction / post-DoF TAA are not expressed, velocity
@@ -22105,8 +28858,14 @@ declare namespace TOOLKIT {
         /**
          * The cross-applier decisions of one camera stack (pure, spit-and-polish T13): `vignetteActive` = a Classic vignette
          * with intensity > 0 (Unity's `IsEnabledAndSupported`); `hdrGrading` = the colour-grading family is active and in
-         * HDR mode (PPv2 HighDefinitionRange, or any URP / HDRP volume), the export carries a LogC LUT (`lutspace: "logc"`)
-         * and the camera allows HDR. `hdrReason` names the fallback cause otherwise.
+         * HDR mode (PPv2 HighDefinitionRange, or any URP / HDRP volume) and the export carries a LogC LUT (`lutspace: "logc"`).
+         * `hdrReason` names the fallback cause otherwise.
+         *
+         * The camera's `allowhdr` is deliberately NOT part of the decision. Unity picks the grading path from the profile /
+         * pipeline asset, never from the camera's HDR flag: URP's `ApplyColorGrading` (Common.hlsl) and PPv2's ColorGrading
+         * run the same LUT on an LDR camera, whose 8-bit target simply clamps the input to [0, 1] first. Falling back to the
+         * LDR path here dropped the baked tone mapper (an LDR URP camera with ACES rendered washed out to white). An LDR
+         * Babylon chain is display-encoded instead of linear, which the grading pass handles itself (`displayEncodedChain`).
          */
         static DeriveStackFlags(model: TOOLKIT.IPostProcessModel, metadata: TOOLKIT.IPostProcessCameraMetadata): TOOLKIT.IPostProcessStackFlags;
         /**
@@ -22138,9 +28897,9 @@ declare namespace TOOLKIT {
          *   other pass is image processing; the Inspector row switches None / FXAA / SMAA / TAA live and edits every TAA knob,
          *   and neutralises (never detaches) on the effect switch.
          * Accepted deviations: image processing moves into the post chain on AA-only cameras; the dither runs ahead of the
-         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; HDRP exports keep allowhdr false (an HDR chain
-         * renders HDRP's physical-unit exposure black until pre-exposure lands), so HDRP anti-aliasing runs on the 8-bit
-         * display-encoded chain; a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
+         * AA tail; SMAA's stencil optimisation is replaced by clear + discard; legacy HDRP exports keep allowhdr false (an HDR chain
+         * renders HDRP's physical-unit exposure black without pre-exposure), so their anti-aliasing runs on the 8-bit
+         * display-encoded chain; parity exports run the HDR chain (hdrp-complete-parity D9); a camera with no chain and no AA work (e.g. a disabled PPv2 layer with MSAA off) still gets
          * the canvas MSAA of the project's Antialias Mode; URP's HDR-display FXAA branch and HDRP's alpha / dynamic-resolution
          * FXAA paths are not ported; TAA: URP runs DoF after TAA, URP mipBias is not applied (no sampler LOD bias), HDRP
          * anti-flicker / motion-vector rejection / anti-ringing / ringing reduction / post-DoF TAA are not expressed, velocity
@@ -22155,6 +28914,13 @@ declare namespace TOOLKIT {
         private antialiasingRecordOf;
         private static AntialiasingUnity;
         /** DEC-6: the chain's HDR flag -- a pipeline's own `_hdr` (it may be reused, built by someone else) wins over the camera's `allowhdr`. */
+        /**
+         * The render-target type for a head pass between the bloom composite and the grading pass (vignette, grain, the LDR colour
+         * filter, the grading input): half-float where the engine can render it, so bloom pushed above white survives into the
+         * grading the way Unity's Uber shader keeps it (bloom, vignette, grain and grading in one HDR shader), on every pipeline.
+         * On an HDR chain the chain type already is half-float; the chain's own type when the engine has no half-float target.
+         */
+        static PrecisionTextureType(scene: BABYLON.Scene, textureType: number): number;
         static ChainHdr(pipeline: BABYLON.DefaultRenderingPipeline, hdr: boolean): boolean;
         /** The canvas's own MSAA (engine creation option `antialias`); null when the engine does not say. */
         static CanvasAntialias(scene: BABYLON.Scene): boolean;
@@ -22422,6 +29188,31 @@ declare namespace TOOLKIT {
          * (`UberPost.shader:273` grading, `:278` grain). Built-in and HDRP volumes keep every line above exactly (D30).
          */
         protected applyGrain(camera: BABYLON.Camera, pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        /** HDRP PaniniProjection at `HeadSlots.panini` (HDRP only, FR-H1); no pass while `distance` is 0 (Unity `IsActive`) until the Inspector raises it. */
+        protected applyPanini(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        private ensurePanini;
+        /**
+         * HDRP ScreenSpaceLensFlare (HDRP only, FR-H1) at `HeadSlots.lensFlare` (after the bloom chain, whose `mipUp[bloomMip]` it reads); no
+         * pass while Unity's `IsActive` is false (intensity 0) until the Inspector raises it. An HDRP asset without screen space
+         * lens flare support renders none.
+         */
+        protected applyLensFlare(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        private ensureLensFlare;
+        /**
+         * The bloom chain's `mipUp[mip]` for the lens flare (the INPUT of the pass after `coloredBloom_up_<mip>`, i.e. of
+         * `coloredBloom_up_<mip - 1>`, or of the composite for mip 0 - the deepest level the ladder has when it is shorter) and
+         * the live composite intensity / tint (0 while the bloom switch neutralises it). Null without a bloom chain.
+         */
+        private bloomMipFor;
+        /**
+         * HDRP GlobalIllumination: only `enable` + `tracing` RayMarching renders (`HdrpPostEffects.CreateSsgi` at
+         * `HeadSlots.hdrpSsgi`); Ray Tracing / Mixed are PLAN 2 and report once. No pass otherwise (the Inspector creates it
+         * when it switches SSGI on).
+         */
+        protected applyGlobalIllumination(camera: BABYLON.Camera, family: TOOLKIT.IPostProcessEffectModel, model: TOOLKIT.IPostProcessModel, textureType: number): void;
+        private ensureSsgi;
+        /** A pass the Inspector created after the stack applied: the chain head keeps the MSAA count, the watchdog sees the new shaders. */
+        private afterLivePass;
         /** FR-35: sharpen -> pipeline sharpen edge amount. */
         protected applySharpen(pipeline: BABYLON.DefaultRenderingPipeline, family: TOOLKIT.IPostProcessEffectModel): void;
         /** Model field value (Unity default when not overridden), undefined when the family has no such field. */
@@ -22689,8 +29480,104 @@ declare namespace TOOLKIT {
         private listBloom;
         private listColorGrading;
         private listDepthOfField;
+        private listPanini;
+        private listLensFlare;
+        private listGlobalIllumination;
         private listMotionBlur;
         private listLensDistortion;
+        /**
+         * hdrp-complete-parity T19: the HDRP Exposure row of a parity camera - one row per `hdrp.exposure` field (curves and the
+         * mask read-only), the mode switch, reset, and the GPU read-outs (multiplier, EV, target, metered average; read back
+         * at most 4x per second while shown, the only CPU read of the state). Static modes re-apply pe on every edit.
+         */
+        private listHdrpExposure;
+        /**
+         * hdrp-complete-parity T17 step 4: the HDRP fog (`hdrp.fog`) - enabled, mean free path, base / maximum height, max fog
+         * distance and the volumetric switch. Edits write the block the fog pass and the transparent plugin read every frame.
+         */
+        private listFog;
+        /**
+         * hdrp-raytracing-polyfill T4: the ray-tracing row of an asked scene - the debug-view switch, the backend state, which lights
+         * trace their shadows (T6) and the BVH statistics. Absent (null) on every scene without a ray-tracing system.
+         * @param camera - The listed camera.
+         * @returns The row, or null.
+         */
+        private listRayTracing;
+        /**
+         * hdrp-raytracing-polyfill T12: the path tracer's fields of a path-traced camera - the samples read-out, `maximumSamples` (raising
+         * it resumes a converged accumulation), `denoising` (Intel OIDN / NVIDIA OptiX run the toolkit denoiser: neither exists in a
+         * browser) and "raster while moving" (spec D23, off by default: HDRP shows the noisy progressive image while moving).
+         * @param row - The `rayTracing` row being listed.
+         * @param record - The camera's ray-tracing record.
+         */
+        private listPathTracer;
+        /** The Inspector's "automatic" choice of a governed effect's tier dropdown (no pin). */
+        private static readonly AutomaticTier;
+        /** Most rays per pixel the Inspector offers for ambient occlusion and shadows (HDRP's limit). */
+        private static readonly MaxInspectorSamples;
+        /** Most rays per pixel the Inspector offers for reflections, GI and subsurface scattering (HDRP's limit). */
+        private static readonly MaxInspectorTracedSamples;
+        /** Most bounces / recursion depth the Inspector offers (HDRP's limit). */
+        private static readonly MaxInspectorBounces;
+        /** Longest ray the Inspector offers, in metres. */
+        private static readonly MaxInspectorRayLength;
+        /** Smallest ray length the Inspector offers, in metres. */
+        private static readonly MinInspectorRayLength;
+        /** Step of the Inspector's ray-length fields, in metres. */
+        private static readonly InspectorRayLengthStep;
+        /** Percent per unit fraction (read-outs). */
+        private static readonly PercentPerUnit;
+        /**
+         * hdrp-raytracing-polyfill T7–T11, T14 (FR-L15): every ray-traced effect of the row, editable live - the governor read-out and
+         * its automatic switch, then per effect: its read-out (the samples and resolution it actually traces), its measured GPU time,
+         * its tier (automatic or pinned), the "screen-space fallback (A/B)" switch (on hands the effect back to its raster /
+         * screen-space branch: shadow maps, SSAO2, SSR, SSGI ray marching, raster transparency, screen-space SSS) and its HDRP settings
+         * (on / off, tracing mode, quality mode, samples, bounces, ray length, denoise, resolution), written into the camera's
+         * ray-tracing intent that every trace reads.
+         * @param row - The `rayTracing` row being listed.
+         * @param record - The camera's ray-tracing record (its system has a backend).
+         */
+        private listRayTracedEffects;
+        /**
+         * hdrp-raytracing-polyfill T14: the governor's read-out (budget, measured GPU time, last step), its automatic switch and the GPU
+         * timer it reads.
+         * @param row - The `rayTracing` row being listed.
+         * @param system - The scene's ray-tracing system.
+         */
+        private listRayTracingGovernor;
+        /**
+         * The ray-traced shadow fields: the read-out and governed fields, the directional shadow ray length, and per light that asks
+         * for a ray-traced shadow its on / off switch and samples (the light's exported `rtshadows` block).
+         * @param row - The `rayTracing` row being listed.
+         * @param system - The scene's ray-tracing system.
+         * @param intent - The camera's ray-tracing intent.
+         */
+        private listRayTracedShadows;
+        /**
+         * The fields every governed effect shares: its read-out, measured GPU time, tier dropdown (automatic or pinned) and the
+         * "screen-space fallback (A/B)" switch.
+         * @param row - The `rayTracing` row being listed.
+         * @param system - The scene's ray-tracing system.
+         * @param effect - The effect.
+         */
+        private listGovernedEffect;
+        /**
+         * The HDRP settings of one traced effect that exist in its intent block: tracing mode, quality mode, samples, bounces, ray
+         * length, denoise and resolution (each written into the block every trace reads).
+         * @param row - The `rayTracing` row being listed.
+         * @param prefix - The field key prefix.
+         * @param label - The effect's name.
+         * @param fields - The effect's intent block.
+         * @param section - The block's name in `RayTracingContract.Defaults` (HDRP's defaults for a missing key).
+         * @param offer - Which settings the effect has (`samples` is the largest sample count).
+         */
+        private listTracedSettings;
+        /**
+         * hdrp-complete-parity T9 step 6: the live HDRP PhysicallyBasedSky (`TOOLKIT.HdrpPhysicallyBasedSky`) - model, intensity, the
+         * air / aerosol / ozone parameters, artistic overrides, update mode, the "baked sky (A/B)" switch and the mode / capture
+         * read-outs. Edits re-run the LUTs and request an environment update.
+         */
+        private listSky;
         private listAutoExposure;
         private listAmbientOcclusion;
         private listScreenSpaceReflections;
@@ -22708,7 +29595,8 @@ declare namespace TOOLKIT {
         /**
          * PPv2 `PostProcessLayer.ResetHistory()` (camera-antialiasing-taa FR-10, auto-exposure-parity FR-6): the next frame of
          * `camera` (every camera when omitted) starts a new TAA history and snaps its auto exposure to the target -- for cuts the
-         * toolkit cannot detect (a scripted cut, a teleport). Returns how many TAA and auto-exposure records were reset.
+         * toolkit cannot detect (a scripted cut, a teleport); the HDRP SSGI temporal history restarts too. Returns how many TAA,
+         * auto-exposure and SSGI records were reset.
          */
         ResetHistory(camera?: BABYLON.Camera): number;
         /**
@@ -22728,6 +29616,12 @@ declare namespace TOOLKIT {
         private spliceIntoToggleOrder;
         private recordToggleOrder;
         /** The owned passes of `camera` matching `predicate` (detached ones included, so ON finds them again). */
+        /**
+         * hdrp-complete-parity T20: the HDRP toggle -- the family's owned passes stay attached and are set neutral (OFF) or
+         * restored (ON): bloom composite `_toolkitBypass` (intensity 0 = the scene exactly), grading `toolkitGrading.bypass`
+         * (lutBlend 0), vignette intensity / opacity 0 and grain intensity 0 on the pass's live Unity settings.
+         */
+        private neutraliseHdrpFamily;
         private toggleOwnedPasses;
         /** Detaches `passes` (OFF) or re-inserts the family's detached passes at their recorded slot among the live passes (ON). */
         private togglePasses;
@@ -23158,12 +30052,20 @@ declare namespace TOOLKIT {
             [family: string]: string[];
         };
         /**
+         * hdrp-raytracing-polyfill T1 (FR-L1): the ray-tracing fields of each family, consumed by `RayTracingContract.Read` (the
+         * ray-tracing intent), so `unconsumedFields` never reports them - no ray-tracing key is unsupported or mode-only. Every
+         * name is HDRP-only, so no Built-in or URP field of the same family is silenced by it.
+         */
+        static readonly RayTracingConsumes: {
+            [family: string]: string[];
+        };
+        /**
          * The OVERRIDDEN fields of `family` that `consumes` does not claim, in declaration order (review-fixes FR-15). An
          * un-overridden field is the Unity default and changes nothing, so it is never reported. `effectenabled` is never
          * reported either: it is the effect's on/off control (FR-14), not a parameter with a visual meaning. A field the
          * exporter could not serialise (`unsupported` set) is also skipped here -- `applyStack` reports those with the
          * type-specific message, and both warnings share the `param:<family>.<field>` key, so reporting it twice would
-         * suppress the more informative one.
+         * suppress the more informative one. The family's `RayTracingConsumes` fields are claimed by the ray-tracing contract.
          */
         static unconsumedFields(family: IPostProcessEffectModel, consumes: string[]): string[];
         /**
@@ -23179,6 +30081,7 @@ declare namespace TOOLKIT {
                     [from: string]: string;
                 };
                 consumedElsewhere?: boolean;
+                hdrpOnly?: boolean;
             };
         };
         /** HDRP namespace prefix, used to tell the obsolete HDRP shims from the PPv2 effects that share their type name. */
@@ -23390,6 +30293,8 @@ declare namespace TOOLKIT {
         /** Babylon roughness blur (spit-and-polish FR-8): set on every SSR pipeline the volume creates. */
         blurDispersionStrength?: number;
         enableSmoothReflections?: boolean;
+        /** hdrp-complete-parity T21: HDRP `minSmoothness` as Babylon's reflectivity threshold (1 - minSmoothness). */
+        reflectivityThreshold?: number;
     }
     /** Antialiasing derived from the camera metadata (FR-16; camera-antialiasing-parity D6, D7, D12, D15, D20). */
     interface IPostProcessAntialiasing {
@@ -23619,6 +30524,27 @@ declare namespace TOOLKIT {
          * (`ColorUtils.Luminance`, Rec. 709 weights); a black tint is white. Takes the authored sRGB `[r, g, b]`. Pure.
          */
         static bloomUrpTint(color: number[]): number[];
+        /**
+         * HDRP `GetBloomThresholdParams` (`HDRenderPipeline.PostProcess.cs`): `lthresh = GammaToLinearSpace(threshold)`,
+         * `knee = lthresh * 0.5 + 1e-5`, vector `(lthresh, lthresh - knee, 2 * knee, 0.25 / knee)` -- the `_BloomThreshold`
+         * that `QuadraticThreshold` (BloomCommon.hlsl) reads in the prefilter and in the Uber composite. Pure.
+         */
+        static bloomHdrpThresholdVector(threshold: number): number[];
+        /** HDRP `PrepareUberBloomParameters`: `intensity = 2^intensity - 1` ("makes intensity easier to control"). Pure. */
+        static bloomHdrpIntensity(intensity: number): number;
+        /**
+         * HDRP bloom `anamorphic`: the mip chain is sized `scaleW *= 1 + a` (a < 0) / `scaleH *= 1 - a` (a > 0) with
+         * `a = camera.anamorphism * 0.5` -- a narrower mip on one axis widens the blur on it by the inverse. Returns the
+         * blur-radius multipliers `[x, y]` the ladder's blur passes apply to their texel steps; `[1, 1]` when off or for an
+         * anamorphism of 0 (Unity's camera default). Pure.
+         */
+        static bloomHdrpAnamorphicScale(anamorphic: boolean, anamorphism?: number): number[];
+        /**
+         * HDRP `FilmGrain.type` (`FilmGrainLookup`: Thin1, Thin2, Medium1..Medium6, Large01, Large02, Custom) -> the index into
+         * `HDRenderPipelineRuntimeTextures.filmGrainTex` the exporter wrote as `hdrptexture`; -1 for Custom (the component's own
+         * `texture`). Pure.
+         */
+        static hdrpFilmGrainTextureIndex(type: number): number;
         /** URP `DepthOfField.highQualitySampling` -> Babylon blur level: High when true, Medium otherwise (D16). Pure. */
         static dofBlurLevelFromUrpBokeh(highQualitySampling: boolean): number;
         /**
@@ -23712,6 +30638,24 @@ declare namespace TOOLKIT {
          * (Low, Medium, High, High). Never touches fStop.
          */
         static dofBlurLevelFromKernelSize(kernelSize: number): number;
+        /**
+         * hdrp-complete-parity T21: HDRP depth-of-field quality -> BABYLON.DepthOfFieldEffectBlurLevel from the resolved near / far
+         * sample counts (the exporter writes `nearsamplecount` / `farsamplecount` from the quality level or the custom values):
+         * the larger count decides -- at most 3 samples Low, at most 5 Medium, more High. Neither count -> Medium (HDRP Medium).
+         */
+        static dofBlurLevelFromHdrpSamples(nearSampleCount: number, farSampleCount: number): number;
+        /** Largest circle of confusion Babylon's bokeh reaches, in sensor millimetres (the f-stop fit of `dofFromHdrpManual`). */
+        static DofHdrpMaxCoc: number;
+        /**
+         * hdrp-complete-parity T21: HDRP `Manual` depth of field -> one Babylon focus plane + f-stop. Focus is the middle of the
+         * in-focus band, `(nearFocusEnd + farFocusStart) / 2`, and the f-stop is chosen so the thin-lens circle of confusion
+         * reaches `DofHdrpMaxCoc` at `farFocusEnd`: `fStop = focalLength^2 / (CoCmax * (farFocusEnd - focus))` (millimetres).
+         * Null when the band is inverted (farFocusStart nearer than nearFocusEnd).
+         */
+        static dofFromHdrpManual(nearFocusEnd: number, farFocusStart: number, farFocusEnd: number, focalLengthMm: number): {
+            focusDistanceMm: number;
+            fStop: number;
+        };
         /** URP Gaussian DoF (gaussianStart/End metres, gaussianMaxRadius 0.5..1.5) -> focus at start, blur level from the radius, with a warning. */
         static dofFromGaussian(start: number, end: number, maxRadius: number): IPostProcessGaussianDof;
         /**
@@ -23726,6 +30670,10 @@ declare namespace TOOLKIT {
         static motionStrengthFromShutterAngle(shutterAngle: number): number;
         /** URP intensity 0..1 -> motionStrength = intensity * k. */
         static motionStrengthFromIntensity(intensity: number): number;
+        /** hdrp-complete-parity T21: HDRP `intensity` (0..) -> motionStrength = intensity * k (HDRP has no upper bound). */
+        static motionStrengthFromHdrpIntensity(intensity: number): number;
+        /** hdrp-complete-parity T21: HDRP resolved `sampleCount` -> motionBlurSamples, clamped 4..64 (HDRP Medium = 8). */
+        static motionSamplesFromHdrp(sampleCount: number): number;
         static motionSamplesFromQuality(quality: number): number;
         /**
          * Multiplier on the r^2 coefficient derived from the Unity model (1 = the second-order expansion of PPv2 / URP's
@@ -23817,6 +30765,14 @@ declare namespace TOOLKIT {
          */
         static ssaoFromUnity(intensity: number, radius: number, quality?: number, stepCount?: number): IPostProcessSsao;
         /**
+         * hdrp-complete-parity T21: HDRP ScreenSpaceAmbientOcclusion -> SSAO2. `radius` and `intensity` go through
+         * `ssaoFromUnity`; the resolved `stepCount` gives `samples = clamp(2 * stepCount, 8, 32)`; `blurSharpness` (0..1) is the
+         * bilateral depth tolerance (`bilateralTolerance`, sharper = stricter); without a step count the HDRP Medium (6) stands.
+         * `directLightingStrength` has no Babylon equivalent (reported by the applier), `temporalAccumulation` needs none (the
+         * SSAO2 noise is static and TAA-friendly).
+         */
+        static ssaoFromHdrp(intensity: number, radius: number, stepCount: number, blurSharpness: number): IPostProcessSsao;
+        /**
          * Amplitude of Babylon's image-processing dither (`ImageProcessingConfiguration.ditheringIntensity`), applied on every
          * stack by `PostProcessor.applyDithering`. Babylon adds a uniform `+-0.5 * intensity * 255` levels after the gamma encode
          * (`dither = mix(-i, +i, rand)` with `i = 0.5 * intensity`, static hash noise); Unity's FINALPASS adds a triangular
@@ -23857,8 +30813,16 @@ declare namespace TOOLKIT {
          * minSmoothness (surfaces smoother than this reflect) has no direct SSR counterpart and is approximated as the
          * global roughness factor used by Babylon's roughness blur: roughnessFactor = 1 - minSmoothness (documented,
          * ssrRoughnessBlur), with the blur itself enabled like every other SSR pipeline the volume creates.
+         * hdrp-complete-parity T21: `minSmoothness` also sets `reflectivityThreshold = 1 - minSmoothness`, `smoothnessFadeStart`
+         * (clamped to >= minSmoothness) drives the roughness fade, `depthBufferThickness` x `HdrpThicknessDepth` the thickness.
          */
-        static ssrFromHdrp(rayMaxIterations: number, minSmoothness: number, screenFadeDistance: number): IPostProcessSsr;
+        static ssrFromHdrp(rayMaxIterations: number, minSmoothness: number, screenFadeDistance: number, smoothnessFadeStart?: number, depthBufferThickness?: number): IPostProcessSsr;
+        /**
+         * hdrp-complete-parity T21 / T22: HDRP's ray-marching depth thickness is relative (it scales with the linear depth,
+         * `_SsrThicknessScale = 1 / (1 + t)`); Babylon's `screenSpaceRayTrace` takes view-space units. One typical depth (10 m)
+         * converts it: SSR 0.01 -> 0.1, GI 0.1 -> 1.
+         */
+        static HdrpThicknessDepth: number;
         /** Mode names by effective mode index (0..4). */
         static readonly AntialiasingModeNames: string[];
         /** D8 reason code -> the words the warning and the Inspector use. */
@@ -24089,6 +31053,7137 @@ declare namespace TOOLKIT {
     }
     export {};
 }
+declare namespace TOOLKIT {
+    /** Names of the ray-tracing backends (hdrp-raytracing-polyfill D-L3). */
+    type RayTracingBackendName = "webgpu-compute" | "webgl2-fragment" | "hardware-rayquery";
+    /**
+     * The packed acceleration structure a backend uploads (hdrp-raytracing-polyfill T4): every array is in the GPU layout of
+     * Design Reference › Data shapes, ready to copy into one buffer each. `RayTracingSystem.pack` builds it.
+     */
+    interface IRtPackedScene {
+        /** Every bottom-level BVH, concatenated; 8 floats per node, child / leaf indices local to their BVH (`blasNodeOffset`). */
+        blasNodes: Float32Array;
+        /**
+         * Three vec4 corners per source triangle of every geometry, in geometry order (`triOffset`): xyz position, w (corner 0) the
+         * triangle's sub-material slot. After all corners follow the per-corner attributes, one vec4 each: octahedral normal xy (1.5 =
+         * none), uv.
+         */
+        triangles: Float32Array;
+        /** Leaf order of every geometry: local source-triangle indices, at the same `triOffset` as the geometry's triangles. */
+        triIndices: Uint32Array;
+        /** 36 words (144 bytes) per instance: world, inverse world, blasNodeOffset, triOffset, materialOffset, flags. */
+        instances: Float32Array;
+        /** The top-level BVH over the instances, 8 floats per node; a leaf's `leftOrFirst` is the instance index. */
+        tlasNodes: Float32Array;
+        /** Height-field headers, pyramids and raw heights as u32 words (pyramid floats as their bit patterns). */
+        heightData: Uint32Array;
+        /** Number of valid instances in `instances`. */
+        instanceCount: number;
+        /** Number of valid nodes in `tlasNodes`. */
+        tlasNodeCount: number;
+        /** Number of triangles (the per-corner attributes start at corner `triangleCount × 3` of `triangles`). */
+        triangleCount: number;
+        /** The material table: 8 vec4 rows per `RtMaterial` record, then one uv-transform row per record (T5), then one subsurface row per record (T11). */
+        materialRows: Float32Array;
+        /** Number of material records. */
+        materialCount: number;
+        /** The light table: 4 vec4 rows per `RtLight` record (T5). */
+        lightRows: Float32Array;
+        /** Number of lights. */
+        lightCount: number;
+    }
+    /** The per-dispatch inputs of a trace. */
+    interface IRayTracingTraceParams {
+        /** The camera whose primary rays are traced. */
+        camera: BABYLON.Camera;
+        /** Output width in pixels. */
+        width: number;
+        /** Output height in pixels. */
+        height: number;
+    }
+    /** The per-dispatch inputs every frame tracer shares (T6–T11): the frame hash and the ray bias. */
+    interface IRtFrameTraceParams extends IRayTracingTraceParams {
+        /** Frame counter that decorrelates the per-frame ray hashes. */
+        frameIndex: number;
+        /** Smallest offset of a ray origin along the surface normal, in metres (HDRP `rayBias`). */
+        rayBias: number;
+    }
+    /** The per-dispatch inputs every screen-space tracer shares (T6–T9): the prepass surfaces of the frame just rendered. */
+    interface IRtSurfaceTraceParams extends IRtFrameTraceParams {
+        /** The prepass view-depth texture (R32F, Babylon `PREPASS_DEPTH_TEXTURE_TYPE`) of the frame just rendered. */
+        depthTexture: BABYLON.BaseTexture;
+        /** The prepass normal texture (`PREPASS_NORMAL_TEXTURE_TYPE`) of the same frame. */
+        normalTexture: BABYLON.BaseTexture;
+        /** True when the prepass writes world-space normals (`PrePassRenderer.generateNormalsInWorldSpace`), else view space. */
+        normalsInWorldSpace: boolean;
+    }
+    /** The per-dispatch inputs of the ray-traced shadow kernel (T6). */
+    interface IRtShadowTraceParams extends IRtSurfaceTraceParams {
+        /** Light-table record of each shadow slot 0–3 (-1 = empty slot). */
+        slotLights: number[];
+        /** Shadow rays per pixel of each slot. */
+        slotSamples: number[];
+        /** `RayTracedShadows.Flags` bits of each slot (pass-through, colour shadow, luminance mask). */
+        slotFlags: number[];
+        /** Length of directional shadow rays, in metres (HDRP `directionalShadowRayLength`). */
+        directionalRayLength: number;
+    }
+    /**
+     * Which instances an effect's rays see (D-L6, HDRP HDRaytracingManager): instances carrying one of `excludeFlags`
+     * (`RayTracingSystem.Flags`) are skipped, and so are those whose Unity layer is not in `layerMask`.
+     */
+    interface IRtRayMembership {
+        /** `RtInstance.flags` bits that keep an instance out of the effect's rays (transparent-only, shadows-only). */
+        excludeFlags: number;
+        /** The effect's Unity layer mask, as an unsigned 32-bit value (every layer = 0xFFFFFFFF). */
+        layerMask: number;
+    }
+    /** The per-dispatch inputs of the ray-traced ambient occlusion kernel (T7). */
+    interface IRtAmbientOcclusionTraceParams extends IRtSurfaceTraceParams {
+        /** Longest occlusion ray, in metres (HDRP `rayLength`). */
+        rayLength: number;
+        /** Rays per pixel (HDRP `sampleCount`). */
+        sampleCount: number;
+        /** The instances the occlusion rays see. */
+        membership: IRtRayMembership;
+    }
+    /** The per-dispatch inputs of the ray-traced reflection kernel (T8). */
+    interface IRtReflectionTraceParams extends IRtSurfaceTraceParams {
+        /** The prepass reflectivity texture (`PREPASS_REFLECTIVITY_TEXTURE_TYPE`: F0 rgb, smoothness a). */
+        reflectivityTexture: BABYLON.BaseTexture;
+        /** Longest reflection ray, in metres (HDRP `rayLength`). */
+        rayLength: number;
+        /** Rays per pixel (HDRP `sampleCount`). */
+        sampleCount: number;
+        /** Bounces per ray (HDRP `bounceCount` in Quality mode, 1 in Performance). */
+        bounceCount: number;
+        /** Smoothness below which the raster reflection stays (HDRP `minSmoothness`). */
+        minSmoothness: number;
+        /** Smoothness from which the traced reflection has full weight (HDRP `smoothnessFadeStart`). */
+        smoothnessFadeStart: number;
+        /** Largest pre-exposed value of one sample, per channel (HDRP `clampValue`). */
+        clampValue: number;
+        /** HDRP `rayMiss` (`RayTracingContract.Enums.Fallback`). */
+        rayMiss: number;
+        /** HDRP `lastBounceFallbackHierarchy` (`RayTracingContract.Enums.Fallback`). */
+        lastBounce: number;
+        /** Length of the hit's directional shadow rays, in metres. */
+        directionalRayLength: number;
+        /** The instances the reflection rays see (the hits' shadow rays skip only transparent-only instances). */
+        membership: IRtRayMembership;
+    }
+    /** The per-dispatch inputs of the ray-traced global illumination kernel (T9). */
+    interface IRtGlobalIlluminationTraceParams extends IRtSurfaceTraceParams {
+        /** Longest diffuse ray, in metres (HDRP `rayLength`). */
+        rayLength: number;
+        /** Rays per pixel (HDRP `sampleCount` in Quality mode, 1 in Performance). */
+        sampleCount: number;
+        /** Diffuse bounces per ray (HDRP `bounceCount` in Quality mode, 1 in Performance). */
+        bounceCount: number;
+        /** Largest pre-exposed HSV value of one sample (HDRP `clampValue`). */
+        clampValue: number;
+        /** HDRP `rayMiss` (`RayTracingContract.Enums.Fallback`). */
+        rayMiss: number;
+        /** HDRP `lastBounceFallbackHierarchy` (`RayTracingContract.Enums.Fallback`). */
+        lastBounce: number;
+        /** HDRP `ambientProbeDimmer`: the scale of the ambient probe at the last bounce. */
+        ambientProbeDimmer: number;
+        /** Length of the hits' directional shadow rays, in metres. */
+        directionalRayLength: number;
+        /** The instances the diffuse rays see (the hits' shadow rays skip only transparent-only instances). */
+        membership: IRtRayMembership;
+    }
+    /** The per-dispatch inputs of the recursive rendering kernel (T10). */
+    interface IRtRecursiveTraceParams extends IRtFrameTraceParams {
+        /** Longest secondary ray, in metres (HDRP `rayLength`; the camera ray reaches the far scene). */
+        rayLength: number;
+        /** Deepest ray, the camera ray counting as 1 (HDRP `maxDepth`). */
+        maxDepth: number;
+        /** Smoothness from which a hit spawns a reflection ray (HDRP `minSmoothness`). */
+        minSmoothness: number;
+        /** HDRP `rayMiss` (`RayTracingContract.Enums.Fallback`). */
+        rayMiss: number;
+        /** HDRP `lastBounceFallbackHierarchy` (`RayTracingContract.Enums.Fallback`). */
+        lastBounce: number;
+        /** HDRP `ambientProbeDimmer`: the scale of the ambient probe at the hits. */
+        ambientProbeDimmer: number;
+        /** Length of the hits' directional shadow rays, in metres. */
+        directionalRayLength: number;
+        /** The Unity layers whose renderers are drawn by recursive rays, as an unsigned 32-bit value. */
+        selectionMask: number;
+    }
+    /** The per-dispatch inputs of the ray-traced subsurface scattering kernel (T11). */
+    interface IRtSubsurfaceTraceParams extends IRtFrameTraceParams {
+        /** Random walks per pixel (HDRP `sampleCount`). */
+        sampleCount: number;
+        /** Length of the exit points' directional shadow rays, in metres. */
+        directionalRayLength: number;
+    }
+    /** The height fog a path's secondary segments cross (T12, HDRP OpticalDepthHeightFog + the analytic sky-coloured in-scatter). */
+    interface IRtPathFog {
+        /** Extinction at the base height, per metre (1 / mean free path). */
+        extinction: number;
+        /** Height below which the fog is homogeneous, in metres. */
+        baseHeight: number;
+        /** Longest fogged segment, in metres (HDRP `maxFogDistance`). */
+        maximumDistance: number;
+        /** HDRP `_HeightFogExponents`: 1 / H and H, the scale height in metres. */
+        heightExponents: number[];
+        /** True when the fog takes the sky's colour (HDRP colour mode Sky), false for the constant colour. */
+        skyColor: boolean;
+        /** Sky mode: the tint; constant mode: the pre-exposed colour. */
+        color: number[];
+        /** Sky mode: the scale that turns the sky cube's level into the fog colour (1 / the reflection multiplier). */
+        skyScale: number;
+        /** HDRP mip fog: near and far distances in metres and the largest mip share. */
+        mip: number[];
+        /** The last mip level of the sky cube. */
+        maxLevel: number;
+        /** The fog albedo (volumetric fog), white otherwise. */
+        albedo: number[];
+    }
+    /** The per-dispatch inputs of the path tracer kernel (T12). */
+    interface IRtPathTraceParams extends IRtFrameTraceParams {
+        /** The per-sample seed (HDRP seed mode: the running frame count, the sample index, or the custom seed plus it). */
+        seed: number;
+        /** HDRP `minimumDepth`: the first segment whose light counts, and Russian roulette starts after it. */
+        minimumDepth: number;
+        /** HDRP `maximumDepth`: segments per path. */
+        maximumDepth: number;
+        /** HDRP `maximumIntensity`: the pre-exposed luminance an indirect contribution is clamped to. */
+        maximumIntensity: number;
+        /** Length of directional shadow rays, in metres. */
+        directionalRayLength: number;
+        /** Thin-lens aperture radius in metres (0 = pinhole). */
+        apertureRadius: number;
+        /** Distance of the focus plane in metres. */
+        focusDistance: number;
+        /** HDRP `tilingParameters` x / y: the interleaved tile grid (1 × 1 = the whole frame each dispatch). */
+        tileCount: number[];
+        /** The tile this dispatch traces (column, row). */
+        tile: number[];
+        /** True while the first sample cycle runs (the AOVs are written). */
+        writeAovs: boolean;
+        /** True for the first dispatch after a reset (the accumulation starts from zero). */
+        restart: boolean;
+        /** The instances the paths see (HDRP `layerMask`). */
+        membership: IRtRayMembership;
+        /** The camera-sized sky background (the live sky pass) for camera rays that miss, or null to read the sky cube. */
+        background: BABYLON.BaseTexture;
+        /** The height fog of the secondary segments, or null without fog. */
+        fog: IRtPathFog;
+        /** Width and height of the bound sky CDF, or null when sky importance sampling is off. */
+        skyCdfSize: number[];
+    }
+    /** The images one path-tracer dispatch leaves (T12). */
+    interface IRtPathOutputs {
+        /** The accumulated mean radiance (rgba16f, pre-exposed). */
+        image: BABYLON.BaseTexture;
+        /** The albedo AOV of the first hit (rgba16f). */
+        albedo: BABYLON.BaseTexture;
+        /** The guide AOV: world normal and view depth of the first hit (rgba16f, `RayTracingGuide` layout). */
+        guide: BABYLON.BaseTexture;
+    }
+    /** The two images the shadow kernel writes (T6). */
+    interface IRtShadowOutputs {
+        /** RGBA8: the visibility of shadow slots 0–3 (1 = lit). */
+        mask: BABYLON.BaseTexture;
+        /** RGBA16F: slot 0's colour-shadow tint in rgb, the traced view depth in a (the materials' reprojection test). */
+        color: BABYLON.BaseTexture;
+    }
+    /**
+     * One ray-tracing backend (hdrp-raytracing-polyfill D-L3): owns the GPU copies of the packed scene and the trace kernels.
+     * Kernels compile when the backend is created and are polled with `isReady()` before the first trace; buffers are bound to the
+     * kernels when they are (re)created, never per frame.
+     */
+    interface IRayTracingBackend {
+        /** Which backend this is. */
+        readonly name: RayTracingBackendName;
+        /** The compile or creation error that disabled the backend, or null while it is healthy. */
+        readonly failure: string;
+        /**
+         * Whether the backend can run on an engine.
+         * @param engine - The engine to test.
+         * @returns True when the backend can trace on it.
+         */
+        isSupported(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * Whether every kernel compiled and the scene buffers exist.
+         * @returns True once a trace can be dispatched.
+         */
+        isReady(): boolean;
+        /**
+         * Uploads the whole packed scene (membership changed): buffers that grew are recreated and rebound, the others updated.
+         * @param system - The ray-tracing system whose `packed` scene is uploaded.
+         */
+        upload(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the top level and the changed instances (transforms moved, membership unchanged); never rebinds.
+         * @param system - The ray-tracing system whose `packed` scene changed.
+         * @param firstInstance - First changed instance (default: all).
+         * @param lastInstance - Last changed instance, inclusive (default: all).
+         */
+        updateTopLevel(system: TOOLKIT.RayTracingSystem, firstInstance?: number, lastInstance?: number): void;
+        /**
+         * Uploads the bottom-level nodes and triangles in place after a DynamicGeometry refit (sizes unchanged); never rebinds.
+         * @param system - The ray-tracing system whose `packed` scene changed.
+         */
+        updateGeometry(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the material table (its buffer is recreated and rebound only when it grew).
+         * @param system - The ray-tracing system whose `packed.materialRows` changed.
+         */
+        uploadMaterials(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the light table (its buffer is recreated and rebound only when it grew).
+         * @param system - The ray-tracing system whose `packed.lightRows` changed.
+         */
+        uploadLights(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Binds the texture-bucket arrays (after a bucket swapped its array); an empty bucket binds a 1-layer placeholder.
+         * @param arrays - The six arrays in bucket-id order (null = empty).
+         */
+        bindTextureBuckets(arrays: BABYLON.BaseTexture[]): void;
+        /**
+         * Binds the sky-miss cube (D-L18: the scene's environment texture, sampled at mip 0 × its level); null binds black.
+         * @param texture - The cube, or null.
+         */
+        bindSky(texture: BABYLON.BaseTexture): void;
+        /**
+         * Whether an effect's kernel compiled and can dispatch.
+         * @param effect - The effect name.
+         * @returns True once `trace(effect)` can run.
+         */
+        isEffectReady(effect: string): boolean;
+        /**
+         * Dispatches one effect's kernel.
+         * @param effect - The effect name (`debugNormals`, `primaryShading`).
+         * @param params - The trace inputs.
+         * @returns The texture the effect wrote, or null when it could not run this frame.
+         */
+        trace(effect: string, params: IRayTracingTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the ray-traced shadow kernel (T6) over the prepass of the frame just rendered.
+         * @param params - The camera, size, prepass textures and shadow slots.
+         * @returns The mask and colour images, or null when the kernel is not ready.
+         */
+        traceShadows(params: IRtShadowTraceParams): IRtShadowOutputs;
+        /**
+         * Creates (and starts compiling) an effect's kernel the first time the effect is asked for; a scene that never asks for it
+         * never compiles it (D-L2).
+         * @param effect - The effect name (`ambientOcclusion`, `reflections`).
+         */
+        prepareEffect(effect: string): void;
+        /**
+         * Dispatches the ray-traced ambient occlusion kernel (T7) over the prepass of the frame just rendered.
+         * @param params - The camera, size, prepass textures and the occlusion rays.
+         * @returns The noisy visibility image (rgba16f, visibility in a), or null when the kernel is not ready.
+         */
+        traceAmbientOcclusion(params: IRtAmbientOcclusionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the ray-traced reflection kernel (T8) over the prepass of the frame just rendered.
+         * @param params - The camera, size, prepass textures and the reflection settings.
+         * @returns The noisy reflection image (rgba16f, premultiplied by the fade weight), or null when the kernel is not ready.
+         */
+        traceReflections(params: IRtReflectionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the ray-traced global illumination kernel (T9) over the prepass of the frame just rendered.
+         * @param params - The camera, size, prepass textures and the diffuse-ray settings.
+         * @returns The noisy indirect-diffuse image (rgba16f), or null when the kernel is not ready.
+         */
+        traceGlobalIllumination(params: IRtGlobalIlluminationTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the recursive rendering kernel (T10): camera rays through the recursive renderers.
+         * @param params - The camera, size and the recursion settings.
+         * @returns The recursive colour image (rgba16f, a = the view depth of the recursive hit), or null when the kernel is not ready.
+         */
+        traceRecursive(params: IRtRecursiveTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the ray-traced subsurface scattering kernel (T11): random walks under the diffusion-profile surfaces.
+         * @param params - The camera, size and the walk settings.
+         * @returns The noisy scattered-lighting image (rgba16f, a = the surface view depth), or null when the kernel is not ready.
+         */
+        traceSubsurface(params: IRtSubsurfaceTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the path tracer (T12): one path per pixel of the current tile, accumulated into the ping-pong rgba32f images.
+         * @param params - The camera, size, sample, tile and path settings.
+         * @returns The accumulated mean and the AOVs, or null when the kernel is not ready.
+         */
+        tracePath(params: IRtPathTraceParams): IRtPathOutputs;
+        /**
+         * Measures the sky cube's luminance on an equirectangular grid (T12: the HDRI sky's sampling CDF) and reads it back.
+         * @param camera - Any camera of the scene (the dispatch parameters need one).
+         * @param width - Grid width (azimuth).
+         * @param height - Grid height (polar angle).
+         * @returns The luminance row by row, or null when the kernel is not ready.
+         */
+        measureSkyLuminance(camera: BABYLON.Camera, width: number, height: number): Promise<Float32Array>;
+        /**
+         * Uploads the sky CDF the path tracer samples (`RayTracingPathTracer.PackSkyCdf` layout); null leaves a 1-word placeholder.
+         * @param words - The packed CDF, or null.
+         */
+        uploadSkyCdf(words: Float32Array): void;
+        /**
+         * Divides an image by the path tracer's albedo AOV (demodulation before the denoiser) or multiplies it again.
+         * @param signal - The image.
+         * @param albedo - The albedo AOV (the same size).
+         * @param divide - True to divide, false to multiply.
+         * @returns The modulated image, or null while the kernel compiles.
+         */
+        modulatePath(signal: BABYLON.BaseTexture, albedo: BABYLON.BaseTexture, divide: boolean): BABYLON.BaseTexture;
+        /**
+         * Merges the denoised GI and ambient-occlusion images into `rtLighting0` (D-L8: GI rgb, visibility a).
+         * @param globalIllumination - The GI image.
+         * @param ambientOcclusion - The ambient-occlusion image (the same size).
+         * @returns The packed image, or null while the packing kernel compiles.
+         */
+        packLighting(globalIllumination: BABYLON.BaseTexture, ambientOcclusion: BABYLON.BaseTexture): BABYLON.BaseTexture;
+        /**
+         * The compile error of an effect's kernel (the effect hands back to its screen-space branch with one report), or null.
+         * @param effect - The effect name.
+         * @returns The error, or null while the kernel is healthy (or not created).
+         */
+        effectFailure(effect: string): string;
+        /**
+         * The surfaces the screen-space tracers read: the prepass images themselves (WebGPU), or their half-resolution copies at the
+         * WebGL2 backend's reduced tier (D-L14).
+         * @param surfaces - The traced frame's prepass surfaces.
+         * @returns The surfaces to trace, or null while the reduction pass compiles.
+         */
+        prepareSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * The half-resolution copy of the traced surfaces an effect at a half-resolution tier reads (T14, D-L12): WebGPU reduces the
+         * prepass (`SurfaceReductionKernelWGSL`); WebGL2 traces its reduced surfaces already and returns them unchanged.
+         * @param surfaces - The surfaces `prepareSurfaces` returned this frame.
+         * @returns The half-resolution surfaces, or null while the reduction kernel compiles.
+         */
+        reduceSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * The compute kernels of an effect, for the governor's GPU timer (T14).
+         * @param effect - The effect name.
+         * @returns WebGPU: the effect's trace kernel once created; WebGL2: none (its passes are timed by timer queries).
+         */
+        kernelShaders(effect: string): BABYLON.ComputeShader[];
+        /** The resolution divisor every trace of this backend runs at (1 on WebGPU, 2 on WebGL2's reduced tier, D-L14). */
+        readonly resolutionDivisor: number;
+        /** The most rays per pixel this backend traces (unlimited on WebGPU, 1 on WebGL2, D-L14). */
+        readonly maximumSamples: number;
+        /** True when the backend can render the Inspector's debug views (the WGSL debug kernels and pass). */
+        readonly supportsDebugView: boolean;
+        /** Releases every buffer, kernel and texture. */
+        dispose(): void;
+    }
+    /** The scene counts and the sky the per-dispatch parameters carry (`RayTracingDispatchParams.writeTrace`). */
+    interface IRtDispatchScene {
+        /** Instances uploaded (the traversal's loop bound). */
+        instanceCount: number;
+        /** Top-level nodes uploaded. */
+        tlasNodeCount: number;
+        /** Lights in the light table. */
+        lightCount: number;
+        /** Material records (the uv-transform rows follow them). */
+        materialCount: number;
+        /** Triangles uploaded (the attribute corners follow their positions). */
+        triangleCount: number;
+        /** The sky-miss cube, or null. */
+        skyTexture: BABYLON.BaseTexture;
+    }
+    /**
+     * The uniform buffers every trace kernel reads (hdrp-raytracing-polyfill T4–T12), shared by the WebGPU compute backend and the
+     * WebGL2 fragment backend (T13: the translated kernels read the same buffers as std140 blocks, members in the same order):
+     * `TraceParams` (camera, output size, scene counts, sky), `ShadowParams`, one `EffectParams` per on-demand effect and
+     * `PathParams`. Every write method fills one effect's fields from its trace inputs.
+     */
+    class RayTracingDispatchParams {
+        /** Names of the nine pre-scaled spherical-harmonic uniforms of `EffectParams`, in Babylon's `preScaledHarmonics` order. */
+        private static readonly HarmonicNames;
+        /** `skyParams.y` encodings of the sky cube: linear, RGBD, gamma (`RayTracingShaders.ShadingLibraryWGSL`). */
+        private static readonly SkyEncoding;
+        /** A layer mask holding every Unity layer. */
+        static readonly AllLayers: number;
+        /** The `PathParams` vec4 members, in the WGSL struct's order (the view-to-world matrix follows them). */
+        private static readonly PathVectors;
+        /** Per-dispatch parameters (`TraceParams`). */
+        readonly trace: IRtUniformWriter;
+        /** Per-dispatch shadow parameters (`ShadowParams`, T6). */
+        readonly shadow: IRtUniformWriter;
+        /** Per-dispatch parameters of the path tracer (`PathParams`, T12), created with its kernel. */
+        path: IRtUniformWriter;
+        /** The engine the buffers live on. */
+        private readonly engine;
+        /** One `EffectParams` buffer per on-demand effect (every kernel dispatches once per frame). */
+        private readonly effects;
+        /** Scratch for the camera's inverse view matrix (view-space prepass normals to world). */
+        private readonly viewToWorld;
+        /** Scratch for the inverse view-projection matrix. */
+        private readonly inverseViewProjection;
+        /**
+         * Creates the trace and shadow parameter buffers.
+         * @param engine - The engine.
+         */
+        constructor(engine: BABYLON.AbstractEngine);
+        /**
+         * The `EffectParams` buffer of an on-demand effect (created on first use).
+         * @param effect - The effect name.
+         * @returns The buffer.
+         */
+        effect(effect: string): IRtUniformWriter;
+        /**
+         * The path tracer's `PathParams` buffer (created on first use).
+         * @returns The buffer.
+         */
+        ensurePath(): IRtUniformWriter;
+        /**
+         * Writes `TraceParams`: camera, output size, scene counts, the sky cube's matrix / level / encoding (read every dispatch, so
+         * pre-exposure edits of its level apply at once) and the attribute offset.
+         * @param camera - The traced camera.
+         * @param width - Output width in pixels.
+         * @param height - Output height in pixels.
+         * @param scene - The uploaded counts and the sky.
+         */
+        writeTrace(camera: BABYLON.Camera, width: number, height: number, scene: IRtDispatchScene): void;
+        /**
+         * The larger of two image sizes, per axis (the packed `rtLighting0` when GI and ambient occlusion trace at different tiers).
+         * @param first - One size.
+         * @param second - The other.
+         * @returns The size covering both.
+         */
+        static LargerSize(first: BABYLON.ISize, second: BABYLON.ISize): BABYLON.ISize;
+        /**
+         * Writes `ShadowParams`: the slots, the frame hash, the ray bias and directional length, the view-depth plane of the camera
+         * (the prepass stores view z) and the view-to-world rotation for view-space prepass normals.
+         * @param params - The shadow trace inputs.
+         * @param maximumSamples - The most shadow rays per slot the backend traces (its tier).
+         */
+        writeShadow(params: IRtShadowTraceParams, maximumSamples: number): void;
+        /**
+         * Writes the ambient-occlusion kernel's `EffectParams` (T7).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param maximumSamples - The most rays per pixel the backend traces.
+         */
+        writeAmbientOcclusion(effect: string, params: IRtAmbientOcclusionTraceParams, maximumSamples: number): void;
+        /**
+         * Writes the reflection kernel's `EffectParams` (T8).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param maximumSamples - The most rays per pixel the backend traces.
+         * @param skyTexture - The sky cube (its harmonics), or null.
+         */
+        writeReflections(effect: string, params: IRtReflectionTraceParams, maximumSamples: number, skyTexture: BABYLON.BaseTexture): void;
+        /**
+         * Writes the GI kernel's `EffectParams` (T9).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param maximumSamples - The most rays per pixel the backend traces.
+         * @param skyTexture - The sky cube (its harmonics), or null.
+         */
+        writeGlobalIllumination(effect: string, params: IRtGlobalIlluminationTraceParams, maximumSamples: number, skyTexture: BABYLON.BaseTexture): void;
+        /**
+         * Writes the recursive kernel's `EffectParams` (T10).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param skyTexture - The sky cube (its harmonics), or null.
+         */
+        writeRecursive(effect: string, params: IRtRecursiveTraceParams, skyTexture: BABYLON.BaseTexture): void;
+        /**
+         * Writes the subsurface kernel's `EffectParams` (T11).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param maximumSamples - The most walks per pixel the backend traces.
+         * @param skyTexture - The sky cube (its harmonics), or null.
+         */
+        writeSubsurface(effect: string, params: IRtSubsurfaceTraceParams, maximumSamples: number, skyTexture: BABYLON.BaseTexture): void;
+        /**
+         * Writes the path tracer's `PathParams` (T12): seed, depths, clamp, bias, lens, tile, membership, sky CDF, fog and the
+         * camera's view-depth plane and view-to-world matrix.
+         * @param params - The path trace inputs.
+         */
+        writePath(params: IRtPathTraceParams): void;
+        /** Releases every buffer. */
+        dispose(): void;
+        /**
+         * Writes the surface fields of an effect's `EffectParams` (frame hash, bias, ray length, samples, depth plane, normal space).
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param rayLength - The effect's ray length in metres.
+         * @param sampleCount - The effect's rays per pixel.
+         * @param normalsInWorldSpace - True when the prepass normals are world space (camera tracers read none: any value).
+         * @returns The buffer (the caller adds its own fields and flushes it).
+         */
+        private writeEffect;
+        /**
+         * Writes the sky cube's pre-scaled spherical harmonics (Babylon's `vSphericalL00…L22`): the irradiance reflection hits
+         * receive; zero without a sky.
+         * @param buffer - The effect's `EffectParams`.
+         * @param skyTexture - The sky cube, or null.
+         */
+        private static WriteHarmonics;
+        /**
+         * Writes an effect's ray membership into `EffectParams.layerParams`: the layer mask as two exact 16-bit halves (a float holds
+         * 24 bits), the excluded flags, and the flags its hits' shadow rays exclude.
+         * @param buffer - The effect's `EffectParams`.
+         * @param membership - The effect's membership.
+         * @param shadowExcludeFlags - Flags the shadow rays of the effect's hits skip.
+         */
+        private static WriteMembership;
+        /**
+         * A 32-bit layer mask as two exact 16-bit halves (a uniform float holds 24 bits exactly), low half first.
+         * @param mask - The mask, as a signed or unsigned 32-bit value.
+         * @returns The low and high halves.
+         */
+        private static SplitMask;
+        /**
+         * One slot's value of a per-slot parameter list.
+         * @param values - The per-slot values (may be shorter than four, or null).
+         * @param slot - The slot, 0–3.
+         * @param fallback - The value of a missing slot.
+         * @returns The slot's value or the fallback.
+         */
+        private static SlotValue;
+    }
+    /**
+     * The WebGPU compute backend (hdrp-raytracing-polyfill T4, T5, D-L3): read-only storage buffers for the BVHs, triangles (with
+     * their per-corner attributes), instances, height fields, the material table and the light table; a uniform buffer for the
+     * per-dispatch camera, sky and counts; the six texture-bucket arrays with one shared repeat sampler; the sky-miss cube; and one
+     * kernel per effect created from `RayTracingShaders` with an explicit `bindingsMapping`. Resources are bound when they are
+     * (re)created, never per frame; storage buffers carry the polyfill's packed layout byte for byte.
+     */
+    class WebGpuComputeBackend implements IRayTracingBackend {
+        /** Smallest storage buffer created, in bytes: WebGPU rejects zero-sized bindings, so an empty array still gets a buffer. */
+        private static readonly MinimumBufferBytes;
+        /** The sample counts of this backend are never clamped (the authored tier). */
+        private static readonly UnlimitedSamples;
+        /** The debug hit-normal effect name accepted by `trace` (equals `RayTracingShaders.DebugNormalsEffect`, kept literal so load order never matters). */
+        static readonly DebugNormalsEffect: string;
+        /** The primary-shading effect name accepted by `trace` (T5). */
+        static readonly PrimaryShadingEffect: string;
+        /** The ray-traced shadow effect name dispatched by `traceShadows` (T6). */
+        static readonly ShadowsEffect: string;
+        /** The ray-traced ambient occlusion effect name dispatched by `traceAmbientOcclusion` (T7). */
+        static readonly AmbientOcclusionEffect: string;
+        /** The ray-traced reflection effect name dispatched by `traceReflections` (T8). */
+        static readonly ReflectionsEffect: string;
+        /** The ray-traced global illumination effect name dispatched by `traceGlobalIllumination` (T9). */
+        static readonly GlobalIlluminationEffect: string;
+        /** The recursive rendering effect name dispatched by `traceRecursive` (T10). */
+        static readonly RecursiveEffect: string;
+        /** The ray-traced subsurface scattering effect name dispatched by `traceSubsurface` (T11). */
+        static readonly SubsurfaceEffect: string;
+        /** The path tracer effect name dispatched by `tracePath` (T12). */
+        static readonly PathTracerEffect: string;
+        /** The sky-luminance effect name dispatched by `measureSkyLuminance` (T12). */
+        static readonly SkyLuminanceEffect: string;
+        /** {@inheritDoc IRayTracingBackend.name} */
+        readonly name: RayTracingBackendName;
+        /** {@inheritDoc IRayTracingBackend.failure} */
+        failure: string;
+        /** {@inheritDoc IRayTracingBackend.supportsDebugView} */
+        readonly supportsDebugView: boolean;
+        /** {@inheritDoc IRayTracingBackend.resolutionDivisor} */
+        readonly resolutionDivisor: number;
+        /** {@inheritDoc IRayTracingBackend.maximumSamples} */
+        readonly maximumSamples: number;
+        /** The engine the buffers and kernels live on. */
+        private readonly engine;
+        /** The scene the output textures belong to. */
+        private readonly scene;
+        /** The kernels by effect name, created (and compiling) in the constructor. */
+        private kernels;
+        /** The uniform buffers every kernel reads (`TraceParams`, `ShadowParams`, `EffectParams`, `PathParams`). */
+        private dispatchParams;
+        /** The shadow kernel's second output: slot 0's colour tint and the traced view depth (rgba16f, T6). */
+        private shadowColorOutput;
+        /** The `rtLighting0` packing kernel (created the first time GI and ambient occlusion trace together). */
+        private packKernel;
+        /** The packed `rtLighting0` image (GI rgb, visibility a). */
+        private packedLighting;
+        /** The scene storage buffers by binding name, with their byte sizes. */
+        private buffers;
+        /** The repeat / bilinear sampler every bucket array is read with. */
+        private bucketSampler;
+        /** The 1-layer placeholder bound to empty buckets. */
+        private placeholderArray;
+        /** The bucket arrays last bound, by binding name (an on-demand kernel binds them at creation). */
+        private boundBuckets;
+        /** The 1-pixel black cube bound while the scene has no ready environment. */
+        private placeholderCube;
+        /** The sky-miss cube currently bound (null = the placeholder). */
+        private skyTexture;
+        /** True once `upload` ran at least once. */
+        private uploaded;
+        /** Instance count of the last upload (the kernel's loop bound). */
+        private instanceCount;
+        /** Top-level node count of the last upload. */
+        private tlasNodeCount;
+        /** Triangle count of the last upload (start of the attribute corners). */
+        private triangleCount;
+        /** Material count of the last material upload (start of the uv-transform rows). */
+        private materialCount;
+        /** Light count of the last light upload. */
+        private lightCount;
+        /** The path tracer's two rgba32f accumulation images (read one, write the other, swapped every dispatch). */
+        private readonly pathAccumulation;
+        /** Which accumulation image the next dispatch writes. */
+        private pathWriteIndex;
+        /** The path tracer's albedo AOV (rgba16f). */
+        private pathAlbedo;
+        /** The path tracer's guide AOV: world normal and view depth (rgba16f). */
+        private pathGuide;
+        /** 1-pixel stand-in for the sky background when the scene has no sky mesh. */
+        private pathBackgroundPlaceholder;
+        /** The demodulation and remodulation kernels (created on the first denoise) and their outputs, by `divide`. */
+        private readonly modulateKernels;
+        /** The surface-reduction kernel of the half-resolution tiers (created the first time an effect traces at half resolution, T14). */
+        private reductionKernel;
+        /** Positions of the reduced surface images in `reducedImages`. */
+        private static readonly ReducedImage;
+        /** The reduced surfaces by `ReducedImage` position: view depth (rgba32f), normals, velocity and reflectivity (rgba16f). */
+        private readonly reducedImages;
+        /** 1-pixel image bound for a missing velocity or reflectivity prepass image during the reduction. */
+        private reductionPlaceholder;
+        /**
+         * Creates the backend and starts compiling its kernels (D-L2: only an asked scene on a compute-capable engine gets here).
+         * @param scene - The scene the backend traces.
+         */
+        constructor(scene: BABYLON.Scene);
+        /**
+         * Whether an engine runs WebGPU compute shaders.
+         * @param engine - The engine to test.
+         * @returns True on a WebGPU engine with compute support.
+         */
+        isSupported(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * Whether the debug kernel compiled and the scene was uploaded. Polling this also finishes the asynchronous compiles.
+         * @returns True once `trace` can dispatch.
+         */
+        isReady(): boolean;
+        /**
+         * Whether one effect's kernel compiled and the scene was uploaded.
+         * @param effect - The effect name.
+         * @returns True once `trace(effect)` can dispatch.
+         */
+        isEffectReady(effect: string): boolean;
+        /**
+         * Uploads the packed scene; a buffer that must grow is recreated and rebound to the kernels (membership changes only).
+         * @param system - The system whose `packed` scene is uploaded.
+         */
+        upload(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the changed instance range and the top-level nodes (per-frame transform path); rebinds only if a buffer had to grow.
+         * @param system - The system whose `packed` scene changed.
+         * @param firstInstance - First changed instance (default 0).
+         * @param lastInstance - Last changed instance, inclusive (default: the last one).
+         */
+        updateTopLevel(system: TOOLKIT.RayTracingSystem, firstInstance?: number, lastInstance?: number): void;
+        /**
+         * Uploads the bottom-level nodes and the triangles in place after a refit.
+         * @param system - The system whose `packed` scene changed.
+         */
+        updateGeometry(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the material table.
+         * @param system - The system whose `packed.materialRows` changed.
+         */
+        uploadMaterials(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Uploads the light table.
+         * @param system - The system whose `packed.lightRows` changed.
+         */
+        uploadLights(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Binds the six bucket arrays (placeholders for empty buckets) to every kernel that samples them.
+         * @param arrays - The arrays in bucket-id order (null = empty).
+         */
+        bindTextureBuckets(arrays: BABYLON.BaseTexture[]): void;
+        /**
+         * Binds the sky-miss cube to every kernel that samples it (the cube's own sampler binds one slot below it).
+         * @param texture - The environment cube, or null for black.
+         */
+        bindSky(texture: BABYLON.BaseTexture): void;
+        /**
+         * Dispatches one effect's kernel for a camera.
+         * @param effect - `debugNormals` or `primaryShading`.
+         * @param params - The camera and output size.
+         * @returns The traced image (rgba8 normals or rgba16f radiance), or null when the effect is not ready or unknown.
+         */
+        trace(effect: string, params: IRayTracingTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the shadow kernel (T6): binds the prepass textures when they changed, sizes the two outputs, writes the camera and
+         * shadow parameters, and traces every slot in one dispatch.
+         * @param params - The camera, size, prepass textures and shadow slots.
+         * @returns The mask and colour images, or null when the kernel is not ready.
+         */
+        traceShadows(params: IRtShadowTraceParams): IRtShadowOutputs;
+        /**
+         * Creates an on-demand effect's kernel (ambient occlusion, reflections) the first time it is asked for, bound to every
+         * resource that already exists; later calls do nothing.
+         * @param effect - `ambientOcclusion` or `reflections`.
+         */
+        prepareEffect(effect: string): void;
+        /**
+         * Dispatches the ambient occlusion kernel (T7): cosine hemisphere rays from every prepass pixel.
+         * @param params - The camera, size, prepass textures and the occlusion rays.
+         * @returns The noisy visibility image, or null when the kernel is not ready.
+         */
+        traceAmbientOcclusion(params: IRtAmbientOcclusionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the reflection kernel (T8): GGX visible-normal rays from every smooth enough prepass pixel.
+         * @param params - The camera, size, prepass textures and the reflection settings.
+         * @returns The noisy reflection image, or null when the kernel is not ready.
+         */
+        traceReflections(params: IRtReflectionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the GI kernel (T9): cosine-weighted diffuse rays from every prepass pixel.
+         * @param params - The camera, size, prepass textures and the diffuse-ray settings.
+         * @returns The noisy indirect-diffuse image, or null when the kernel is not ready.
+         */
+        traceGlobalIllumination(params: IRtGlobalIlluminationTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the recursive kernel (T10): one camera ray per pixel, recursion where it meets a recursive renderer.
+         * @param params - The camera, size and the recursion settings.
+         * @returns The recursive colour image, or null when the kernel is not ready.
+         */
+        traceRecursive(params: IRtRecursiveTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the subsurface kernel (T11): random walks under every pixel whose surface has a diffusion profile.
+         * @param params - The camera, size and the walk settings.
+         * @returns The scattered-lighting image, or null when the kernel is not ready.
+         */
+        traceSubsurface(params: IRtSubsurfaceTraceParams): BABYLON.BaseTexture;
+        /**
+         * Dispatches the path tracer (T12): binds the accumulation pair (the previous image read, the other written), the AOVs, the
+         * background and the sky CDF, writes `PathParams` and traces every pixel of the frame (the threads outside the current tile
+         * carry their accumulation over).
+         * @param params - The camera, size, sample, tile and path settings.
+         * @returns The accumulated mean and the AOVs, or null when the kernel is not ready.
+         */
+        tracePath(params: IRtPathTraceParams): IRtPathOutputs;
+        /**
+         * Measures the sky cube's luminance on an equirectangular grid and reads it back (T12, HDRI sky sampling).
+         * @param camera - Any camera of the scene.
+         * @param width - Grid width.
+         * @param height - Grid height.
+         * @returns The luminance row by row, or null when the kernel is not ready.
+         */
+        measureSkyLuminance(camera: BABYLON.Camera, width: number, height: number): Promise<Float32Array>;
+        /**
+         * Uploads the packed sky CDF (or a 1-word placeholder) to the binding the path tracer reads.
+         * @param words - The packed CDF, or null.
+         */
+        uploadSkyCdf(words: Float32Array): void;
+        /**
+         * Divides an image by the albedo AOV or multiplies it again (the path tracer's denoise, T12); each direction has its own kernel
+         * and output, so both run in one frame.
+         * @param signal - The image.
+         * @param albedo - The albedo AOV.
+         * @param divide - True to divide, false to multiply.
+         * @returns The modulated image, or null while the kernel compiles.
+         */
+        modulatePath(signal: BABYLON.BaseTexture, albedo: BABYLON.BaseTexture, divide: boolean): BABYLON.BaseTexture;
+        /**
+         * Packs the denoised GI and ambient-occlusion images into one (D-L8 `rtLighting0`); the kernel compiles on first use.
+         * @param globalIllumination - The GI image (rgb).
+         * @param ambientOcclusion - The ambient-occlusion image (a), the same size.
+         * @returns The packed image, or null while the kernel compiles or failed.
+         */
+        packLighting(globalIllumination: BABYLON.BaseTexture, ambientOcclusion: BABYLON.BaseTexture): BABYLON.BaseTexture;
+        /**
+         * The compile error of an effect's kernel.
+         * @param effect - The effect name.
+         * @returns The error, or null.
+         */
+        effectFailure(effect: string): string;
+        /**
+         * The WebGPU kernels trace the prepass at its own resolution.
+         * @param surfaces - The traced frame's prepass surfaces.
+         * @returns The same surfaces.
+         */
+        prepareSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * {@inheritDoc IRayTracingBackend.reduceSurfaces}
+         * @param surfaces - The full-resolution prepass surfaces.
+         * @returns The half-resolution surfaces, or null while the kernel compiles or after it failed.
+         */
+        reduceSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * {@inheritDoc IRayTracingBackend.kernelShaders}
+         * @param effect - The effect name.
+         * @returns The effect's trace kernel, or none before it is created.
+         */
+        kernelShaders(effect: string): BABYLON.ComputeShader[];
+        /**
+         * (Re)creates the four reduced surface images at a size (depth rgba32f, the others rgba16f storage images).
+         * @param width - Reduced width.
+         * @param height - Reduced height.
+         */
+        private ensureReducedImages;
+        /**
+         * The 1-pixel transparent image bound for a missing prepass image during the reduction (created on first use).
+         * @returns The placeholder.
+         */
+        private reductionPlaceholderImage;
+        /** Releases every storage buffer, the uniform buffers, the output and placeholder textures; the kernels are dropped. */
+        dispose(): void;
+        /** The GPU bytes the backend holds in storage buffers (stats). */
+        get bufferBytes(): number;
+        /** Creates the uniform buffer, the sampler, the placeholders and every kernel; kernels compile asynchronously and report a WGSL error once. */
+        private createKernels;
+        /**
+         * Creates one kernel with its bindings mapping and binds the uniform buffer and the bucket sampler.
+         * @param effect - The effect name.
+         * @param source - The complete WGSL source.
+         * @param defines - Preprocessor defines (`#define` lines).
+         * @param outputType - Texture type of the kernel's output storage texture.
+         */
+        private createKernel;
+        /**
+         * Creates the path tracer's kernel (T12) with its `PathParams` buffer, the background placeholder and a 1-word sky CDF, so
+         * every binding the kernel reads exists before its first dispatch.
+         */
+        private createPathTracerKernel;
+        /**
+         * (Re)creates the path tracer's accumulation pair and AOVs at the trace size and binds the AOVs (only when the size changes;
+         * the display image is the kernel's own output).
+         * @param entry - The path tracer kernel.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         */
+        private ensurePathImages;
+        /** Releases the path tracer's accumulation pair and AOVs. */
+        private disposePathImages;
+        /** Releases every path-tracer resource: the images, the placeholder and the modulation kernels' outputs (the parameters belong to `dispatchParams`). */
+        private disposePathResources;
+        /**
+         * Binds every resource that already exists to a kernel created after them (the storage buffers, the bucket arrays, the sky).
+         * @param entry - The new kernel.
+         */
+        private bindExistingResources;
+        /**
+         * The ready kernel of a surface tracer with its output sized and the prepass surfaces bound.
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @returns The kernel, or null when it cannot dispatch this frame.
+         */
+        private surfaceKernel;
+        /**
+         * The ready kernel of a camera tracer (recursive, subsurface: their own camera rays, no prepass input) with its output sized.
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @returns The kernel, or null when it cannot dispatch this frame.
+         */
+        private cameraKernel;
+        /**
+         * Writes the camera parameters and dispatches a surface tracer over the whole output.
+         * @param entry - The kernel (from `surfaceKernel`).
+         * @param params - The trace inputs.
+         * @returns The kernel's output.
+         */
+        private dispatchSurfaceKernel;
+        /**
+         * Binds a per-dispatch texture to a kernel only when it changed (a changed binding rebuilds the kernel's bind group).
+         * @param entry - The kernel.
+         * @param name - The binding name.
+         * @param texture - The texture.
+         */
+        private static BindTexture;
+        /**
+         * Runs an action for every kernel that uses a binding.
+         * @param name - The binding name.
+         * @param action - What to do with the kernel.
+         */
+        private forKernelsUsing;
+        /**
+         * Copies one packed array into its storage buffer, recreating (and rebinding) the buffer when it is too small.
+         * @param name - The binding name (`TraceBindings` key).
+         * @param data - The packed words.
+         */
+        private writeBuffer;
+        /**
+         * (Re)creates a kernel's output texture at the trace size and rebinds it (only when the size changes).
+         * @param entry - The kernel.
+         * @param width - Output width in pixels.
+         * @param height - Output height in pixels.
+         */
+        private ensureOutput;
+        /**
+         * (Re)creates the shadow kernel's colour / depth output at the trace size and rebinds it (only when the size changes).
+         * @param entry - The shadow kernel.
+         * @param width - Output width in pixels.
+         * @param height - Output height in pixels.
+         */
+        private ensureShadowColorOutput;
+        /**
+         * Writes the per-dispatch `TraceParams` (`RayTracingDispatchParams.writeTrace`) from this backend's uploaded counts and sky.
+         * @param camera - The traced camera.
+         * @param width - Output width in pixels.
+         * @param height - Output height in pixels.
+         */
+        private writeParams;
+        /**
+         * A readable message from anything thrown.
+         * @param error - What was thrown.
+         * @returns Its message.
+         */
+        private static MessageOf;
+    }
+    /**
+     * The WebGL2 fragment backend (hdrp-raytracing-polyfill T13, D-L14): the same packed scene as `WebGpuComputeBackend`, held in
+     * four data textures (`RayTracingDataTextures`: static geometry - bottom-level nodes and triangles -, the per-frame top level -
+     * instances and top-level nodes -, the tables - materials, lights, sky CDF - and the u32 words - leaf triangle indices and
+     * height fields), traced by the WGSL kernels translated to GLSL fragment passes (`RayTracingShaders.FragmentKernel`,
+     * `RayTracingFragmentPass`) that read the same parameters (`RayTracingDispatchParams`, set as plain uniforms). It is the reduced tier of FR-L3:
+     * the screen-space tracers read a half-resolution copy of the prepass (`prepareSurfaces`), the path tracer traces at half
+     * resolution, and every effect traces `MaximumSamples` ray per pixel. Passes compile when an effect is first asked for and are
+     * polled with `isReady`; a pass that fails to compile reports once and its effect hands back (`effectFailure`). The debug views
+     * stay WebGPU-only.
+     */
+    class WebGl2FragmentBackend implements IRayTracingBackend {
+        /** Rays per pixel of every effect at this tier (D-L14). */
+        static readonly MaximumSamples: number;
+        /** The tier's resolution divisor (half resolution, D-L14). */
+        static readonly ResolutionDivisor: number;
+        /** The surface-reduction pass name. */
+        private static readonly ReductionPass;
+        /** The `rtLighting0` packing pass name. */
+        private static readonly PackPass;
+        /** The path tracer's demodulation and remodulation pass names, by `divide`. */
+        private static readonly ModulatePasses;
+        /** The uniform of the surface-reduction pass: reduced width, height and their reciprocals. */
+        private static readonly ReductionSizeUniform;
+        /** {@inheritDoc IRayTracingBackend.name} */
+        readonly name: RayTracingBackendName;
+        /** {@inheritDoc IRayTracingBackend.failure} */
+        failure: string;
+        /** {@inheritDoc IRayTracingBackend.supportsDebugView} */
+        readonly supportsDebugView: boolean;
+        /** {@inheritDoc IRayTracingBackend.resolutionDivisor} */
+        readonly resolutionDivisor: number;
+        /** {@inheritDoc IRayTracingBackend.maximumSamples} */
+        readonly maximumSamples: number;
+        /** The scene the passes and textures belong to. */
+        private readonly scene;
+        /** The parameters the translated kernels read (plain uniforms set from `RayTracingUniformValues`). */
+        private readonly dispatchParams;
+        /** The passes by effect name, created when the effect is first asked for. */
+        private readonly passes;
+        /** The data textures by name (`RayTracingGlsl.DataTextures`). */
+        private readonly dataTextures;
+        /** The first texel (or word) of every storage array in its data texture: the `rtBase_<name>` uniforms. */
+        private readonly bases;
+        /** The material rows with their words as values (the tables texture is repacked when any table changes). */
+        private materialRows;
+        /** The light rows with their words as values. */
+        private lightRows;
+        /** The packed sky CDF. */
+        private skyCdf;
+        /** The counts and sky `TraceParams` carries. */
+        private readonly counts;
+        /** True once `upload` ran. */
+        private uploaded;
+        /** The six bucket arrays, in bucket-id order (null = empty). */
+        private bucketArrays;
+        /** The 1-layer white array bound to empty buckets. */
+        private readonly placeholderArray;
+        /** The 1-pixel black cube bound without a sky. */
+        private readonly placeholderCube;
+        /** The 1-pixel transparent image bound for a missing velocity / reflectivity / background image. */
+        private readonly placeholderImage;
+        /** The set the next path-tracer pass writes (the other holds the accumulation it reads). */
+        private pathWriteSet;
+        /**
+         * Creates the backend (only for an asked scene, D-L2) and starts compiling the shadow pass; every other pass compiles when its
+         * effect is first asked for.
+         * @param scene - The scene the backend traces.
+         */
+        constructor(scene: BABYLON.Scene);
+        /**
+         * Whether an engine runs this backend: WebGL2 with float textures and float / half-float render targets (EXT_color_buffer_float).
+         * @param engine - The engine to test.
+         * @returns True when the fragment tracers can run.
+         */
+        static IsSupported(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * {@inheritDoc IRayTracingBackend.isSupported}
+         * @param engine - The engine to test.
+         * @returns True when the fragment tracers can run.
+         */
+        isSupported(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * Whether the scene is uploaded (the passes compile per effect).
+         * @returns True once a trace can be attempted.
+         */
+        isReady(): boolean;
+        /**
+         * Whether an effect's pass compiled and the scene is uploaded.
+         * @param effect - The effect name.
+         * @returns True once the effect can trace.
+         */
+        isEffectReady(effect: string): boolean;
+        /**
+         * The compile error of an effect's pass.
+         * @param effect - The effect name.
+         * @returns The error, or null.
+         */
+        effectFailure(effect: string): string;
+        /**
+         * Uploads the whole packed scene into the four data textures.
+         * @param system - The system whose `packed` scene is uploaded.
+         */
+        upload(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Repacks the top-level texture: the instances (words as values) and the top-level nodes.
+         * @param system - The system whose `packed` scene changed.
+         */
+        updateTopLevel(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Repacks the geometry texture: the bottom-level nodes (words as values) and the triangles with their attributes.
+         * @param system - The system whose `packed` scene changed.
+         */
+        updateGeometry(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Repacks the tables texture after a material upload.
+         * @param system - The system whose `packed.materialRows` changed.
+         */
+        uploadMaterials(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Repacks the tables texture after a light upload.
+         * @param system - The system whose `packed.lightRows` changed.
+         */
+        uploadLights(system: TOOLKIT.RayTracingSystem): void;
+        /**
+         * Keeps the bucket arrays the shading kernels sample (empty buckets bind the placeholder at draw time).
+         * @param arrays - The six arrays in bucket-id order (null = empty).
+         */
+        bindTextureBuckets(arrays: BABYLON.BaseTexture[]): void;
+        /**
+         * Keeps the sky-miss cube.
+         * @param texture - The environment cube, or null for black.
+         */
+        bindSky(texture: BABYLON.BaseTexture): void;
+        /**
+         * The debug views are WebGPU-only.
+         * @returns Always null.
+         */
+        trace(): BABYLON.BaseTexture;
+        /**
+         * Starts compiling an effect's pass the first time the effect is asked for.
+         * @param effect - The effect name.
+         */
+        prepareEffect(effect: string): void;
+        /**
+         * D-L14's reduced tier: copies the prepass at half resolution (depth, normals, velocity, reflectivity) so every tracer, the
+         * guide and the denoiser read same-size surfaces.
+         * @param surfaces - The traced frame's prepass surfaces.
+         * @returns The half-resolution surfaces, or null while the reduction compiles.
+         */
+        prepareSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * {@inheritDoc IRayTracingBackend.reduceSurfaces}
+         * @param surfaces - The surfaces `prepareSurfaces` reduced this frame.
+         * @returns The same surfaces (this backend traces half resolution at every tier).
+         */
+        reduceSurfaces(surfaces: IRtFrameSurfaces): IRtFrameSurfaces;
+        /**
+         * {@inheritDoc IRayTracingBackend.kernelShaders}
+         * @param effect - The effect name.
+         * @returns None: the fragment passes are timed by timer queries around the effect.
+         */
+        kernelShaders(effect: string): BABYLON.ComputeShader[];
+        /**
+         * Draws the shadow pass over the (reduced) prepass.
+         * @param params - The camera, size, prepass textures and shadow slots.
+         * @returns The mask and colour images, or null when the pass is not ready.
+         */
+        traceShadows(params: IRtShadowTraceParams): IRtShadowOutputs;
+        /**
+         * Draws the ambient-occlusion pass.
+         * @param params - The camera, size, prepass textures and the occlusion rays.
+         * @returns The noisy visibility image, or null when the pass is not ready.
+         */
+        traceAmbientOcclusion(params: IRtAmbientOcclusionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Draws the reflection pass.
+         * @param params - The camera, size, prepass textures and the reflection settings.
+         * @returns The noisy reflection image, or null when the pass is not ready.
+         */
+        traceReflections(params: IRtReflectionTraceParams): BABYLON.BaseTexture;
+        /**
+         * Draws the GI pass.
+         * @param params - The camera, size, prepass textures and the diffuse-ray settings.
+         * @returns The noisy indirect-diffuse image, or null when the pass is not ready.
+         */
+        traceGlobalIllumination(params: IRtGlobalIlluminationTraceParams): BABYLON.BaseTexture;
+        /**
+         * Draws the recursive-rendering pass (its own camera rays).
+         * @param params - The camera, size and the recursion settings.
+         * @returns The recursive colour image, or null when the pass is not ready.
+         */
+        traceRecursive(params: IRtRecursiveTraceParams): BABYLON.BaseTexture;
+        /**
+         * Draws the subsurface pass (its own camera rays).
+         * @param params - The camera, size and the walk settings.
+         * @returns The scattered-lighting image, or null when the pass is not ready.
+         */
+        traceSubsurface(params: IRtSubsurfaceTraceParams): BABYLON.BaseTexture;
+        /**
+         * Draws one path-tracer sample at half resolution: the accumulation of the other target set is read and this set written
+         * (ping-pong). Every dispatch traces the whole frame (one tile) and rewrites the AOVs, because a fragment pass writes every
+         * output of every pixel; a resize restarts the accumulation.
+         * @param params - The camera, size, sample, tile and path settings.
+         * @returns The accumulated mean and the AOVs, or null when the pass is not ready.
+         */
+        tracePath(params: IRtPathTraceParams): IRtPathOutputs;
+        /**
+         * Measures the sky cube's luminance on an equirectangular grid (a float pass, read back).
+         * @param camera - Any camera of the scene.
+         * @param width - Grid width.
+         * @param height - Grid height.
+         * @returns The luminance row by row, or null when the pass is not ready.
+         */
+        measureSkyLuminance(camera: BABYLON.Camera, width: number, height: number): Promise<Float32Array>;
+        /**
+         * Keeps the packed sky CDF (the tables texture is repacked).
+         * @param words - The packed CDF, or null.
+         */
+        uploadSkyCdf(words: Float32Array): void;
+        /**
+         * Divides an image by the albedo AOV or multiplies it again.
+         * @param signal - The image.
+         * @param albedo - The albedo AOV.
+         * @param divide - True to divide, false to multiply.
+         * @returns The modulated image, or null while the pass compiles.
+         */
+        modulatePath(signal: BABYLON.BaseTexture, albedo: BABYLON.BaseTexture, divide: boolean): BABYLON.BaseTexture;
+        /**
+         * Packs the GI and ambient-occlusion images into `rtLighting0`.
+         * @param globalIllumination - The GI image.
+         * @param ambientOcclusion - The ambient-occlusion image.
+         * @returns The packed image, or null while the pass compiles.
+         */
+        packLighting(globalIllumination: BABYLON.BaseTexture, ambientOcclusion: BABYLON.BaseTexture): BABYLON.BaseTexture;
+        /** Releases every pass, data texture, placeholder and uniform buffer. */
+        dispose(): void;
+        /**
+         * How an effect's pass is built.
+         * @param effect - The effect name.
+         * @returns The description, or null for an effect this backend does not trace (the debug views).
+         */
+        private effectDescription;
+        /**
+         * The surface-reduction pass (created on first use).
+         * @returns The pass.
+         */
+        private reductionPass;
+        /**
+         * A ready screen-space pass sized to the (reduced) prepass.
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @returns The pass, or null when it cannot draw this frame.
+         */
+        private surfacePass;
+        /**
+         * A ready pass sized to the trace.
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @returns The pass, or null when it cannot draw this frame.
+         */
+        private cameraPass;
+        /**
+         * Draws a screen-space pass with the prepass surfaces bound.
+         * @param pass - The pass.
+         * @param effect - The effect name.
+         * @param params - The trace inputs.
+         * @param extra - Further bindings, or null.
+         * @returns The pass's images.
+         */
+        private drawSurfacePass;
+        /**
+         * Writes `TraceParams` and draws a trace pass with the scene bound: the data textures and their bases, the buckets, the sky
+         * and its level count, and the uniform blocks.
+         * @param pass - The pass.
+         * @param effect - The effect name (its `EffectParams` block).
+         * @param params - The camera and the trace size.
+         * @param set - The target set.
+         * @param extra - Further bindings, or null.
+         * @returns The set's images.
+         */
+        private drawPass;
+        /**
+         * Binds what every trace kernel reads.
+         * @param bound - The pass's effect.
+         * @param kernel - The translated kernel.
+         * @param effect - The effect name.
+         */
+        private bindScene;
+        /**
+         * The values behind a kernel's uniform variable.
+         * @param instance - The WGSL variable (`params`, `shadowParams`, `effectParams`, `pathParams`).
+         * @param effect - The effect name.
+         * @returns The values, or null.
+         */
+        private uniformValues;
+        /**
+         * Draws an image-to-image pass (no scene data): creates it on first use, sizes it to its input.
+         * @param name - The pass name.
+         * @param source - Its WGSL kernel.
+         * @param size - The output size.
+         * @param binder - Binds its inputs.
+         * @returns The image, or null while the pass compiles or failed.
+         */
+        private drawImagePass;
+        /** Repacks the tables texture: material rows, light rows, sky CDF. */
+        private writeTables;
+        /**
+         * Uploads a packed data texture (recreated when its row count changed) and records its section bases.
+         * @param name - The data texture name.
+         * @param packed - The packed texels and bases.
+         * @param words - True for the RGBA32UI word texture.
+         */
+        private writeDataTexture;
+        /**
+         * The mip count of the sky cube (`textureNumLevels` of the WGSL).
+         * @param sky - The cube, or null.
+         * @returns The level count (1 without mips or without a sky).
+         */
+        private static LevelCount;
+    }
+    /**
+     * Hardware ray queries (D-L3): WebGPU has no ray-query extension in any shipping browser, so this backend is never available
+     * today; it exists so the backend choice has one place to grow when browsers ship it.
+     */
+    class HardwareRayQueryBackend {
+        /**
+         * Whether hardware ray queries are available.
+         * @returns Always false today.
+         */
+        static IsAvailable(): boolean;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * One bottom-level BVH (hdrp-raytracing-polyfill D-L4): binned-SAH nodes over one geometry's triangles. The field names are the
+     * plan's cross-task contract (T4 uploads `nodes` / `triIndices` to storage buffers, T13 to RGBA32F textures).
+     */
+    interface IBlasResult {
+        /**
+         * The nodes, 8 floats (32 bytes) each: `min.xyz, leftOrFirst, max.xyz, count`. `leftOrFirst` and `count` are u32 bit patterns:
+         * read them through a `Uint32Array` view of the same buffer. `count 0` = interior (children `leftOrFirst` and `leftOrFirst + 1`),
+         * otherwise a leaf over `triIndices[leftOrFirst .. leftOrFirst + count)`. Node 0 is the root.
+         */
+        nodes: Float32Array;
+        /** Leaf triangle order: each entry is a source triangle index (its first index sits at `indices[3 × entry]`). */
+        triIndices: Uint32Array;
+        /** Number of nodes in `nodes` (0 for a geometry without triangles). */
+        nodeCount: number;
+        /** Wall time of the build in milliseconds, measured where the build ran (inside the worker for `BuildInWorker`). */
+        buildMs: number;
+    }
+    /** One decoded BVH node, for tests, debugging and tools (the GPU reads the packed 32-byte layout directly). */
+    interface IBvhNode {
+        /** Minimum corner of the node's box, in the space the BVH was built in. */
+        min: number[];
+        /** Maximum corner of the node's box. */
+        max: number[];
+        /** Interior: index of the left child (the right child is the next node). Leaf: first entry in the leaf order. */
+        leftOrFirst: number;
+        /** 0 for an interior node, otherwise the number of primitives in the leaf. */
+        count: number;
+    }
+    /**
+     * The closest hit of a ray against one geometry. `t` and `tri` are the plan's contract names (Interfaces › `Intersect`): `t` is
+     * the ray parameter of the hit, so the hit point is `origin + t × dir` (world units only when `dir` is unit length).
+     */
+    interface IRayHit {
+        /** Ray parameter of the hit, in multiples of the ray direction's length. */
+        t: number;
+        /** Source triangle index (its first index sits at `indices[3 × tri]`). */
+        tri: number;
+        /** Möller–Trumbore barycentric weight of the triangle's second vertex. */
+        barycentricU: number;
+        /** Möller–Trumbore barycentric weight of the triangle's third vertex. */
+        barycentricV: number;
+        /**
+         * True when the ray hit the side the triangle's normal `(v1 − v0) × (v2 − v0)` faces, in the space of the hit (world space for
+         * instance hits, after the `flipWinding` correction).
+         */
+        frontFace: boolean;
+    }
+    /** The closest hit of a ray against a top-level BVH: the triangle hit plus the instance it belongs to. */
+    interface IRayInstanceHit extends IRayHit {
+        /** Index of the hit instance in the instance list the top level was built from. */
+        instance: number;
+    }
+    /**
+     * Any-hit test for alpha-tested geometry (D-L5): called for every candidate hit inside the traversal loop, before it may become
+     * the closest hit.
+     * @param triangle - The candidate's source triangle index.
+     * @param barycentricU - Barycentric weight of the triangle's second vertex.
+     * @param barycentricV - Barycentric weight of the triangle's third vertex.
+     * @returns True to accept the hit, false to let the ray pass through (alpha below the cutoff).
+     */
+    type RayAnyHitCallback = (triangle: number, barycentricU: number, barycentricV: number) => boolean;
+    /** One instance of a bottom-level BVH placed in the world (D-L4): what the CPU top-level traversal needs per instance. */
+    interface IRtInstanceRef {
+        /** The instance's geometry BVH. */
+        blas: IBlasResult;
+        /** The geometry's object-space positions, 3 floats per vertex. */
+        positions: Float32Array;
+        /** The geometry's triangle list, 3 vertex indices per triangle. */
+        indices: Uint32Array;
+        /** Object → world affine matrix, 16 numbers in Babylon's layout (translation at 12, 13, 14). */
+        world: Float64Array;
+        /** World → object matrix (inverse of `world`), same layout. */
+        inverseWorld: Float64Array;
+        /** True when `world` mirrors (negative determinant), so a triangle's front side flips between object and world space. */
+        flipWinding: boolean;
+        /** Alpha-test any-hit callback for alpha-tested materials, or null for opaque geometry. */
+        anyHit: RayAnyHitCallback;
+    }
+    /**
+     * A terrain traced as a height field (D-L5): R × R samples, cell (x, z) spans samples x..x+1 / z..z+1 and is split along the
+     * diagonal from sample (x, z) to (x+1, z+1) into triangle 0 = (x,z)(x,z+1)(x+1,z+1) and triangle 1 = (x,z)(x+1,z+1)(x+1,z).
+     */
+    interface IHeightField {
+        /** Raw height samples, row-major by z then x (`heights[z × resolution + x]`), 0..65535 like Unity's heightmap. */
+        heights: Uint16Array;
+        /** Samples per side (R). At least 2. */
+        resolution: number;
+        /** The min / max pyramid from `RayTracingBvh.HeightFieldPyramid`, level 0 first, in raw height units. */
+        pyramid: Float32Array[];
+        /** World position [x, y, z] of sample (0, 0) at raw height 0. */
+        origin: number[];
+        /** World distance between neighbouring samples along [x, z], in meters. */
+        spacing: number[];
+        /** World meters per raw height unit (terrain height / 65535 for a Unity terrain). */
+        heightScale: number;
+    }
+    /** The closest hit of a ray against a height field. */
+    interface IHeightFieldHit {
+        /** Ray parameter of the hit, in multiples of the ray direction's length (same convention as `IRayHit.t`). */
+        t: number;
+        /** Cell column (x) of the hit, 0..resolution − 2. */
+        cellX: number;
+        /** Cell row (z) of the hit, 0..resolution − 2. */
+        cellZ: number;
+        /** Which of the cell's two triangles was hit (0 or 1, see `IHeightField`). */
+        triangle: number;
+    }
+    /**
+     * CPU acceleration structures for the ray-tracing polyfill (hdrp-raytracing-polyfill T3, D-L4, D-L5): binned-SAH bottom levels
+     * (built in an inline Blob worker, main-thread fallback), the per-frame top level over instance boxes, the terrain height-field
+     * min / max pyramid, and CPU reference traversals (Möller–Trumbore, front-to-back short stack, alpha any-hit, mirrored instances,
+     * hierarchical height-field DDA) that the WebGPU / WebGL2 kernels of T4 / T13 must match.
+     *
+     * The four kernels below are serialised into the worker with `Function.prototype.toString()`, so each one may reference nothing
+     * but its own parameters and locals (no TOOLKIT, no BABYLON, no class statics): a bundler or minifier renaming outer names then
+     * cannot break the worker.
+     */
+    class RayTracingBvh {
+        /** Bytes per BVH node: `{ min: vec3f, leftOrFirst: u32, max: vec3f, count: u32 }`. */
+        static readonly NodeBytes: number;
+        /** Floats (and u32 words) per BVH node. */
+        static readonly FloatsPerNode: number;
+        /** SAH bins per axis. */
+        static readonly Bins: number;
+        /** Largest bottom-level leaf the SAH aims for, in triangles. */
+        static readonly MaxLeaf: number;
+        /** Deepest leaf depth of any BVH this class builds (root = 0), so a traversal never holds more than `StackSize` entries. */
+        static readonly MaxDepth: number;
+        /** Traversal short-stack entries (CPU here, WGSL / GLSL in T4 / T13). */
+        static readonly StackSize: number;
+        /** Möller–Trumbore determinant below which the ray counts as parallel to the triangle. */
+        private static readonly ParallelEpsilon;
+        /** Stand-in for a zero direction component in slab tests, so the inverse stays finite and never produces NaN. */
+        private static readonly DirectionEpsilon;
+        /** Relative widening of a box's exit distance, so float rounding never culls a triangle lying on the box surface. */
+        private static readonly BoxExitSlack;
+        /** Height-field cell selection nudge along the ray, in grid cells, so a ray on a cell border picks the cell ahead. */
+        private static readonly CellNudge;
+        /** Bottom-level build limits (D-L4: 16 bins, leaf ≤ 4 triangles unless splitting costs more). */
+        private static readonly BlasSettings;
+        /** Top-level build limits: one instance per leaf, so a leaf's `leftOrFirst` is the instance index itself. */
+        private static readonly TlasSettings;
+        /** The shared BLAS worker, created on the first `BuildInWorker` call. */
+        private static worker;
+        /** The worker's Blob URL, revoked by `DisposeWorker`. */
+        private static workerUrl;
+        /** True once the worker failed to start or crashed; every later build runs on the main thread. */
+        private static workerFailed;
+        /** Next job id for worker requests. */
+        private static nextJobId;
+        /** Builds waiting for a worker reply, by job id. */
+        private static pendingJobs;
+        /**
+         * Self-contained kernel (serialised into the worker): the bounds of every triangle.
+         * @param positions - 3 floats per vertex.
+         * @param indices - 3 vertex indices per triangle; a trailing partial triangle is ignored.
+         * @returns 6 floats per triangle: min.xyz then max.xyz. Exact copies of float32 vertex values, so boxes enclose triangles exactly.
+         */
+        private static readonly TriangleBoundsKernel;
+        /**
+         * Self-contained kernel (serialised into the worker): a binned-SAH BVH over primitive boxes (D-L4 Algorithms). Root at node 0,
+         * children allocated in pairs from node 1, so a tree over N primitives never needs more than 2N − 1 nodes. Deterministic: the
+         * same input gives the same node array on the main thread and in the worker.
+         * @param primitiveBounds - 6 floats per primitive: min.xyz, max.xyz.
+         * @param primitiveCount - Number of primitives to read from `primitiveBounds`.
+         * @param settings - Bins, leaf size, depth limit and leaf strictness.
+         * @param nodes - Output, at least (2 × primitiveCount − 1) × 8 floats; written in the 32-byte node layout.
+         * @returns The node count and the leaf order of the primitives.
+         * @throws {Error} When `nodes` is too small.
+         */
+        private static readonly TreeKernel;
+        /**
+         * Self-contained kernel (serialised into the worker): one complete BLAS build.
+         * @param positions - 3 floats per vertex.
+         * @param indices - 3 vertex indices per triangle.
+         * @param settings - The bottom-level build limits.
+         * @param triangleBoundsKernel - `TriangleBoundsKernel` (passed in so this kernel stays self-contained).
+         * @param treeKernel - `TreeKernel`.
+         * @returns The BLAS with a tight node array (exactly `nodeCount × 8` floats, its own buffer) and its build time.
+         */
+        private static readonly BlasKernel;
+        /**
+         * Self-contained kernel (serialised into the worker): installs the message handler that builds one BLAS per request and
+         * transfers the result buffers back.
+         * @param workerScope - The worker global (`self`).
+         * @param settings - The bottom-level build limits.
+         * @param blasKernel - `BlasKernel`.
+         * @param triangleBoundsKernel - `TriangleBoundsKernel`.
+         * @param treeKernel - `TreeKernel`.
+         */
+        private static readonly WorkerEntry;
+        /**
+         * Builds a bottom-level BVH on the calling thread.
+         * @param positions - Object-space positions, 3 floats per vertex. Not modified.
+         * @param indices - Triangle list, 3 vertex indices per triangle. Not modified.
+         * @returns The BLAS (D-L4 node layout).
+         */
+        static BuildSync(positions: Float32Array, indices: Uint32Array): IBlasResult;
+        /**
+         * Builds a bottom-level BVH in the shared inline Blob worker. The inputs are copied and the copies transferred, so the
+         * caller's arrays stay usable; the result buffers come back by transfer. Falls back to `BuildSync` (still returning a
+         * promise) when `Worker`, `Blob` or `URL.createObjectURL` is unavailable (Node) or the worker cannot start (e.g. a CSP
+         * without `worker-src blob:`), reporting the failure once. The node array is identical to `BuildSync`'s.
+         * @param positions - Object-space positions, 3 floats per vertex. Not modified.
+         * @param indices - Triangle list, 3 vertex indices per triangle. Not modified.
+         * @returns A promise of the BLAS; rejected only when the build itself throws or `DisposeWorker` runs first.
+         */
+        static BuildInWorker(positions: Float32Array, indices: Uint32Array): Promise<IBlasResult>;
+        /**
+         * Stops the shared BLAS worker and revokes its Blob URL (scene dispose). Builds still waiting are rejected; the next
+         * `BuildInWorker` starts a fresh worker.
+         */
+        static DisposeWorker(): void;
+        /**
+         * The worker's whole script: the four self-contained kernels serialised with `Function.prototype.toString()` and the
+         * bottom-level settings as JSON. Public so tests can run it in an empty context to prove the kernels are self-contained.
+         * @returns JavaScript source that, run with `self` bound to a worker global, installs the BLAS build handler.
+         */
+        static WorkerSource(): string;
+        /**
+         * Builds the top-level BVH over instance boxes (D-L4: rebuilt every frame from world matrices). One instance per leaf, and a
+         * leaf's `leftOrFirst` is the instance index itself, so the top level needs no separate order array.
+         * @param instanceBounds - 6 floats per instance: world min.xyz, max.xyz (see `WorldBounds`).
+         * @param count - Number of instances.
+         * @param out - Receives the nodes; needs at least (2 × count − 1) × 8 floats.
+         * @returns The node count (2 × count − 1, or 0 without instances).
+         * @throws {Error} When `out` is too small.
+         */
+        static BuildTlas(instanceBounds: Float32Array, count: number, out: Float32Array): number;
+        /**
+         * Decodes one node of a packed node array.
+         * @param nodes - A node array in the 32-byte layout.
+         * @param index - The node index.
+         * @returns The node's box, `leftOrFirst` and `count`.
+         */
+        static ReadNode(nodes: Float32Array, index: number): IBvhNode;
+        /**
+         * CPU reference closest hit against one BLAS (front-to-back, short stack, Möller–Trumbore, two-sided).
+         * @param result - The BLAS.
+         * @param positions - The positions it was built from.
+         * @param indices - The indices it was built from.
+         * @param origin - Ray origin [x, y, z].
+         * @param dir - Ray direction [x, y, z]; need not be unit length (t is in multiples of it).
+         * @param tMax - Hits at or beyond this ray parameter are ignored.
+         * @param anyHit - Optional alpha-test any-hit callback (D-L5); a rejected candidate never becomes the closest hit.
+         * @returns The closest hit with 0 < t < tMax, or null.
+         */
+        static Intersect(result: IBlasResult, positions: Float32Array, indices: Uint32Array, origin: ArrayLike<number>, dir: ArrayLike<number>, tMax: number, anyHit?: RayAnyHitCallback): IRayHit;
+        /**
+         * Places a BLAS in the world: computes the inverse matrix and the `flipWinding` bit (negative determinant, D-L4).
+         * @param blas - The geometry BVH.
+         * @param positions - The geometry positions.
+         * @param indices - The geometry indices.
+         * @param world - Object → world affine matrix, 16 numbers in Babylon's layout.
+         * @param anyHit - Optional alpha-test any-hit callback for the instance's material.
+         * @returns The instance record.
+         * @throws {Error} When the matrix is singular.
+         */
+        static CreateInstance(blas: IBlasResult, positions: Float32Array, indices: Uint32Array, world: ArrayLike<number>, anyHit?: RayAnyHitCallback): IRtInstanceRef;
+        /**
+         * Writes the world box of an instance (its BLAS root box through the world matrix) for `BuildTlas`.
+         * @param blas - The instance's BLAS.
+         * @param world - Object → world matrix, Babylon layout.
+         * @param out - Receives min.xyz, max.xyz.
+         * @param offset - Index in `out` of min.x (6 × instance index for a packed array).
+         */
+        static WorldBounds(blas: IBlasResult, world: ArrayLike<number>, out: Float32Array, offset: number): void;
+        /**
+         * CPU reference closest hit against a top level: TLAS traversal, then each candidate instance's BLAS in object space (the ray
+         * goes through `inverseWorld`; its parameter t is preserved by the affine map), with `frontFace` corrected by `flipWinding`.
+         * @param tlasNodes - Nodes from `BuildTlas`.
+         * @param tlasNodeCount - Node count from `BuildTlas`.
+         * @param instances - The instances, in the order their boxes were passed to `BuildTlas`.
+         * @param origin - World ray origin [x, y, z].
+         * @param dir - World ray direction [x, y, z].
+         * @param tMax - Hits at or beyond this ray parameter are ignored.
+         * @param accept - The ray membership (D-L6, the kernels' `instanceAccepted`): instances it rejects are skipped; null = all.
+         * @returns The closest hit, or null.
+         */
+        static IntersectInstances(tlasNodes: Float32Array, tlasNodeCount: number, instances: IRtInstanceRef[], origin: ArrayLike<number>, dir: ArrayLike<number>, tMax: number, accept?: (instanceIndex: number) => boolean): IRayInstanceHit;
+        /**
+         * An alpha-test any-hit callback (D-L5): interpolates the hit's texture coordinate and accepts the hit when the sampled
+         * base-colour alpha reaches the cutoff (Unity's `clip(alpha − cutoff)`).
+         * @param uvs - 2 floats per vertex, the base-colour texture coordinates.
+         * @param indices - The triangle list the hits refer to.
+         * @param sampleAlpha - Returns the base-colour alpha (0..1) at a texture coordinate.
+         * @param alphaCutoff - Hits with alpha below this pass through.
+         * @returns The callback for `Intersect` / `CreateInstance`.
+         */
+        static CreateAlphaTest(uvs: Float32Array, indices: Uint32Array, sampleAlpha: (u: number, v: number) => number, alphaCutoff: number): RayAnyHitCallback;
+        /**
+         * The height-field min / max pyramid (D-L5): level 0 has one cell per sample quad ((R − 1)² cells, min / max of its four
+         * corners); each next level halves the cells per side (rounding up) until one cell covers the whole terrain.
+         * @param heights - R × R raw heights, `heights[z × R + x]`.
+         * @param resolution - Samples per side (R), at least 2.
+         * @returns One array per level, level 0 first: 2 floats per cell (min, max) in raw height units, row-major by z then x.
+         */
+        static HeightFieldPyramid(heights: Uint16Array, resolution: number): Float32Array[];
+        /**
+         * Builds a height-field record with its pyramid.
+         * @param heights - R × R raw heights, `heights[z × R + x]`.
+         * @param resolution - Samples per side (R), at least 2.
+         * @param origin - World position [x, y, z] of sample (0, 0) at raw height 0.
+         * @param spacing - World distance between samples along [x, z], in meters.
+         * @param heightScale - World meters per raw height unit.
+         * @returns The height field.
+         */
+        static CreateHeightField(heights: Uint16Array, resolution: number, origin: number[], spacing: number[], heightScale: number): IHeightField;
+        /**
+         * CPU reference hierarchical DDA over the height-field pyramid (D-L5): walks cells front to back, skips a cell whenever the
+         * ray's height span inside it misses the cell's [min, max], descends where it overlaps, tests the two triangles of each
+         * level-0 cell it reaches, and climbs one level after each step. Hits equal the triangulated terrain (see `IHeightField`).
+         * @param field - The height field.
+         * @param origin - World ray origin [x, y, z].
+         * @param dir - World ray direction [x, y, z].
+         * @param tMax - Hits at or beyond this ray parameter are ignored.
+         * @returns The closest hit, or null.
+         */
+        static IntersectHeightField(field: IHeightField, origin: ArrayLike<number>, dir: ArrayLike<number>, tMax: number): IHeightFieldHit;
+        /**
+         * Returns the shared worker, starting it on first use, or null when builds must run on the main thread.
+         * @returns The worker, or null.
+         */
+        private static AcquireWorker;
+        /**
+         * Settles the pending build a worker reply belongs to.
+         * @param reply - The worker's reply.
+         */
+        private static OnWorkerReply;
+        /**
+         * The worker could not start or crashed: report once, stop using workers, and finish every waiting build on the main thread
+         * (the caller's arrays were never transferred, so they are still intact).
+         * @param message - The failure message.
+         */
+        private static OnWorkerFailure;
+        /** Terminates the worker and revokes its Blob URL, if any. */
+        private static ReleaseWorker;
+        /**
+         * Front-to-back traversal of a packed node array with a `StackSize` short stack; the far child is pushed with its entry
+         * distance and skipped on pop when a closer hit has been found since.
+         * @param nodes - A node array in the 32-byte layout.
+         * @param origin - Ray origin.
+         * @param dir - Ray direction.
+         * @param tMax - Initial closest distance.
+         * @param visitLeaf - Tests a leaf's primitives; receives (leftOrFirst, count, closest t so far) and returns the new closest t.
+         * @returns The final closest t (tMax when nothing was hit).
+         */
+        private static TraverseNodes;
+        /**
+         * Slab test of a ray against one node box.
+         * @param nodes - The node array.
+         * @param nodeIndex - The node.
+         * @param origin - Ray origin.
+         * @param inverseDirection - 1 / direction per axis (finite, see `SafeComponent`).
+         * @param closestT - The box counts only if entered before this distance.
+         * @returns The entry distance (≥ 0), or Infinity on a miss.
+         */
+        private static RayBoxEntry;
+        /**
+         * A direction component safe to invert: zero becomes a tiny value of the same sign.
+         * @param component - The direction component.
+         * @returns The component, or ±`DirectionEpsilon` when its magnitude is smaller.
+         */
+        private static SafeComponent;
+        /**
+         * Copies one triangle's three corners into a 9-entry scratch array.
+         * @param positions - 3 floats per vertex.
+         * @param indices - 3 vertex indices per triangle.
+         * @param triangle - The triangle index.
+         * @param corners - Receives v0.xyz, v1.xyz, v2.xyz.
+         */
+        private static ReadTriangle;
+        /**
+         * Möller–Trumbore ray / triangle test, two-sided.
+         * @param corners - v0.xyz, v1.xyz, v2.xyz.
+         * @param origin - Ray origin.
+         * @param dir - Ray direction.
+         * @param tMax - Hits at or beyond this distance are rejected.
+         * @param candidate - Receives t, barycentric u, barycentric v and the determinant (positive = front side of (v1−v0)×(v2−v0)).
+         * @returns True on a hit with 0 < t < tMax.
+         */
+        private static MollerTrumbore;
+        /**
+         * Inverts an affine matrix in Babylon's layout (rows are the transformed x / y / z axes, then the translation).
+         * @param matrix - The 16-number source.
+         * @param inverse - Receives the inverse.
+         * @returns The determinant of the linear part (negative = mirroring).
+         * @throws {Error} When the matrix is singular.
+         */
+        private static InvertAffine;
+        /**
+         * Cross product of two 3-vectors.
+         * @param first - The left operand.
+         * @param second - The right operand.
+         * @returns first × second.
+         */
+        private static Cross;
+        /**
+         * Transforms a point by a Babylon-layout matrix (row vector times matrix, translation applied).
+         * @param matrix - 16 numbers.
+         * @param point - The point.
+         * @param out - Receives the transformed point (may not alias `point`).
+         */
+        private static TransformPoint;
+        /**
+         * Transforms a direction by a Babylon-layout matrix (no translation, no normalisation, so ray parameters are preserved).
+         * @param matrix - 16 numbers.
+         * @param direction - The direction.
+         * @param out - Receives the transformed direction (may not alias `direction`).
+         */
+        private static TransformDirection;
+        /**
+         * One pyramid level from the level below: each cell is the min / max over its up-to-2 × 2 children.
+         * @param childLevel - The finer level (2 floats per cell).
+         * @param childCellsPerSide - Cells per side of the finer level.
+         * @param cellsPerSide - Cells per side of the new level (half, rounded up).
+         * @returns The new level.
+         */
+        private static ReducePyramidLevel;
+        /**
+         * Clips a ray to a box.
+         * @param origin - Ray origin.
+         * @param direction - Ray direction.
+         * @param boxMin - Box minimum corner.
+         * @param boxMax - Box maximum corner.
+         * @param tMax - Upper ray parameter.
+         * @returns [entry, exit] with 0 ≤ entry ≤ exit ≤ tMax, or null when the ray misses.
+         */
+        private static ClipRayToBox;
+        /**
+         * The height-field cell holding the ray at one parameter, on one axis of one pyramid level, nudged along the ray so a
+         * position exactly on a border picks the cell the ray is entering.
+         * @param gridOrigin - Ray origin on the axis, in grid cells.
+         * @param gridDirection - Ray direction on the axis, in grid cells.
+         * @param rayT - The ray parameter.
+         * @param cellSize - Level-0 cells per cell of this level.
+         * @param levelWidth - Cells per side of this level.
+         * @returns The cell index, clamped to the level.
+         */
+        private static CellAt;
+        /**
+         * The ray parameter at which the ray leaves a cell span on one axis.
+         * @param gridOrigin - Ray origin on the axis, in grid cells.
+         * @param gridDirection - Ray direction on the axis, in grid cells.
+         * @param low - Lower cell border on the axis.
+         * @param high - Upper cell border on the axis.
+         * @returns The exit parameter, Infinity when the ray does not move on this axis.
+         */
+        private static CellExit;
+        /**
+         * Tests the two triangles of one level-0 height-field cell in grid space (the ray parameter is the same as in world space).
+         * @param field - The height field.
+         * @param cellX - Cell column.
+         * @param cellZ - Cell row.
+         * @param gridOrigin - Ray origin in grid space (x, z in cells, y in raw height units).
+         * @param gridDirection - Ray direction in grid space.
+         * @param tMax - Upper ray parameter.
+         * @param corners - 9-entry scratch for one triangle.
+         * @param candidate - 4-entry scratch for Möller–Trumbore.
+         * @returns The closer of the two triangle hits, or null.
+         */
+        private static IntersectHeightFieldCell;
+    }
+}
+declare namespace TOOLKIT {
+    /** One ray-tracing parameter as the intent carries it: enums as their integer, layer masks as their bits, vectors as arrays. */
+    type RayTracingValue = number | boolean | string | number[] | null;
+    /** The ray-tracing fields of one HDRP component, by exported lower-case key (`tracing`, `raylength`, ...). */
+    interface IRayTracingFields {
+        [field: string]: RayTracingValue;
+    }
+    /**
+     * The ray-traced shadow settings of one light: the exported `rtshadows` block (HDRP HDAdditionalLightData), with HDRP's defaults
+     * for any missing key.
+     */
+    interface IRtShadowLight {
+        /** `useRayTracedShadows`: the light's shadow is ray traced instead of shadow mapped. */
+        enabled: boolean;
+        /** `numRayTracingSamples`: shadow rays per pixel (area / soft shadows). */
+        samples: number;
+        /** `filterTracedShadow`: the traced shadow is denoised. */
+        filter: boolean;
+        /** `filterSizeTraced`: the denoiser kernel size in pixels. */
+        filterSize: number;
+        /** `distanceBasedFiltering`: the denoiser widens with the occluder distance. */
+        distanceBased: boolean;
+        /** `semiTransparentShadow`: transparent occluders attenuate the shadow by their alpha. */
+        semiTransparent: boolean;
+        /** `colorShadow`: transmissive occluders tint the shadow (directional lights). */
+        colorShadow: boolean;
+        /** `useScreenSpaceShadows`: HDRP routes the light's shadow through the screen-space shadow buffer. */
+        screenSpace: boolean;
+        /** `angularDiameter` of a directional light, in degrees: the sun disc that softens its shadow. */
+        angularDiameter: number;
+        /** `Light.shapeRadius` of a punctual / spot light, in meters: the emitter sphere that softens its shadow. */
+        shapeRadius: number;
+    }
+    /**
+     * The ray-tracing intent of one camera (hdrp-raytracing-polyfill D-L1): what the author asked HDRP to ray trace, read from the
+     * camera's blended volume model and the scene's lights. Nothing here renders by itself; the ray-tracing system consumes it.
+     */
+    interface IRayTracingIntent {
+        /** True when any section enables a ray-traced branch for this camera (D-L1) - the D-L2 zero-cost gate. */
+        asked: boolean;
+        /** RayTracingSettings + LightCluster: ray biases, culling, acceleration-structure build mode, light cluster range. */
+        settings: IRayTracingFields;
+        /** GlobalIllumination: `enable`, `tracing` (RayCastingMode), `mode` (RayTracingMode) and the ray-traced / mixed fields. */
+        gi: IRayTracingFields;
+        /** ScreenSpaceReflection: `enabled`, `tracing`, `mode` and the ray-traced fields. */
+        ssr: IRayTracingFields;
+        /** ScreenSpaceAmbientOcclusion: `raytracing` and the ray-traced fields. */
+        ssao: IRayTracingFields;
+        /** SubSurfaceScattering: `raytracing` and `samplecount`. */
+        sss: IRayTracingFields;
+        /** RecursiveRendering: `enable`, `layermask`, `maxdepth` and the miss / last-bounce fallbacks. */
+        recursive: IRayTracingFields;
+        /** PathTracing: `enable`, `layermask`, sample / depth limits, denoiser and sky importance sampling. */
+        pathTracing: IRayTracingFields;
+        /** The ray-traced shadow settings of every light that carries an `rtshadows` block, keyed by the Babylon light id. */
+        lights: {
+            [id: string]: IRtShadowLight;
+        };
+    }
+    /**
+     * Parses the exported ray-tracing intent (hdrp-raytracing-polyfill T1, FR-L1, D-L1, D-L3). HDRP's ray-tracing components travel
+     * in the `rayTracing` post-processing family (RayTracingSettings, LightCluster, PathTracing, RecursiveRendering,
+     * SubSurfaceScattering), the ray fields of GI / SSR / SSAO in their own families, and the light data on each light. `Read` merges
+     * them into one `IRayTracingIntent` with HDRP 17.5's defaults for everything not exported.
+     */
+    class RayTracingContract {
+        /** HDRP's ray-tracing enums (RayCastingMode, RayTracingMode, RayTracingFallbackHierachy) as their integer values. */
+        static readonly Enums: {
+            RayCastingMode: {
+                RayMarching: number;
+                RayTracing: number;
+                Mixed: number;
+            };
+            RayTracingMode: {
+                Performance: number;
+                Quality: number;
+            };
+            Fallback: {
+                None: number;
+                Sky: number;
+                ReflectionProbes: number;
+                ReflectionProbesAndSky: number;
+            };
+        };
+        /** The model family that carries HDRP's ray-tracing components (`PostProcessingContract.Vocabulary`). */
+        static readonly Family: string;
+        /** HDRP 17.5's default for every intent field (the component sources' initialisers), per section. */
+        static readonly Defaults: {
+            [section: string]: IRayTracingFields;
+        };
+        /** HDRP's ray-traced shadow defaults for a light whose `rtshadows` block lacks a key (HDAdditionalLightData initialisers). */
+        static readonly ShadowDefaults: IRtShadowLight;
+        /** Per intent section: the model family it reads and the family field behind each intent key (renamed ones differ). */
+        private static readonly Sources;
+        /**
+         * Builds the ray-tracing intent of one camera from its blended volume model and the scene's lights. A model that no HDRP volume
+         * contributed to (Built-in, URP, none) never asks; its sections hold HDRP's defaults.
+         * @param scene - The scene whose lights carry the `rtshadows` blocks (stored as `_tkRtShadows` by the light intake).
+         * @param cameraModel - The camera's blended post-processing model (`PostProcessingContract.blendStack(...).model`), or null.
+         * @returns The intent; never null.
+         */
+        static Read(scene: BABYLON.Scene, cameraModel: TOOLKIT.IPostProcessModel): IRayTracingIntent;
+        /**
+         * D-L1: whether an intent enables a ray-traced branch - GI or SSR tracing other than Ray Marching, ray-traced SSAO or SSS,
+         * recursive rendering, the path tracer, or any light with ray-traced shadows.
+         * @param intent - The intent to test.
+         * @returns True when something asks for ray tracing.
+         */
+        static Asks(intent: IRayTracingIntent): boolean;
+        /**
+         * The exporter's scene-wide answer (`hdrp.raytracing.asked`): any volume or light in the scene asks. D-L2's zero-cost gate
+         * reads it before any camera model exists.
+         * @param scene - The scene.
+         * @returns True for a parity HDRP scene whose export says ray tracing is asked.
+         */
+        static SceneAsked(scene: BABYLON.Scene): boolean;
+        /**
+         * Parses one exported `rtshadows` light block, HDRP's default standing in for every missing or mistyped key.
+         * @param raw - The block as exported (`{ enabled, samples, filter, filtersize, ... }`), or null.
+         * @returns The light's shadow settings; the defaults when `raw` is not an object.
+         */
+        static ReadShadowLight(raw: any): IRtShadowLight;
+        /**
+         * Normalises one exported parameter value: `{ value, name }` enums and `{ value }` layer masks to their number, `{ x, y, z, w }`
+         * vectors to an array; plain numbers, booleans, strings and arrays pass through.
+         * @param value - The family field's value.
+         * @returns The intent value, or null for anything else.
+         */
+        static NormaliseValue(value: any): RayTracingValue;
+        /**
+         * One intent section: HDRP's defaults overlaid with the model family's values (overridden or carried un-overridden).
+         * @param model - The camera's HDRP model, or null for defaults only.
+         * @param sectionName - The section (`gi`, `ssr`, `pathTracing`, ...).
+         * @returns A fresh field map.
+         */
+        private static section;
+        /**
+         * The `rtshadows` blocks of the scene's lights, keyed by light id.
+         * @param scene - The scene, or null.
+         * @returns The parsed blocks.
+         */
+        private static readLights;
+        /**
+         * True when an HDRP volume contributed to the model.
+         * @param model - The blended model, or null.
+         * @returns True for an HDRP (or mixed-with-HDRP) stack.
+         */
+        private static isHdrpModel;
+        /**
+         * True when the model's family exists and one of its effects is active.
+         * @param model - The camera's HDRP model, or null.
+         * @param familyName - The family name.
+         * @returns The family's activity; false when absent.
+         */
+        private static familyActive;
+        /**
+         * A copy of a defaults map (arrays copied too), so an intent never aliases `Defaults`.
+         * @param source - The defaults map.
+         * @returns The copy.
+         */
+        private static copyFields;
+        /**
+         * An identity key map for a section whose intent keys are the family field names.
+         * @param names - The field names.
+         * @returns `{ name: name }` for every name.
+         */
+        private static sameNames;
+        /**
+         * A boolean, or the fallback for anything else.
+         * @param value - The raw value.
+         * @param fallback - HDRP's default.
+         * @returns The boolean.
+         */
+        private static boolOr;
+        /**
+         * A finite number, or the fallback for anything else.
+         * @param value - The raw value.
+         * @param fallback - HDRP's default.
+         * @returns The number.
+         */
+        private static numberOr;
+    }
+}
+declare namespace TOOLKIT {
+    /** How one traced signal is denoised (hdrp-raytracing-polyfill D-L11), derived from HDRP's per-effect denoiser settings. */
+    interface IRtDenoiserSettings {
+        /** À-trous passes after the temporal pass, 0–5 (steps 1, 2, 4, 8, 16 × `firstStep`); 0 = temporal only. */
+        iterations: number;
+        /** Step of the first à-trous pass: 1, or 2 for HDRP's half-resolution denoiser (the same footprint at a quarter of the taps). */
+        firstStep: number;
+        /** Per channel (rgba): 1 = denoised, 0 = passed through raw (a ray-traced shadow slot whose light turned its filter off). */
+        channelMask: number[];
+        /** Per channel weights of the scalar the variance estimate and the luminance edge-stop read. */
+        luminanceWeights: number[];
+        /** True for a specular signal (reflections): mirror-like pixels pass through, the history is clamped to the neighbourhood, and a roughness term stops the filter. */
+        specular: boolean;
+    }
+    /** One compute kernel of the denoiser and its compile state. */
+    interface IRtDenoiseKernel {
+        /** The compute shader. */
+        shader: BABYLON.ComputeShader;
+        /** The compile error, or null. */
+        failure: string;
+    }
+    /**
+     * The guide of the ray-traced frame (hdrp-raytracing-polyfill T7): every traced frame writes the world normal and view depth of
+     * each prepass pixel (top row first, the kernels' order) into an rgba16f image, kept for two frames. The current guide drives the
+     * à-trous edge stops and the materials' D-L7 depth test (its alpha is the traced view depth); the previous guide is the history
+     * geometry the temporal pass compares against. One guide serves every denoiser and every effect of the scene.
+     */
+    class RayTracingGuide {
+        /** Name of the guide kernel (its raw WGSL is passed directly, never through the shader store). */
+        static readonly KernelName: string;
+        /** Bindings of the guide kernel. */
+        static readonly Bindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /** The guide kernel: view depth and world normal of each prepass pixel. */
+        static readonly KernelWGSL: string;
+        /** The guide written by the last frame (null before the first). */
+        current: BABYLON.BaseTexture;
+        /** The guide of the frame before it (the temporal pass's history geometry; null before the second frame). */
+        previous: BABYLON.BaseTexture;
+        /** True when `previous` holds a frame of the same size (false after a resize or an invalidation). */
+        previousValid: boolean;
+        /** The traced camera's inverse view-projection of the current frame (world positions from the guide's depth). */
+        readonly inverseViewProjection: BABYLON.Matrix;
+        /** The current frame's view-depth plane: view depth = dot(xyz, position) + w. */
+        readonly depthPlane: BABYLON.Vector4;
+        /** The previous frame's view-depth plane (the depth a surface had in the history). */
+        readonly previousDepthPlane: BABYLON.Vector4;
+        /** The scene the guide images belong to. */
+        private readonly scene;
+        /** The two guide images, swapped every frame. */
+        private readonly images;
+        /** Which of `images` the next frame writes. */
+        private writeIndex;
+        /** The guide kernel (created on first use). */
+        private kernel;
+        /** The guide's fragment pass on an engine without compute (T13), created on first use. */
+        private pass;
+        /** The guide kernel's parameters. */
+        private parameters;
+        /** Scratch for the view-to-world rotation. */
+        private readonly viewToWorld;
+        /**
+         * Creates the guide of a scene's ray-traced frames (nothing is allocated until the first frame).
+         * @param scene - The traced scene.
+         */
+        constructor(scene: BABYLON.Scene);
+        /** The compile error of the guide kernel (or pass), or null. */
+        get failure(): string;
+        /**
+         * Writes the guide of the frame the camera just rendered: swaps the images, rebuilds the frame matrices and dispatches the kernel.
+         * @param camera - The traced camera.
+         * @param width - Prepass width in pixels.
+         * @param height - Prepass height in pixels.
+         * @param depthTexture - The prepass view depth.
+         * @param normalTexture - The prepass normals.
+         * @param normalsInWorldSpace - True when the prepass stores world-space normals.
+         * @returns False when the kernel is not ready yet (nothing was written).
+         */
+        update(camera: BABYLON.Camera, width: number, height: number, depthTexture: BABYLON.BaseTexture, normalTexture: BABYLON.BaseTexture, normalsInWorldSpace: boolean): boolean;
+        /**
+         * Takes a guide image another tracer wrote in this guide's layout (T12: the path tracer's normal / view-depth AOV) as the
+         * current guide, with no history: the next `denoise` filters it spatially only.
+         * @param camera - The camera the image was traced from.
+         * @param image - The guide image (rgba16f: world normal, view depth; top row first).
+         */
+        adopt(camera: BABYLON.Camera, image: BABYLON.BaseTexture): void;
+        /** Forgets the history geometry (the next frame starts every denoiser afresh). */
+        invalidate(): void;
+        /** Releases the images, the kernel's parameters and the kernel. */
+        dispose(): void;
+        /**
+         * Rebuilds the frame matrices and writes the guide kernel's parameters.
+         * @param camera - The traced camera.
+         * @param width - Prepass width in pixels.
+         * @param height - Prepass height in pixels.
+         * @param normalsInWorldSpace - True when the prepass stores world-space normals.
+         */
+        private writeParameters;
+        /** Creates the guide kernel's parameters once. */
+        private ensureParameters;
+        /** Creates the guide kernel and its parameters once. */
+        private ensureKernel;
+        /**
+         * The guide's fragment pass on an engine without compute (T13, two images ping-pong), created on first use.
+         * @returns The pass, or null on a compute engine.
+         */
+        private fragmentPass;
+        /**
+         * One of the two guide images at the frame size (recreated on resize).
+         * @param index - 0 or 1.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns The image.
+         */
+        private ensureImage;
+        /**
+         * Whether an image has a size.
+         * @param image - The image.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns True when it matches.
+         */
+        private static SameSize;
+    }
+    /**
+     * The ray-tracing denoiser (hdrp-raytracing-polyfill D-L11, T7), one instance per traced signal (shadow masks, ambient occlusion,
+     * reflections; GI later), every one running the same SVGF-style kernels:
+     * - temporal: the previous frame's accumulation is fetched where the prepass velocity says the pixel was (bilinear, each tap kept
+     *   only when the history guide's depth is within `DepthTolerance` + two depth slopes of the surface's own depth in that frame and
+     *   its normal within `NormalTolerance` - HDRP's occluder / receiver motion rejection), blended with `1 / length` down to
+     *   `MinimumBlend`, and the moments of the signal's scalar give its variance (a 3 × 3 spatial estimate while fewer than
+     *   `SpatialVarianceFrames` frames accumulated);
+     * - à-trous: up to five 5 × 5 B3-spline passes with steps 1, 2, 4, 8, 16, each tap weighted by depth (σz 1, relative to the depth
+     *   slope), normal (σn 128) and luminance (σl 4, relative to the standard deviation), plus a roughness term for specular signals.
+     * The kernels are WGSL compute (created on first use, never on a scene that traces nothing); their CPU reference, line for line,
+     * lives in `tests/raytracing/denoiser.test.js` and reads the same constants. The accumulated history and moments live in ping-pong images; the
+     * filtered result lands in one of two scratch images that the materials read in the next frame (D-L7), before the next trace
+     * overwrites it.
+     */
+    class RayTracingDenoiser {
+        /** D-L11 depth weight σz (relative to the depth slope across the tap distance). */
+        static readonly SigmaDepth: number;
+        /** D-L11 normal weight exponent σn. */
+        static readonly SigmaNormal: number;
+        /** D-L11 luminance weight σl (in standard deviations of the signal). */
+        static readonly SigmaLuminance: number;
+        /** Roughness difference that scales the specular roughness weight (exp(-Δroughness / this)). */
+        static readonly SigmaRoughness: number;
+        /** Most à-trous passes (steps 1, 2, 4, 8, 16). */
+        static readonly MaxIterations: number;
+        /** Longest history in frames (the blend never drops below 1 / this, nor below `MinimumBlend`). */
+        static readonly MaxHistoryLength: number;
+        /** Smallest temporal blend of the new frame (SVGF's α). */
+        static readonly MinimumBlend: number;
+        /** Frames below which the variance comes from the 3 × 3 neighbourhood instead of the moments. */
+        static readonly SpatialVarianceFrames: number;
+        /** Relative view-depth difference a history tap may have (plus two depth slopes). */
+        static readonly DepthTolerance: number;
+        /** Smallest dot product of the history normal with the surface normal. */
+        static readonly NormalTolerance: number;
+        /** Roughness under which a specular pixel is a mirror: one deterministic ray, nothing to denoise. */
+        static readonly MirrorRoughness: number;
+        /** Standard deviations of the neighbourhood box a specular history is clamped to. */
+        static readonly HistoryClampDeviations: number;
+        /** Depth-weight epsilon, relative to the centre depth (half-float guides keep three decimal digits). */
+        static readonly RelativeDepthEpsilon: number;
+        /** Luminance-weight epsilon. */
+        static readonly LuminanceEpsilon: number;
+        /** The B3-spline taps of the 5 × 5 à-trous kernel, from offset -2 to 2. */
+        static readonly KernelWeights: number[];
+        /** Bindings of the temporal kernel. */
+        static readonly TemporalBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /** Bindings of the à-trous kernel. */
+        static readonly FilterBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /** Babylon's `ComputeBindingType.StorageTexture`: storage outputs are never swapped (the toolkit rebinds them when it recreates them). */
+        private static readonly StorageTextureBinding;
+        /** The placeholder `KernelReady` binds for a disposed image, per scene. */
+        private static stalePlaceholders;
+        /** The settings this signal is denoised with (set before each `denoise`). */
+        settings: IRtDenoiserSettings;
+        /** Live read-out: the à-trous passes the last `denoise` ran (0 = temporal pass only). */
+        lastIterations: number;
+        /** The scene the images belong to. */
+        private readonly scene;
+        /** A label for the images and kernels (the signal's name). */
+        private readonly label;
+        /** The temporal kernel (created on first use). */
+        private temporalKernel;
+        /** The à-trous kernel (created on first use). */
+        private filterKernel;
+        /** The temporal kernel's parameters. */
+        private temporalParameters;
+        /** One parameter buffer per à-trous pass (several dispatches of one frame must not share a buffer the queue rewrites). */
+        private filterParameters;
+        /** Accumulated history, ping-pong. */
+        private readonly history;
+        /** Moments, history length and variance, ping-pong. */
+        private readonly moments;
+        /** À-trous scratch, ping-pong; the last pass's image is the result. */
+        private readonly scratch;
+        /** Which history / moments image the next frame writes. */
+        private writeIndex;
+        /** True when the images hold an accumulation of this signal. */
+        private historyValid;
+        /** 1-pixel "no motion" velocity bound when the prepass has no velocity image. */
+        private stillVelocity;
+        /** The temporal fragment pass on an engine without compute (T13): history and moments, two sets ping-pong. */
+        private temporalPass;
+        /** The à-trous fragment pass on an engine without compute (T13): two scratch sets ping-pong. */
+        private filterPass;
+        /**
+         * Creates the denoiser of one signal (nothing is allocated until the first `denoise`).
+         * @param scene - The traced scene.
+         * @param label - The signal's name, for the GPU resource labels.
+         * @param settings - The initial settings.
+         */
+        constructor(scene: BABYLON.Scene, label: string, settings: IRtDenoiserSettings);
+        /** The compile error of either kernel, or null. */
+        get failure(): string;
+        /**
+         * HDRP's denoiser radius / half resolution / second pass as an à-trous schedule (D-L11): the radius (HDRP's 0–1 range) sets
+         * up to five passes, a second denoiser pass adds one, and the half-resolution denoiser starts at step 2.
+         * @param radius - HDRP `denoiserRadius`.
+         * @param halfResolution - HDRP `halfResolutionDenoiser`.
+         * @param secondPass - HDRP `secondDenoiserPass`.
+         * @returns The pass count and first step.
+         */
+        static Schedule(radius: number, halfResolution: boolean, secondPass: boolean): {
+            iterations: number;
+            firstStep: number;
+        };
+        /**
+         * HDRP's per-light `filterSizeTraced` (the kernel's width in pixels) as à-trous passes: the passes whose combined radius
+         * (two taps of each pass's step) first reaches half the width.
+         * @param filterSize - The light's filter size in pixels (HDRP default 16).
+         * @returns 1–5 passes.
+         */
+        static IterationsForFilterSize(filterSize: number): number;
+        /**
+         * Denoises one frame of the signal: the temporal pass, then `settings.iterations` à-trous passes.
+         * @param guide - The scene's guide (already updated for this frame).
+         * @param signal - The traced image (top row first).
+         * @param velocity - The prepass velocity image (Babylon's cube-root encoding), or null when the prepass has none.
+         * @param reflectivity - The prepass reflectivity image (specular signals: alpha = smoothness), or null.
+         * @returns The denoised image, or the raw signal while the kernels compile.
+         */
+        denoise(guide: TOOLKIT.RayTracingGuide, signal: BABYLON.BaseTexture, velocity: BABYLON.BaseTexture, reflectivity: BABYLON.BaseTexture): BABYLON.BaseTexture;
+        /**
+         * The denoiser's compute kernels, for the governor's GPU timer (T14): the effect they denoise owns their time.
+         * @returns The temporal and à-trous kernels once created (none on WebGL2, whose passes are timed around the effect).
+         */
+        kernelShaders(): BABYLON.ComputeShader[];
+        /** Drops the accumulation (the next frame starts afresh: the effect was switched off and on, or the camera cut). */
+        reset(): void;
+        /** Releases every image, parameter buffer and kernel. */
+        dispose(): void;
+        /**
+         * Creates one compute kernel from raw WGSL with an explicit bindings mapping; a compile error is reported once.
+         * @param engine - The WebGPU engine.
+         * @param name - The kernel name.
+         * @param source - The WGSL source (entry point `main`).
+         * @param bindings - Every binding the source may declare.
+         * @returns The kernel.
+         */
+        static CreateKernel(engine: BABYLON.AbstractEngine, name: string, source: string, bindings: {
+            [name: string]: IRtBindingSlot;
+        }): IRtDenoiseKernel;
+        /**
+         * Whether a toolkit compute kernel can dispatch. Babylon's `ComputeShader.isReady` also asks every texture bound at its last
+         * dispatch, and the kernels bind their per-frame images only once they are ready - so an image disposed since (the prepass
+         * targets rebuilt by a resize or a camera switch, a recreated trace image) would keep the kernel "not ready" forever. Such
+         * disposed sampled textures are swapped for a ready 1-pixel placeholder first; the dispatch that follows binds the real images.
+         * @param shader - The kernel.
+         * @param scene - The scene (owner of the placeholder).
+         * @returns True when the kernel compiled and every remaining binding is ready.
+         */
+        static KernelReady(shader: BABYLON.ComputeShader, scene: BABYLON.Scene): boolean;
+        /**
+         * Whether a bound resource is a texture disposed since it was bound (no GPU texture behind it any more).
+         * @param resource - The bound resource.
+         * @returns True for a disposed texture.
+         */
+        static IsDisposedTexture(resource: unknown): boolean;
+        /**
+         * The ready 1-pixel image `KernelReady` binds in place of a disposed one (one per scene, released with it).
+         * @param scene - The scene.
+         * @returns The placeholder.
+         */
+        private static StalePlaceholder;
+        /**
+         * A storage image of the denoiser (rgba16f, nearest).
+         * @param scene - The scene.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @param name - The texture name.
+         * @returns The image.
+         */
+        static CreateImage(scene: BABYLON.Scene, width: number, height: number, name: string): BABYLON.RawTexture;
+        /**
+         * The temporal kernel source (`TemporalBindings`); the specular variant reads the prepass smoothness.
+         * @param specular - True for a specular signal.
+         * @returns The WGSL.
+         */
+        static TemporalKernelWGSL(specular: boolean): string;
+        /**
+         * The à-trous kernel source (`FilterBindings`); the specular variant adds the roughness term and passes mirrors through.
+         * @param specular - True for a specular signal.
+         * @returns The WGSL.
+         */
+        static FilterKernelWGSL(specular: boolean): string;
+        /**
+         * Constants and the depth-slope helper both kernels share (no `//` comment holds a semicolon).
+         * @returns The WGSL.
+         */
+        private static CommonWGSL;
+        /**
+         * The specular temporal rule: a mirror (one deterministic ray) keeps the new frame, a glossy history is clamped to the
+         * neighbourhood box of the new frame (reflections move with parallax the surface velocity does not describe).
+         * @returns The WGSL lines.
+         */
+        private static SpecularHistoryWGSL;
+        /**
+         * The specular filter rule: a mirror passes through (nothing to denoise), the smoothness is read for the roughness term.
+         * @returns The WGSL lines.
+         */
+        private static SpecularFilterWGSL;
+        /**
+         * Creates the kernels (WebGPU) or the fragment passes (WebGL2, T13) and their parameter buffers once, and polls them.
+         * @returns True when the denoiser can run this frame.
+         */
+        private prepare;
+        /** Creates both kernels (the specular variants for a specular signal) and their parameter buffers once. */
+        private ensureKernels;
+        /** Creates both fragment passes (T13: the translated kernels, two target sets each) and the parameter buffers once. */
+        private ensurePasses;
+        /** Creates the temporal parameters and one filter parameter buffer per à-trous pass once. */
+        private ensureParameters;
+        /**
+         * Sizes the history, moments and scratch images (WebGPU) or the passes' targets (WebGL2) to the frame.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns True when they were recreated (the history is gone).
+         */
+        private resizeTargets;
+        /**
+         * The temporal pass of one frame.
+         * @param guide - The scene's guide.
+         * @param signal - The traced image.
+         * @param velocity - The prepass velocity, or null.
+         * @param reflectivity - The prepass reflectivity (specular), or null.
+         * @param historyUsable - True when last frame's images and guide may be read.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns This frame's accumulated value and moments.
+         */
+        private runTemporal;
+        /**
+         * One à-trous pass.
+         * @param iteration - The pass index (its own parameter buffer, and its scratch image `iteration % 2`).
+         * @param guide - The scene's guide.
+         * @param source - The image being filtered.
+         * @param moments - This frame's moments (variance in w).
+         * @param reflectivity - The prepass reflectivity (specular), or null.
+         * @param step - The pass's step in pixels.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns The filtered image.
+         */
+        private runFilter;
+        /**
+         * Writes the temporal pass's parameters.
+         * @param guide - The scene's guide.
+         * @param historyUsable - True when last frame's images and guide may be read.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         */
+        private writeTemporalParameters;
+        /**
+         * Writes one à-trous pass's parameters (its own buffer: several passes of one frame must not share one).
+         * @param iteration - The pass index.
+         * @param step - The pass's step in pixels.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns The pass's buffer.
+         */
+        private writeFilterParameters;
+        /**
+         * Dispatches the temporal kernel (its parameters are written).
+         * @param guide - The scene's guide.
+         * @param signal - The traced image.
+         * @param velocity - The prepass velocity, or null.
+         * @param reflectivity - The prepass reflectivity (specular), or null.
+         * @param previousValue - Last frame's history.
+         * @param previousMoments - Last frame's moments.
+         * @param valueTarget - This frame's history.
+         * @param momentsTarget - This frame's moments.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         */
+        private dispatchTemporal;
+        /**
+         * Dispatches one à-trous kernel (its parameters are written).
+         * @param parameters - The pass's parameter buffer.
+         * @param guide - The scene's guide.
+         * @param source - The image being filtered.
+         * @param moments - This frame's moments (variance in w).
+         * @param target - The pass's output.
+         * @param reflectivity - The prepass reflectivity (specular), or null.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         */
+        private dispatchFilter;
+        /**
+         * One image of a ping-pong pair at the frame size (recreated on resize, which also drops the history).
+         * @param images - The pair.
+         * @param index - 0 or 1.
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @param purpose - Name suffix.
+         * @returns The image.
+         */
+        private ensureImage;
+        /**
+         * The 1-pixel "no motion" velocity (0.5, 0.5 in Babylon's encoding) for a prepass without velocity.
+         * @returns The texture.
+         */
+        private ensureStillVelocity;
+    }
+}
+declare namespace TOOLKIT {
+    /** One light that owns a ray-traced shadow slot (hdrp-raytracing-polyfill T6, D-L8). */
+    interface IRtShadowSlot {
+        /** The light. */
+        light: BABYLON.Light;
+        /** Its slot, 0–3: the channel of `rtShadows` its mask is written to. */
+        slot: number;
+        /** Its exported ray-traced shadow settings. */
+        settings: IRtShadowLight;
+    }
+    /** The result of `RayTracedShadows.AssignSlots`: the lights that trace, and the ray-traced lights that keep their shadow map. */
+    interface IRtShadowAssignment {
+        /** The lights given slots 0–3, in slot order. */
+        slotted: IRtShadowSlot[];
+        /** Ray-traced lights beyond the four slots (they keep their Babylon shadow generator). */
+        overflow: BABYLON.Light[];
+    }
+    /** One occluder a shadow ray crosses, as the CPU reference of the shadow kernel reads it. */
+    interface IRtShadowOccluder {
+        /** Base-colour alpha (× the base texture's alpha), 0–1. */
+        alpha: number;
+        /** `RayTracingMaterials.AlphaMode` value. */
+        alphaMode: number;
+        /** Refraction intensity (Babylon refractionIntensity = HDRP's transmittance mask); above 0 the occluder is refractive. */
+        transmission: number;
+        /** Linear base colour, three numbers. */
+        baseColor: number[];
+    }
+    /** What reaches a light along one shadow ray (CPU reference of `traceShadowRay`). */
+    interface IRtShadowTransmittance {
+        /** The scalar the slot's mask stores, 0 (blocked) – 1 (lit): `ShadowVisibility` of `color`. */
+        visibility: number;
+        /** HDRP's `rayIntersection.color`: the product of every crossed occluder's transmittance, three numbers. */
+        color: number[];
+    }
+    /** The camera and prepass images of one traced frame (`RayTracedFrame`), handed to every screen-space tracer. */
+    interface IRtFrameSurfaces {
+        /** The traced camera. */
+        camera: BABYLON.Camera;
+        /** Prepass width in pixels. */
+        width: number;
+        /** Prepass height in pixels. */
+        height: number;
+        /** The prepass view depth. */
+        depthTexture: BABYLON.BaseTexture;
+        /** The prepass normals. */
+        normalTexture: BABYLON.BaseTexture;
+        /** The prepass velocity (Babylon's cube-root encoding), or null. */
+        velocityTexture: BABYLON.BaseTexture;
+        /** The prepass reflectivity (F0 rgb, smoothness a), or null while reflections do not trace. */
+        reflectivityTexture: BABYLON.BaseTexture;
+        /** True when the prepass stores world-space normals. */
+        normalsInWorldSpace: boolean;
+        /** The frame counter (decorrelates the ray hashes). */
+        frameIndex: number;
+    }
+    /** One hit of a subsurface walk's ray against the object (CPU reference of the kernel's `traceClosestMasked`). */
+    interface IRtWalkHit {
+        /** Distance along the ray, in world units. */
+        t: number;
+        /** The surface normal at the hit, unit length (any side: the walk turns it outward). */
+        normal: number[];
+    }
+    /** The end of one subsurface random walk (CPU reference of the kernel's `WalkResult`). */
+    interface IRtWalkResult {
+        /** True when the walk left the object (a walk that does not within the step budget is killed, throughput 0). */
+        exited: boolean;
+        /** Where the walk left the object (biased outward), three numbers. */
+        position: number[];
+        /** The outward normal at the exit, three numbers. */
+        normal: number[];
+        /** The walk's throughput per channel (the diffuse colour for an immediate exit). */
+        throughput: number[];
+    }
+    /** What a recursive ray spawns at a hit (CPU reference of the recursive kernel's branching). */
+    interface IRtRecursiveSpawn {
+        /** The hit spawns a mirror reflection ray (smooth enough). */
+        reflection: boolean;
+        /** The hit spawns a refraction / pass-through ray (transparent, no total internal reflection). */
+        refraction: boolean;
+    }
+    /** The surfaces one effect traces and the guide its denoiser reads (the frame's own, or their half-resolution copy, T14). */
+    interface IRtTracedSurfaces {
+        /** The surfaces. */
+        surfaces: IRtFrameSurfaces;
+        /** Their guide. */
+        guide: TOOLKIT.RayTracingGuide;
+    }
+    /** A traced effect as `RayTracedFrame` runs it and the governor steps it (T14): shadows and every screen-space tracer. */
+    interface IRtTracedEffect extends IRtGovernedEffect {
+        /** True while the effect traces and the materials use it. */
+        readonly active: boolean;
+        /** The resolution divisor the effect traces at (its tier and authored resolution, at least the backend's own). */
+        readonly resolutionDivisor: number;
+        /**
+         * Traces the effect over the frame's surfaces at its resolution.
+         * @param surfaces - The traced frame's surfaces at the effect's resolution.
+         * @param guide - The guide of those surfaces.
+         */
+        trace(surfaces: IRtFrameSurfaces, guide: TOOLKIT.RayTracingGuide): void;
+        /**
+         * The compute kernels whose GPU time is the effect's (its trace and denoiser kernels; none on WebGL2).
+         * @returns The kernels.
+         */
+        timedKernels(): BABYLON.ComputeShader[];
+    }
+    /**
+     * Ray-traced shadows (hdrp-raytracing-polyfill T6, D-L7, D-L8, Algorithms › shadow rays). Up to four lights whose export asks for
+     * ray-traced shadows (`_tkRtShadows.enabled`) get slots 0–3 (directional lights first, then scene order); their Babylon shadow
+     * generator is switched off (`light.shadowEnabled = false`, restored on dispose), while every other light keeps its shadow map and
+     * a fifth ray-traced light keeps its map with one report. After the traced camera renders frame N, `RayTracedFrame` hands this
+     * effect the frame's prepass surfaces and the backend's shadow kernel writes one visibility mask per slot and slot 0's colour tint
+     * (`rtShadowColor`); the masks of the slots whose light filters its shadow (`filter`, `filterSize`) go through the denoiser (T7) and
+     * the result is `rtShadows`. `RayTracedLightingPlugin` samples them in frame N + 1 at the position reprojected through the frame's
+     * `previousViewProjection`, falling back to the raster shadow term off screen or where the view depth differs by more than
+     * `DepthTolerance` (D-L7). An engine without a prepass, or the Inspector's screen-space fallback, hands every light back to its
+     * shadow map. Occluders follow HDRP's ShaderPassRaytracingVisibility (`OccluderTransmittance`).
+     */
+    class RayTracedShadows implements IRtTracedEffect {
+        /** Ray-traced shadow slots per scene (D-L8): the four channels of `rtShadows`. */
+        static readonly MaxSlots: number;
+        /** D-L7: largest relative view-depth difference at which a traced pixel is reused (2 %). */
+        static readonly DepthTolerance: number;
+        /**
+         * Per-slot flag bits the shadow kernel reads (`ShadowParams.slotFlags`): `passThrough` = transparent occluders transmit (HDRP's
+         * TRANSPARENT_COLOR_SHADOW keyword), `colorShadow` = the slot keeps the colour (mask = its largest channel, tint = the rest),
+         * `luminance` = the mask is the colour's luminance (punctual lights); neither of the last two: the colour's first channel.
+         */
+        static readonly Flags: {
+            passThrough: number;
+            colorShadow: number;
+            luminance: number;
+        };
+        /** How a slot turns HDRP's transmitted colour into its scalar mask (RaytracingShadow.raytrace integration). */
+        static readonly ScalarMode: {
+            firstChannel: number;
+            luminance: number;
+            colorMax: number;
+        };
+        /** HDRP / Unity `Luminance()` weights (linear Rec. 709). */
+        static readonly LuminanceWeights: number[];
+        /** Most shadow rays per pixel and slot (the kernel's `SAMPLES_PER_SLOT`). */
+        static readonly MaxSamples: number;
+        /** 1.0 as an IEEE half float (the colour placeholder matches the kernel's rgba16float output). */
+        private static readonly HalfFloatOne;
+        /** Smoothing weight of `stats.encodeAverageMs`. */
+        private static readonly AverageWeight;
+        /** The ray-tracing system this effect belongs to. */
+        readonly system: TOOLKIT.RayTracingSystem;
+        /** The lights that own a slot, in slot order. */
+        slots: IRtShadowSlot[];
+        /** Ray-traced lights beyond the four slots (they keep their shadow map). */
+        overflow: BABYLON.Light[];
+        /** True once the masks hold a traced frame of the current slots (false: the materials use their raster shadow term). */
+        historyValid: boolean;
+        /** Live read-outs: traces dispatched, the last trace size and the CPU time spent encoding the dispatch. */
+        readonly stats: {
+            traces: number;
+            width: number;
+            height: number;
+            encodeMs: number;
+            encodeAverageMs: number;
+        };
+        /** {@inheritDoc IRtGovernedEffect.governorLabel} */
+        readonly governorLabel: string;
+        /** {@inheritDoc IRtGovernedEffect.rasterBranch} */
+        readonly rasterBranch: string;
+        /** {@inheritDoc IRtGovernedEffect.authoredHalfResolution} (HDRP traces ray-traced shadows at full resolution.) */
+        readonly authoredHalfResolution: boolean;
+        /** The scene. */
+        private readonly scene;
+        /** The traced (and, for filtered slots, denoised) mask image (null before the first trace). */
+        private mask;
+        /** The denoiser of the slot masks (created with the effect; it allocates nothing until a slot filters). */
+        private readonly denoiser;
+        /** True while the Inspector's A/B switch shows the shadow maps instead (`screenSpaceFallback`). */
+        private fallback;
+        /** The traced colour / depth image (null before the first trace). */
+        private color;
+        /** 1-pixel white mask bound before the first trace (created on first use). */
+        private placeholderMask;
+        /** 1-pixel white tint with depth 0 (never matches a surface) bound before the first trace (created on first use). */
+        private placeholderColor;
+        /** `shadowEnabled` of every light whose generator this effect switched off, restored on dispose or when it loses its slot. */
+        private readonly switchedOff;
+        /** Signature of the ray-traced lights at the last assignment (reassigned when it changes). */
+        private signature;
+        /** True once the engine turned out to have no prepass: tracing stopped and every light got its shadow map back. */
+        private handedBack;
+        /** True once the slots changed and the materials must recompile their defines. */
+        private materialsDirty;
+        /** The governor tier (`RayTracingGovernor.Tier`); the last tier gives every light its shadow map back. */
+        private tierValue;
+        /**
+         * Creates the effect of a ray-tracing system that has a backend (D-L2: never on a scene that does not ask).
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * The shadow effect of a scene's ray-tracing system, without creating either.
+         * @param scene - The scene.
+         * @returns The effect, or null when the scene has no system or no backend.
+         */
+        static Find(scene: BABYLON.Scene): RayTracedShadows;
+        /**
+         * The exported ray-traced shadow settings of a light (`_tkRtShadows`, T1).
+         * @param light - The light.
+         * @returns The settings, or null when the light carries no block.
+         */
+        static SettingsOf(light: BABYLON.Light): IRtShadowLight;
+        /**
+         * D-L8: gives slots 0–3 to the enabled lights that ask for ray-traced shadows - directional lights first (slot 0 carries the
+         * colour shadow, HDRP's sun), then scene order; every further ray-traced light is overflow.
+         * @param lights - The scene's lights, in scene order.
+         * @returns The slotted lights and the overflow.
+         */
+        static AssignSlots(lights: BABYLON.Light[]): IRtShadowAssignment;
+        /**
+         * Whether a light's shadow rays pass through transparent occluders - HDRP's TRANSPARENT_COLOR_SHADOW keyword, which HDRP sets
+         * from `colorShadow` for the directional light (ScreenSpaceShadowsDirectional.cs) and from `semiTransparentShadow` for
+         * punctual lights (ScreenSpaceShadowsPunctual.cs).
+         * @param settings - The light's ray-traced shadow settings.
+         * @param directional - True for a directional light.
+         * @returns True when transparent occluders transmit.
+         */
+        static PassesThrough(settings: IRtShadowLight, directional: boolean): boolean;
+        /**
+         * One occluder's factor on HDRP's `rayIntersection.color` (CPU reference of the kernel's `occluderTransmittance`, a port of
+         * ShaderPassRaytracingVisibility.hlsl's any-hit): without pass-through, or on a non-transparent surface, the ray stops (black);
+         * a refractive transparent surface multiplies by `lerp(transmittanceColor, 0, 1 - transmittanceMask)`; any other transparent
+         * surface by `1 - opacity`. Mapping onto the `RtMaterial` record: transparent = alpha mode blend, refractive = transmission
+         * above 0 (HAS_REFRACTION), transmittanceColor = the linear base colour, transmittanceMask = the transmission (HDRP's Lit sets
+         * transmittanceMask = 1 - alpha and alpha = 1 for refraction, LitDataIndividualLayer.hlsl; the exporter writes that mask as
+         * the transmission, Babylon's refractionIntensity, with alpha 1), opacity = alpha.
+         * @param occluder - The occluder.
+         * @param passThrough - `PassesThrough` of the light.
+         * @returns The colour factor, three numbers.
+         */
+        static OccluderTransmittance(occluder: IRtShadowOccluder, passThrough: boolean): number[];
+        /**
+         * The scalar a slot's mask stores from HDRP's transmitted colour (RaytracingShadow.raytrace): `firstChannel` = `color.x` (the
+         * directional grey-scale integration), `luminance` = `Luminance(color)` (punctual lights), `colorMax` = the largest channel
+         * (the colour shadow: the material multiplies the mask by the tint `color / mask`, giving back the colour).
+         * @param color - The transmitted colour.
+         * @param mode - A `ScalarMode` value.
+         * @returns The mask value, 0–1.
+         */
+        static ShadowVisibility(color: number[], mode: number): number;
+        /**
+         * The transmittance of a whole shadow ray (CPU reference of `traceShadowRay`): the product of every crossed occluder's factor,
+         * and the slot's scalar of it.
+         * @param occluders - The occluders along the ray (order does not matter).
+         * @param passThrough - `PassesThrough` of the light.
+         * @param mode - The slot's `ScalarMode`.
+         * @returns The transmitted colour and the mask value.
+         */
+        static RayTransmittance(occluders: IRtShadowOccluder[], passThrough: boolean, mode: number): IRtShadowTransmittance;
+        /**
+         * D-L7: where a world position falls in the traced frame (CPU reference of the plugin's reprojection): its uv in the masks
+         * (row 0 at the top, like the kernel's pixels) and its view depth in the traced frame.
+         * @param viewProjection - The traced frame's view-projection matrix.
+         * @param depthPlane - The traced frame's view-depth plane.
+         * @param position - The world position.
+         * @returns uv, view depth, and whether the position is in front of the traced camera and inside its image.
+         */
+        static Reproject(viewProjection: BABYLON.Matrix, depthPlane: BABYLON.Vector4, position: BABYLON.Vector3): {
+            u: number;
+            v: number;
+            depth: number;
+            onScreen: boolean;
+        };
+        /**
+         * D-L7: whether a fragment may use the traced mask (CPU reference of the plugin's test) - a traced frame exists, the position is
+         * on screen in it, and the traced view depth there is within `DepthTolerance` of the position's own depth; otherwise the
+         * material keeps its raster shadow term.
+         * @param historyValid - A traced frame of the current slots exists.
+         * @param onScreen - The reprojected position is inside the traced image.
+         * @param tracedDepth - The view depth the kernel stored at the reprojected pixel.
+         * @param expectedDepth - The position's view depth in the traced frame.
+         * @returns True to use the traced mask.
+         */
+        static UsesTracedShadow(historyValid: boolean, onScreen: boolean, tracedDepth: number, expectedDepth: number): boolean;
+        /** True when at least one light traces its shadow (the plugin's defines switch on); false once handed back to shadow maps. */
+        get active(): boolean;
+        /** {@inheritDoc IRtGovernedEffect.governorKey} */
+        get governorKey(): string;
+        /** {@inheritDoc IRtGovernedEffect.governed} */
+        get governed(): boolean;
+        /** {@inheritDoc IRtGovernedEffect.authoredSamples} (the most shadow rays any slot asks for) */
+        get authoredSamples(): number;
+        /**
+         * The governor tier (D-L12): the half-resolution tiers trace the masks at half resolution, the one-sample tier one shadow ray
+         * per slot, the last tier gives every light its shadow map back (as the A/B switch does).
+         */
+        get tier(): number;
+        set tier(tier: number);
+        /** What the masks trace at the tier on this backend. */
+        get work(): IRtTierWork;
+        /** {@inheritDoc IRtTracedEffect.resolutionDivisor} */
+        get resolutionDivisor(): number;
+        /**
+         * {@inheritDoc IRtTracedEffect.timedKernels}
+         * @returns The shadow kernel and the mask denoiser's kernels.
+         */
+        timedKernels(): BABYLON.ComputeShader[];
+        /**
+         * The shadow rays per pixel a slot asks for, within the kernel's limit.
+         * @param entry - The slot.
+         * @returns 1–`MaxSamples`.
+         */
+        static SlotSamples(entry: IRtShadowSlot): number;
+        /** True when a light asks for ray-traced shadows on this engine (whether they show or the A/B switch hands them back). */
+        get asked(): boolean;
+        /**
+         * The Inspector's A/B switch: true hands every slotted light back to its shadow map (the raster look), false traces again.
+         */
+        get screenSpaceFallback(): boolean;
+        set screenSpaceFallback(enabled: boolean);
+        /** True while every slotted light shows its shadow map: the A/B switch, or the governor's last tier. */
+        private get showsShadowMaps();
+        /**
+         * Switches between the traced masks and the shadow maps after the A/B switch or the tier changed: the shadow maps come back
+         * (generators restored, slots dropped from the light table and the materials), or the slots are reassigned at the next update.
+         * @param wasShowingMaps - `showsShadowMaps` before the change.
+         */
+        private rasterBranchChanged;
+        /** The image the materials sample for the slot masks (a 1-pixel "lit" placeholder before the first trace). */
+        get maskTexture(): BABYLON.BaseTexture;
+        /** The image the materials sample for slot 0's tint and the traced depth (a placeholder whose depth never matches before the first trace). */
+        get colorTexture(): BABYLON.BaseTexture;
+        /** True when the slot-0 light is a directional light with colour shadows (HDRP's colour shadow, the plugin's tint define). */
+        get colorShadowActive(): boolean;
+        /**
+         * The slot of a light.
+         * @param light - The light.
+         * @returns 0–3, or -1 when the light does not trace its shadow.
+         */
+        slotOf(light: BABYLON.Light): number;
+        /**
+         * The per-frame update (run by `RayTracingSystem.sync` before the light table packs): reassigns the slots when the set of
+         * ray-traced lights changed, and asks the materials to recompile when it did.
+         */
+        update(): void;
+        /**
+         * A one-line state for the Inspector: every ray-traced light with its slot, samples and options, and the overflow.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** Restores every switched-off shadow generator, releases the denoiser and the placeholders (system dispose; the traced images belong to the backend). */
+        dispose(): void;
+        /**
+         * Applies a new slot assignment: generators of lights that lost their slot come back, newly slotted lights switch theirs off,
+         * the light table learns the slots, the overflow is reported once, and the traced history is dropped.
+         */
+        private assign;
+        /**
+         * A string that changes whenever the set, order or settings of the ray-traced lights change.
+         * @returns The signature.
+         */
+        private lightSignature;
+        /**
+         * D-L7: traces the masks of the frame `RayTracedFrame` hands over (its prepass is complete), for the materials of the next
+         * frame, then denoises the slots whose light filters its shadow.
+         * @param surfaces - The traced frame's camera and prepass images.
+         * @param guide - The frame's guide (updated for this frame).
+         */
+        trace(surfaces: IRtFrameSurfaces, guide: TOOLKIT.RayTracingGuide): void;
+        /**
+         * The error policy when the shadows cannot trace - the engine has no prepass (the surfaces cannot be read) or the shadow kernel
+         * failed to compile: tracing stops, every light this effect switched off gets its shadow generator back, the light table and
+         * the materials drop their slots, and one report says why.
+         * @param failure - The kernel's compile error, or omitted when the engine has no prepass.
+         */
+        handBack(failure?: string): void;
+        /**
+         * The denoiser settings of the current slots (HDRP's per-light `filterTracedShadow` / `filterSizeTraced`): a slot whose light
+         * filters is denoised, the others pass through raw; the largest filter size sets the passes.
+         * @param slots - The slotted lights.
+         * @returns The settings, or null when no slot filters.
+         */
+        static DenoiserSettingsOf(slots: IRtShadowSlot[]): IRtDenoiserSettings;
+        /**
+         * Denoises the raw masks when a slot filters (else returns them raw).
+         * @param raw - The kernel's mask image.
+         * @param surfaces - The traced frame.
+         * @param guide - The frame's guide.
+         * @returns The image the materials sample.
+         */
+        private denoise;
+        /** Asks the materials to recompile their defines once the slots or the A/B switch changed. */
+        private flushMaterials;
+        /**
+         * The light-table record of each slot's light (-1 when its light is not packed this frame).
+         * @returns Four record indices.
+         */
+        private slotLightIndices;
+        /**
+         * The kernel flags of one slot: pass-through (`PassesThrough`), the colour shadow (a directional light with `colorShadow` in
+         * slot 0, which owns `rtShadowColor`), and the luminance mask of punctual lights.
+         * @param entry - The slot.
+         * @returns `Flags` bits.
+         */
+        private flagsOf;
+        /** Gives every light this effect switched off its shadow generator back. */
+        private restoreShadowMaps;
+        /**
+         * A 1-pixel texture the materials bind before the first trace.
+         * @param scene - The scene.
+         * @param pixel - The RGBA value.
+         * @param textureType - Babylon texture type of `pixel`.
+         * @param name - Texture name.
+         * @returns The texture.
+         */
+        static CreatePlaceholder(scene: BABYLON.Scene, pixel: ArrayBufferView, textureType: number, name: string): BABYLON.RawTexture;
+        /**
+         * A finite number from an intent field, else a default.
+         * @param value - The field value.
+         * @param fallback - The default.
+         * @returns The number.
+         */
+        static NumberOr(value: RayTracingValue, fallback: number): number;
+    }
+    /**
+     * The frame every screen-space tracer of a scene shares (hdrp-raytracing-polyfill T7, D-L7): after the traced camera renders frame
+     * N (`onAfterCameraRenderObservable`, so its prepass is complete) it reads the prepass images, writes the guide (world normal +
+     * view depth, the denoisers' geometry and the materials' depth reference), runs the shadow tracer and then every surface effect
+     * (ambient occlusion, reflections, GI, recursive rendering, subsurface scattering - `RayTracingSystem.surfaceEffects`), packs
+     * `rtLighting0`, and keeps the frame's view-projection for the materials' reprojection in frame N + 1. The prepass depth,
+     * normal and velocity (plus reflectivity while reflections trace) are requested through a prepass effect configuration carried by
+     * the camera's first post process, the way TAA and the HDRP fog request theirs; an engine without a prepass hands every effect
+     * back to its raster branch (one report each).
+     */
+    class RayTracedFrame {
+        /** Name of the prepass effect configuration that asks for the traced surfaces. */
+        static readonly PrePassConfigurationName: string;
+        /** The ray-tracing system this frame belongs to. */
+        readonly system: TOOLKIT.RayTracingSystem;
+        /** The guide of the traced frames (shared by every denoiser and the materials' depth test). */
+        readonly guide: TOOLKIT.RayTracingGuide;
+        /** The view-projection matrix the current images were traced with (frame N), for the materials' reprojection in frame N + 1. */
+        readonly previousViewProjection: BABYLON.Matrix;
+        /** The view-depth plane of the traced frame: view depth = dot(xyz, position) + w (the prepass stores view z). */
+        readonly previousDepthPlane: BABYLON.Vector4;
+        /** True once a traced frame exists (false: the materials keep every raster term). */
+        historyValid: boolean;
+        /** Frames traced since creation (also decorrelates the per-frame ray hashes). */
+        frameIndex: number;
+        /** True when the last rendered camera was path traced: the path tracer replaced the frame and no traced effect ran. */
+        pathTraced: boolean;
+        /** The scene. */
+        private readonly scene;
+        /** Scene observer that traces after the camera rendered. */
+        private afterCameraObserver;
+        /** The prepass effect configuration that asks for the surfaces (registered once). */
+        private prePassConfiguration;
+        /** The post process carrying the configuration (the prepass only turns on for configurations a post process carries). */
+        private prePassCarrier;
+        /** 1-pixel guide bound before the first trace (depth 0 never matches a surface). */
+        private placeholderGuide;
+        /** `rtLighting0` packed from the GI and ambient-occlusion images while both trace (D-L8), else null. */
+        private packedLighting;
+        /** True once the engine turned out to have no prepass. */
+        private handedBack;
+        /** The guide of the half-resolution surfaces (T14: effects at a half-resolution tier on WebGPU), created on first use. */
+        private reducedGuide;
+        /** The half-resolution surfaces of the current traced frame, or null when they could not be made this frame. */
+        private reduced;
+        /** `frameIndex` of the frame `reduced` belongs to (-1: none yet). */
+        private reducedFrameIndex;
+        /**
+         * Creates the frame of a ray-tracing system that has a backend (D-L2: never on a scene that does not ask).
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * The traced frame of a scene's ray-tracing system, without creating either.
+         * @param scene - The scene.
+         * @returns The frame, or null when the scene has no system or no backend.
+         */
+        static Find(scene: BABYLON.Scene): RayTracedFrame;
+        /** The guide the materials compare their depth with (a placeholder that never matches before the first trace). */
+        get guideTexture(): BABYLON.BaseTexture;
+        /**
+         * The image the materials bind as `rtLighting0` (D-L8: GI rgb, ambient-occlusion visibility a): the packed image while both
+         * trace, else the one effect's image (GI alone keeps a = 1, ambient occlusion alone leaves rgb unread).
+         */
+        get lighting0Texture(): BABYLON.BaseTexture;
+        /** Stops tracing and releases the guide, the placeholder and the prepass request (system dispose). */
+        dispose(): void;
+        /**
+         * The camera whose frames are traced: the first active camera (the one the prepass serves).
+         * @returns The camera, or null.
+         */
+        private tracedCamera;
+        /**
+         * D-L7: traces every active effect over the frame the camera just rendered, for the materials of the next frame.
+         * @param camera - The camera that finished rendering.
+         */
+        private trace;
+        /**
+         * Traces one effect at its tier's resolution (T14): the frame's surfaces, or their half-resolution copy for an effect the governor
+         * (or its authored resolution) runs at half resolution; the GPU timer measures it (WebGL2 queries around its passes, WebGPU
+         * timestamps on its kernels).
+         * @param effect - The effect.
+         * @param full - The frame's surfaces and guide.
+         */
+        private traceEffect;
+        /**
+         * The half-resolution copy of this frame's surfaces and its guide, made once per traced frame (on WebGL2 the backend's
+         * surfaces are reduced already, so no effect asks for this).
+         * @param surfaces - The frame's surfaces.
+         * @returns The reduced surfaces and guide, or null while the reduction kernel compiles.
+         */
+        private reducedSurfaces;
+        /**
+         * The prepass images of the frame just rendered.
+         * @param camera - The traced camera.
+         * @param prePass - The scene's prepass renderer.
+         * @returns The surfaces, or null while depth or normals are not in the prepass yet.
+         */
+        private surfacesOf;
+        /**
+         * D-L8: packs the GI and ambient-occlusion images into one `rtLighting0` while both traced this frame (the materials bind one
+         * sampler for both); otherwise `lighting0Texture` hands out the one effect's image.
+         */
+        private packLighting;
+        /** The error policy when the engine has no prepass: every effect hands back to its raster branch, one report each. */
+        private handBack;
+        /**
+         * Asks the prepass for depth, normals and velocity (plus reflectivity while reflections trace): registers the effect
+         * configuration and, when no post process of the camera carries one yet, hangs it on the camera's first post process (Babylon
+         * turns the prepass on only for configurations a post process or material carries), then applies the new layout at once
+         * (`PostProcessor.SyncPrePass`). A texture type added later (reflections switched on) is added to the same request.
+         * @param camera - The traced camera.
+         * @param needsReflectivity - True while reflections trace.
+         * @returns The prepass renderer, or null when the engine has none (the caller hands every effect back).
+         */
+        private requestPrePass;
+        /**
+         * Adds the missing texture types to a prepass request.
+         * @param target - The request's `texturesRequired`.
+         * @param required - The types needed.
+         * @returns True when a type was added.
+         */
+        private static AddTextureTypes;
+    }
+    /**
+     * What every screen-space tracer of the traced frame shares (T7, T8): the asked state from the traced camera's intent, the A/B
+     * switch that hands the effect back to its screen-space branch, the hand-back when the engine has no prepass, the effect's
+     * denoiser and the image the materials sample (a placeholder before the first trace).
+     */
+    abstract class RayTracedSurfaceEffect implements IRtTracedEffect {
+        /** The ray-tracing system this effect belongs to. */
+        readonly system: TOOLKIT.RayTracingSystem;
+        /** Live read-outs: traces dispatched, the last trace size and the denoiser passes of the last frame. */
+        readonly stats: {
+            traces: number;
+            width: number;
+            height: number;
+            denoisePasses: number;
+        };
+        /** {@inheritDoc IRtGovernedEffect.governorLabel} */
+        readonly governorLabel: string;
+        /** {@inheritDoc IRtGovernedEffect.rasterBranch} */
+        readonly rasterBranch: string;
+        /** The scene. */
+        protected readonly scene: BABYLON.Scene;
+        /** The effect's denoiser (it allocates nothing until the effect traces). */
+        protected readonly denoiser: TOOLKIT.RayTracingDenoiser;
+        /** The image the materials sample (null before the first trace). */
+        protected image: BABYLON.BaseTexture;
+        /** True while the Inspector's A/B switch shows the screen-space branch instead. */
+        private fallback;
+        /** True once the engine turned out to have no prepass. */
+        private handedBack;
+        /** The placeholder bound before the first trace (created on first use). */
+        private placeholder;
+        /** `active` at the last `update`, so the materials recompile only when it changes. */
+        private wasActive;
+        /** The governor tier (`RayTracingGovernor.Tier`), set by the system and the governor. */
+        private tierValue;
+        /**
+         * Creates the effect of a ray-tracing system that has a backend.
+         * @param system - The scene's ray-tracing system.
+         * @param label - The effect's name (denoiser resources).
+         * @param denoiserSettings - The denoiser's initial settings.
+         * @param governorLabel - The effect's name in governor reports and read-outs.
+         * @param rasterBranch - HDRP's non-ray-traced counterpart it hands back to.
+         */
+        protected constructor(system: TOOLKIT.RayTracingSystem, label: string, denoiserSettings: IRtDenoiserSettings, governorLabel: string, rasterBranch: string);
+        /** {@inheritDoc IRtGovernedEffect.governorKey} */
+        get governorKey(): string;
+        /** {@inheritDoc IRtGovernedEffect.governed} */
+        get governed(): boolean;
+        /** {@inheritDoc IRtGovernedEffect.authoredHalfResolution} */
+        get authoredHalfResolution(): boolean;
+        /** {@inheritDoc IRtGovernedEffect.authoredSamples} */
+        get authoredSamples(): number;
+        /**
+         * The governor tier (D-L12). The last tier hands the effect back to its screen-space branch (`active` turns false and the
+         * materials recompile at the next update); the others change the resolution and samples of the next trace.
+         */
+        get tier(): number;
+        set tier(tier: number);
+        /** What the effect traces at its tier on this backend (resolution divisor, samples, hand-back). */
+        get work(): IRtTierWork;
+        /** {@inheritDoc IRtTracedEffect.resolutionDivisor} */
+        get resolutionDivisor(): number;
+        /**
+         * {@inheritDoc IRtTracedEffect.timedKernels}
+         * @returns The trace kernel and the denoiser kernels.
+         */
+        timedKernels(): BABYLON.ComputeShader[];
+        /** True when the traced camera's intent asks for this effect on an engine that can trace it (whether it shows or not). */
+        get asked(): boolean;
+        /** True while the effect traces and the materials use it (asked, the A/B switch off, its kernel healthy, not handed back by the governor). */
+        get active(): boolean;
+        /** The Inspector's A/B switch: true shows the effect's screen-space branch (the raster look), false traces again. */
+        get screenSpaceFallback(): boolean;
+        set screenSpaceFallback(enabled: boolean);
+        /** True once the effect traced an image (false: its placeholder stands in). */
+        get hasImage(): boolean;
+        /** The image the materials sample: the denoised trace, or the effect's neutral placeholder before the first trace. */
+        get texture(): BABYLON.BaseTexture;
+        /**
+         * The per-frame update (run by `RayTracingSystem.sync`): starts compiling the kernel the first time the effect is asked, and
+         * asks the materials to recompile when the effect switched on or off.
+         * @returns True when `active` changed this frame.
+         */
+        update(): boolean;
+        /**
+         * Traces and denoises the effect over the frame `RayTracedFrame` hands over.
+         * @param surfaces - The traced frame's camera and prepass images.
+         * @param guide - The frame's guide (updated for this frame).
+         */
+        trace(surfaces: IRtFrameSurfaces, guide: TOOLKIT.RayTracingGuide): void;
+        /**
+         * The error policy when the effect cannot trace - the engine has no prepass or the effect's kernel failed to compile: the effect
+         * stops and its screen-space branch renders (one report saying why).
+         * @param failure - The kernel's compile error, or omitted when the engine has no prepass.
+         */
+        handBack(failure?: string): void;
+        /** Releases the denoiser and the placeholder (system dispose; the traced images belong to the backend). */
+        dispose(): void;
+        /**
+         * The traced camera's ray-tracing intent.
+         * @returns The intent, or null before the post-processing recorded one.
+         */
+        protected tracedIntent(): IRayTracingIntent;
+        /**
+         * The effect's work for an intent at its tier on this backend.
+         * @param intent - The traced camera's intent, or null.
+         * @returns The work.
+         */
+        protected workFor(intent: IRayTracingIntent): IRtTierWork;
+        /**
+         * The read-out of the effect's tier: the tier name and the size it traced last.
+         * @returns The text.
+         */
+        protected tierSummary(): string;
+        /**
+         * A numeric intent setting for the read-outs, HDRP's default (`RayTracingContract.Defaults`) when the export lacks it.
+         * @param fields - The effect's intent block.
+         * @param section - The block's name in `RayTracingContract.Defaults`.
+         * @param key - The setting.
+         * @returns The value.
+         */
+        static SettingOf(fields: IRayTracingFields, section: string, key: string): number;
+        /**
+         * The read-out of an effect the governor handed back.
+         * @returns The text.
+         */
+        protected handedBackSummary(): string;
+        /**
+         * Whether the authored settings trace at half resolution (HDRP Performance mode with `fullResolution` off); default: never.
+         * @param intent - The traced camera's intent.
+         * @returns True for an authored half resolution.
+         */
+        protected halvesResolution(intent: IRayTracingIntent): boolean;
+        /**
+         * The authored rays per pixel of the effect; default 1 (an effect without a sample count).
+         * @param intent - The traced camera's intent.
+         * @returns The samples.
+         */
+        protected samplesOf(intent: IRayTracingIntent): number;
+        /**
+         * A one-line state for the Inspector: on / off, the samples and resolution actually traced, the tier.
+         * @returns The read-out.
+         */
+        abstract describe(): string;
+        /**
+         * Whether an intent asks for this effect.
+         * @param intent - The traced camera's intent.
+         * @returns True when the effect is asked.
+         */
+        protected abstract asks(intent: IRayTracingIntent): boolean;
+        /**
+         * The backend effect name of the effect's kernel.
+         * @returns The name.
+         */
+        protected abstract effectName(): string;
+        /**
+         * The effect's name in reports and labels.
+         * @returns The name.
+         */
+        protected abstract label(): string;
+        /**
+         * The neutral pixel the materials sample before the first trace (half floats).
+         * @returns The RGBA pixel.
+         */
+        protected abstract placeholderPixel(): Uint16Array;
+        /**
+         * Dispatches the effect's kernel.
+         * @param backend - The backend.
+         * @param surfaces - The traced frame.
+         * @param intent - The traced camera's intent.
+         * @returns The raw traced image, or null.
+         */
+        protected abstract dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /**
+         * The denoiser settings from the intent.
+         * @param intent - The traced camera's intent.
+         * @returns The settings, or null when the effect is not denoised.
+         */
+        protected abstract denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+    }
+    /**
+     * Ray-traced ambient occlusion (hdrp-raytracing-polyfill T7, FR-L6, a port of HDRP's RTAO): asked by the camera volume's
+     * ScreenSpaceAmbientOcclusion `rayTracing`. Every prepass pixel casts `sampleCount` cosine-weighted rays of `rayLength` (the BVH
+     * sees geometry the screen never shows); the visible fraction is denoised (HDRP's temporal + diffuse denoiser, here the SVGF
+     * passes of `denoiserRadius`) into `rtLighting0.a`, and the material applies HDRP's `pow(visibility, intensity)` to its ambient
+     * and indirect diffuse light, and `lerp(1, ao, directLightingStrength)` to its direct diffuse light. While it traces, the camera's
+     * screen-space SSAO is neutralised (HDRP runs one or the other).
+     */
+    class RayTracedAmbientOcclusion extends RayTracedSurfaceEffect {
+        /** HDRP's largest RTAO sample count. */
+        static readonly MaxSamples: number;
+        /**
+         * Creates the effect.
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * CPU reference of the kernel's estimator: the fraction of the given cosine-hemisphere directions that escape within the ray
+         * length.
+         * @param origin - The biased ray origin, three numbers.
+         * @param directions - The sample directions (unit vectors in the normal's hemisphere).
+         * @param rayLength - The longest ray, in metres.
+         * @param occluded - Whether a ray from `origin` along a direction hits anything within a distance (the BVH query).
+         * @returns The visible fraction, 0–1.
+         */
+        static Visibility(origin: number[], directions: number[][], rayLength: number, occluded: (origin: number[], direction: number[], distance: number) => boolean): number;
+        /**
+         * CPU reference of the kernel's `cosineHemisphereDirection` (the same tangent frame, so CPU and GPU rays agree).
+         * @param normal - The unit surface normal, three numbers.
+         * @param first - The first random number, 0–1.
+         * @param second - The second random number, 0–1.
+         * @returns The unit direction.
+         */
+        static CosineDirection(normal: number[], first: number, second: number): number[];
+        /**
+         * HDRP's RTAOApplyIntensity, as the material applies it: the occlusion factor from the denoised visibility.
+         * @param visibility - The visible fraction.
+         * @param intensity - HDRP `intensity` (the exponent).
+         * @returns The ambient-occlusion factor, 0–1 (1 = unoccluded).
+         */
+        static OcclusionFactor(visibility: number, intensity: number): number;
+        /** HDRP's `intensity` and `directLightingStrength` of the traced camera (the material's `rtFrameInfo.zw`). */
+        get strengths(): {
+            intensity: number;
+            directLightingStrength: number;
+        };
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.samplesOf} */
+        protected samplesOf(intent: IRayTracingIntent): number;
+        /** {@inheritDoc RayTracedSurfaceEffect.asks} */
+        protected asks(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.effectName} */
+        protected effectName(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.label} */
+        protected label(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.placeholderPixel} */
+        protected placeholderPixel(): Uint16Array;
+        /** {@inheritDoc RayTracedSurfaceEffect.dispatch} */
+        protected dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /** {@inheritDoc RayTracedSurfaceEffect.denoiserSettings} */
+        protected denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+    }
+    /**
+     * Ray-traced reflections (hdrp-raytracing-polyfill T8, FR-L4, D-L7–D-L9, D-L18): asked by the camera volume's
+     * ScreenSpaceReflection `tracing` Ray Tracing or Mixed (on this forward path Mixed traces every pixel, the plan's edge-case policy:
+     * a screen-space march first would only skip rays HDRP's own Mixed mode also traces once they leave the screen). Pixels at least
+     * `minSmoothness` smooth trace GGX visible-normal rays (`ReflectionKernelWGSL`); the specular denoiser smooths glossy pixels and
+     * leaves mirrors alone; the material replaces its environment radiance with `ComposeEnvironment` (Fresnel / roughness are applied
+     * by Babylon's environment BRDF afterwards, as HDRP applies its FGD). Transparent receivers take part when `enabledTransparent`.
+     * While it traces, the camera's screen-space SSR is neutralised (HDRP runs one or the other).
+     */
+    class RayTracedReflections extends RayTracedSurfaceEffect {
+        /** HDRP's largest reflection sample count. */
+        static readonly MaxSamples: number;
+        /** HDRP's largest bounce count. */
+        static readonly MaxBounces: number;
+        /**
+         * Creates the effect.
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * CPU reference of the kernel's first-bounce miss (HDRP's `rayMiss` hierarchy, `RayTracingContract.Enums.Fallback`): None →
+         * black, Sky → the sky cube, ReflectionProbes / ReflectionProbesAndSky → unresolved, so the material keeps its raster
+         * environment term (Babylon's reflection texture: the probe, else the scene environment, i.e. the sky).
+         * @param fallback - The hierarchy, 0–3.
+         * @param skyRadiance - The sky cube's radiance along the ray, three numbers.
+         * @returns The radiance resolved by the trace and whether it resolved the ray.
+         */
+        static ResolveMiss(fallback: number, skyRadiance: number[]): {
+            radiance: number[];
+            resolved: number;
+        };
+        /**
+         * HDRP's smoothness fade weight of a pixel (0 below `minSmoothness`: the raster reflection stays).
+         * @param smoothness - The pixel's perceptual smoothness.
+         * @param minSmoothness - HDRP `minSmoothness`.
+         * @param fadeStart - HDRP `smoothnessFadeStart`.
+         * @returns The weight, 0–1.
+         */
+        static SmoothnessWeight(smoothness: number, minSmoothness: number, fadeStart: number): number;
+        /**
+         * The material's environment radiance with the traced reflection (the plugin's line): `traced.rgb + (1 - traced.a) × raster`,
+         * where the trace is premultiplied by the fade weight and `a` is the weighted share the trace resolved.
+         * @param traced - The denoised reflection texel, four numbers.
+         * @param raster - The material's own environment radiance, three numbers.
+         * @returns The radiance the material uses.
+         */
+        static ComposeEnvironment(traced: number[], raster: number[]): number[];
+        /**
+         * One reflection sample of a pixel as the kernel forms it, for a first bounce that misses: the fade weight, the miss
+         * resolution and the premultiplied output texel.
+         * @param smoothness - The pixel's smoothness.
+         * @param ssr - The traced camera's SSR intent fields.
+         * @param skyRadiance - The sky cube's radiance along the ray.
+         * @returns The output texel (rgb premultiplied, a = weighted resolved share).
+         */
+        static MissTexel(smoothness: number, ssr: IRayTracingFields, skyRadiance: number[]): number[];
+        /** True when transparent receivers take the traced reflection (HDRP `enabledTransparent`). */
+        get transparentReceivers(): boolean;
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.samplesOf} */
+        protected samplesOf(intent: IRayTracingIntent): number;
+        /** {@inheritDoc RayTracedSurfaceEffect.halvesResolution} */
+        protected halvesResolution(intent: IRayTracingIntent): boolean;
+        /**
+         * The bounces of an SSR intent: `bounceCount` in Quality mode, 1 in Performance (HDRP).
+         * @param ssr - The SSR intent fields.
+         * @returns 1–8.
+         */
+        static BouncesOf(ssr: IRayTracingFields): number;
+        /** {@inheritDoc RayTracedSurfaceEffect.asks} */
+        protected asks(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.effectName} */
+        protected effectName(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.label} */
+        protected label(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.placeholderPixel} */
+        protected placeholderPixel(): Uint16Array;
+        /** {@inheritDoc RayTracedSurfaceEffect.dispatch} */
+        protected dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /** {@inheritDoc RayTracedSurfaceEffect.denoiserSettings} */
+        protected denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+    }
+    /**
+     * Ray-traced global illumination (hdrp-raytracing-polyfill T9, FR-L5, D-L7, D-L8, D-L11, after HDRP's RayTracingIndirectDiffuse):
+     * asked by the camera volume's GlobalIllumination `tracing` Ray Tracing or Mixed (Mixed traces every pixel on this forward path,
+     * as reflections do). Every prepass pixel casts cosine-weighted diffuse rays - one in Performance mode, `sampleCount` × `bounceCount`
+     * in Quality - whose hits are lit by their emission and the diffuse lobe of every light with a shadow ray, and at the last bounce by
+     * the ambient probe × `ambientProbeDimmer` where a ray from the hit escapes (`LastBounceIrradiance`); first-ray misses take the
+     * ray-miss hierarchy (the sky cube, D-L18). Samples are clamped by HDRP's HSV value (`ClampSample`), the image is denoised and
+     * packed into `rtLighting0.rgb`; the material REPLACES its lightmap / probe / APV indirect diffuse with it on opaque receivers of
+     * the GI layer mask (`receives`), before ambient occlusion multiplies it. While it traces, a ray-marched SSGI of the camera is
+     * neutralised; the A/B switch hands back to SSGI ray marching (HDRP's fallback when ray tracing is unavailable).
+     */
+    class RayTracedGlobalIllumination extends RayTracedSurfaceEffect {
+        /** Most diffuse rays per pixel (Quality `sampleCount`). */
+        static readonly MaxSamples: number;
+        /** Most diffuse bounces (Quality `bounceCount`). */
+        static readonly MaxBounces: number;
+        /**
+         * Creates the effect.
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * HDRP's `RayTracingHSVClamp` of one sample (CPU reference of the kernel's `clampHsvValue`): the largest channel - the HSV value -
+         * is bounded by `clampValue`, the hue kept; negative channels become 0.
+         * @param radiance - The pre-exposed sample, three numbers.
+         * @param clampValue - HDRP `clampValue`.
+         * @returns The clamped sample.
+         */
+        static ClampSample(radiance: number[], clampValue: number): number[];
+        /**
+         * The irradiance the last hit's diffuse receives (CPU reference of the kernel's `lastBounceIrradiance`): HDRP's ambient probe ×
+         * `ambientProbeDimmer` where one cosine ray from the hit escapes, the emission that ray reaches where it is blocked (the sky
+         * harmonics carry no locality - a closed room would otherwise take the outdoor ambient), nothing with the None hierarchy.
+         * @param ambientProbe - The ambient probe's irradiance at the hit normal, three numbers.
+         * @param dimmer - HDRP `ambientProbeDimmer`.
+         * @param hierarchy - HDRP `lastBounceFallbackHierarchy`.
+         * @param escaped - True when the fallback ray from the hit escaped.
+         * @param reachedEmission - The emission the fallback ray reached when blocked, three numbers.
+         * @returns The irradiance (the hit's diffuse colour multiplies it).
+         */
+        static LastBounceIrradiance(ambientProbe: number[], dimmer: number, hierarchy: number, escaped: boolean, reachedEmission: number[]): number[];
+        /**
+         * The radiance of a diffuse ray that misses (CPU reference of the kernel's `missRadiance`): the sky cube for Sky and for
+         * ReflectionProbes (the probes a compute kernel cannot read), black for None.
+         * @param hierarchy - HDRP `rayMiss`.
+         * @param skyRadiance - The sky cube's radiance along the ray, three numbers.
+         * @returns The radiance.
+         */
+        static MissRadiance(hierarchy: number, skyRadiance: number[]): number[];
+        /**
+         * Rays per pixel of a GI intent: `sampleCount` in Quality mode, 1 in Performance (HDRP).
+         * @param gi - The GI intent fields.
+         * @returns 1–32.
+         */
+        static SamplesOf(gi: IRayTracingFields): number;
+        /**
+         * Bounces of a GI intent: `bounceCount` in Quality mode, 1 in Performance (HDRP).
+         * @param gi - The GI intent fields.
+         * @returns 1–8.
+         */
+        static BouncesOf(gi: IRayTracingFields): number;
+        /**
+         * Whether a mesh's draw takes the traced GI: an opaque or alpha-tested material on a renderer whose Unity layer is in the GI
+         * layer mask (HDRP replaces the indirect diffuse of opaque receivers only).
+         * @param mesh - The mesh being prepared.
+         * @param material - Its material.
+         * @returns True when the GI applies.
+         */
+        receives(mesh: BABYLON.AbstractMesh, material: BABYLON.PBRBaseMaterial): boolean;
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.samplesOf} */
+        protected samplesOf(intent: IRayTracingIntent): number;
+        /** {@inheritDoc RayTracedSurfaceEffect.halvesResolution} */
+        protected halvesResolution(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.asks} */
+        protected asks(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.effectName} */
+        protected effectName(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.label} */
+        protected label(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.placeholderPixel} */
+        protected placeholderPixel(): Uint16Array;
+        /** {@inheritDoc RayTracedSurfaceEffect.dispatch} */
+        protected dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /** {@inheritDoc RayTracedSurfaceEffect.denoiserSettings} */
+        protected denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+    }
+    /**
+     * Recursive rendering (hdrp-raytracing-polyfill T10, FR-L8, D-L9, after HDRP's RaytracingRenderer.raytrace and
+     * EvaluateRayTracingForward.hlsl): asked by the camera volume's RecursiveRendering `enable`. Every pixel casts its own camera ray
+     * (HDRP's primary ray - a glass pixel's prepass may hold the glass or what lies behind it, the trace decides); where it first meets a
+     * renderer of the recursive layer mask the pixel is shaded by reflection and refraction rays up to `maxDepth` (IOR, thickness and
+     * transmittance from the material record, `RecursiveKernelWGSL`). The image (colour + the view depth of that hit) needs no
+     * denoiser - every ray is deterministic. Materials of the masked renderers (`TK_RTRECURSIVE`) replace their raster colour with it
+     * where the reprojected depth matches, and hide their fragments behind the traced surface (back faces, panes seen through glass).
+     * HDRP limits recursive rays to the masked renderers and flags pixels by the "Raytracing" rendering pass, which the export does not
+     * carry: here the mask picks the pixels and the rays see every visible renderer, so glass refracts the scene behind it. The A/B
+     * switch hands back to raster transparency.
+     */
+    class RayTracedRecursiveRendering extends RayTracedSurfaceEffect {
+        /** Deepest ray the kernel follows (`RECURSIVE_DEPTH_MAX`). */
+        static readonly MaxDepth: number;
+        /** Most rays one pixel traces (`RECURSIVE_RAYS_MAX`). */
+        static readonly MaxRays: number;
+        /** Entries of the kernel's ray stack (`RECURSIVE_STACK_SIZE`). */
+        static readonly StackSize: number;
+        /**
+         * Creates the effect.
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * Snell refraction (CPU reference of WGSL `refract`, which the kernel calls): the transmitted direction of a unit incident
+         * direction through a surface whose unit normal faces the incident side, for the relative index `eta` = n(incident side) /
+         * n(transmitted side).
+         * @param incident - The incident direction, three numbers.
+         * @param normal - The surface normal facing the incident ray, three numbers.
+         * @param eta - The relative index of refraction.
+         * @returns The refracted unit direction, or null on total internal reflection.
+         */
+        static Refract(incident: number[], normal: number[], eta: number): number[];
+        /**
+         * The relative index of refraction the kernel uses at a hit: entering a solid (front side) 1 / IOR, leaving it (back side)
+         * IOR, a thin surface (thickness 0) 1 - it passes straight through.
+         * @param ior - The material IOR.
+         * @param thickness - The material thickness (0 = thin).
+         * @param backFacing - True when the ray meets the surface from behind its vertex normal (leaving the solid).
+         * @returns The relative index.
+         */
+        static RelativeIor(ior: number, thickness: number, backFacing: boolean): number;
+        /**
+         * How many rays one pixel traces (CPU reference of the kernel's stack loop): the camera ray is depth 1, a hit spawns its
+         * reflection and refraction children (per `spawns`) only while its depth is below `maxDepth` and the stack has room, and the
+         * loop stops at `MaxRays`.
+         * @param maxDepth - HDRP `maxDepth`.
+         * @param spawns - What the hit of a ray at a depth spawns (a miss spawns nothing: return both false).
+         * @returns The rays traced.
+         */
+        static CountRays(maxDepth: number, spawns: (depth: number) => IRtRecursiveSpawn): number;
+        /** The Unity layers whose renderers are drawn by recursive rays (HDRP `layerMask`), as an unsigned 32-bit value. */
+        get selectionMask(): number;
+        /**
+         * Whether a mesh is drawn by the recursive rays (its renderer's Unity layer is in the recursive layer mask).
+         * @param mesh - The mesh being prepared.
+         * @returns True when its material takes the recursive colour.
+         */
+        selects(mesh: BABYLON.AbstractMesh): boolean;
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.asks} */
+        protected asks(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.effectName} */
+        protected effectName(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.label} */
+        protected label(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.placeholderPixel} */
+        protected placeholderPixel(): Uint16Array;
+        /** {@inheritDoc RayTracedSurfaceEffect.dispatch} */
+        protected dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /** {@inheritDoc RayTracedSurfaceEffect.denoiserSettings} */
+        protected denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+    }
+    /**
+     * Ray-traced subsurface scattering (hdrp-raytracing-polyfill T11, FR-L9, PLAN 1 D19, a port of HDRP's RayTracingSubSurface
+     * `ScatteringWalk`): asked by the camera volume's SubSurfaceScattering `rayTracing`. Every pixel casts a camera ray; under a
+     * surface whose material carries a diffusion profile (the `hdrpsss` materials: Babylon's prepass subsurface scattering) the kernel
+     * runs `sampleCount` random walks through the BVH with the profile's scattering distance and lights each exit point as a white
+     * Lambert surface (`SubsurfaceKernelWGSL`, CPU reference `Walk`). The denoised result REPLACES the material's diffuse lighting
+     * (direct, transmitted and indirect - HDRP lerps its diffuse buffer to the traced one), so the screen-space SSS of that material
+     * receives nothing to blur; thin parts transmit light because the walks leave through the far side. The A/B switch hands back to
+     * the screen-space SSS.
+     */
+    class RayTracedSubsurfaceScattering extends RayTracedSurfaceEffect {
+        /** Most walks per pixel (HDRP `sampleCount`, at most 32). */
+        static readonly MaxSamples: number;
+        /** Most steps of one walk (HDRP `maxWalkSteps`). */
+        static readonly MaxWalkSteps: number;
+        /** A scattering distance below this (world units) is the surface's own diffuse (`MINIMUM_SCATTERING_DISTANCE`). */
+        static readonly MinimumScatteringDistance: number;
+        /** Smallest extinction denominator (HDRP's `max(radius * s, 1e-16)`). */
+        private static readonly SigmaEpsilon;
+        /**
+         * The denoiser of the scattered lighting (HDRP denoises its RT SSS with its temporal and diffuse filters): four à-trous passes
+         * over rgb (one walk per pixel is noisy), the depth channel passed through raw.
+         */
+        private static readonly Denoising;
+        /**
+         * Creates the effect.
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * HDRP's `RemapSubSurfaceScatteringParameters`: the diffuse colour and scattering distance to the scattering and extinction
+         * coefficients of the walk.
+         * @param albedo - The diffuse colour, three numbers.
+         * @param scatteringDistance - The profile's scattering distance in world units, three numbers.
+         * @returns sigmaS and sigmaT per channel.
+         */
+        static RemapParameters(albedo: number[], scatteringDistance: number[]): {
+            sigmaS: number[];
+            sigmaT: number[];
+        };
+        /**
+         * One random walk (CPU reference of the kernel's `scatteringWalk`, HDRP's `ScatteringWalk`): the first step cosine-distributed
+         * into the surface from just below it, then isotropic steps; each step's length is exponential in the extinction of a channel
+         * picked by the throughput-weighted single-scattering albedo; a step that reaches the object's boundary exits there. A
+         * scattering distance below `MinimumScatteringDistance` exits at once with the diffuse colour (the surface's own diffuse).
+         * @param position - The surface point, three numbers.
+         * @param normal - The outward unit normal there, three numbers.
+         * @param albedo - The diffuse colour, three numbers.
+         * @param scatteringDistance - The profile's scattering distance in world units, three numbers.
+         * @param random - Uniform random numbers in [0, 1), four per step (direction × 2, distance, channel).
+         * @param intersect - The closest boundary hit along a ray within a distance, or null.
+         * @param bias - Ray offset off the surface, in world units.
+         * @returns The walk's exit and throughput.
+         */
+        static Walk(position: number[], normal: number[], albedo: number[], scatteringDistance: number[], random: () => number, intersect: (origin: number[], direction: number[], maximumDistance: number) => IRtWalkHit, bias: number): IRtWalkResult;
+        /**
+         * Walks per pixel of an SSS intent (HDRP `sampleCount`).
+         * @param sss - The SSS intent fields.
+         * @returns 1–32.
+         */
+        static SamplesOf(sss: IRayTracingFields): number;
+        /**
+         * Whether a material takes the traced subsurface lighting: a PBR material whose screen-space subsurface scattering is on (an
+         * `hdrpsss` diffusion profile, PLAN 1 D19).
+         * @param material - The material.
+         * @returns True when the material carries a diffusion profile.
+         */
+        static HasProfile(material: BABYLON.Material): boolean;
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.samplesOf} */
+        protected samplesOf(intent: IRayTracingIntent): number;
+        /** {@inheritDoc RayTracedSurfaceEffect.asks} */
+        protected asks(intent: IRayTracingIntent): boolean;
+        /** {@inheritDoc RayTracedSurfaceEffect.effectName} */
+        protected effectName(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.label} */
+        protected label(): string;
+        /** {@inheritDoc RayTracedSurfaceEffect.placeholderPixel} */
+        protected placeholderPixel(): Uint16Array;
+        /** {@inheritDoc RayTracedSurfaceEffect.dispatch} */
+        protected dispatch(backend: IRayTracingBackend, surfaces: IRtFrameSurfaces, intent: IRayTracingIntent): BABYLON.BaseTexture;
+        /** {@inheritDoc RayTracedSurfaceEffect.denoiserSettings} */
+        protected denoiserSettings(intent: IRayTracingIntent): IRtDenoiserSettings;
+        /**
+         * A ratio that is 0 where the denominator is 0 (HDRP's `SafeDivide`).
+         * @param numerator - The numerator.
+         * @param denominator - The denominator.
+         * @returns The ratio.
+         */
+        private static SafeRatio;
+        /**
+         * A uniform direction on the unit sphere (the kernel's `uniformSphereDirection`).
+         * @param first - Uniform random number, 0–1.
+         * @param second - Uniform random number, 0–1.
+         * @returns The unit direction.
+         */
+        private static SphereDirection;
+    }
+}
+declare namespace TOOLKIT {
+    /** How one WGSL storage array of the ray-tracing kernels is read on WebGL2 (hdrp-raytracing-polyfill D-L14). */
+    interface IRtGlslStorageArray {
+        /** The data texture holding the array (`RayTracingGlsl.DataTextures`). */
+        texture: string;
+        /** How an element is fetched: `vec4` (one texel), `node` (`BvhNode`, two texels), `instance` (`RtInstance`, nine texels), `word` (one u32 of an RGBA32UI texel), `float` (one f32 of an RGBA32F texel). */
+        kind: string;
+    }
+    /** A translated fragment kernel: the GLSL and everything the pass binds to it. */
+    interface IRtGlslKernel {
+        /** The GLSL ES 3.0 fragment source (Babylon's preprocessor still resolves its `#include` lines). */
+        source: string;
+        /** Sampler uniforms the kernel declares (textures, cubes, arrays and the data textures it reads). */
+        samplers: string[];
+        /** Plain uniforms the kernel declares (data-array base offsets, level counts, the output size). */
+        uniforms: string[];
+        /** The WGSL uniform variables, each flattened into plain uniforms `<variable>_<member>` (`RayTracingUniformValues.apply`). */
+        uniformGroups: string[];
+        /** The kernel's outputs (WGSL storage textures and read-write arrays), in `layout(location)` order. */
+        outputs: string[];
+        /** The WGSL storage arrays the kernel reads. */
+        storageArrays: string[];
+    }
+    /**
+     * The WGSL → GLSL ES 3.0 translator of the WebGL2 ray-tracing backend (hdrp-raytracing-polyfill T13, D-L14). The WebGPU kernels
+     * (`RayTracingShaders`, `RayTracingDenoiser`) are the single source of the maths; on WebGL2 each kernel is translated line by line
+     * into a fullscreen fragment shader: a compute invocation becomes the fragment at `gl_FragCoord` (the kernels' pixel rows and a
+     * render target's rows both start at memory row 0), a storage texture becomes a `layout(location)` output (MRT), a uniform struct
+     * plain uniforms `<variable>_<member>` (WebGL2 hosts may disable uniform buffers) fed by `RayTracingUniformValues`, and every storage array a data texture read by `texelFetch`
+     * (`RayTracingGlsl.DataTextures`: 4096 texels per row, a BVH node in two texels, an instance in nine). Words the WGSL reinterprets
+     * with `bitcast<u32>` are packed on WebGL2 as their float values (exact below 2^24, `NoWordValue` for 0xFFFFFFFF), because a float
+     * texture may flush the denormal bit patterns of small integers. The expression typer resolves WGSL's inferred `let` types,
+     * abstract integer literals, vector comparisons (`lessThan` …, NaN tests become `isnan`) and `select`; Babylon's WGSL includes
+     * map to their GLSL twins. Function prototypes are emitted first (WGSL needs no declaration order), every struct and
+     * scalar is zero-initialised as WGSL does, and no `//` comment reaches the GLSL.
+     */
+    class RayTracingGlsl {
+        /** Texels per row of every data texture (D-L14). */
+        static readonly DataTextureWidth: number;
+        /** Texels of one BVH node (`min.xyz, leftOrFirst`, `max.xyz, count`). */
+        static readonly NodeTexels: number;
+        /** Column texels of a 4 × 4 matrix. */
+        static readonly MatrixColumns: number;
+        /** Texels of one `RtInstance` (world, inverse world, the four words). */
+        static readonly InstanceTexels: number;
+        /** Components of one texel. */
+        static readonly TexelComponents: number;
+        /** The float a packed word holds for 0xFFFFFFFF ("no texture"): a float table cannot carry that bit pattern safely. */
+        static readonly NoWordValue: number;
+        /** The four data textures of the WebGL2 backend: static geometry, the per-frame top level, the material / light / sky tables, and the u32 words. */
+        static readonly DataTextures: {
+            geometry: string;
+            topLevel: string;
+            tables: string;
+            words: string;
+        };
+        /** Where every WGSL storage array lives on WebGL2. */
+        static readonly StorageArrays: {
+            [name: string]: IRtGlslStorageArray;
+        };
+        /** Prefix of the uniform holding a storage array's first texel (or word) in its data texture. */
+        static readonly BasePrefix: string;
+        /** Suffix of the uniform that replaces `textureNumLevels(<texture>)`. */
+        static readonly LevelCountSuffix: string;
+        /** The uniform that replaces `textureDimensions(<output>)`: the pass's output size in pixels. */
+        static readonly OutputSizeUniform: string;
+        /** Separator of a flattened uniform: WGSL `params.outputSize` → GLSL uniform `params_outputSize`. */
+        static readonly GroupSeparator: string;
+        /** WGSL scalar and vector type names and their GLSL twins. */
+        private static readonly TypeNames;
+        /** Generic WGSL vector / matrix names (`vec3<f32>`) and their GLSL prefix per component type. */
+        private static readonly GenericTypes;
+        /** Babylon WGSL include functions whose GLSL twin has another name. */
+        private static readonly IncludeRenames;
+        /** WGSL builtins with another GLSL name. */
+        private static readonly BuiltinRenames;
+        /** Builtins whose result has the (widest) type of their arguments. */
+        private static readonly ComponentwiseBuiltins;
+        /** Builtins returning a float. */
+        private static readonly ScalarBuiltins;
+        /** WGSL comparison operators and the GLSL functions comparing vectors component by component. */
+        private static readonly VectorComparisons;
+        /** Binary operator precedence (higher binds tighter). */
+        private static readonly Precedence;
+        /** Identifiers GLSL reserves or owns as builtins: a WGSL name among them gets `RenamedSuffix`. */
+        private static readonly ReservedNames;
+        /** The return type recorded for an overloaded include helper: the widest type of the call's arguments. */
+        private static readonly OverloadedReturn;
+        /** Tokens before the failure an error message quotes. */
+        private static readonly ErrorContextTokens;
+        /** Tokens from the failure on an error message quotes. */
+        private static readonly ErrorTrailingTokens;
+        /** Suffix of a renamed reserved identifier. */
+        private static readonly RenamedSuffix;
+        /** The precision lines every kernel starts with (ES 3.0 gives sampler2DArray and the integer samplers no default precision). */
+        private static readonly PrecisionLines;
+        /** The tokens being parsed. */
+        private tokens;
+        /** The parse position. */
+        private position;
+        /** Struct field types, by struct name. */
+        private readonly structs;
+        /** Struct field order, by struct name (zero initialisers and constructors). */
+        private readonly structOrder;
+        /** Known functions. */
+        private readonly functions;
+        /** Global names and types (constants, private globals, uniform instances, samplers). */
+        private readonly globals;
+        /** Local scopes, innermost last. */
+        private scopes;
+        /** The kernel's output names (storage textures, read-write arrays). */
+        private readonly outputs;
+        /** The read-only storage arrays the kernel declares, with their element types. */
+        private readonly storage;
+        /** Sampler declarations. */
+        private readonly samplers;
+        /** Plain uniforms the translation added (base offsets, level counts, the output size). */
+        private readonly uniforms;
+        /** The flattened uniforms of the WGSL uniform variables. */
+        private readonly groupUniforms;
+        /** The WGSL uniform variables (flattened into plain uniforms) and their struct types. */
+        private readonly groups;
+        /** Struct declarations (GLSL). */
+        private readonly structCode;
+        /** Include and other preprocessor lines (GLSL). */
+        private readonly directiveCode;
+        /** Constant and private global declarations (GLSL), in source order. */
+        private readonly globalCode;
+        /** Function prototypes (GLSL). */
+        private readonly prototypeCode;
+        /** Function definitions (GLSL), in source order. */
+        private readonly functionCode;
+        /** The return type of the function being translated. */
+        private returnType;
+        /** GLSL function bodies that replace translated ones, by function name. */
+        private readonly overrides;
+        /**
+         * Creates a translator (use `Translate`).
+         * @param overrides - GLSL function definitions that replace the translated ones, by function name.
+         */
+        private constructor();
+        /**
+         * Translates one WGSL compute kernel into a GLSL ES 3.0 fragment kernel.
+         * @param wgsl - The kernel's WGSL with its Babylon includes as `#include<name>` lines (not inlined).
+         * @param overrides - GLSL definitions that replace translated functions of the same name (WebGL2-only rules).
+         * @returns The GLSL and its bindings.
+         * @throws {Error} When the source uses WGSL the translator does not know.
+         */
+        static Translate(wgsl: string, overrides?: {
+            [name: string]: string;
+        }): IRtGlslKernel;
+        /**
+         * The texel of a data texture that holds a texel index (D-L14: `(t % 4096, floor(t / 4096))`).
+         * @param texelIndex - The texel index.
+         * @returns Column and row.
+         */
+        static TexelCoordinates(texelIndex: number): number[];
+        /**
+         * The GLSL helpers every translated kernel shares: the texel address of an index and the word of a packed float.
+         * @returns The GLSL.
+         */
+        private static HelperFunctions;
+        /**
+         * Runs the translation.
+         * @param wgsl - The WGSL source.
+         * @returns The kernel.
+         */
+        private translate;
+        /**
+         * Splits WGSL into tokens: comments are dropped, a preprocessor line is one `directive` token.
+         * @param source - The WGSL.
+         * @returns The tokens.
+         */
+        private static Tokenize;
+        /** Reads the return types of Babylon's GLSL include functions and the types of their constants (the typer needs them). */
+        private readIncludeSignatures;
+        /**
+         * First pass: the signature of every WGSL function, the fields of every struct, every module-scope variable and the type of
+         * every typed constant (WGSL needs no declaration order, the translation of a function body needs them all).
+         */
+        private collectSignatures;
+        /** Parses one top-level item and appends its GLSL. */
+        private parseTopLevel;
+        /**
+         * Skips `@name(...)` attributes.
+         * @returns The attribute names.
+         */
+        private skipAttributes;
+        /** Skips to the end of a module-scope statement (a variable the first pass already declared). */
+        private skipStatement;
+        /** A struct: emitted as a GLSL struct unless it only types a uniform block (then the block declares its members). */
+        private parseStruct;
+        /**
+         * Whether a struct is the type of a uniform variable of the kernel (looked ahead in the tokens).
+         * @param name - The struct name.
+         * @returns True for a uniform struct.
+         */
+        private isUniformStruct;
+        /**
+         * A constant: `const NAME: T = value` → `const T NAME = value`.
+         * @returns The GLSL (without the semicolon).
+         */
+        private parseConstant;
+        /**
+         * A module-scope variable: a uniform struct, a storage array, a texture, a sampler (dropped: GLSL samples through the texture)
+         * or a private global.
+         */
+        private parseGlobalVariable;
+        /**
+         * A function: its prototype and its definition (or the override's); the compute entry point becomes `main` over the fragment.
+         * @param isEntryPoint - True for `@compute fn main`.
+         */
+        private parseFunction;
+        /**
+         * A `{ … }` block: its statements as indented GLSL lines.
+         * @param depth - Indentation depth of the statements.
+         * @returns The lines (without the braces).
+         */
+        private parseBlock;
+        /**
+         * One statement.
+         * @param depth - Indentation depth.
+         * @param lines - The lines it is appended to.
+         */
+        private parseStatement;
+        /**
+         * `let` / `var` / `const` inside a function.
+         * @param isConstant - True for `const`.
+         * @returns The GLSL declaration (without the semicolon).
+         */
+        private parseLocalDeclaration;
+        /**
+         * `if (…) {…} else if (…) {…} else {…}`.
+         * @param depth - Indentation depth.
+         * @param lines - Output lines.
+         * @param indent - The indentation string.
+         */
+        private parseIf;
+        /**
+         * `for (init; condition; update) {…}`; the init's variable lives in the loop's scope.
+         * @param depth - Indentation depth.
+         * @param lines - Output lines.
+         * @param indent - The indentation string.
+         */
+        private parseFor;
+        /**
+         * `switch value { case A, B: {…} default: {…} }`: every clause ends with `break` (WGSL clauses never fall through).
+         * @param depth - Indentation depth.
+         * @param lines - Output lines.
+         * @param indent - The indentation string.
+         */
+        private parseSwitch;
+        /**
+         * An assignment, a call, or a `textureStore` / read-write array write (the kernel's outputs).
+         * @returns The GLSL (without the semicolon).
+         */
+        private parseSimpleStatement;
+        /**
+         * A full expression (binary operators by precedence).
+         * @param minimumPrecedence - The loosest operator this call may consume.
+         * @returns The value.
+         */
+        private parseExpression;
+        /**
+         * A prefix-operator expression.
+         * @returns The value.
+         */
+        private parseUnary;
+        /**
+         * Member access, indexing and the storage-array loaders after a primary expression.
+         * @param value - The primary value.
+         * @returns The value.
+         */
+        private parsePostfix;
+        /**
+         * An indexed value: a storage array becomes its loader call, a vector or local array an `int` subscript.
+         * @param container - The indexed value.
+         * @param index - The index.
+         * @returns The element.
+         */
+        private indexed;
+        /**
+         * A literal, a name, a parenthesised expression or a call.
+         * @returns The value.
+         */
+        private parsePrimary;
+        /**
+         * `( a, b, … )`.
+         * @returns The argument values.
+         */
+        private parseArguments;
+        /**
+         * A call: a type constructor, a texture builtin, a math builtin, a kernel function or an include function.
+         * @param name - The WGSL callee.
+         * @param values - The arguments.
+         * @returns The value.
+         */
+        private call;
+        /**
+         * The texture builtins: sampling, fetching, sizes and level counts.
+         * @param name - The WGSL builtin.
+         * @param values - The arguments.
+         * @returns The value, or null when `name` is not a texture builtin.
+         */
+        private textureCall;
+        /**
+         * A type constructor (`vec3f(…)`, `array<f32, 5>(…)`, a struct); an empty vector constructor is WGSL's zero value.
+         * @param type - The GLSL type.
+         * @param values - The arguments.
+         * @returns The value.
+         */
+        private construct;
+        /**
+         * A binary operation with WGSL's typing: vector comparisons become their GLSL functions (a self-inequality becomes `isnan`),
+         * a float remainder WGSL's truncated `%`, abstract literals take the other operand's type.
+         * @param operator - The WGSL operator.
+         * @param left - Left operand.
+         * @param right - Right operand.
+         * @returns The value.
+         */
+        private binary;
+        /**
+         * A scalar operand of a vector comparison widened to the vector (GLSL compares vectors of one size only).
+         * @param value - The operand.
+         * @param count - The vector size.
+         * @returns The GLSL code.
+         */
+        private splat;
+        /**
+         * Converts a value to a type where GLSL needs it: an abstract literal is rewritten, other values are left as they are (WGSL
+         * already required matching types).
+         * @param value - The value.
+         * @param type - The wanted GLSL type.
+         * @returns The coerced value.
+         */
+        private coerce;
+        /**
+         * The GLSL zero value of a type (WGSL zero-initialises every variable).
+         * @param type - The GLSL type.
+         * @returns The code.
+         */
+        private zeroValue;
+        /**
+         * The type of `container.member`: a struct field, or a swizzle of a vector.
+         * @param container - The container's type.
+         * @param member - The member name.
+         * @returns The member's type.
+         */
+        private memberType;
+        /**
+         * Parses a WGSL type (at the current token) into its GLSL spelling: scalars, vectors, matrices, structs, `array<T, N>` →
+         * `T[N]`, `ptr<function, T>` → `ptr:T`, textures → their WGSL name (mapped by `SamplerType`).
+         * @returns The GLSL type.
+         */
+        private parseType;
+        /** Consumes a generic's closing `>` (or half of a `>>` token). */
+        private closeGeneric;
+        /**
+         * The plain uniforms of the flattened WGSL uniform variables (`<variable>_<member>`, every member of the struct), which the
+         * pass sets from `RayTracingUniformValues` (WebGL2 hosts may run without uniform buffers).
+         * @returns The GLSL.
+         */
+        private groupDeclarations;
+        /**
+         * The sampler declarations: the kernel's textures, then the data textures its storage arrays live in.
+         * @returns The GLSL.
+         */
+        private samplerDeclarations;
+        /**
+         * Every sampler name the pass binds.
+         * @returns The names.
+         */
+        private samplerNames;
+        /**
+         * The data textures the kernel's storage arrays live in.
+         * @returns The texture names.
+         */
+        private dataTextures;
+        /**
+         * The loader function of every storage array the kernel reads (`rtLoad_<name>(index)`) and its base uniform.
+         * @returns The GLSL.
+         */
+        private storageLoaders;
+        /**
+         * The loader of an `RtInstance` array: the world matrix in four column texels, its inverse in the next four, the words last.
+         * @param name - The storage array.
+         * @param fetch - Builds the fetch of a texel offset from the instance's first texel.
+         * @returns The GLSL lines.
+         */
+        private static InstanceLoader;
+        /**
+         * The GLSL type of a uniform the translation added.
+         * @param name - The uniform.
+         * @returns Its type.
+         */
+        private uniformType;
+        /**
+         * Adds a uniform once.
+         * @param name - The uniform.
+         */
+        private addUniform;
+        /**
+         * Declares a name in the innermost scope (or as a global outside functions).
+         * @param name - The GLSL name.
+         * @param type - Its type.
+         */
+        private declare;
+        /**
+         * The type of a name in scope.
+         * @param name - The GLSL name.
+         * @returns Its type.
+         * @throws {Error} For an unknown name.
+         */
+        private lookup;
+        /**
+         * The GLSL name of a declared WGSL name (a reserved one gets `RenamedSuffix`).
+         * @param name - The WGSL name.
+         * @returns The GLSL name.
+         */
+        private declaredName;
+        /**
+         * The current token, without consuming it.
+         * @returns The token (an empty symbol at the end).
+         */
+        private peek;
+        /**
+         * A token ahead of the current one.
+         * @param offset - How far ahead.
+         * @returns The token (an empty symbol at the end).
+         */
+        private peekAt;
+        /**
+         * Consumes the current token.
+         * @returns The token.
+         */
+        private next;
+        /**
+         * Consumes the current token when it is a given symbol.
+         * @param text - The symbol.
+         * @returns True when consumed.
+         */
+        private accept;
+        /**
+         * Consumes a required symbol.
+         * @param text - The symbol.
+         * @throws {Error} When another token follows.
+         */
+        private expect;
+        /**
+         * Whether every token was consumed.
+         * @returns True at the end.
+         */
+        private atEnd;
+        /**
+         * A literal's GLSL code and type (`1.0` float, `1u` uint, `1i` int, `1` abstract int).
+         * @param text - The WGSL literal.
+         * @returns The value.
+         */
+        private static Literal;
+        /**
+         * `bitcast<T>(value)`: from a uint, a real reinterpretation; from a float, the WebGL2 packing rule (words travel as their float
+         * values, `NoWordValue` for 0xFFFFFFFF).
+         * @param argument - The value.
+         * @param target - The GLSL target type.
+         * @returns The value.
+         */
+        private static Bitcast;
+        /**
+         * `select(whenFalse, whenTrue, condition)`: a ternary for a scalar condition, `mix` for a vector one.
+         * @param values - The three arguments.
+         * @returns The value.
+         */
+        private select;
+        /**
+         * The widest type of some values: a vector over a scalar, a concrete type over an abstract literal.
+         * @param values - The values.
+         * @returns The type.
+         */
+        private static WidestType;
+        /**
+         * The result type of an arithmetic operation (matrix × vector → vector, vector over scalar).
+         * @param left - Left operand.
+         * @param right - Right operand.
+         * @returns The type.
+         */
+        private static ArithmeticType;
+        /**
+         * The component type of a GLSL type (`vec3` → `float`, `uvec2` → `uint`, `bvec4` → `bool`).
+         * @param type - The type.
+         * @returns The component type.
+         */
+        private static ComponentType;
+        /**
+         * Components of a scalar or vector type (1 for scalars and everything else).
+         * @param type - The type.
+         * @returns 1–4.
+         */
+        private static ComponentCount;
+        /**
+         * The element type of an array (`T[N]` → `T`), the component of a vector, the column of a matrix.
+         * @param type - The container type.
+         * @returns The element type.
+         */
+        private static ElementType;
+        /**
+         * The type a pointer points at (`ptr:T` → `T`); other types unchanged.
+         * @param type - The type.
+         * @returns The pointee.
+         */
+        private static PointeeOf;
+        /**
+         * A concrete type for a declaration (an abstract literal declares an `int`, as WGSL's `let x = 1`).
+         * @param value - The initial value.
+         * @returns The type.
+         */
+        private static ConcreteType;
+        /**
+         * A declarator: `T name` or, for an array, `T name[N]`.
+         * @param type - The type.
+         * @param name - The name.
+         * @returns The GLSL.
+         */
+        private static Declarator;
+        /**
+         * The GLSL sampler type of a WGSL texture type.
+         * @param type - The WGSL texture type (`texture_2d<f32>`, …).
+         * @returns The sampler type.
+         */
+        private static SamplerType;
+        /**
+         * Removes one pair of redundant outer parentheses.
+         * @param code - GLSL code.
+         * @returns The code.
+         */
+        private static Unwrap;
+    }
+    /** One section of a data texture: a packed array and where it starts. */
+    interface IRtDataSection {
+        /** The storage-array name (`RayTracingGlsl.StorageArrays` key). */
+        name: string;
+        /** The packed values (floats for a float texture, words for the word texture). */
+        data: Float32Array | Uint32Array;
+    }
+    /** A packed data texture: its texels and the first texel (float textures) or word (the word texture) of every section. */
+    interface IRtDataTexture {
+        /** Texel components, 4 per texel, `RayTracingGlsl.DataTextureWidth` texels per row. */
+        data: Float32Array | Uint32Array;
+        /** Rows of the texture. */
+        rows: number;
+        /** First texel (or word) of each section, by name: the `rtBase_<name>` uniform. */
+        bases: {
+            [name: string]: number;
+        };
+    }
+    /**
+     * The WebGL2 layouts of the packed scene (hdrp-raytracing-polyfill T13, D-L14): the `IRtPackedScene` arrays rewritten for data
+     * textures. A node keeps its 8 words in two texels, an instance its 36 words in nine; the words the WGSL reads with
+     * `bitcast<u32>` (node children / counts, instance offsets and flags, material workflow / alpha / normal modes and texture
+     * references, light types and flags) become their float values, 0xFFFFFFFF becomes `RayTracingGlsl.NoWordValue`.
+     */
+    class RayTracingDataTextures {
+        /** Words per BVH node. */
+        static readonly NodeWords: number;
+        /** Words of an `RtInstance`. */
+        static readonly InstanceWords: number;
+        /** Words of an `RtMaterial` record (8 vec4 rows). */
+        static readonly MaterialWords: number;
+        /** Words of an `RtLight` record (4 vec4 rows). */
+        static readonly LightWords: number;
+        /** The u32 words of a BVH node: `leftOrFirst` and `count`. */
+        static readonly NodeWordSlots: number[];
+        /** The u32 words of an instance: the four offsets and flags after the two matrices. */
+        static readonly InstanceWordSlots: number[];
+        /** The u32 words of a material record: workflow (row 3 w), alpha mode (row 6 x), normal mode (row 6 z), the four texture references (row 7). */
+        static readonly MaterialWordSlots: number[];
+        /** The u32 words of a light record: its type (row 0 w) and flags (row 3 w). */
+        static readonly LightWordSlots: number[];
+        /** The u32 value WGSL uses for "none". */
+        private static readonly NoWord;
+        /**
+         * A copy of packed records whose u32 words are rewritten as their float values (the words share the float array's buffer).
+         * @param source - The packed records (a Float32Array whose u32 slots hold bit patterns).
+         * @param recordWords - Words per record.
+         * @param wordSlots - The u32 slots of a record.
+         * @param recordCount - Records to convert (the rest of `source` is copied unchanged).
+         * @returns The converted copy.
+         */
+        static WordsAsValues(source: Float32Array, recordWords: number, wordSlots: number[], recordCount: number): Float32Array;
+        /**
+         * Packs sections one after another into one data texture (each section starts on a new texel).
+         * @param sections - The sections, in order.
+         * @param words - True for the u32 word texture (bases count words), false for a float texture (bases count texels).
+         * @returns The texture data and the section bases.
+         */
+        static Pack(sections: IRtDataSection[], words: boolean): IRtDataTexture;
+        /**
+         * One texel of a packed float texture (the CPU twin of the kernels' `texelFetch(texture, rtTexel(index), 0)`).
+         * @param texture - The packed texture.
+         * @param texelIndex - The texel.
+         * @returns Its four components.
+         */
+        static Texel(texture: IRtDataTexture, texelIndex: number): number[];
+    }
+    /**
+     * One fullscreen fragment pass of the WebGL2 backend (hdrp-raytracing-polyfill T13): a translated kernel (`RayTracingGlsl`)
+     * drawn by an `EffectRenderer` into its own multiple render targets - one per output, `targetSets` sets for ping-pong - whose
+     * images the effects and materials sample like the compute backend's storage textures. The effect compiles when the pass is
+     * created (Babylon's parallel compile) and is polled with `isReady`; a compile error is reported once and the pass never draws.
+     * The previously bound framebuffer and the camera viewport are restored after each draw.
+     */
+    class RayTracingFragmentPass {
+        /** The compile error, or null. */
+        failure: string;
+        /** The translated kernel. */
+        readonly kernel: IRtGlslKernel;
+        /** The scene the images belong to. */
+        private readonly scene;
+        /** The fullscreen renderer of each scene (shared by every pass of the scene, released with it). */
+        private static readonly renderers;
+        /** The renderer that draws the fullscreen quad (the scene's shared one). */
+        private readonly renderer;
+        /** The effect. */
+        private readonly wrapper;
+        /** The texture type of each output. */
+        private readonly outputTypes;
+        /** Target sets (1, or 2 for ping-pong). */
+        private readonly targetSets;
+        /** The pass name (labels and reports). */
+        private readonly name;
+        /** One multiple render target per set. */
+        private targets;
+        /** The images of each set, one per output. */
+        private images;
+        /** Width of the targets in pixels. */
+        private width;
+        /** Height of the targets in pixels. */
+        private height;
+        /** The bindings of the draw in progress. */
+        private binder;
+        /**
+         * Creates the pass and starts compiling its effect.
+         * @param scene - The scene.
+         * @param name - The pass name.
+         * @param kernel - The translated kernel.
+         * @param defines - `#define` lines the kernel compiles with.
+         * @param outputTypes - Texture type of each output, in `kernel.outputs` order.
+         * @param targetSets - Target sets (2 for ping-pong).
+         */
+        constructor(scene: BABYLON.Scene, name: string, kernel: IRtGlslKernel, defines: string[], outputTypes: number[], targetSets: number);
+        /**
+         * Whether an engine traces with fragment passes (no WebGPU compute: the WebGL2 backend, its guide and its denoiser).
+         * @param engine - The engine.
+         * @returns True without compute shaders.
+         */
+        static UsesFragments(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * Sets the flattened uniforms a translated kernel declares for a WGSL uniform variable from their values.
+         * @param effect - The pass's effect.
+         * @param instance - The WGSL variable (`params`, `guideParams`, …).
+         * @param values - The values (a `RayTracingUniformValues` on an engine without compute).
+         */
+        static BindUniforms(effect: BABYLON.Effect, instance: string, values: IRtUniformWriter): void;
+        /**
+         * The shared fullscreen renderer of a scene (created on first use, released with the scene).
+         * @param scene - The scene.
+         * @returns The renderer.
+         */
+        private static RendererOf;
+        /**
+         * Whether the effect compiled.
+         * @returns True once the pass can draw.
+         */
+        isReady(): boolean;
+        /**
+         * The images of one target set (null before the first `resize`).
+         * @param set - The set.
+         * @returns The images, one per output.
+         */
+        outputs(set: number): BABYLON.BaseTexture[];
+        /**
+         * (Re)creates the targets at a size (only when it changed).
+         * @param width - Width in pixels.
+         * @param height - Height in pixels.
+         * @returns True when the targets were recreated (their content is undefined).
+         */
+        resize(width: number, height: number): boolean;
+        /**
+         * Draws the kernel into one target set.
+         * @param set - The set.
+         * @param binder - Binds the kernel's textures and uniforms on the effect.
+         * @returns The set's images.
+         */
+        render(set: number, binder: (effect: BABYLON.Effect) => void): BABYLON.BaseTexture[];
+        /** Releases the targets, their images and the effect. */
+        dispose(): void;
+        /** Releases the targets and their images. */
+        private disposeTargets;
+        /**
+         * Records a compile error and reports it once.
+         * @param errors - The compiler's message.
+         */
+        private reportFailure;
+    }
+    /**
+     * The writes the ray-tracing kernels make to their per-dispatch parameters: `BABYLON.UniformBuffer` on WebGPU, and
+     * `RayTracingUniformValues` for the WebGL2 fragment passes (T13), which set plain uniforms (no uniform buffers needed).
+     */
+    interface IRtUniformWriter {
+        /**
+         * Declares a uniform.
+         * @param name - The member name.
+         * @param size - Floats it holds (4 or 16).
+         */
+        addUniform(name: string, size: number): void;
+        /** Finishes the layout. */
+        create(): void;
+        /**
+         * Writes a vec4.
+         * @param name - The member name.
+         * @param x - First component.
+         * @param y - Second component.
+         * @param z - Third component.
+         * @param w - Fourth component.
+         */
+        updateFloat4(name: string, x: number, y: number, z: number, w: number): void;
+        /**
+         * Writes a 4 × 4 matrix.
+         * @param name - The member name.
+         * @param matrix - The matrix.
+         */
+        updateMatrix(name: string, matrix: BABYLON.DeepImmutable<BABYLON.Matrix>): void;
+        /** Flushes the writes (a uniform buffer uploads them). */
+        update(): void;
+        /** Releases the storage. */
+        dispose(): void;
+    }
+    /**
+     * Per-dispatch parameters of a WebGL2 fragment pass (T13): the values of one WGSL uniform struct, kept on the CPU and set on the
+     * pass's effect as the flattened uniforms `<variable>_<member>` the translator declares (`RayTracingGlsl.GroupSeparator`).
+     */
+    class RayTracingUniformValues implements IRtUniformWriter {
+        /** Floats of a 4 × 4 matrix member. */
+        private static readonly MatrixFloats;
+        /** The vec4 values by member name. */
+        private readonly vectors;
+        /** The matrix values by member name. */
+        private readonly matrices;
+        /**
+         * A uniform writer for an engine: a `BABYLON.UniformBuffer` where compute kernels bind it, values for fragment passes.
+         * @param engine - The engine.
+         * @param name - The buffer's label.
+         * @returns The writer.
+         */
+        static Create(engine: BABYLON.AbstractEngine, name: string): IRtUniformWriter;
+        /**
+         * The uniform buffer behind a writer (compute kernels bind it).
+         * @param writer - The writer.
+         * @returns The buffer, or null for fragment values.
+         */
+        static AsUniformBuffer(writer: IRtUniformWriter): BABYLON.UniformBuffer;
+        /**
+         * Declares a member (values need no layout).
+         * @param name - The member name.
+         * @param size - Floats it holds.
+         */
+        addUniform(name: string, size: number): void;
+        /** Nothing to allocate. */
+        create(): void;
+        /**
+         * Keeps a vec4.
+         * @param name - The member name.
+         * @param x - First component.
+         * @param y - Second component.
+         * @param z - Third component.
+         * @param w - Fourth component.
+         */
+        updateFloat4(name: string, x: number, y: number, z: number, w: number): void;
+        /**
+         * Keeps a copy of a matrix.
+         * @param name - The member name.
+         * @param matrix - The matrix.
+         */
+        updateMatrix(name: string, matrix: BABYLON.DeepImmutable<BABYLON.Matrix>): void;
+        /** Nothing to upload: `apply` sets the uniforms at draw time. */
+        update(): void;
+        /** Drops the values. */
+        dispose(): void;
+        /**
+         * Sets every value on an effect as `<instance>_<member>`.
+         * @param effect - The pass's effect.
+         * @param instance - The WGSL uniform variable.
+         */
+        apply(effect: BABYLON.Effect, instance: string): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * One traced effect the governor steps between tiers (hdrp-raytracing-polyfill T14, D-L12): ray-traced shadows, ambient
+     * occlusion, reflections, GI, recursive rendering and subsurface scattering implement it; the path tracer does not (it is
+     * progressive and has no budget).
+     */
+    interface IRtGovernedEffect {
+        /** Stable key of the effect (its backend effect name): timer clocks, reports and Inspector fields use it. */
+        readonly governorKey: string;
+        /** The effect's name in reports and read-outs ("ambient occlusion"). */
+        readonly governorLabel: string;
+        /** HDRP's non-ray-traced counterpart the effect hands back to at the last tier ("SSAO", "the shadow maps"). */
+        readonly rasterBranch: string;
+        /** True while the effect is asked and healthy and the Inspector's A/B switch does not show its raster branch. */
+        readonly governed: boolean;
+        /** True when the authored settings trace at half resolution (HDRP Performance mode with `fullResolution` off). */
+        readonly authoredHalfResolution: boolean;
+        /** The authored rays per pixel (the largest per slot for shadows; 1 for an effect without a sample count). */
+        readonly authoredSamples: number;
+        /** The tier the effect runs at (`RayTracingGovernor.Tier`); setting it applies the tier from the next traced frame. */
+        tier: number;
+    }
+    /** What an effect traces at one tier. */
+    interface IRtTierWork {
+        /** Resolution divisor against the camera (1 = full, 2 = half). */
+        divisor: number;
+        /** Rays per pixel actually traced (after the tier and the backend's own cap). */
+        samples: number;
+        /** True when the effect hands back to its raster branch (nothing is traced). */
+        handedBack: boolean;
+    }
+    /** How a governor is set up for one ray-tracing system. */
+    interface IRtGovernorOptions {
+        /** The device named in a hand-back report (`engine.description`). */
+        device: string;
+        /** The tier every effect starts at and never rises above (`RayTracingGovernor.BaseTierFor`). */
+        baseTier: number;
+        /** The backend's own resolution divisor (WebGL2 traces half resolution at every tier, D-L14). */
+        backendDivisor: number;
+        /** The backend's own sample cap (WebGL2 traces one ray per pixel, D-L14). */
+        backendMaxSamples: number;
+        /** True when a GPU timer measures the traced effects; without one the tiers never move. */
+        timed: boolean;
+        /** Writes a hand-back report once per key (defaults to `RayTracingSystem.Report`). */
+        report?: (key: string, message: string) => void;
+    }
+    /**
+     * The GPU-time governor of the traced effects (hdrp-raytracing-polyfill T14, D-L12, spec FR-L13). Every frame it adds up the
+     * measured GPU time of the effects that trace; after `StepDownFrames` consecutive frames over `BudgetMs` it steps the most
+     * expensive effect one tier down - T0 authored → T1 half resolution → T2 half resolution and one sample → T3 hand back to HDRP's
+     * screen-space branch (one report naming the effect, the device and the reason) - skipping a tier that would trace exactly what the
+     * effect traces already (an authored half resolution, one authored sample, the WebGL2 backend's half resolution and one sample).
+     * After `StepUpFrames` consecutive frames under `RecoveryFraction` of the budget it steps the stepped-down effect that adds the least
+     * predicted cost (`predictCost`) back up, when the frame stays under that same 70 % line (hysteresis); a step up that is reverted
+     * soon after makes the effect wait a cooldown that doubles at every revert, so the tiers settle instead of oscillating. Without a
+     * timer the tiers stay at the base tier (T0 on WebGPU, T1 on WebGL2). The Inspector can pin an effect to a tier and switch the
+     * automatic stepping off.
+     */
+    class RayTracingGovernor {
+        /** GPU budget of all traced effects together, in milliseconds per frame (D-L12). */
+        static BudgetMs: number;
+        /** Consecutive frames over budget before an effect steps down. */
+        static readonly StepDownFrames: number;
+        /** Consecutive frames under `RecoveryFraction` of the budget before an effect steps back up. */
+        static readonly StepUpFrames: number;
+        /** Fraction of the budget the traced effects must stay under to recover a tier (70 %); a step up must also be predicted under it. */
+        static readonly RecoveryFraction: number;
+        /** A step down of an effect within this many frames of its step up reverts that step up (its next step up backs off). */
+        static readonly RevertWindowFrames: number;
+        /** Frames a reverted effect waits before its next step up is tried; doubled at every further revert. */
+        static readonly FirstCooldownFrames: number;
+        /** Longest step-up cooldown, in frames (one minute at 60 frames per second). */
+        static readonly MaxCooldownFrames: number;
+        /** Growth of the cooldown at each revert. */
+        static readonly CooldownGrowth: number;
+        /** Resolution divisor of the half-resolution tiers. */
+        static readonly HalfResolutionDivisor: number;
+        /** Rays per pixel of the one-sample tier. */
+        static readonly ReducedSamples: number;
+        /** The tiers (D-L12). */
+        static readonly Tier: {
+            authored: number;
+            halfResolution: number;
+            halfResolutionOneSample: number;
+            handBack: number;
+        };
+        /** Decimals of the millisecond read-outs and reports. */
+        static readonly ReadoutDecimals: number;
+        /** Read-out names of the tiers, by tier. */
+        static readonly TierNames: string[];
+        /** The tier every effect starts at. */
+        readonly baseTier: number;
+        /** The device named in the hand-back reports. */
+        readonly device: string;
+        /** True when a GPU timer feeds the governor (the tiers move only then). */
+        readonly timed: boolean;
+        /** The Inspector's automatic switch: false freezes every tier where it is. */
+        enabled: boolean;
+        /** Live read-outs: the traced GPU time of the last measured frame, the frame counters and the last step. */
+        readonly stats: {
+            totalMs: number;
+            overFrames: number;
+            underFrames: number;
+            steps: number;
+            lastStep: string;
+        };
+        /** The backend's own resolution divisor. */
+        private readonly backendDivisor;
+        /** The backend's own sample cap. */
+        private readonly backendMaxSamples;
+        /** The report writer. */
+        private readonly report;
+        /** Tiers the Inspector pinned, by effect key. */
+        private readonly pinned;
+        /** The GPU milliseconds last measured for each effect at each tier (predicts whether a step up fits the budget). */
+        private readonly measured;
+        /** Keys of the effects stepped down, the latest last (the candidates of a step up). */
+        private readonly steppedDown;
+        /** Effects whose hand-back was reported (exactly one report each). */
+        private readonly reported;
+        /** Frames the governor counted (the clock of the step-up cooldowns). */
+        private frame;
+        /** The frame of each effect's last step up. */
+        private readonly steppedUpAt;
+        /** Each effect's current step-up cooldown, in frames (grows at every revert). */
+        private readonly cooldowns;
+        /** The frame before which an effect may not step up again (after a revert). */
+        private readonly blockedUntil;
+        /**
+         * Creates the governor of one ray-tracing system.
+         * @param options - The device, base tier, backend caps, timer presence and report writer.
+         */
+        constructor(options: IRtGovernorOptions);
+        /**
+         * The device a hand-back report names: `engine.description`, plus the GPU renderer string where the engine exposes one (WebGL2).
+         * @param engine - The engine.
+         * @returns The device name.
+         */
+        static DeviceName(engine: BABYLON.AbstractEngine): string;
+        /**
+         * D-L12's starting tier: T0 (authored) on WebGPU; T1 on WebGL2, whose fragment backend always traces half resolution.
+         * @param isWebGPU - True for the WebGPU compute backend.
+         * @returns The base tier.
+         */
+        static BaseTierFor(isWebGPU: boolean): number;
+        /**
+         * HDRP's authored resolution of ray-traced GI and reflections: Performance mode traces half resolution unless `fullResolution`
+         * is on (HDRenderPipeline.RaytracingIndirectDiffuse / RaytracingReflection); Quality mode always traces full resolution.
+         * @param fields - The GI or SSR intent fields.
+         * @returns True for an authored half resolution.
+         */
+        static AuthoredHalfResolution(fields: IRayTracingFields): boolean;
+        /**
+         * What an effect traces at a tier: the half-resolution tiers (and an authored half resolution, FR-L13) halve the resolution,
+         * the one-sample tier traces one ray per pixel, the backend's own divisor and cap always apply, the last tier traces nothing.
+         * @param tier - The tier.
+         * @param authoredHalfResolution - The authored settings trace at half resolution.
+         * @param authoredSamples - The authored rays per pixel.
+         * @param backendDivisor - The backend's resolution divisor.
+         * @param backendMaxSamples - The backend's sample cap.
+         * @returns The work.
+         */
+        static WorkAt(tier: number, authoredHalfResolution: boolean, authoredSamples: number, backendDivisor: number, backendMaxSamples: number): IRtTierWork;
+        /**
+         * The relative cost of a work: rays per frame, proportional to the traced pixels (1 / divisor²) times the samples.
+         * @param work - The work.
+         * @returns The relative cost (0 for a hand-back).
+         */
+        static RelativeCost(work: IRtTierWork): number;
+        /**
+         * The work of an effect at a tier on this governor's backend.
+         * @param effect - The effect.
+         * @param tier - The tier (defaults to the effect's own).
+         * @returns The work.
+         */
+        workOf(effect: IRtGovernedEffect, tier?: number): IRtTierWork;
+        /**
+         * The next tier down that changes what the effect traces (a tier that traces the same work saves nothing and is skipped).
+         * @param effect - The effect.
+         * @returns The tier, or the effect's own when it is handed back already.
+         */
+        nextTierDown(effect: IRtGovernedEffect): number;
+        /**
+         * The next tier up that changes what the effect traces, never above the base tier; of several tiers that trace that same work
+         * the highest is taken (an authored half resolution recovers to T0, not to the identical T1).
+         * @param effect - The effect.
+         * @returns The tier, or the effect's own when it is at the base tier.
+         */
+        nextTierUp(effect: IRtGovernedEffect): number;
+        /**
+         * Pins an effect to a tier (the Inspector), or gives it back to the automatic stepping: an unpinned effect stays at its tier and
+         * joins the recovery order, so it steps back up once the frame has room (and down if it is over budget).
+         * @param key - The effect key.
+         * @param tier - The tier, or null for automatic.
+         */
+        pin(key: string, tier: number): void;
+        /**
+         * The tier an effect is pinned to.
+         * @param key - The effect key.
+         * @returns The tier, or null when the effect steps automatically.
+         */
+        pinnedTier(key: string): number;
+        /**
+         * The per-frame step (run before the effects update): applies the pins, adds up the measured GPU time of the tracing effects and
+         * steps one effect down or up when a window of frames is complete.
+         * @param effects - Every effect of the system.
+         * @param costOf - The last measured GPU milliseconds of an effect key, or null while unmeasured.
+         * @param measured - False while the measurements are incomplete (WebGL2 re-measures after the traced set changed): the pins
+         *   apply, the frame counts nothing (default true).
+         */
+        update(effects: IRtGovernedEffect[], costOf: (key: string) => number, measured?: boolean): void;
+        /**
+         * A one-line state for the Inspector.
+         * @returns The read-out.
+         */
+        describe(): string;
+        /**
+         * Whether two works trace the same thing.
+         * @param first - One work.
+         * @param second - The other.
+         * @returns True when resolution, samples and hand-back agree.
+         */
+        private static SameWork;
+        /**
+         * Moves every pinned effect to its pinned tier.
+         * @param effects - Every effect of the system.
+         */
+        private applyPins;
+        /**
+         * Counts the frame as over budget, under the recovery line, or neither (both windows restart).
+         * @param total - The traced GPU milliseconds of the frame.
+         */
+        private countFrame;
+        /**
+         * Keeps the cost an effect was measured at in its current tier.
+         * @param effect - The effect.
+         * @param cost - Its GPU milliseconds.
+         */
+        private remember;
+        /**
+         * Steps the most expensive automatic effect one tier down (D-L12) and reports a hand-back once.
+         * @param tracing - The effects that trace.
+         * @param costs - Their measured GPU milliseconds.
+         * @param total - The frame's traced GPU milliseconds.
+         */
+        private stepDown;
+        /**
+         * Steps one stepped-down effect one tier back up: of those whose cooldown after a reverted step up has passed and whose predicted
+         * frame fits under `RecoveryFraction` of the budget (the same hysteresis line that gates recovery, so a step up never lands next
+         * to the budget and comes straight back down), the one that adds the least GPU time (on a tie the latest stepped down) - the
+         * cheapest effects come back first and an effect that does not fit never blocks the others.
+         * @param effects - Every effect of the system.
+         * @param costs - The measured GPU milliseconds of the tracing effects.
+         * @param total - The frame's traced GPU milliseconds.
+         */
+        private stepUp;
+        /**
+         * Backs off an effect whose step up was just reverted: its next step up waits a cooldown that doubles at every revert.
+         * @param key - The effect key.
+         */
+        private backOff;
+        /**
+         * The GPU time an effect is expected to take at a higher tier: its current time scaled by the traced work (rays per frame ∝
+         * pixels × samples, `RelativeCost`); a handed-back effect, which costs nothing now, by the time last measured at that tier
+         * (unknown: 0, the step is tried).
+         * @param effect - The effect.
+         * @param target - The higher tier.
+         * @param currentCost - Its GPU milliseconds now.
+         * @returns The predicted milliseconds.
+         */
+        private predictCost;
+        /**
+         * Puts an effect on top of the recovery order.
+         * @param key - The effect key.
+         */
+        private markSteppedDown;
+        /**
+         * Updates the step read-outs.
+         * @param effect - The effect that stepped.
+         * @param from - Its previous tier.
+         * @param direction - "down" or "up".
+         */
+        private recordStep;
+        /**
+         * FR-L13: exactly one report per effect handed back by the governor, naming the effect, the device and the reason.
+         * @param effect - The effect.
+         * @param from - The tier it was handed back from.
+         * @param total - The frame's traced GPU milliseconds.
+         */
+        private reportHandBack;
+    }
+    /**
+     * The per-frame GPU duration of one effect's compute kernels on WebGPU. Babylon writes compute-pass timestamps for a
+     * `ComputeShader` whose `gpuTimeInFrame` holds an object with `_addDuration(frameId, nanoseconds)` (its WebGPUPerfCounter
+     * contract); every kernel of an effect shares one clock, so a frame's durations add up.
+     */
+    class RayTracingKernelClock {
+        /** The frame whose durations are being added up. */
+        private frameId;
+        /** Nanoseconds added for `frameId` so far. */
+        private frameNanoseconds;
+        /** Milliseconds of the last complete frame, or null before one completed. */
+        lastMilliseconds: number;
+        /**
+         * Babylon's timestamp callback (the name binds to `WebGPUPerfCounter._addDuration`): adds one dispatch's duration to its frame;
+         * the first duration of a newer frame closes the previous one.
+         * @param frameId - The engine frame the dispatch belongs to.
+         * @param durationNanoseconds - The dispatch's GPU time in nanoseconds.
+         */
+        _addDuration(frameId: number, durationNanoseconds: number): void;
+    }
+    /**
+     * Measures the GPU time of each traced effect (hdrp-raytracing-polyfill T14, D-L12). WebGPU (`timestamp-query`): Babylon's
+     * compute-pass timestamps, one `RayTracingKernelClock` shared by an effect's kernels (trace and denoiser); only the traced kernels
+     * read back (the main pass and render-target counters stall the frame and are cleared). WebGL2 (`EXT_disjoint_timer_query_webgl2`):
+     * one TIME_ELAPSED query at a time, taking turns between the span of all traced passes (`SpanKey`) and each effect's passes. On
+     * ANGLE over Metal an effect's reading also carries GPU work queued before it (all six read 85–95 ms in a 37 ms frame), so the
+     * readings are reconciled with the span (`Reconcile`) before the governor reads them. Babylon's frame counter
+     * (`EngineInstrumentation.gpuFrameTimeCounter`) is not used: on WebGPU it reads 0 here, and on WebGL2 it would hold the one
+     * TIME_ELAPSED query the per-effect measurement needs.
+     */
+    class RayTracingGpuTimer {
+        /** Nanoseconds per millisecond. */
+        static readonly NanosecondsPerMillisecond: number;
+        /** Frames a WebGL2 query may stay unavailable (a disjoint GPU) before it is dropped and the next effect measured. */
+        static readonly PendingQueryLimitFrames: number;
+        /**
+         * WebGL2: per-effect readings adding up to more than this many spans are cumulative - each one runs from the span's start to the
+         * end of its effect (ANGLE over Metal without timestamps) - and are turned into per-effect costs by differencing.
+         */
+        static readonly CumulativeFactor: number;
+        /** WebGL2: weight of a new reading in a key's exponential average (the readings of one turn come from different frames). */
+        static readonly ReadingSmoothing: number;
+        /** WebGL2: the key of the span query around every traced pass of a frame. */
+        static readonly SpanKey: string;
+        /** The GPU-timing state of every engine a timer switched timing on for. */
+        private static readonly shares;
+        /** How the timer measures: compute-pass timestamps (WebGPU) or timer queries (WebGL2). */
+        readonly kind: "compute-timestamps" | "timer-query";
+        /** The engine measured. */
+        private readonly engine;
+        /** The clock of every effect key. */
+        private readonly clocks;
+        /** WebGL2: the order in which each key's last query started (the least recently measured key goes next). */
+        private readonly startedAt;
+        /** WebGL2: queries started so far (the clock of `startedAt`). */
+        private started;
+        /** WebGL2: the keys that traced since the last poll. */
+        private tracedNow;
+        /** WebGL2: the keys that traced in the previous frame (the candidates of the next query). */
+        private tracedBefore;
+        /** WebGL2: the query in flight, or null. */
+        private pending;
+        /**
+         * Creates the timer of an engine that has one (use `Create`).
+         * @param engine - The engine.
+         */
+        private constructor();
+        /**
+         * Reconciles per-effect readings with the GPU time of the whole traced span: readings that add up to more than the span
+         * (each one carrying work queued before it) are scaled down in proportion so they sum to it; readings within it are kept.
+         * @param readings - The effects' readings in milliseconds (null = unmeasured, left out and kept null).
+         * @param span - The traced span in milliseconds (the most the effects can have taken together), or null when unmeasured.
+         * @returns The reconciled readings, in the same order.
+         */
+        static Reconcile(readings: number[], span: number): number[];
+        /**
+         * The timer of an engine: WebGPU with the `timestamp-query` feature, or WebGL2 with `EXT_disjoint_timer_query_webgl2`.
+         * @param engine - The engine.
+         * @returns The timer, or null when the engine has no GPU timer (the governor keeps the base tier).
+         */
+        static Create(engine: BABYLON.AbstractEngine): RayTracingGpuTimer;
+        /**
+         * Whether an engine can time GPU work.
+         * @param engine - The engine.
+         * @returns True with a timestamp / timer-query capability.
+         */
+        static IsAvailable(engine: BABYLON.AbstractEngine): boolean;
+        /**
+         * WebGPU: lets every kernel of an effect write its compute-pass timestamps to the effect's clock (idempotent, every frame).
+         * @param key - The effect key.
+         * @param shaders - The effect's kernels (trace and denoiser).
+         */
+        track(key: string, shaders: BABYLON.ComputeShader[]): void;
+        /**
+         * WebGL2: starts the time query around an effect's passes when no query is in flight and, of the keys that traced last frame, this
+         * one was measured least recently (a key that stops tracing - handed back - drops out of the turns at once).
+         * @param key - The effect key.
+         */
+        begin(key: string): void;
+        /**
+         * Per-effect costs from WebGL2 readings in trace order. When the readings add up to more than `CumulativeFactor` spans they are
+         * cumulative (reading i = the span's start to the end of effect i, measured on ANGLE over Metal: alone 3.56 / 2.94 / 2.66 /
+         * 7.88 / 6.57 / 5.05 ms read 3.6 / 5.75 / 7.8 / 14.9 / 20.7 / 30.5 ms) and each cost is its reading minus the previous effect's
+         * (never below 0); then the costs are reconciled with the span (`Reconcile`).
+         * @param readings - The effects' readings in milliseconds, in trace order (null = unmeasured).
+         * @param span - The traced span in milliseconds, or null when unmeasured.
+         * @returns The per-effect costs, in the same order.
+         */
+        static PerEffectCosts(readings: number[], span: number): number[];
+        /**
+         * WebGL2: drops every reading (the set or order of traced effects changed, so cumulative readings of the old set would be
+         * differenced against the wrong predecessor); the query in flight is still read but its result discarded.
+         */
+        forgetReadings(): void;
+        /** WebGL2: opens the span query before the frame's first traced pass when it is the span's turn. */
+        beginSpan(): void;
+        /** WebGL2: closes the span query after the frame's last traced pass. */
+        endSpan(): void;
+        /**
+         * The last measured GPU time of the whole traced span (WebGL2).
+         * @returns Milliseconds, or null while unmeasured (always on WebGPU, whose per-kernel timestamps need no span).
+         */
+        spanMilliseconds(): number;
+        /**
+         * WebGL2: closes the query an effect's `begin` opened.
+         * @param key - The effect key.
+         */
+        end(key: string): void;
+        /** The per-frame poll: WebGPU clears the counters that stall the frame, WebGL2 reads the query in flight. */
+        poll(): void;
+        /**
+         * The last measured GPU time of an effect.
+         * @param key - The effect key.
+         * @returns Milliseconds, or null while unmeasured.
+         */
+        millisecondsOf(key: string): number;
+        /** Releases the timer (system dispose); the last timer of an engine restores Babylon's timing switch and main-pass counter. */
+        dispose(): void;
+        /**
+         * The clock of an effect key, created on first use.
+         * @param key - The effect key.
+         * @returns The clock.
+         */
+        private clockOf;
+        /** WebGL2: reads the query in flight; a result goes to its effect's clock and the next effect's turn begins. */
+        private readPending;
+        /**
+         * WebGL2: the key to measure next - of the keys that traced last frame (or the asking key on the first frame), the one whose
+         * query started least recently (never measured first).
+         * @param key - The key asking to start.
+         * @returns The key whose turn it is.
+         */
+        private nextKey;
+        /**
+         * WebGPU: clears the main-pass counter and every render-target counter Babylon created while timing is on - each one reads back
+         * every frame and stalls it by milliseconds (measured on the fixture); only the traced kernels' clocks read back.
+         */
+        private clearFrameCounters;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The light table of the ray-tracing polyfill (hdrp-raytracing-polyfill T5, Design Reference `RtLight`, D-L18): one 64-byte
+     * record (four vec4 rows) per traced Babylon light, holding the light's CURRENT Babylon colour × scaled intensity, so the
+     * pre-exposure the toolkit already applies to every light (`HdrpRendering` bindings) and the per-frame atmospheric attenuation of
+     * PhysicallyBasedSky suns are traced exactly as rasterised. Rows:
+     * 0 = position (point / spot) or ground colour × intensity (hemispheric), type;
+     * 1 = colour × intensity, radius (point / spot shape radius) or angular diameter in radians (directional);
+     * 2 = direction (directional / spot: where the light points, hemispheric: up), range;
+     * 3 = spot cos(half angle), angle scale (glTF falloff; the exponent for Babylon's standard falloff), angle offset, flags
+     *     (bits 0–7 falloff, bits 8–15 ray-traced shadow slot 0–3 from `shadowSlots`, 255 = none).
+     * The table is repacked every frame (a handful of lights) and reported changed only when a word differs, so the backend
+     * re-uploads exactly when pre-exposure, a colour or a transform moved.
+     */
+    class RayTracingLightTable {
+        /** 32-bit words per `RtLight` record (64 bytes). */
+        static readonly LightWords: number;
+        /** `type` values. */
+        static readonly LightType: {
+            directional: number;
+            point: number;
+            spot: number;
+            hemispheric: number;
+        };
+        /** Falloff values (flags bits 0–7): Babylon's physical inverse square, glTF windowed inverse square, standard linear. */
+        static readonly Falloff: {
+            physical: number;
+            gltf: number;
+            standard: number;
+        };
+        /** Shadow slot meaning "no ray-traced shadow" (T6 assigns slots 0–3). */
+        static readonly NoShadowSlot: number;
+        /** Largest range written (f32 has no `Number.MAX_VALUE`). */
+        private static readonly MaxRange;
+        /** Smallest spot cone the glTF angle scale divides by (Babylon's own clamp). */
+        private static readonly MinimumConeDelta;
+        /** The packed records (`count` × 16 words; at least one record so the buffer is never empty). */
+        data: Float32Array;
+        /** Number of packed lights. */
+        count: number;
+        /** Uploads requested since creation (tests and the Inspector). */
+        uploads: number;
+        /** Ray-traced shadow slot (0–3) of every light that has one (T6: `RayTracedShadows` assigns them); others pack `NoShadowSlot`. */
+        readonly shadowSlots: Map<BABYLON.Light, number>;
+        /** Record index of every light packed by the last `update` (the shadow kernel reads its slot lights by it). */
+        private readonly recordIndices;
+        /** The scene whose lights are traced. */
+        private readonly scene;
+        /** Set by a pre-exposure change: the next `update` reports a change even when the words were patched in place. */
+        private forced;
+        /** `HdrpRendering.OnPreExposureChanged` observer. */
+        private preExposureObserver;
+        /**
+         * Packs one light into a record.
+         * @param light - The light.
+         * @param words - The packed records.
+         * @param base - First word of the record.
+         * @param shadowSlot - The light's ray-traced shadow slot (0–3), or `NoShadowSlot` (the default).
+         * @returns False when the light type is not traced (the record is left untouched).
+         */
+        static PackLight(light: BABYLON.Light, words: Float32Array, base: number, shadowSlot?: number): boolean;
+        /**
+         * Creates the table and binds it to the scene's pre-exposure (D-L18).
+         * @param scene - The traced scene.
+         */
+        constructor(scene: BABYLON.Scene);
+        /**
+         * Repacks the enabled lights; returns true when the records changed since the last call (the caller re-uploads).
+         * @returns True to upload.
+         */
+        update(): boolean;
+        /**
+         * The record index of a light packed by the last `update`.
+         * @param light - The light.
+         * @returns Its index in the table, or -1 when it is not packed (disabled, dark or an untraced type).
+         */
+        indexOf(light: BABYLON.Light): number;
+        /**
+         * Sets the ray-traced shadow slots (T6) and forces the next `update` to repack and report a change.
+         * @param slots - The slot of every ray-traced shadow light.
+         */
+        setShadowSlots(slots: Map<BABYLON.Light, number>): void;
+        /** Unbinds from the pre-exposure observable. */
+        dispose(): void;
+        /**
+         * The world direction a directional or spot light points to (its transformed direction when parented).
+         * @param light - The light.
+         * @returns The normalised direction.
+         */
+        private static WorldDirection;
+        /**
+         * The Babylon falloff a punctual light renders with on PBR materials (Babylon's default is physical).
+         * @param light - The light.
+         * @returns A `Falloff` value.
+         */
+        private static FalloffOf;
+        /**
+         * A light's exported ray-traced shadow size (`rtshadows` key, T1): the sun's angular diameter in degrees or a punctual light's
+         * shape radius in metres; 0 when the light carries no ray-tracing block.
+         * @param light - The light.
+         * @param key - `angulardiameter` or `shaperadius`.
+         * @returns The size.
+         */
+        private static SizeOf;
+        /**
+         * Whether two word arrays are equal.
+         * @param first - One array.
+         * @param second - The other.
+         * @returns True when every word matches.
+         */
+        private static SameWords;
+    }
+}
+declare namespace TOOLKIT {
+    /** Colour space of a traced texture (D-L10): sRGB for base colour and emission, linear for data (metallic-roughness, normals). */
+    type RtTextureColorSpace = "srgb" | "linear";
+    /**
+     * Resolves a material texture to its packed bucket reference (`bucket << 16 | layer`), scheduling the bake on first use.
+     * @param texture - The material's texture.
+     * @param colorSpace - The colour space the texture is read in.
+     * @returns The packed reference, or `RayTracingMaterials.NoTexture` while it is not baked (or cannot be traced).
+     */
+    type RtTextureResolver = (texture: BABYLON.BaseTexture, colorSpace: RtTextureColorSpace) => number;
+    /**
+     * Reads one traced texture on the CPU (the reference any-hit of the tests): the texel of a packed reference at a texture coordinate.
+     * @param reference - The packed bucket reference.
+     * @param u - Texture coordinate u (already transformed by the material's tiling and offset).
+     * @param v - Texture coordinate v.
+     * @returns The RGBA texel, 0..1 per channel (colour still in the bucket's colour space, alpha always linear).
+     */
+    type RtTextureSampler = (reference: number, u: number, v: number) => number[];
+    /** Which exported inputs a traced material was packed from (the report of a Shader Graph material lists them). */
+    interface IRtMaterialInputs {
+        /** "pbr", "standard", "graph", "terrain" or "fallback". */
+        source: string;
+        /** The Unity property names (graph) or Babylon fields the record read, in packing order. */
+        inputs: string[];
+    }
+    /** Size bucket of a traced texture (D-L10). */
+    interface IRtTextureBucketSize {
+        /** Edge of the bucket's square layers, in pixels (256, 512 or 1024). */
+        bucketSize: number;
+        /** Index of the size in `RayTracingTextureBuckets.BucketSizes`. */
+        sizeIndex: number;
+        /** True when the source is larger than the largest bucket and is downsampled into it. */
+        downsampled: boolean;
+    }
+    /**
+     * Bakes one texture into a bucket layer: renders it at `bucketSize` × `bucketSize` and reads the RGBA8 pixels back.
+     * @param texture - The source texture (any format, compressed included).
+     * @param bucketSize - The layer edge in pixels.
+     * @param colorSpace - The bucket's colour space (an sRGB bucket keeps gamma-encoded bytes).
+     * @returns The pixels, `bucketSize² × 4` bytes in the texture's own row order, or null when the bake failed.
+     */
+    type RtTextureBaker = (texture: BABYLON.BaseTexture, bucketSize: number, colorSpace: RtTextureColorSpace) => Promise<Uint8Array>;
+    /**
+     * The shared material model of the ray-tracing polyfill (hdrp-raytracing-polyfill T5, D-L9): every traced material becomes one
+     * `RtMaterial` record of exactly 128 bytes (eight vec4 rows, Design Reference › Data shapes) — base colour, emission and its
+     * exposure weight, metallic-roughness or specular-glossiness, IOR / transmission, coat, sheen, anisotropy, iridescence, alpha mode
+     * and cutoff, the double-sided normal mode, thickness, and four bucket texture references. The packed table appends one uv
+     * transform row (scale.xy, offset.xy) per material after the records, because Unity shares one tiling / offset per material.
+     * Transpiled Shader Graph materials trace with their exported PBR inputs (one report per material), terrains with a constant.
+     */
+    class RayTracingMaterials {
+        /** 32-bit words per `RtMaterial` record (128 bytes). */
+        static readonly MaterialWords: number;
+        /** vec4 rows per `RtMaterial` record. */
+        static readonly MaterialRows: number;
+        /** Floats per uv-transform row (scale u, scale v, offset u, offset v). */
+        static readonly TransformFloats: number;
+        /** Floats per subsurface row (scattering distance rgb in world units, 1 when the material has a diffusion profile). */
+        static readonly SubsurfaceFloats: number;
+        /** Babylon's (and HDRP's) diffusion-profile scattering distance unit: millimetres. */
+        static readonly MetresPerMillimetre: number;
+        /** Texture reference meaning "no texture". */
+        static readonly NoTexture: number;
+        /** Index of refraction of an ordinary dielectric (F0 = 0.04), Babylon's and HDRP's default. */
+        static readonly DefaultIor: number;
+        /** Base colour of the neutral record (no material, terrain): HDRP's mid grey. */
+        static readonly NeutralGrey: number;
+        /** Smallest specular power Babylon's StandardMaterial converts to a roughness. */
+        private static readonly MinimumSpecularPower;
+        /** Word offsets of every `RtMaterial` field, in the exact Design Reference order. */
+        static readonly Fields: {
+            baseColor: number;
+            emissive: number;
+            emissiveWeight: number;
+            metallic: number;
+            roughness: number;
+            ior: number;
+            transmission: number;
+            specular: number;
+            workflow: number;
+            coat: number;
+            coatRoughness: number;
+            sheenIntensity: number;
+            sheenRoughness: number;
+            anisotropyStrength: number;
+            anisotropyRotation: number;
+            iridescenceIntensity: number;
+            iridescenceIor: number;
+            alphaMode: number;
+            alphaCutoff: number;
+            normalMode: number;
+            thickness: number;
+            textures: number;
+        };
+        /** Texture slots inside the `textures` vec4 (offset from `Fields.textures`). */
+        static readonly TextureSlots: {
+            baseColor: number;
+            metallicRoughness: number;
+            normal: number;
+            emissive: number;
+        };
+        /** `workflow` values. */
+        static readonly Workflow: {
+            metallicRoughness: number;
+            specularGlossiness: number;
+        };
+        /** `alphaMode` values. */
+        static readonly AlphaMode: {
+            opaque: number;
+            alphaTest: number;
+            alphaBlend: number;
+        };
+        /** `normalMode` values: single-sided, then HDRP's double-sided normal modes Flip, Mirror and None. */
+        static readonly NormalMode: {
+            singleSided: number;
+            flip: number;
+            mirror: number;
+            none: number;
+        };
+        /** Unity property names a transpiled graph's PBR inputs are looked up by (first match wins). */
+        static readonly GraphPropertyNames: {
+            baseColor: string[];
+            baseMap: string[];
+            metallic: string[];
+            smoothness: string[];
+            normalMap: string[];
+            emissionColor: string[];
+            emissionMap: string[];
+        };
+        /**
+         * Packs one material into an `RtMaterial` record and its uv-transform row. PBR (metallic-roughness and specular-glossiness),
+         * Babylon StandardMaterial, transpiled Shader Graph classes (exported PBR inputs, one report) and null (the neutral grey record
+         * used for terrains and meshes without a material) are understood.
+         * @param material - The material, or null for the neutral record.
+         * @param resolveTexture - Turns a texture into its bucket reference (schedules the bake).
+         * @param records - The packed rows: `MaterialRows` vec4 rows per record; the record is written at `recordIndex`.
+         * @param recordIndex - Index of the record.
+         * @param transforms - The uv-transform rows (4 floats per record), written at `recordIndex`.
+         * @returns What the record was packed from.
+         */
+        static PackMaterial(material: BABYLON.Material, resolveTexture: RtTextureResolver, records: Float32Array, recordIndex: number, transforms: Float32Array): IRtMaterialInputs;
+        /**
+         * The CPU twin of the WGSL `anyHitAccepts` (D-L5): alpha-tested materials accept a candidate hit when base-colour alpha ×
+         * the base-colour texture's alpha reaches the cutoff; every other alpha mode always accepts.
+         * @param records - The packed material rows.
+         * @param materialIndex - The record of the hit triangle.
+         * @param transforms - The uv-transform rows.
+         * @param sampleTexture - Reads a bucket texel (null: textures read as opaque white).
+         * @param u - Interpolated mesh texture coordinate u.
+         * @param v - Interpolated mesh texture coordinate v.
+         * @returns True to accept the hit.
+         */
+        static AnyHitAccepts(records: Float32Array, materialIndex: number, transforms: Float32Array, sampleTexture: RtTextureSampler, u: number, v: number): boolean;
+        /**
+         * An alpha-test any-hit callback for `RayTracingBvh.Intersect` that reads the material table (the CPU reference of the GPU path).
+         * @param records - The packed material rows.
+         * @param transforms - The uv-transform rows.
+         * @param materialIndex - The record of the instance's material.
+         * @param uvs - 2 floats per vertex, the mesh's texture coordinates.
+         * @param indices - The triangle list the hits refer to.
+         * @param sampleTexture - Reads a bucket texel.
+         * @returns The callback.
+         */
+        static CreateMaterialAlphaTest(records: Float32Array, transforms: Float32Array, materialIndex: number, uvs: Float32Array, indices: Uint32Array, sampleTexture: RtTextureSampler): RayAnyHitCallback;
+        /**
+         * The double-sided normal mode of a material: single-sided while back faces are culled, otherwise HDRP's mode (Flip from
+         * Babylon's two-sided lighting, Mirror / None from the HDRP/Lit plugin).
+         * @param material - The material.
+         * @returns A `NormalMode` value.
+         */
+        static NormalModeOf(material: BABYLON.Material): number;
+        /**
+         * The subsurface row of a material (T11, PLAN 1 D19): a PBR material whose screen-space subsurface scattering is on carries its
+         * diffusion profile's scattering distance (Babylon's `ssDiffusionProfileColors`, millimetres, HDRP's profile) converted to world
+         * units through the configuration's `metersPerUnit` (HDRP `worldScale`), and w = 1; every other material is all zeros (the
+         * subsurface kernel leaves it alone).
+         * @param material - The material, or null.
+         * @param rows - The subsurface rows.
+         * @param recordIndex - The material's record index.
+         */
+        static PackSubsurface(material: BABYLON.Material, rows: Float32Array, recordIndex: number): void;
+        /**
+         * Writes the neutral record (mid grey, dielectric, roughness 1, opaque, no textures).
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         */
+        private static WriteDefaults;
+        /**
+         * Packs a Babylon PBR material (and every toolkit class built on it): metallic-roughness when `metallic` or `roughness` is
+         * set, else specular-glossiness from `reflectivityColor` / `microSurface`; coat, sheen, anisotropy, iridescence and the
+         * sub-surface refraction (transmission, IOR, thickness); alpha and the normal mode.
+         * @param material - The material.
+         * @param resolveTexture - The texture resolver.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         * @param transforms - The uv-transform rows.
+         * @param transformBase - First float of the record's transform.
+         * @returns The inputs read.
+         */
+        private static PackPbrMaterial;
+        /**
+         * Packs the optional PBR layers: clear coat, sheen, anisotropy, iridescence and sub-surface refraction (transmission, IOR,
+         * thickness). Disabled layers stay at their neutral values.
+         * @param material - The material.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         */
+        private static PackPbrLayers;
+        /**
+         * Whether a material refracts (Babylon sub-surface refraction with a non-zero intensity). HDRP only refracts on a transparent
+         * surface type, so such a material traces as alpha-blended and its renderer as transparent-only (HDRP
+         * `materialIsOnlyTransparent`) even though the export gives refractive glass alpha 1 (its transmittance mask is the
+         * refraction intensity).
+         * @param material - The material, or null.
+         * @returns True for a refractive material.
+         */
+        static IsRefractive(material: BABYLON.Material): boolean;
+        /**
+         * Packs a Babylon StandardMaterial as a metallic-roughness dielectric (roughness from the Blinn-Phong specular power).
+         * @param material - The material.
+         * @param resolveTexture - The texture resolver.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         * @param transforms - The uv-transform rows.
+         * @param transformBase - First float of the record's transform.
+         * @returns The inputs read.
+         */
+        private static PackStandardMaterial;
+        /**
+         * Packs a transpiled Shader Graph material from its exported PBR inputs (D-L10): base colour / map, metallic, smoothness,
+         * normal map and emission looked up by Unity property name, the stock PBR values for whatever the graph does not expose.
+         * The graph's own shading is not evaluated in traces; one report per material names the inputs it traces with.
+         * @param material - The material.
+         * @param resolveTexture - The texture resolver.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         * @param transforms - The uv-transform rows.
+         * @param transformBase - First float of the record's transform.
+         * @returns The inputs read, or null when the material is not a transpiled graph.
+         */
+        private static PackGraphMaterial;
+        /**
+         * Packs a graph's emission colour (pre-exposed with HDRP's default exposure weight 1) and emission map.
+         * @param graph - The graph material.
+         * @param resolveTexture - The texture resolver.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         * @param inputs - Receives the names read.
+         */
+        private static PackGraphEmission;
+        /**
+         * Writes the alpha mode and cutoff: alpha-tested (Unity's `clip`), alpha-blended (a refractive material too: HDRP's transparent
+         * surface type), else opaque.
+         * @param material - The material.
+         * @param records - The packed rows.
+         * @param base - First word of the record.
+         */
+        private static PackAlpha;
+        /**
+         * Writes a texture's tiling / offset (`uv × scale + offset`, the 2-D affine part of Babylon's texture matrix) or the identity.
+         * @param texture - The texture whose transform the material shares, or null.
+         * @param transforms - The uv-transform rows.
+         * @param transformBase - First float of the record's transform.
+         */
+        private static WriteTransform;
+        /**
+         * Resolves a texture through the resolver, or "no texture".
+         * @param resolveTexture - The resolver.
+         * @param texture - The texture or null.
+         * @param colorSpace - The role's colour space; a texture marked linear (`gammaSpace` false) is always read as linear.
+         * @returns The packed reference.
+         */
+        private static Resolve;
+        /**
+         * The first name a predicate accepts.
+         * @param names - Candidate names, in priority order.
+         * @param present - Whether a name exists on the material.
+         * @returns The name, or null.
+         */
+        private static FirstPresent;
+    }
+    /**
+     * The packed material table of one ray-tracing system: unique material lists (one entry per sub-material slot of a mesh) packed
+     * contiguously, so an instance's `materialOffset` + the triangle's slot addresses its record. Lists are deduplicated by the
+     * materials they hold; the table is rebuilt on every pack and whenever a texture bake lands or pre-exposure changes.
+     */
+    class RayTracingMaterialTable {
+        /** The packed rows: `materialCount` records of 8 vec4, then one uv-transform vec4 per record, then one subsurface vec4 per record. */
+        rows: Float32Array;
+        /** Number of packed records. */
+        materialCount: number;
+        /** The resolver the records' textures go through. */
+        private readonly resolveTexture;
+        /**
+         * Creates the table.
+         * @param resolveTexture - Turns a texture into its bucket reference.
+         */
+        constructor(resolveTexture: RtTextureResolver);
+        /**
+         * Packs the material lists of the packed instances.
+         * @param lists - One list per instance: its materials by sub-material slot (null = the neutral grey record).
+         * @returns The record offset of every list, in the same order.
+         */
+        build(lists: BABYLON.Material[][]): number[];
+        /**
+         * The record rows (without the transforms).
+         * @returns A view of the records.
+         */
+        get records(): Float32Array;
+        /**
+         * The uv-transform rows.
+         * @returns A view of the transforms.
+         */
+        get transforms(): Float32Array;
+        /**
+         * The subsurface rows (`RayTracingMaterials.PackSubsurface`), after the uv-transform rows.
+         * @returns A view of the subsurface rows.
+         */
+        get subsurface(): Float32Array;
+    }
+    /**
+     * Traced textures (D-L10): blitted at load into per-size `texture_2d_array` buckets (256, 512, 1024; larger inputs downsampled to
+     * 1024) through an `EffectRenderer` pass + `readPixels` → `RawTexture2DArray`, compressed inputs included; one array per size and
+     * per colour space (sRGB albedo / emissive, linear data), so a kernel samples six arrays. A bucket that gains textures re-bakes all
+     * of its layers in one batch and swaps its array when the batch lands (no CPU copy is kept between batches).
+     */
+    class RayTracingTextureBuckets {
+        /** Layer edges of the size buckets, in pixels. */
+        static readonly BucketSizes: number[];
+        /** Number of buckets: three sizes × two colour spaces. */
+        static readonly BucketCount: number;
+        /** WebGPU's guaranteed `maxTextureArrayLayers`. */
+        static readonly MaxLayers: number;
+        /** Bytes per baked texel (RGBA8). */
+        private static readonly BytesPerTexel;
+        /** Notified after a bucket array was swapped (the backend rebinds, the system repacks its materials). */
+        readonly onArraysChangedObservable: BABYLON.Observable<RayTracingTextureBuckets>;
+        /** The scene the arrays belong to. */
+        private readonly scene;
+        /** The baker (GPU by default; tests inject a CPU one). */
+        private readonly baker;
+        /** The GPU baker when this instance created it (disposed with the buckets). */
+        private readonly ownedBaker;
+        /** Entries by texture id and colour space. */
+        private entries;
+        /** The six buckets. */
+        private buckets;
+        /** Textures requested before they were ready (polled by `update`). */
+        private waiting;
+        /** True once disposed: late bakes are dropped. */
+        private disposed;
+        /**
+         * The size bucket of a texture (D-L10): the smallest bucket that holds its larger edge, the 1024 bucket (downsampled) beyond.
+         * @param width - Texture width in pixels.
+         * @param height - Texture height in pixels.
+         * @returns The bucket size.
+         */
+        static SizeFor(width: number, height: number): IRtTextureBucketSize;
+        /**
+         * The bucket id of a size and colour space: sRGB buckets 0..2, linear buckets 3..5 (the WGSL `sampleBucket` order).
+         * @param colorSpace - The colour space.
+         * @param sizeIndex - Index in `BucketSizes`.
+         * @returns The bucket id.
+         */
+        static BucketId(colorSpace: RtTextureColorSpace, sizeIndex: number): number;
+        /**
+         * Packs a texture reference (`bucket << 16 | layer`).
+         * @param bucketId - The bucket.
+         * @param layer - The layer.
+         * @returns The reference word.
+         */
+        static Reference(bucketId: number, layer: number): number;
+        /**
+         * Splits a texture reference.
+         * @param reference - The reference word.
+         * @returns The bucket and layer.
+         */
+        static Decode(reference: number): {
+            bucketId: number;
+            layer: number;
+        };
+        /**
+         * Creates the buckets.
+         * @param scene - The scene the arrays belong to.
+         * @param baker - The baker; omit for the GPU baker (EffectRenderer + readPixels).
+         */
+        constructor(scene: BABYLON.Scene, baker?: RtTextureBaker);
+        /**
+         * The packed reference of a texture in a colour space; the first request queues it, so it reads "no texture" until the batch of
+         * its bucket landed.
+         * @param texture - The texture.
+         * @param colorSpace - The colour space it is read in.
+         * @returns The reference, or `RayTracingMaterials.NoTexture`.
+         */
+        reference(texture: BABYLON.BaseTexture, colorSpace: RtTextureColorSpace): number;
+        /**
+         * Per-frame step: queued textures that became ready join their bucket, and every stale bucket whose baker is ready starts a
+         * batch. Returns once nothing more can start this frame; finished batches swap their array and notify.
+         */
+        update(): void;
+        /**
+         * The array of a bucket (null while it has none).
+         * @param bucketId - The bucket.
+         * @returns The array texture.
+         */
+        arrayOf(bucketId: number): BABYLON.BaseTexture;
+        /**
+         * Layers of a bucket's current array.
+         * @param bucketId - The bucket.
+         * @returns The layer count.
+         */
+        layerCount(bucketId: number): number;
+        /** True while textures wait to load or a batch bakes. */
+        get pending(): boolean;
+        /** GPU bytes of the bucket arrays. */
+        get bytes(): number;
+        /** Releases every array and the baker. */
+        dispose(): void;
+        /** Moves queued textures that finished loading into their bucket (a texture that is not a 2-D image never traces). */
+        private assignWaiting;
+        /**
+         * Bakes every layer of a bucket into a fresh array; the array swaps in when all layers landed (failed layers stay black and
+         * their textures untraced).
+         * @param bucketId - The bucket.
+         */
+        private bakeBucket;
+        /**
+         * Creates the bucket's new array from a finished batch, assigns the layers and notifies.
+         * @param bucketId - The bucket.
+         * @param batch - The baked entries in layer order.
+         * @param results - Whether each layer baked.
+         * @param pixels - The layers' RGBA8 pixels.
+         * @param bucketSize - The layer edge.
+         */
+        private swapArray;
+    }
+    /**
+     * The GPU texture baker (D-L10): one `EffectRenderer` fullscreen pass per texture into a bucket-sized RGBA8 render target,
+     * sampled at the mip level matching the downsampling, then `readPixels`. Hardware-sRGB sources are re-encoded to gamma so an
+     * sRGB bucket always holds gamma bytes. The blit is WGSL on WebGPU and its GLSL twin on the WebGL2 backend (T13).
+     */
+    class RayTracingTextureBaker {
+        /** Shader name of the blit pass. */
+        static readonly BlitShaderName: string;
+        /** The engine. */
+        private readonly engine;
+        /** The scene the render targets belong to. */
+        private readonly scene;
+        /** The fullscreen renderer (created on first use). */
+        private renderer;
+        /** The blit effect (created on first use). */
+        private wrapper;
+        /**
+         * Creates the baker; the blit effect compiles on the first `isReady` poll.
+         * @param scene - The scene.
+         */
+        constructor(scene: BABYLON.Scene);
+        /**
+         * Whether the blit effect compiled (creates it on the first call).
+         * @returns True once bakes can run.
+         */
+        isReady(): boolean;
+        /**
+         * Bakes one texture into bucket-sized RGBA8 pixels.
+         * @param texture - The source texture.
+         * @param bucketSize - The layer edge in pixels.
+         * @param colorSpace - The bucket's colour space.
+         * @returns The pixels in the texture's row order, or null when the read-back failed.
+         */
+        bake(texture: BABYLON.BaseTexture, bucketSize: number, colorSpace: RtTextureColorSpace): Promise<Uint8Array>;
+        /** Releases the renderer and the effect. */
+        dispose(): void;
+        /** Registers the blit shader (WGSL and its GLSL twin) and creates the renderer and effect in the engine's language. */
+        private createEffect;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The luminance CDF of an HDRI sky (hdrp-raytracing-polyfill T12, HDRP PathTracingSkySampling): an equirectangular grid whose texel
+     * weights are luminance × sin(polar angle), as a marginal CDF over the rows and one conditional CDF per row.
+     */
+    interface IRtSkyCdf {
+        /** Grid width (azimuth), in texels. */
+        width: number;
+        /** Grid height (polar angle, zenith row first), in texels. */
+        height: number;
+        /** `height + 1` cumulative row shares, 0 … 1. */
+        marginal: Float32Array;
+        /** `height` rows of `width + 1` cumulative texel shares, 0 … 1 each (a row without light is uniform). */
+        conditional: Float32Array;
+        /** Sum of every texel weight (0 = the sky is black and has nothing to sample). */
+        integral: number;
+    }
+    /** One direction drawn from a sky CDF, as equirectangular coordinates, with its density. */
+    interface IRtSkySample {
+        /** Azimuth coordinate, 0 … 1 (`RayTracingPathTracer.EquirectDirection`). */
+        u: number;
+        /** Polar coordinate, 0 (zenith) … 1 (nadir). */
+        v: number;
+        /** Density per solid angle. */
+        pdf: number;
+    }
+    /** The thin lens of a path-traced camera (HDRP PathTracing.ComputeDoFConstants). */
+    interface IRtThinLens {
+        /** Aperture radius in metres (0 = pinhole, no depth of field). */
+        apertureRadius: number;
+        /** Distance of the focus plane in metres. */
+        focusDistance: number;
+    }
+    /** Live read-outs of the path tracer (Inspector `rayTracing` row, the live session's dispatch counter). */
+    interface IRtPathTracerStats {
+        /** Every compute dispatch the path tracer issued since load (traces, sky luminance, AOV modulation, denoiser passes). */
+        dispatches: number;
+        /** Accumulation restarts since load. */
+        resets: number;
+        /** Milliseconds from the last restart until `maximumSamples` was reached (0 while accumulating). */
+        convergedMs: number;
+        /** True once the converged image was denoised. */
+        denoised: boolean;
+    }
+    /**
+     * The progress of one accumulation (T12, D-L13), the CPU state machine the path tracer follows: a change signature (camera, scene,
+     * lights, materials, exposure, sky, settings) restarts it, every dispatch traces one tile of the `tilingParameters` grid, a sample
+     * completes when every tile was traced, and the accumulation stops at `maximumSamples` (raising the maximum resumes it).
+     */
+    class PathTracerProgress {
+        /** Samples completed since the last restart. */
+        samples: number;
+        /** The tile the next dispatch traces, 0 … tileCount - 1 (row-major). */
+        tile: number;
+        /** Restarts so far. */
+        resets: number;
+        /** HDRP `maximumSamples`. */
+        maximumSamples: number;
+        /** Columns of the tile grid. */
+        tileColumns: number;
+        /** Rows of the tile grid. */
+        tileRows: number;
+        /** The signature of the accumulation in progress (null before the first frame). */
+        private signature;
+        /**
+         * Creates the progress of one accumulation.
+         * @param maximumSamples - HDRP `maximumSamples`.
+         */
+        constructor(maximumSamples: number);
+        /** Tiles per sample. */
+        get tileCount(): number;
+        /** True once `maximumSamples` samples accumulated (the GPU is idle until the next restart or a larger maximum). */
+        get converged(): boolean;
+        /** True while the first sample cycle runs (the AOVs are written). */
+        get firstCycle(): boolean;
+        /** True when the next dispatch starts from an empty accumulation. */
+        get restarting(): boolean;
+        /**
+         * Compares the frame's change signature with the accumulation's; any difference restarts it.
+         * @param signature - The frame's signature (numbers compared exactly).
+         * @returns True when the accumulation restarted.
+         */
+        observe(signature: number[]): boolean;
+        /** Records one dispatch: the next tile, and one more sample when the tile cycle wraps. */
+        completeDispatch(): void;
+        /**
+         * Whether two signatures are equal.
+         * @param previous - The accumulation's signature, or null.
+         * @param next - The frame's signature.
+         * @returns True when both exist and every number matches.
+         */
+        static SameSignature(previous: number[], next: number[]): boolean;
+    }
+    /**
+     * The progressive path tracer (hdrp-raytracing-polyfill T12, FR-L10, D-L13, D-L18): a camera whose evaluated volume enables
+     * PathTracing renders its frame from the `pathTracer` kernel instead of the raster colour - the PostProcessor's chain-head pass
+     * (`HeadSlots.pathTracer`) shows `displayTexture`, and every post effect after it runs on the traced radiance.
+     * - One sample per pixel per frame (one interleaved tile per frame with `tilingParameters`), accumulated in rgba32f; at
+     *   `maximumSamples` nothing dispatches any more and the image is kept.
+     * - The accumulation restarts on any change of the camera (view, projection settings, size), the BVH (`sceneVersion`), the
+     *   material and light tables (pre-exposure included), the texture buckets, a PLAN 1 sky environment update
+     *   (`HdrpPhysicallyBasedSky.OnEnvironmentUpdated`) or the settings.
+     * - Camera rays that miss read the live sky pass rendered into a camera-sized target (every enabled infinite-distance sky mesh:
+     *   the live PhysicallyBasedSky, or the baked skybox); escaped rays read the lighting cube at mip 0 × its level. An HDRI sky is
+     *   importance sampled through a 256 × 128 luminance CDF (HDRP `skyImportanceSampling`, default HDRI only).
+     * - `denoising` other than None runs the toolkit's SVGF denoiser once the samples converge (every frame with `temporal`), guided
+     *   by the normal / depth AOV and demodulated by the albedo AOV when `useAOVs` (Intel OIDN / NVIDIA OptiX do not exist in a
+     *   browser).
+     * The raster frame still renders underneath (its depth feeds the HDRP fog pass that fogs the camera segment). The kernel compiles
+     * only when a camera asks for path tracing (D-L2); other ray-traced effects do not trace while the path tracer renders.
+     */
+    class RayTracingPathTracer {
+        /** HDRP's enums the path tracer reads, as their integer values. */
+        static readonly Enums: {
+            SkyImportanceSampling: {
+                HdriOnly: number;
+                On: number;
+                Off: number;
+            };
+            Denoiser: {
+                None: number;
+                Intel: number;
+                Optix: number;
+            };
+            SeedMode: {
+                NonRepeating: number;
+                Repeating: number;
+                Custom: number;
+            };
+            DepthOfFieldMode: {
+                Off: number;
+                UsePhysicalCamera: number;
+                Manual: number;
+            };
+            FocusDistanceMode: {
+                Camera: number;
+                Volume: number;
+            };
+        };
+        /** Width of the sky CDF grid (HDRP PathTracingSkySamplingData). */
+        static readonly CdfWidth: number;
+        /** Height of the sky CDF grid. */
+        static readonly CdfHeight: number;
+        /** Smallest Russian-roulette survival probability. */
+        static readonly RouletteMinimum: number;
+        /** Largest Russian-roulette survival probability. */
+        static readonly RouletteMaximum: number;
+        /** HDRP / Unity `Luminance()` weights (linear Rec. 709). */
+        static readonly LuminanceWeights: number[];
+        /** HDRP DepthOfField `focusDistance` default, in metres (the camera's own focus distance is not exported). */
+        static readonly DefaultFocusDistance: number;
+        /** The sky type of an HDRI sky in the exported `hdrp.sky` block. */
+        private static readonly HdriSkyType;
+        /** Millimetres per metre (the physical camera's focal length is in millimetres). */
+        private static readonly MillimetresPerMetre;
+        /** Converts the convergence time read-out from milliseconds to seconds. */
+        private static readonly MillisecondsPerSecond;
+        /** HDRP Fog defaults for the keys an older export lacks (the values the HDRP fog pass assumes). */
+        private static readonly FogDefaults;
+        /** Every à-trous pass of the denoiser (the converged image is filtered once, with its widest footprint). */
+        private static readonly DenoiserIterations;
+        /** The ray-tracing system the path tracer belongs to. */
+        readonly system: TOOLKIT.RayTracingSystem;
+        /** The accumulation's progress. */
+        readonly progress: PathTracerProgress;
+        /** Live read-outs. */
+        readonly stats: IRtPathTracerStats;
+        /** Inspector "raster while moving" (spec D23, off by default): while the accumulation restarts every frame the raster image shows. */
+        rasterWhileMoving: boolean;
+        /** The camera the path tracer renders this frame (null when the active camera is not path traced). */
+        activeCamera: BABYLON.Camera;
+        /** The scene. */
+        private readonly scene;
+        /** The denoiser of the converged image (allocates nothing until the first denoise). */
+        private readonly denoiser;
+        /** The guide the denoiser reads: the path tracer's normal / view-depth AOV. */
+        private readonly guide;
+        /** The thin lens of each path-traced camera (`setCameraLens`). */
+        private readonly lenses;
+        /** The accumulated mean of the last dispatch. */
+        private traced;
+        /** The denoised image (null until the denoise ran for this accumulation). */
+        private denoisedImage;
+        /** True when the accumulation restarted this frame (the camera or the scene changed: "raster while moving" shows the raster). */
+        private restartedThisFrame;
+        /** True once the denoise for the current accumulation ran (or was asked again by the Inspector). */
+        private denoiseDone;
+        /** Bumped by every PLAN 1 sky environment update and pre-exposure change: part of the change signature. */
+        private environmentVersion;
+        /** The running seed of HDRP's NonRepeating seed mode. */
+        private runningSeed;
+        /** The frame id of the last dispatch: the render-target phase can run more than once per frame, the tracer dispatches once. */
+        private lastTracedFrame;
+        /** `performance.now()` of the last restart. */
+        private restartedAt;
+        /** The camera-sized sky background (the live sky pass), or null without a sky mesh. */
+        private background;
+        /** The camera whose `customRenderTargets` hold the background. */
+        private backgroundCamera;
+        /** The sky CDF in use (null: no sky importance sampling). */
+        private skyCdf;
+        /** The environment the CDF was built from (texture id and environment version), or null. */
+        private skyCdfKey;
+        /** True while a luminance read-back is in flight. */
+        private skyCdfPending;
+        /** 1-pixel black image the pass binds before the first sample. */
+        private placeholder;
+        /** True once disposed (a late luminance read-back is dropped). */
+        private disposed;
+        /** Scene observer that restarts the accumulation when needed, before the camera's render targets render. */
+        private beforeCameraObserver;
+        /** Scene observer that traces after the render targets (the sky background) rendered, before the camera's own pass. */
+        private afterTargetsObserver;
+        /** PLAN 1's environment-update observer. */
+        private environmentObserver;
+        /** Pre-exposure observer. */
+        private preExposureObserver;
+        /**
+         * Creates the path tracer of a ray-tracing system that has a backend (it allocates nothing until a camera asks for it).
+         * @param system - The scene's ray-tracing system.
+         */
+        constructor(system: TOOLKIT.RayTracingSystem);
+        /**
+         * The Russian-roulette survival probability of a path (Algorithms › path tracer): 1 up to and including the `minimumDepth`-th
+         * hit, then clamp(max(throughput), 0.05, 0.95).
+         * @param throughput - The path throughput (rgb).
+         * @param hitDepth - The hit just shaded, 1 for the camera ray's hit.
+         * @param minimumDepth - HDRP `minimumDepth`.
+         * @returns The probability the path continues.
+         */
+        static RouletteSurvival(throughput: number[], hitDepth: number, minimumDepth: number): number;
+        /**
+         * The multiple-importance-sampling power heuristic with β = 2 (HDRP PowerHeuristic): the weight of the strategy whose density is
+         * `pdf` against the other one; the two weights of a pair sum to 1.
+         * @param pdf - This strategy's density for the direction.
+         * @param otherPdf - The other strategy's density for the same direction.
+         * @returns The weight, 0 … 1.
+         */
+        static PowerHeuristic(pdf: number, otherPdf: number): number;
+        /**
+         * HDRP's `ClampValue` of an indirect contribution: scaled down to `maximumIntensity` luminance, hue kept (values are
+         * pre-exposed, as HDRP's luminance × exposure).
+         * @param value - The contribution (rgb).
+         * @param maximumIntensity - HDRP `maximumIntensity`.
+         * @returns The clamped contribution.
+         */
+        static ClampIndirect(value: number[], maximumIntensity: number): number[];
+        /**
+         * Whether the path tracer builds a sky CDF (HDRP `skyImportanceSampling`, D-L18): Off never, On always, HDRI Only (the default)
+         * only for an HDRI sky - a PhysicallyBasedSky scene builds none.
+         * @param mode - `Enums.SkyImportanceSampling`.
+         * @param skyType - The exported `hdrp.sky.type` (`hdri`, `physicallybased`, …), or null.
+         * @returns True when a CDF is built.
+         */
+        static BuildsSkyCdf(mode: number, skyType: string): boolean;
+        /**
+         * Builds the sky CDF from the luminance of an equirectangular grid (zenith row first): texel weight = luminance × sin(polar
+         * angle at the texel centre), a marginal CDF over the row sums and a conditional CDF per row.
+         * @param luminance - `width × height` luminance values, row by row.
+         * @param width - Grid width.
+         * @param height - Grid height.
+         * @returns The CDF (`integral` 0 when the sky is black).
+         */
+        static BuildSkyCdf(luminance: Float32Array, width: number, height: number): IRtSkyCdf;
+        /**
+         * The CDF in the kernel's `skyCdf` layout: the marginal, then every conditional row.
+         * @param cdf - The CDF.
+         * @returns The packed words.
+         */
+        static PackSkyCdf(cdf: IRtSkyCdf): Float32Array;
+        /**
+         * Draws a direction from the sky CDF (CPU reference of the kernel's `sampleSkyCdf`).
+         * @param cdf - The CDF.
+         * @param rowRandom - Uniform number for the row, 0 … 1.
+         * @param columnRandom - Uniform number for the column, 0 … 1.
+         * @returns The equirectangular coordinates and the density per solid angle.
+         */
+        static SampleSkyCdf(cdf: IRtSkyCdf, rowRandom: number, columnRandom: number): IRtSkySample;
+        /**
+         * The sky CDF's density per solid angle at equirectangular coordinates (CPU reference of the kernel's `skyCdfPdf`).
+         * @param cdf - The CDF.
+         * @param u - Azimuth coordinate, 0 … 1.
+         * @param v - Polar coordinate, 0 … 1.
+         * @returns The density per solid angle.
+         */
+        static SkyPdf(cdf: IRtSkyCdf, u: number, v: number): number;
+        /**
+         * The world direction of equirectangular coordinates (the kernels' `equirectDirection`): azimuth from +x toward +z, polar angle
+         * from +y.
+         * @param u - Azimuth coordinate, 0 … 1.
+         * @param v - Polar coordinate, 0 … 1.
+         * @returns The unit direction.
+         */
+        static EquirectDirection(u: number, v: number): number[];
+        /**
+         * HDRP's thin lens (PathTracing.ComputeDoFConstants): only a physical camera (the export writes `physicalaperture` /
+         * `physicalfocallength` for those alone) under a DepthOfField in Use Physical Camera mode has an aperture, radius = ½ × focal
+         * length (m) / f-number; the focus plane is the volume's `focusDistance` (the camera's own focus distance is not exported, so
+         * the Camera focus-distance mode reads the volume value too).
+         * @param camera - The exported camera metadata, or null.
+         * @param depthOfFieldMode - The camera volume's DepthOfField mode (`Enums.DepthOfFieldMode`), or null without one.
+         * @param focusDistance - The volume's `focusDistance` in metres, or null.
+         * @returns The lens.
+         */
+        static ThinLens(camera: TOOLKIT.IPostProcessCameraMetadata, depthOfFieldMode: number, focusDistance: number): IRtThinLens;
+        /** The image the PostProcessor's chain-head pass shows: the denoised or accumulated mean, or a black placeholder before the first sample. */
+        get displayTexture(): BABYLON.BaseTexture;
+        /**
+         * Whether the chain-head pass of a camera shows the traced image this frame.
+         * @param camera - The camera whose pass applies.
+         * @returns True when the camera is path traced, has a sample and is not showing the raster while moving.
+         */
+        showsCamera(camera: BABYLON.Camera): boolean;
+        /** True when the sky CDF is built and bound (HDRI sky importance sampling). */
+        get skyImportanceSampled(): boolean;
+        /**
+         * Whether a camera's frame is path traced: its intent enables PathTracing on an engine with a backend (WebGPU, or WebGL2 at half resolution).
+         * @param camera - The camera.
+         * @returns True for a path-traced camera.
+         */
+        tracesCamera(camera: BABYLON.Camera): boolean;
+        /**
+         * Whether any camera of the scene asks for the path tracer (its kernel compiles ahead of the first switch).
+         * @returns True when one camera's intent enables PathTracing.
+         */
+        get asked(): boolean;
+        /**
+         * Records the thin lens of a path-traced camera (the PostProcessor reads the camera metadata and its DepthOfField).
+         * @param camera - The camera.
+         * @param lens - Its lens.
+         */
+        setCameraLens(camera: BABYLON.Camera, lens: IRtThinLens): void;
+        /** Asks for the denoise again (the Inspector changed `denoising`); a converged image is filtered on the next frame. */
+        requestDenoise(): void;
+        /**
+         * The per-frame update (run by `RayTracingSystem.sync`): starts compiling the path tracer kernel the first time a camera asks for
+         * it, and the sky-luminance kernel when that camera's sky is importance sampled.
+         */
+        update(): void;
+        /**
+         * A one-line state for the Inspector: samples, convergence, resets and the denoise.
+         * @param camera - The listed camera.
+         * @returns The read-out.
+         */
+        describe(camera: BABYLON.Camera): string;
+        /** Stops tracing and releases every image, target and observer (system dispose). Safe to call twice. */
+        dispose(): void;
+        /**
+         * Before the camera's render targets render: decides whether the accumulation restarts (so the sky background re-renders in this
+         * frame's render-target phase).
+         * @param camera - The camera about to render.
+         */
+        prepareFrame(camera: BABYLON.Camera): void;
+        /**
+         * After the render targets rendered: one dispatch of the path tracer per frame for the active path-traced camera (nothing once
+         * converged, the image is kept), then the denoise when it is due.
+         * @param camera - The scene's active camera.
+         */
+        renderFrame(camera: BABYLON.Camera): void;
+        /**
+         * One dispatch: the current tile of the current sample.
+         * @param camera - The path-traced camera.
+         * @param pathTracing - Its PathTracing intent.
+         */
+        private trace;
+        /**
+         * Runs the toolkit denoiser over the accumulated mean (FR-L10 `denoising`): demodulated by the albedo AOV when `useAOVs`,
+         * filtered with the normal / view-depth AOV as its guide (spatially: the accumulation already holds the temporal history),
+         * remodulated.
+         * @param camera - The path-traced camera.
+         * @param useAovs - HDRP `useAOVs`.
+         */
+        private denoise;
+        /**
+         * The change signature of a frame (D-L13): the camera's view and projection settings, the render size, the BVH version, the
+         * material / light / texture uploads, the environment version (sky updates, pre-exposure), the environment texture and its
+         * level, and every PathTracing setting that changes the image (`maximumSamples` and the denoiser excluded: raising the maximum
+         * resumes, the denoiser filters the same accumulation).
+         * @param camera - The path-traced camera.
+         * @param pathTracing - Its PathTracing intent.
+         * @param width - Render width.
+         * @param height - Render height.
+         * @returns The signature.
+         */
+        private signatureOf;
+        /**
+         * The thin lens of a camera (`setCameraLens`), a pinhole when none was recorded.
+         * @param camera - The camera.
+         * @returns The lens.
+         */
+        private lensOf;
+        /**
+         * The per-sample seed (HDRP `seedMode`): NonRepeating = the running dispatch count (never the same twice), Repeating = the
+         * sample index (every accumulation gives the same image), Custom = `customSeed` + the sample index.
+         * @param pathTracing - The PathTracing intent.
+         * @returns The seed.
+         */
+        private seedOf;
+        /**
+         * The height fog of the secondary segments from the scene's `hdrp.fog` block (null when the fog is off or the fog module is
+         * not in the bundle); the same parameters the HDRP fog pass reads.
+         * @returns The fog, or null.
+         */
+        private fogOf;
+        /**
+         * Builds the sky CDF when the camera's sky is importance sampled (HDRI sky, or `skyImportanceSampling` On) and the environment
+         * changed since the last build: the sky-luminance kernel measures the cube, the read-back becomes the CDF, the kernel binds it.
+         * A scene whose sky is not importance sampled builds nothing.
+         * @param camera - The path-traced camera.
+         * @param pathTracing - Its PathTracing intent.
+         */
+        private updateSkyCdf;
+        /**
+         * The exported sky type of the scene (`hdrp.sky.type`).
+         * @returns The type, or null.
+         */
+        private skyType;
+        /**
+         * Re-renders the camera-sized sky background in this frame's render-target phase (D-L18: the live sky pass for camera rays
+         * that miss): every enabled, visible infinite-distance mesh (the live PhysicallyBasedSky, or the baked skybox while it shows).
+         * A scene without one leaves the background null (misses read the sky cube).
+         * @param camera - The path-traced camera.
+         */
+        private refreshBackground;
+        /** Removes the sky background from its camera and disposes it. */
+        private releaseBackground;
+        /**
+         * A numeric PathTracing setting, HDRP's default (`RayTracingContract.Defaults.pathTracing`) when it is missing or mistyped.
+         * @param pathTracing - The camera's PathTracing intent.
+         * @param key - The exported key (`maximumsamples`, `minimumdepth`, …).
+         * @returns The number.
+         */
+        static Setting(pathTracing: IRayTracingFields, key: string): number;
+        /**
+         * Luminance of a linear colour.
+         * @param color - Three numbers.
+         * @returns The luminance.
+         */
+        private static Luminance;
+        /**
+         * The last cell of a cumulative run whose start is at or below a value (binary search, the kernel's `searchCdf`).
+         * @param cumulative - The cumulative values.
+         * @param base - First entry of the run (holds 0).
+         * @param cellCount - Cells in the run (`cellCount + 1` entries, the last holds 1).
+         * @param value - The uniform number.
+         * @returns The cell, 0 … cellCount - 1.
+         */
+        private static SearchCdf;
+        /**
+         * A millisecond clock.
+         * @returns `performance.now()` where it exists, else `Date.now()`.
+         */
+        private static Now;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The material hook of the ray-tracing polyfill (hdrp-raytracing-polyfill D-L8, T6–T8): attached at intake to every PBR material
+     * (stock and generated graph classes) of a scene that asks for ray tracing, never to any other. Each traced effect switches on
+     * its own defines, so a material whose scene traces nothing compiles to stock code and binds no sampler.
+     *
+     * The traced frame (`TK_RTFRAME`, any effect on) binds `rtGuideSampler` (the frame's world normal + view depth) and, before the
+     * lights, reprojects the fragment's world position into the traced frame (`rtPrevViewProjection`, D-L7: the images of frame N are
+     * read in frame N + 1); off screen, before the first trace, or where the traced view depth differs from its own by more than
+     * `rtFrameInfo.y` (2 %) every effect keeps its raster term. Then:
+     * - shadows (T6, `TK_RTSHADOWS`): `rtShadowsSampler` holds the (denoised) visibility of slots 0–3; every light `{X}` whose slot is
+     *   in the per-mesh define `TK_RTSLOT{X}` multiplies Babylon's `shadow` by its mask channel, reached through the `ShadowAnchor`
+     *   regex key (from the light's `diffuse{X} = light{X}.vLightDiffuse` line to its `aggShadow += shadow;`); slot 0 with
+     *   `TK_RTSHADOWCOLOR` also tints the light by `rtShadowColorSampler`;
+     * - ambient occlusion (T7, `TK_RTAO`): `rtLighting0Sampler` alpha is the denoised visibility; HDRP's `pow(visibility, intensity)`
+     *   (`rtFrameInfo.z`) multiplies the indirect diffuse (`IrradianceAnchor`) and the ambient term, and `lerp(1, ao,
+     *   directLightingStrength)` (`rtFrameInfo.w`) the direct diffuse (`DirectDiffuseAnchor`);
+     * - reflections (T8, `TK_RTREFLECTIONS`): `rtLighting1Sampler` holds the denoised reflection premultiplied by HDRP's smoothness
+     *   fade weight; the environment radiance becomes `rgb + (1 - a) × radiance` (`RadianceAnchor`) before Babylon applies its
+     *   environment BRDF (Fresnel / roughness), as HDRP applies its FGD to the traced lighting;
+     * - global illumination (T9, `TK_RTGI`): `rtLighting0Sampler` rgb is the denoised traced irradiance; it REPLACES the indirect
+     *   diffuse where Babylon defines it from the environment / probes (`IrradianceDefinitionAnchor`, before the AO line multiplies it)
+     *   and an additive lightmap is dropped (`LightmapAnchor`), as HDRP's RTGI replaces lightmaps, probes and APV;
+     * - recursive rendering (T10, `TK_RTRECURSIVE`, the recursive layer mask's renderers only): `rtRecursiveSampler` holds the traced
+     *   colour and the view depth of the recursive hit; where that depth is the fragment's own the colour replaces the raster colour
+     *   with alpha 1 before fog (`CUSTOM_FRAGMENT_BEFORE_FOG`), where another recursive surface lies in front the fragment is discarded
+     *   (the trace already shows it);
+     * - subsurface scattering (T11, `TK_RTSSS`, diffusion-profile materials only): `rtSubsurfaceSampler` holds the traced scattered
+     *   lighting and the surface's view depth; where it matches, the material's diffuse and indirect diffuse are zeroed (so the
+     *   screen-space SSS blurs nothing) and the traced lighting is added before fog.
+     * GI, shadows, AO and reflections pass the guide's depth test (`TK_RTGUIDE`); recursive rendering and SSS test their own depth.
+     * The regex keys serve GLSL and WGSL (only the declarations differ); all are returned from the first call, as
+     * MaterialPluginManager freezes the key set.
+     *
+     * Per-frame values (the traced frame's matrix and depth plane, the history flag, the AO strengths) are written in hardBindForSubMesh
+     * into the material's uniform buffer once per frame and buffer, like HdrpTubeLightPlugin, so they never force a material rebind.
+     * @class RayTracedLightingPlugin - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class RayTracedLightingPlugin extends BABYLON.MaterialPluginBase {
+        /** The plugin name (MaterialPluginManager key). */
+        static readonly PluginName: string;
+        /** D-L8: after Babylon's own plugins and the toolkit's lighting plugins that shape the light loop. */
+        static readonly Priority: number;
+        /** Sampler of the traced frame's guide (world normal + view depth: the D-L7 depth test). */
+        static readonly GuideSampler: string;
+        /** Sampler of the slot masks. */
+        static readonly ShadowMaskSampler: string;
+        /** Sampler of slot 0's colour-shadow tint. */
+        static readonly ShadowColorSampler: string;
+        /** Babylon's per-light shadow-map sampler name before the light index (`shadowTexture0`, …). */
+        static readonly ShadowSamplerPrefix: string;
+        /** Sampler of `rtLighting0` (D-L8: GI rgb from T9, ambient-occlusion visibility in a). */
+        static readonly Lighting0Sampler: string;
+        /** Sampler of `rtLighting1` (D-L8: reflection rgb, weight a). */
+        static readonly Lighting1Sampler: string;
+        /** Sampler of the recursive colour (T10: colour rgb, view depth of the recursive hit a). */
+        static readonly RecursiveSampler: string;
+        /** Sampler of the traced subsurface lighting (T11: scattered diffuse rgb, surface view depth a). */
+        static readonly SubsurfaceSampler: string;
+        /** Prefix of the per-light slot defines: `TK_RTSLOT<light index>` = the light's slot, absent when it is not traced. */
+        static readonly SlotDefinePrefix: string;
+        /**
+         * The per-light anchor, GLSL and WGSL: group 1 = the light's code from its diffuse line up to (not including) its
+         * `aggShadow += shadow;`, group 2 = the light index. Matched against the include-expanded fragment source; the diffuse line
+         * reads `light{X}.vLightDiffuse` from the light's uniform buffer, or `vLightDiffuse{X}` where the engine disables uniform
+         * buffers (the WebGL2 host, T13).
+         */
+        static readonly ShadowAnchor: string;
+        /** The indirect-diffuse occlusion line (`pbrBlockFinalLitComponents`): `finalIrradiance *= aoOut.ambientOcclusionColor;`. */
+        static readonly IrradianceAnchor: string;
+        /** The direct-diffuse occlusion line (`pbrBlockFinalUnlitComponents`): `finalDiffuse *= ambientOcclusionForDirectDiffuse;`. */
+        static readonly DirectDiffuseAnchor: string;
+        /** The environment radiance line (`pbrBlockFinalLitComponents`): `finalRadiance = reflectionOut.environmentRadiance.rgb;`. */
+        static readonly RadianceAnchor: string;
+        /** The indirect-diffuse definition (`pbrBlockFinalLitComponents`): `finalIrradiance = reflectionOut.environmentIrradiance;` (GLSL `vec3`, WGSL `var : vec3f`). */
+        static readonly IrradianceDefinitionAnchor: string;
+        /** The lightmap level line of `pbrBlockLightmapInit`, GLSL: `lightmapColor.rgb *= vLightmapInfos.y;`. */
+        static readonly LightmapAnchorGLSL: string;
+        /** The lightmap level line of `pbrBlockLightmapInit`, WGSL: `lightmapColor = vec4f(lightmapColor.rgb * uniforms.vLightmapInfos.y, lightmapColor.a);`. */
+        static readonly LightmapAnchorWGSL: string;
+        /**
+         * The per-frame uniforms, the one source of their names and layout: the traced frame's view-projection and view-depth plane,
+         * and `rtFrameInfo` (x = a traced frame exists, y = the depth tolerance, z = the AO intensity, w = the AO direct-lighting strength).
+         */
+        static readonly Uniforms: {
+            name: string;
+            size: number;
+            type: string;
+        }[];
+        /** The GLSL name of each WGSL type the injected code declares. */
+        private static readonly GlslTypes;
+        /** Uniform-buffer identity of the last per-frame write (one write per frame and buffer). */
+        private lastWriteKey;
+        /** The uniform buffer the last per-frame write went to. */
+        private lastWriteBuffer;
+        /**
+         * Creates the plugin on a material (use `AttachIfAsked`). hardBindForSubMesh is an extra event, read when the plugin is enabled,
+         * so the plugin is constructed disabled, registers for extra events, then enables itself (HdrpTubeLightPlugin's pattern).
+         * @param material - The PBR material.
+         */
+        constructor(material: BABYLON.Material);
+        /**
+         * D-L8 intake (CanvasTools): attaches the plugin to a PBR material of a scene that asks for ray tracing on an engine that can
+         * trace (`RayTracingSystem.SelectBackend`: WebGPU compute, or WebGL2 with float render targets, T13). Every other material,
+         * scene or engine is left untouched and keeps its stock shaders and samplers.
+         * @param material - The material being loaded (before its first compile).
+         * @returns The plugin, or null when none was attached.
+         */
+        static AttachIfAsked(material: BABYLON.Material): RayTracedLightingPlugin;
+        /**
+         * The plugin on a material.
+         * @param material - The material.
+         * @returns The plugin, or null.
+         */
+        static Get(material: BABYLON.Material): RayTracedLightingPlugin;
+        /**
+         * Samplers the plugin adds to a draw (the toolkit's sampler guard counts them as required): the guide while a guide-tested
+         * effect applies, plus one per applied image (shadow masks, the colour tint, `rtLighting0` for AO and / or GI, reflections,
+         * the recursive colour, the subsurface lighting).
+         * @param material - The material being estimated.
+         * @param defines - Its prepared defines, or null (estimated from the scene's active effects).
+         * @returns The sampler count, 0 when nothing is traced.
+         */
+        static RequiredSamplers(material: BABYLON.Material, defines?: BABYLON.MaterialDefines): number;
+        /**
+         * Every define the plugin owns, off: the frame, the guide test, the effect switches and one slot define per unrolled light.
+         * @returns The define defaults.
+         */
+        static DefineDefaults(): {
+            [name: string]: boolean | number;
+        };
+        /**
+         * The class name.
+         * @returns `RayTracedLightingPlugin`.
+         */
+        getClassName(): string;
+        /**
+         * Both shader languages are supported.
+         * @param shaderLanguage - The material's shader language.
+         * @returns True for GLSL and WGSL.
+         */
+        isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
+        /**
+         * Sets the per-mesh defines: `TK_RTSLOT{X}` = the slot of the mesh's light `{X}` when that light traces its shadow and the mesh
+         * receives shadows; `TK_RTSHADOWS` when any does; `TK_RTSHADOWCOLOR` when slot 0 is among them and casts colour; `TK_RTAO` while
+         * ambient occlusion traces; `TK_RTREFLECTIONS` while reflections trace (an alpha-blended material only with HDRP's
+         * `enabledTransparent`); `TK_RTGI` while GI traces, on opaque receivers of its layer mask; `TK_RTSSS` while subsurface
+         * scattering traces, on diffusion-profile materials; `TK_RTGUIDE` when any guide-tested effect is on. A renderer of the
+         * recursive layer mask takes only `TK_RTRECURSIVE` while recursive rendering traces (the traced colour replaces all of its
+         * lighting). `TK_RTFRAME` when anything is on.
+         * @param defines - The material defines.
+         * @param scene - The scene.
+         * @param mesh - The mesh being prepared.
+         */
+        prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
+        /**
+         * Registers the plugin's samplers with the effect (each is declared only under its define).
+         * @param samplers - The effect's sampler names.
+         */
+        getSamplers(samplers: string[]): void;
+        /**
+         * The per-frame uniforms (`Uniforms`) as the material's uniform-buffer layout, plus their GLSL declarations.
+         * @param shaderLanguage - The material's shader language.
+         * @returns The uniform-buffer layout, plus the GLSL declarations.
+         */
+        getUniforms(shaderLanguage?: BABYLON.ShaderLanguage): {
+            ubo: {
+                name: string;
+                size: number;
+                type: string;
+            }[];
+            fragment?: string;
+        };
+        /**
+         * Every draw: writes the per-frame values into the material's uniform buffer, once per frame and buffer (PBR flushes the
+         * buffer at the end of its bind, so a traced draw never forces a material rebind).
+         * @param uniformBuffer - The material's uniform buffer.
+         * @param scene - The scene.
+         * @param engine - The engine.
+         * @param subMesh - The sub-mesh being drawn.
+         */
+        hardBindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Binds the traced images (or their placeholders before the first trace) of every ray-tracing sampler the draw's effect declares.
+         * The effect is read, not the defines: while a new variant compiles Babylon keeps drawing the previous effect (shader hot
+         * swapping) with the new defines already set, and a sampler that effect still declares but nothing bound would read whatever
+         * texture its unit holds - a shadow map in compare mode is a GL "texture format / sampler type" error (T14, seen on WebGL2
+         * after a governor hand-back). For the same reason the shadow maps of lights whose generator the ray-traced shadows switched
+         * off are bound while a previous effect still samples them (`BindStaleShadowMaps`).
+         * @param uniformBuffer - The material's uniform buffer.
+         * @param scene - The scene.
+         * @param engine - The engine.
+         * @param subMesh - The sub-mesh being drawn.
+         */
+        bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
+        /**
+         * Binds the shadow map of every light whose shadow sampler the draw's effect declares while Babylon does not bind it (the
+         * ray-traced shadows switched the light's generator off, or gave it back, and the previous effect is still drawn during the new
+         * variant's compile): the generator's last map, with its own compare mode, so the sampler type always matches.
+         * @param mesh - The mesh being drawn.
+         * @param effect - The effect being drawn.
+         * @param declared - The effect's samplers.
+         */
+        static BindStaleShadowMaps(mesh: BABYLON.AbstractMesh, effect: BABYLON.Effect, declared: string[]): void;
+        /**
+         * The injected fragment code: declarations, the reprojected samples before the lights, the per-light shadow line, the
+         * occlusion lines and the environment radiance line.
+         * @param shaderType - `vertex` or `fragment`.
+         * @param shaderLanguage - The material's shader language.
+         * @returns The code by injection key, or null for the vertex stage.
+         */
+        getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): {
+            [pointName: string]: string;
+        };
+        /**
+         * The sampler declarations, each under its condition (WGSL declares a texture and its sampler; the names are baked into the
+         * code, WGSL rejects a sampler as a function parameter). `rtLighting0` serves ambient occlusion and GI.
+         * @param wgsl - True for WGSL.
+         * @returns The definitions block.
+         */
+        static Definitions(wgsl: boolean): string;
+        /**
+         * D-L7 before the light loop: `tkRtMask` (slot visibilities), `tkRtTint` (slot 0's tint), `tkRtAo` (HDRP's occlusion factor),
+         * `tkRtReflection` (the premultiplied reflection) and `tkRtGi` (the traced irradiance, a = 1 where it applies) from the traced
+         * frame at the fragment's reprojected position when the guide's depth matches; `tkRtRecursive` (rgb, a = 1 to replace the
+         * colour, -1 to hide the fragment behind another recursive surface) and `tkRtSubsurface` (rgb, a = 1 to replace the diffuse)
+         * when their own traced depth matches. Neutral values (1, 1, 1, 0, 0, 0, 0) where the trace cannot be reused (off screen, no
+         * traced frame, depth mismatch). Row 0 of the images is the top of the frame, so v = 0.5 - ndc.y / 2.
+         * @param wgsl - True for WGSL.
+         * @returns The code.
+         */
+        static BeforeLights(wgsl: boolean): string;
+        /**
+         * The per-light replacement of `ShadowAnchor`: re-emits the light's code (`$1`), then - for a light with a slot - multiplies
+         * Babylon's `shadow` by the slot's mask and, for slot 0 with colour shadows, tints the light's diffuse and specular, before
+         * `aggShadow += shadow;` is re-emitted. `$2` is the light index.
+         * @param wgsl - True for WGSL.
+         * @returns The replacement.
+         */
+        static LightShadow(wgsl: boolean): string;
+        /**
+         * The replacement of `IrradianceAnchor`: after Babylon's own occlusion, the traced occlusion multiplies the indirect diffuse.
+         * @returns The replacement (the same in GLSL and WGSL).
+         */
+        static IrradianceOcclusion(): string;
+        /**
+         * The replacement of `DirectDiffuseAnchor`: the ambient term takes the traced occlusion, the direct diffuse takes it by HDRP's
+         * `directLightingStrength`; under traced subsurface scattering the diffuse and indirect diffuse leave (`BeforeFog` adds the
+         * traced lighting instead, so the screen-space SSS blurs nothing).
+         * @param wgsl - True for WGSL.
+         * @returns The replacement.
+         */
+        static DirectDiffuseOcclusion(wgsl: boolean): string;
+        /**
+         * The replacement of `IrradianceDefinitionAnchor`: the traced GI replaces the environment / probe / APV irradiance where it
+         * applies (before Babylon's albedo, energy conservation and ambient occlusion shape it, as HDRP's indirect diffuse).
+         * @returns The replacement (the same in GLSL and WGSL).
+         */
+        static TracedIrradiance(): string;
+        /**
+         * The replacement of the lightmap level line: an additive lightmap is indirect diffuse the traced GI replaces (HDRP's RTGI
+         * replaces lightmaps); a shadow-map lightmap (a multiplier) is kept.
+         * @param wgsl - True for WGSL.
+         * @returns The replacement.
+         */
+        static TracedLightmap(wgsl: boolean): string;
+        /**
+         * `CUSTOM_FRAGMENT_BEFORE_FOG` (after emission, before fog and the prepass split): a recursive renderer hides a fragment behind
+         * another recursive surface and replaces its colour with the traced one (alpha 1: the trace already holds what lies behind
+         * the glass); a diffusion-profile material adds the traced scattered lighting.
+         * @param wgsl - True for WGSL.
+         * @returns The code.
+         */
+        static BeforeFog(wgsl: boolean): string;
+        /**
+         * The replacement of `RadianceAnchor`: the environment radiance keeps the share the trace left unresolved
+         * (`RayTracedReflections.ComposeEnvironment`).
+         * @returns The replacement (the same in GLSL and WGSL).
+         */
+        static TracedRadiance(): string;
+        /**
+         * The shadow-slot defines (T6): `TK_RTSLOT{X}` per light of the mesh that owns a slot (the mesh receives shadows and shadows
+         * trace), `TK_RTSHADOWS` when any does, `TK_RTSHADOWCOLOR` when slot 0 is among them and casts colour.
+         * @param values - The material defines.
+         * @param system - The scene's ray-tracing system, or null (every slot define off).
+         * @param mesh - The mesh being prepared.
+         * @returns True when a light of the mesh traces its shadow.
+         */
+        private prepareShadowDefines;
+        /**
+         * Whether a mesh's draw takes the traced reflection: opaque and alpha-tested materials always, alpha-blended ones only with
+         * HDRP's `enabledTransparent`.
+         * @param mesh - The mesh being prepared.
+         * @param reflections - The scene's reflection effect.
+         * @returns True when the reflection applies.
+         */
+        private receivesReflections;
+    }
+}
+declare namespace TOOLKIT {
+    /** Read-outs of one ray-tracing system (Inspector `rayTracing` row, tests, the live session). */
+    interface IRayTracingStats {
+        /** Triangles uploaded (unique geometry, each shared geometry counted once). */
+        triangles: number;
+        /** Instances in the top-level BVH. */
+        instances: number;
+        /** GPU bytes of the packed scene (geometry, BVHs, instances, height fields). */
+        bytes: number;
+        /** Summed bottom-level build time in milliseconds (measured inside the worker). */
+        buildMs: number;
+        /** Gathered candidates (instances with `raytracingmode ≠ 0`), packed or not. */
+        candidates: number;
+        /** Candidates left out by the memory budget at the last pack. */
+        dropped: number;
+        /** Bottom-level builds still running. */
+        pendingBuilds: number;
+        /** Main-thread milliseconds of the last frame's top-level update (dirty scan, refit or rebuild, upload). */
+        tlasMs: number;
+        /** Smoothed (exponential average) main-thread milliseconds of the per-frame top-level update. */
+        tlasAverageMs: number;
+        /** Full top-level rebuilds since load (membership changes and degraded refits). */
+        tlasRebuilds: number;
+        /** Bottom-up top-level refits since load (transform-only frames). */
+        tlasRefits: number;
+        /** Main-thread milliseconds spent gathering, packing and uploading since the system was created. */
+        loadMs: number;
+        /** Milliseconds from creation until the kernels compiled and the first full upload landed (0 until then). */
+        readyMs: number;
+        /** `RtMaterial` records in the material table (T5). */
+        materials: number;
+        /** Lights in the light table (T5). */
+        lights: number;
+        /** Baked texture layers over every bucket (T5, D-L10). */
+        textureLayers: number;
+        /** GPU bytes of the texture-bucket arrays. */
+        textureBytes: number;
+        /** Material-table uploads since load (pre-exposure changes, texture bakes, edits). */
+        materialUploads: number;
+        /** Light-table uploads since load (pre-exposure changes, colour or transform changes). */
+        lightUploads: number;
+    }
+    /**
+     * The per-scene ray-tracing system (hdrp-raytracing-polyfill T4, D-L2 – D-L6): created only for a parity HDRP scene whose export
+     * asks for ray tracing. It gathers traced meshes and terrains progressively (≤ `GatherBudgetMs` per frame), builds one bottom-level
+     * BVH per unique geometry in the worker, packs everything into the GPU layout, keeps the top level current every frame (a cheap
+     * bottom-up refit when only transforms moved, a full rebuild when membership changes or the refit degrades), refits deforming
+     * DynamicGeometry meshes round-robin, and drives the backend: WebGPU compute, else the WebGL2 fragment backend (T13, D-L14) on an
+     * engine with float render targets; on an engine with neither it reports once and creates nothing heavy (every effect keeps its
+     * screen-space branch). Everything is released on scene dispose.
+     */
+    class RayTracingSystem {
+        /** GPU memory budget for geometry, BVHs and instances (D-L6: 256 MiB); over it, instances are dropped farthest × smallest first. */
+        static MemoryBudgetBytes: number;
+        /** Main-thread budget of the progressive gather, in milliseconds per frame. */
+        static GatherBudgetMs: number;
+        /** 32-bit words per packed instance (`RtInstance`, 144 bytes). */
+        static readonly InstanceWords: number;
+        /** A refit whose summed node area grows beyond this factor of the last full build's triggers a full top-level rebuild. */
+        static readonly RefitDegradationLimit: number;
+        /** While bottom-level builds are still running, repack at most this often (frames), so load does not re-upload per build. */
+        static readonly RepackIntervalFrames: number;
+        /** When more than 1 / this of the top-level nodes' instances moved, one full bottom-up refit beats walking each ancestor chain. */
+        private static readonly PartialRefitRatio;
+        /** DynamicGeometry meshes refitted per frame (round-robin). */
+        static readonly DynamicRefitsPerFrame: number;
+        /** Unity's default `Renderer.rayTracingMode` (DynamicTransform) for an exported renderer whose export lacks the key. */
+        static readonly DefaultRayTracingMode: number;
+        /** Unity `RayTracingMode.DynamicGeometry`. */
+        static readonly DynamicGeometryMode: number;
+        /** Bytes per packed instance plus its share of the top level (two nodes). */
+        private static readonly InstanceBytes;
+        /** Bytes per packed triangle: three vec4 corners, three vec4 corner attributes and one leaf-order word. */
+        private static readonly TriangleBytes;
+        /** Floats per packed triangle in the `triangles` buffer (corners + attributes). */
+        private static readonly TriangleFloats;
+        /** Octahedral component written when a mesh has no normals (the kernels then shade with the face normal). */
+        private static readonly NoNormal;
+        /** Debug-view modes (Inspector `rayTracing` › debug view). */
+        static readonly DebugMode: {
+            off: number;
+            hitNormals: number;
+            primaryShading: number;
+        };
+        /** Instance flag bits (Design Reference › Data shapes). */
+        /**
+         * `RtInstance.flags` bits: flip winding, height field, alpha tested, only transparent materials, shadows-only renderer, and the
+         * instance's Unity layer (0–31) from bit `layerShift` (the per-effect ray membership, D-L6).
+         */
+        static readonly Flags: {
+            flipWinding: number;
+            heightField: number;
+            alphaTested: number;
+            transparentOnly: number;
+            shadowsOnly: number;
+            layerShift: number;
+        };
+        /** Unity layer bits of an instance's flags (after `layerShift`). */
+        private static readonly LayerBits;
+        /** Smoothing weight of `stats.tlasAverageMs`. */
+        private static readonly AverageWeight;
+        /** Fixed words of a packed height-field header before the per-level (offset, width) pairs. */
+        private static readonly HeightHeaderWords;
+        /** Largest raw terrain height (Unity heightmaps are 16-bit). */
+        private static readonly MaxRawHeight;
+        /** Share of `buildProgress` for gathering the scene geometry (scene-loading-progress T8). */
+        private static readonly GatherProgressWeight;
+        /** Share of `buildProgress` for the BVH builds. */
+        private static readonly BuildProgressWeight;
+        /** Share of `buildProgress` for the backend's kernels (compiled and ready). */
+        private static readonly BackendProgressWeight;
+        /** Loading-splash stage labels of `buildStageLabel`, in setup order. */
+        static readonly BuildStageLabels: {
+            gathering: string;
+            building: string;
+            compiling: string;
+        };
+        /** The live system of every asked scene. */
+        private static systems;
+        /** Report keys already written (one report per key per page). */
+        private static reportedKeys;
+        /** The scene this system traces. */
+        readonly scene: BABYLON.Scene;
+        /** The backend, or null when the engine cannot trace (WebGL2 until T13). */
+        readonly backend: IRayTracingBackend;
+        /** Live read-outs. */
+        readonly stats: IRayTracingStats;
+        /** The packed scene the backend uploads (null until the first pack). */
+        packed: IRtPackedScene;
+        /** Notified when `debugView` changes (the PostProcessor adds or removes the debug-view pass). */
+        readonly onDebugViewChangedObservable: BABYLON.Observable<RayTracingSystem>;
+        /** The texture the last debug trace wrote (sampled by the debug-view pass), or null. */
+        debugTexture: BABYLON.BaseTexture;
+        /** The material table (T5), null without a backend. */
+        readonly materialTable: TOOLKIT.RayTracingMaterialTable;
+        /** The texture buckets (T5, D-L10), null without a backend. */
+        readonly textureBuckets: TOOLKIT.RayTracingTextureBuckets;
+        /** The light table (T5), null without a backend. */
+        readonly lightTable: TOOLKIT.RayTracingLightTable;
+        /** The ray-traced shadows (T6), null without a backend (every light then keeps its shadow map). */
+        readonly shadows: TOOLKIT.RayTracedShadows;
+        /** The traced frame every screen-space tracer shares (T7: prepass request, guide, reprojection matrices); null without a backend. */
+        readonly frame: TOOLKIT.RayTracedFrame;
+        /** Ray-traced ambient occlusion (T7); null without a backend. */
+        readonly ambientOcclusion: TOOLKIT.RayTracedAmbientOcclusion;
+        /** Ray-traced reflections (T8); null without a backend. */
+        readonly reflections: TOOLKIT.RayTracedReflections;
+        /** Ray-traced global illumination (T9); null without a backend. */
+        readonly globalIllumination: TOOLKIT.RayTracedGlobalIllumination;
+        /** Recursive rendering (T10); null without a backend. */
+        readonly recursive: TOOLKIT.RayTracedRecursiveRendering;
+        /** Ray-traced subsurface scattering (T11); null without a backend. */
+        readonly subsurface: TOOLKIT.RayTracedSubsurfaceScattering;
+        /** Notified when an effect starts or stops tracing (asked, A/B switch, hand-back), so the screen-space branches follow. */
+        readonly onEffectsChangedObservable: BABYLON.Observable<RayTracingSystem>;
+        /** The progressive path tracer (T12; null without a backend). */
+        readonly pathTracer: TOOLKIT.RayTracingPathTracer;
+        /** The GPU-time governor of the traced effects (T14, D-L12); null without a backend. */
+        readonly governor: TOOLKIT.RayTracingGovernor;
+        /** The GPU timer feeding the governor (T14), or null when the engine has none (the tiers then stay at the base tier). */
+        readonly gpuTimer: TOOLKIT.RayTracingGpuTimer;
+        /** The GPU milliseconds of each tracing effect the governor read last frame (reconciled with the traced span on WebGL2). */
+        private readonly effectCosts;
+        /** The keys of the tracing effects in trace order at the last measurement (WebGL2 re-measures when it changes). */
+        private tracedSignature;
+        /**
+         * Bumped whenever the traced geometry changes (a pack, a transform update that moved an instance, a DynamicGeometry refit): the
+         * path tracer restarts its accumulation when it moves (D-L13 "BVH sync dirty flag").
+         */
+        sceneVersion: number;
+        /** The debug view shown (`DebugMode`). */
+        private debugViewMode;
+        /** Which effects traced at the last update (`updateEffects` notifies when it changes). */
+        private effectsSignature;
+        /** The material table must be repacked (pre-exposure change, a bake landed, the periodic edit poll). */
+        private materialsDirty;
+        /** The sky-miss cube must be rebound (PLAN 1's environment update). */
+        private skyDirty;
+        /** The environment texture bound as the sky-miss cube. */
+        private boundSky;
+        /** `HdrpRendering.OnPreExposureChanged` observer. */
+        private preExposureObserver;
+        /** `HdrpPhysicallyBasedSky.OnEnvironmentUpdated` observer. */
+        private environmentObserver;
+        /** True once disposed: late worker replies are ignored. */
+        private disposed;
+        /** Gathered geometries by key. */
+        private geometries;
+        /** Gathered height fields by key. */
+        private heightFields;
+        /** The world-matrix watch of every gathered node. */
+        private watches;
+        /** Packed instances whose world matrix (or geometry box) changed since the last top-level update. */
+        private dirtyRecords;
+        /** Parent of every top-level node (-1 for the root), rebuilt with the top level. */
+        private tlasParents;
+        /** The top-level leaf of every packed instance. */
+        private instanceLeaves;
+        /** Summed half area of the top-level nodes now (kept current by the refits). */
+        private tlasCurrentArea;
+        /** Every gathered instance (the candidates). */
+        private records;
+        /** The instances of the current pack, in packed order. */
+        private packedRecords;
+        /** World boxes of the packed instances, 6 floats each (the top level's leaf boxes). */
+        private instanceBounds;
+        /** A u32 view of `packed.instances` (offsets and flags), made once per pack. */
+        private instanceWords;
+        /** Summed half area of the top-level nodes right after the last full build. */
+        private tlasBuiltArea;
+        /** Meshes and terrains waiting to be gathered. */
+        private gatherQueue;
+        /** Next queue position to gather (the queue is consumed by index, then reset). */
+        private gatherCursor;
+        /** Terrains whose height field was not built yet, retried every frame. */
+        private waitingTerrains;
+        /** BVH builds started since creation (scene-loading-progress T8: the denominator of the build part of `buildProgress`). */
+        private totalBuildsStarted;
+        /** Membership changed since the last pack. */
+        private membershipDirty;
+        /** Frames since the last pack. */
+        private framesSincePack;
+        /** Next DynamicGeometry geometry to refit (round-robin cursor). */
+        private dynamicCursor;
+        /** Unity layer mask of the asked effects (all layers until a camera intent narrows it). */
+        private layerMask;
+        /** The ray-tracing intent of every camera the post-processing applied. */
+        private cameraIntents;
+        /** Creation time (ms), for `stats.readyMs`. */
+        private readonly createdAt;
+        /** Scene observers removed on dispose. */
+        private beforeRenderObserver;
+        /** Debug trace observer (per camera render). */
+        private beforeCameraObserver;
+        /** New-mesh observer (late meshes join the gather queue). */
+        private meshAddedObserver;
+        /** Removed-mesh observer (their instances leave the BVH). */
+        private meshRemovedObserver;
+        /** Scratch for an instance's world matrix. */
+        private readonly scratchWorld;
+        /** Scratch for an instance's inverse world matrix. */
+        private readonly scratchInverse;
+        /**
+         * The ray-tracing system of a scene, created on first use (D-L2): only a parity HDRP scene whose export asks for ray tracing
+         * gets one; every other scene gets null and costs nothing.
+         * @param scene - The scene.
+         * @returns The system, or null when the scene does not ask.
+         */
+        static Get(scene: BABYLON.Scene): RayTracingSystem;
+        /**
+         * The existing system of a scene without creating one.
+         * @param scene - The scene.
+         * @returns The system, or null.
+         */
+        static Find(scene: BABYLON.Scene): RayTracingSystem;
+        /**
+         * Number of live systems (lifecycle checks: a disposed scene leaves none behind).
+         * @returns The count.
+         */
+        static LiveCount(): number;
+        /**
+         * Which backend an engine runs (FR-L3, D-L14): WebGPU compute first, the WebGL2 fragment backend on an engine with float
+         * render targets, none otherwise (hardware ray queries are not exposed by any browser yet).
+         * @param engine - The engine.
+         * @returns The backend name, or null when no backend can run.
+         */
+        static SelectBackend(engine: BABYLON.AbstractEngine): RayTracingBackendName;
+        /**
+         * Creates the backend `SelectBackend` picks for a scene's engine.
+         * @param scene - The scene.
+         * @returns The backend (its `failure` says when its creation failed), or null when no backend can run.
+         */
+        private static CreateBackend;
+        /**
+         * Writes a ray-tracing report once per key (warn-once convention).
+         * @param key - The dedupe key.
+         * @param message - The report.
+         */
+        static Report(key: string, message: string): void;
+        /**
+         * The Unity `rayTracingMode` of a node: the renderer key the intake stored (`_tkRayTracingMode`) or the exported renderer
+         * block of the nearest ancestor that carries toolkit metadata; Unity's default (DynamicTransform) when that renderer lacks the
+         * key; 0 (not traced) for runtime geometry that no export describes (sky meshes, helpers).
+         * @param node - The mesh or transform.
+         * @returns 0 Off, 1 Static, 2 DynamicTransform, 3 DynamicGeometry.
+         */
+        static RayTracingModeOf(node: BABYLON.Node): number;
+        /**
+         * The Unity layer index of a node (nearest ancestor with toolkit metadata), 0 when none.
+         * @param node - The mesh or transform.
+         * @returns The layer, 0..31.
+         */
+        static LayerOf(node: BABYLON.Node): number;
+        /**
+         * Whether a mesh is a Unity "Shadows Only" renderer (exported `renderer.shadowsonly`; the toolkit hides it with layer mask 0).
+         * @param mesh - The mesh (an instance reads its source's export).
+         * @returns True when only its shadow renders.
+         */
+        static IsShadowsOnly(mesh: BABYLON.AbstractMesh): boolean;
+        /**
+         * D-L6 per-effect ray membership (CPU reference of the kernels' `instanceAccepted`): an instance takes part when none of the
+         * effect's excluded flag bits is set and its Unity layer is in the effect's layer mask.
+         * @param instanceFlags - The instance's `RtInstance.flags`.
+         * @param membership - The effect's excluded flags and layer mask.
+         * @returns True when the effect's rays see the instance.
+         */
+        static InstanceAccepted(instanceFlags: number, membership: IRtRayMembership): boolean;
+        /**
+         * The ray membership of an effect that HDRP traces against its "visible" acceleration structure (AO, reflections, GI): no
+         * transparent-only or shadows-only renderer, and only the layers of the effect's `layerMask`.
+         * @param layerMask - The effect's exported layer mask (-1 = every layer).
+         * @returns The membership.
+         */
+        static VisibleMembership(layerMask: RayTracingValue): IRtRayMembership;
+        /**
+         * The union of the Unity layer masks of every ray-traced branch an intent asks for (D-L6); all layers when only lights ask, and for
+         * recursive rendering and subsurface walks (their rays see every visible renderer, T10 / T11).
+         * @param intent - The camera's ray-tracing intent.
+         * @returns The layer mask as an unsigned 32-bit value.
+         */
+        static LayerMaskOf(intent: IRayTracingIntent): number;
+        /**
+         * Refits a top level bottom-up from new leaf boxes (children always follow their parent in the node array, so walking from the
+         * last node to the first visits every child before its parent).
+         * @param nodes - The top-level nodes (from `TOOLKIT.RayTracingBvh.BuildTlas`), updated in place.
+         * @param nodeCount - Valid nodes.
+         * @param instanceBounds - 6 floats per instance (world min.xyz, max.xyz).
+         * @returns The summed half surface area of every node after the refit (the SAH quality proxy).
+         */
+        static RefitTopLevel(nodes: Float32Array, nodeCount: number, instanceBounds: Float32Array): number;
+        /**
+         * Summed half surface area of a node array (the quality the refit is compared against).
+         * @param nodes - The nodes.
+         * @param nodeCount - Valid nodes.
+         * @returns The summed half area.
+         */
+        static TopLevelArea(nodes: Float32Array, nodeCount: number): number;
+        /**
+         * The per-frame top-level decision: a full binned-SAH rebuild when the membership changed or a refit grew the summed node
+         * area beyond `RefitDegradationLimit` × the area of the last full build; otherwise the refit stands.
+         * @param membershipChanged - Instances joined or left since the last build.
+         * @param refitArea - Summed half area after the refit.
+         * @param builtArea - Summed half area right after the last full build.
+         * @returns True to rebuild.
+         */
+        static ShouldRebuildTopLevel(membershipChanged: boolean, refitArea: number, builtArea: number): boolean;
+        /**
+         * Refits a bottom-level BVH in place after its vertices moved (same topology): leaves enclose their triangles, interior
+         * nodes their children, from the last node to the first.
+         * @param blas - The BVH to refit.
+         * @param positions - The new positions, 3 floats per vertex.
+         * @param indices - The triangle list the BVH was built from.
+         */
+        static RefitBottomLevel(blas: IBlasResult, positions: Float32Array, indices: Uint32Array): void;
+        /**
+         * Creates the system (use `Get`). Without a backend (`SelectBackend`) it reports once and stops; otherwise it creates the backend
+         * (the WebGPU kernels start compiling now, the WebGL2 passes when their effect is first asked for), queues the scene's meshes and
+         * terrains and hooks the frame.
+         * @param scene - The asked scene.
+         */
+        private constructor();
+        /**
+         * The screen-space traced effects in their tracing order (T7–T11): ambient occlusion, reflections, GI, recursive rendering,
+         * subsurface scattering; empty without a backend.
+         */
+        get surfaceEffects(): TOOLKIT.RayTracedSurfaceEffect[];
+        /** Every effect the governor steps, in tracing order (shadows, then the screen-space tracers); empty without a backend. */
+        get governedEffects(): TOOLKIT.IRtTracedEffect[];
+        /**
+         * The last measured GPU time of a traced effect (Inspector read-out).
+         * @param key - The effect key (`IRtGovernedEffect.governorKey`).
+         * @returns Milliseconds, or null without a timer or before a measurement.
+         */
+        effectGpuMilliseconds(key: string): number;
+        /** True while any traced effect renders (shadows or a surface effect): the traced frame runs only then. */
+        get anyEffectActive(): boolean;
+        /** Whether a debug view replaces the frame (Inspector `rayTracing` › debug view). */
+        get debugView(): boolean;
+        /** Shows (hit normals unless another mode is chosen) or hides the debug view; the PostProcessor adds or removes its pass. */
+        set debugView(enabled: boolean);
+        /** The debug view shown: `DebugMode.off`, `hitNormals` or `primaryShading` (direct light + emission, no shadows, T5). */
+        get debugMode(): number;
+        /** Chooses the debug view; switching between on and off adds or removes the PostProcessor's pass. */
+        set debugMode(mode: number);
+        /** True while the debug view shows radiance that the debug pass must tone map (primary shading). */
+        get debugIsRadiance(): boolean;
+        /** A one-line state for the Inspector: unavailable, gathering, compiling, ready or failed. */
+        get status(): string;
+        /**
+         * scene-loading-progress T8: true once the setup needs nothing more before the scene is shown - ready (`stats.readyMs > 0`),
+         * failed, or without a backend (nothing will ever trace).
+         */
+        get isSettled(): boolean;
+        /**
+         * scene-loading-progress T8: setup progress, 0 to 1, for the loading splash - gathering (meshes queued plus terrains waiting
+         * for their height field) 30 %, BVH builds 60 %, backend kernels ready 10 % (`LoadingProgress.Blend`).
+         */
+        get buildProgress(): number;
+        /** scene-loading-progress T8: the splash label of the first incomplete `buildProgress` part (`BuildStageLabels`). */
+        get buildStageLabel(): string;
+        /** True when every queued mesh was gathered and no terrain still waits for its height field. */
+        private isGatherComplete;
+        /**
+         * Records the ray-tracing intent of one camera; the gather keeps only layers some asked branch traces (D-L6).
+         * @param camera - The camera.
+         * @param intent - Its intent (`RayTracingContract.Read`).
+         */
+        setCameraIntent(camera: BABYLON.Camera, intent: IRayTracingIntent): void;
+        /** The ray-tracing intents of every camera the post-processing applied (the path tracer compiles when one asks for it). */
+        get intents(): IRayTracingIntent[];
+        /**
+         * The ray-tracing intent the post-processing recorded for a camera.
+         * @param camera - The camera.
+         * @returns Its intent, or null when the camera has none.
+         */
+        intentOf(camera: BABYLON.Camera): IRayTracingIntent;
+        /**
+         * The per-frame update (runs from `onBeforeRenderObservable`): progressive gather, DynamicGeometry refits, then either a full
+         * pack (membership changed) or the top-level transform update.
+         */
+        sync(): void;
+        /** Releases every buffer, kernel, texture, observer and the BVH worker (scene dispose). Safe to call twice. */
+        dispose(): void;
+        /**
+         * The per-frame governor step (T14): polls the GPU timer and lets the governor step a tier from the effects' measured GPU time,
+         * skipping the frames before the system is ready (kernel compiles and the first uploads stall the GPU) and the frames a
+         * path-traced camera replaced (none of the traced effects ran, their clocks hold stale times).
+         */
+        private updateGovernor;
+        /**
+         * The GPU milliseconds of every tracing effect for the governor. WebGPU: the kernels' timestamps. WebGL2: the readings in trace
+         * order turned into per-effect costs (`RayTracingGpuTimer.PerEffectCosts`: differenced when they are cumulative, then scaled to
+         * the traced span, itself capped by the frame's interval); when the traced set changes every reading is dropped and the frame
+         * is not counted until each tracing effect and the span were measured again.
+         * @returns True when the costs are complete enough to count the frame.
+         */
+        private measureEffectCosts;
+        /**
+         * The per-frame effect update: shadow slots, the on-demand kernels of the asked effects, and one notification when an effect
+         * started or stopped tracing (the PostProcessor hands the screen-space branches over).
+         */
+        private updateEffects;
+        /**
+         * Dispatches the debug trace of the chosen mode (hit normals or primary shading) for the camera about to render (before its
+         * render pass opens).
+         * @param camera - The camera.
+         */
+        private traceDebug;
+        /**
+         * Binds the shading tables to the bucket swaps (rebind + repack), pre-exposure (D-L18: emission repacks, the light table
+         * re-uploads by itself) and PLAN 1's environment updates (the sky-miss cube is rebound).
+         * @param scene - The traced scene.
+         */
+        private observeShadingInputs;
+        /**
+         * The per-frame shading update (T5): texture bakes advance, the material table repacks when dirty (and every
+         * `RepackIntervalFrames` to catch edits), the light table re-uploads when a light's colour × intensity or transform changed
+         * (pre-exposure included), and the sky-miss cube is rebound when the environment changed or finished loading.
+         */
+        private updateShadingTables;
+        /**
+         * Repacks the material table of the packed instances; uploads it when a word changed, and rewrites the instances when a
+         * list's offset or alpha-tested flag moved.
+         */
+        private repackMaterials;
+        /** Rebinds the sky-miss cube when PLAN 1's environment update fired, the environment texture changed or it finished loading. */
+        private syncSky;
+        /**
+         * The material list of an instance: one material per sub-material slot of its geometry (a MultiMaterial's sub-mesh
+         * materials, else the mesh material repeated); a terrain traces the neutral record (null) with one report.
+         * @param record - The instance.
+         * @returns The list.
+         */
+        private materialListOf;
+        /**
+         * Whether a material of an instance's list is alpha-tested (the any-hit runs for it).
+         * @param record - The instance.
+         * @returns True when alpha-tested.
+         */
+        private listIsAlphaTested;
+        /**
+         * Whether every material of an instance's list is alpha-blended or refractive (HDRP 17.5 `materialIsOnlyTransparent`,
+         * HDRaytracingManager: such a renderer is left out of the AO, reflection and GI acceleration structures and only shadow rays see
+         * it; HDRP refraction lives in the transparent queue even where the export gives the glass alpha 1).
+         * @param record - The instance.
+         * @returns True when no material of the list is opaque or alpha-tested.
+         */
+        private listIsTransparentOnly;
+        /** Gathers queued meshes and terrains until the per-frame budget is spent. */
+        private gatherStep;
+        /**
+         * Gathers one mesh (and its thin instances) when it is traced: `raytracingmode ≠ 0`, real triangles, not a sky.
+         * @param mesh - The mesh.
+         */
+        private gatherMesh;
+        /**
+         * The geometry record of a mesh: shared by every mesh drawing the same Babylon geometry, private to a deforming
+         * DynamicGeometry mesh. A new geometry starts its bottom-level build in the worker.
+         * @param mesh - The drawn mesh.
+         * @param source - The mesh that owns the vertex data (the instance source for an instanced mesh).
+         * @param mode - The mesh's ray-tracing mode.
+         * @returns The record, or null when the mesh has no triangle list.
+         */
+        private geometryOf;
+        /**
+         * Gathers one terrain as a height field (D-L5) from the raw heights the terrain keeps (`TerrainBuilder.heightfield`); a terrain
+         * still building is retried next frame.
+         * @param terrain - The terrain.
+         */
+        private gatherTerrain;
+        /**
+         * Drops the instances of a removed mesh (and geometry nobody draws any more).
+         * @param mesh - The removed mesh.
+         */
+        private removeMesh;
+        /**
+         * Registers gathered instances and watches their node's world matrix: a move marks them dirty, so the per-frame update
+         * touches only what moved (no scan over every instance).
+         * @param node - The mesh or terrain transform that places the instances.
+         * @param placed - The instances.
+         */
+        private watch;
+        /** Marks the membership dirty when an instance was enabled, hidden or re-shown since the last pack (polled every `RepackIntervalFrames`). */
+        private pollVisibility;
+        /**
+         * Whether an instance belongs in the BVH now: built, alive, enabled and visible, and on a traced layer.
+         * @param record - The instance.
+         * @returns True to pack it.
+         */
+        private isPackable;
+        /**
+         * Keeps the instances that fit the memory budget (D-L6): candidates sorted nearest × largest first are kept while the total
+         * and every single buffer stay inside their limits; the rest are dropped with one report.
+         * @param candidates - The packable instances.
+         * @returns The kept instances.
+         */
+        private applyBudget;
+        /**
+         * Budget drop order: distance from the camera divided by the instance's world size, so far and small instances go first.
+         * @param record - The instance.
+         * @returns The score (larger = dropped earlier).
+         */
+        private dropScore;
+        /**
+         * The largest single storage buffer the device binds (`maxStorageBufferBindingSize`); every packed array stays below it so no
+         * buffer needs splitting.
+         * @returns Bytes (Infinity when the engine does not say).
+         */
+        private maxBufferBytes;
+        /** Packs the kept instances and their geometry into the GPU layout, builds the top level and uploads everything. */
+        private pack;
+        /** Full binned-SAH top-level build over the current instance boxes. */
+        private rebuildTopLevel;
+        /**
+         * Refits one instance's leaf and its ancestors (stops at the first ancestor whose box did not change), keeping
+         * `tlasCurrentArea` current.
+         * @param instanceIndex - The packed instance whose world box changed.
+         */
+        private refitAncestors;
+        /** Drops the records of removed meshes and the geometry no remaining record draws (pack time, so removals stay O(1)). */
+        private dropRemovedRecords;
+        /**
+         * The per-frame top-level path: rewrites only the instances whose node reported a world-matrix change (or whose geometry was
+         * refitted); refits their top-level ancestors (or the whole top level when many moved), rebuilds it when the refit degraded
+         * beyond `RefitDegradationLimit`, and uploads the changed instance range plus the top-level nodes. A frame where nothing moved
+         * costs one set-size check.
+         */
+        private updateTopLevel;
+        /**
+         * DynamicGeometry refits (D-L5, CPU path): up to `DynamicRefitsPerFrame` deforming meshes per frame read their skinned / morphed
+         * positions, refit their bottom-level boxes in place and rewrite their packed triangles and nodes (sizes unchanged, no rebind).
+         */
+        private refitDynamicGeometry;
+        /**
+         * Writes one packed instance (world, inverse world, offsets, flags) and its world box.
+         * @param record - The instance.
+         * @param index - Its packed index.
+         */
+        private writeInstance;
+        /**
+         * The object → world matrix of an instance: the mesh's world matrix, a thin instance's matrix times it, or a terrain's
+         * transform with its mirrored local x (Unity handedness 0).
+         * @param record - The instance.
+         * @param out - Receives the matrix.
+         * @returns `out`.
+         */
+        private worldMatrixOf;
+        /**
+         * The world box of a local box under an affine matrix (Arvo's method: the transformed centre plus the extents through the
+         * absolute linear part), equal to the box of the eight transformed corners without transforming them.
+         * @param nodes - A node array whose node 0 holds the local box (a BVH root).
+         * @param matrix - Object → world matrix, Babylon layout (rows are the transformed axes, translation at 12..14).
+         * @param out - Receives world min.xyz, max.xyz.
+         * @param offset - Index in `out` of min.x.
+         */
+        private static TransformBox;
+        /**
+         * Writes a geometry's triangles into the packed triangle array: three vec4 corners per source triangle at its `triOffset`
+         * (xyz position, w of corner 0 = the triangle's sub-material slot), and three attribute vec4 at the same corner index past
+         * every scene corner (`totalTriangles × 3`): octahedral normal xy (`NoNormal` when the mesh has none), uv.
+         * @param geometry - The geometry.
+         * @param triangles - The packed triangle array.
+         * @param totalTriangles - Triangles of the whole pack (where the attribute corners begin).
+         */
+        private static WriteTriangles;
+        /**
+         * Octahedral encoding of a normal (the WGSL `octahedralDecode` inverts it): the direction projected onto the octahedron,
+         * the lower hemisphere folded over the diagonals.
+         * @param x - Normal x.
+         * @param y - Normal y.
+         * @param z - Normal z.
+         * @param out - Receives the two components, each in [-1, 1].
+         * @returns `out`.
+         */
+        static OctahedralEncode(x: number, y: number, z: number, out: number[]): number[];
+        /**
+         * The sub-material slot of every triangle: its sub-mesh index when the mesh draws a MultiMaterial, else 0.
+         * @param source - The mesh owning the vertex data.
+         * @param triangleCount - Triangles in the index list.
+         * @returns One slot per triangle.
+         */
+        private static TriangleSlots;
+        /**
+         * Whether two packed tables hold the same words.
+         * @param first - One table.
+         * @param second - The other.
+         * @returns True when every word matches.
+         */
+        private static SameRows;
+        /**
+         * Writes a height field into the packed height words: header `[resolution, levels, heightsOffset, spacingX, spacingZ,
+         * heightScale, (levelOffset, levelWidth) × levels]` (floats as bit patterns, offsets absolute), the pyramid levels as float
+         * bit patterns, then the raw heights one per word.
+         * @param heightField - The height field (its `headerOffset` set by the pack).
+         * @param heightData - The packed height words.
+         */
+        private static WriteHeightField;
+        /**
+         * Half the surface area of one packed node box (0 for an empty or inverted box).
+         * @param nodes - The node array.
+         * @param nodeBase - Index of the node's min.x.
+         * @returns The half area.
+         */
+        private static HalfArea;
+        /**
+         * Wall-clock milliseconds (performance clock when present).
+         * @returns The time.
+         */
+        private static Now;
+    }
+}
+declare namespace TOOLKIT {
+    /** Where one compute binding sits: the `@group` / `@binding` pair the WGSL source declares for a resource name. */
+    interface IRtBindingSlot {
+        /** The WGSL `@group` index. */
+        group: number;
+        /** The WGSL `@binding` index inside the group. */
+        binding: number;
+    }
+    /**
+     * WGSL sources of the ray-tracing polyfill (hdrp-raytracing-polyfill D-L3, T4): the traversal library every WebGPU kernel shares
+     * (top-level BVH over instances, bottom-level BVH per geometry, height-field DDA for terrains, alpha any-hit hook), the debug
+     * hit-normal kernel, and the fullscreen pass that shows the debug image. The traversal is a line-by-line port of the CPU
+     * reference in `RayTracingBvh` (32-entry short stack, nearer child first, popped nodes beyond the closest hit skipped, two-sided
+     * Möller–Trumbore with 0 < t < tMax), so a GPU hit equals the CPU hit for the same ray. GLSL twins come from the WebGL2
+     * backend's translator (`RayTracingGlsl`, T13); every name here is in full words and no `//` comment holds a semicolon (the shader preprocessor splits on it).
+     */
+    class RayTracingShaders {
+        /** Workgroup edge of the screen-space kernels: 8 × 8 threads, one pixel each. */
+        static readonly WorkgroupSize: number;
+        /** Shader-store name of the debug-view fullscreen pass (`<name>FragmentShader` in `ShaderStore.ShadersStoreWGSL`). */
+        static readonly DebugViewShaderName: string;
+        /** Name the debug-view pass samples the traced image under. */
+        static readonly DebugTextureName: string;
+        /** Uniform of the debug-view pass: x = 1 tone maps the traced radiance (primary shading), 0 shows it as is (hit normals). */
+        static readonly DebugParamsName: string;
+        /** Names of the six texture-bucket arrays, in bucket-id order (sRGB 256 / 512 / 1024, then linear 256 / 512 / 1024, D-L10). */
+        static readonly BucketTextureNames: string[];
+        /** The debug hit-normal effect name. */
+        static readonly DebugNormalsEffect: string;
+        /** The primary-shading effect name (T5: direct light + emission at the primary hit, no shadows). */
+        static readonly PrimaryShadingEffect: string;
+        /** The ray-traced shadow effect name (T6: one screen mask per shadow slot, traced from the prepass surfaces). */
+        static readonly ShadowsEffect: string;
+        /** The ray-traced ambient occlusion effect name (T7: cosine hemisphere rays from the prepass surfaces). */
+        static readonly AmbientOcclusionEffect: string;
+        /** The ray-traced reflection effect name (T8: GGX visible-normal rays from the prepass surfaces). */
+        static readonly ReflectionsEffect: string;
+        /** The ray-traced global illumination effect name (T9: cosine-weighted diffuse rays from the prepass surfaces). */
+        static readonly GlobalIlluminationEffect: string;
+        /** The recursive rendering effect name (T10: camera rays through glass, reflected and refracted up to the max depth). */
+        static readonly RecursiveEffect: string;
+        /** The ray-traced subsurface scattering effect name (T11: a random walk inside the diffusion-profile surfaces). */
+        static readonly SubsurfaceEffect: string;
+        /** The progressive path tracer effect name (T12: one camera path per pixel and frame, accumulated). */
+        static readonly PathTracerEffect: string;
+        /** The sky-luminance effect name (T12: the HDRI sky's luminance on a 256 × 128 equirectangular grid, for the sampling CDF). */
+        static readonly SkyLuminanceEffect: string;
+        /** Shader-store name of the path tracer's fullscreen pass (the chain-head replacement of the raster colour, T12). */
+        static readonly PathTracerViewShaderName: string;
+        /** Name the path tracer's fullscreen pass samples the traced image under. */
+        static readonly PathTracerTextureName: string;
+        /** Uniform of the path tracer's pass: x = 1 shows the traced image, 0 keeps the raster colour (before the first sample). */
+        static readonly PathTracerParamsName: string;
+        /**
+         * Defines every kernel that evaluates materials compiles with: they switch on the optional BRDF lobes of Babylon's
+         * `pbrBRDFFunctions` include (D-L9), with HDRP's height-correlated Smith visibility and the default coat IOR.
+         */
+        static readonly ShadingDefines: string[];
+        /** GLSL fragment kernels already translated, by key (`FragmentKernel`). */
+        private static readonly fragmentKernels;
+        /**
+         * The compute bindings of every trace kernel, by resource name: the uniform parameters, the scene buffers, the height-field
+         * words, the output storage texture, the material and light tables, the bucket sampler and arrays, and the sky cube (its
+         * sampler sits one binding below it, where `ComputeShader.setTexture` binds a texture's own sampler). `ComputeShader` needs
+         * this map because the source is raw WGSL.
+         */
+        static readonly TraceBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /**
+         * The resources each kernel statically uses (WebGPU's automatic pipeline layout holds only those, so a kernel is bound only to
+         * its own). Every kernel reads the material table and the buckets through the alpha-tested any-hit.
+         */
+        static readonly KernelBindings: {
+            [effect: string]: string[];
+        };
+        /**
+         * The shared WGSL traversal library: data structures, resource declarations and the closest-hit query `traceClosest`.
+         * Instance flags: bit 0 flipWinding, bit 1 height field, bit 2 alpha tested, bit 3 transparent only, bit 4 shadows only, bits 8–12 the Unity layer (D-L4, D-L6, `traceClosestMasked`); the alpha
+         * any-hit `anyHitAccepts` lives in `MaterialLibraryWGSL`, which every kernel appends. `TraceParams.sceneCounts` = instances,
+         * top-level nodes, lights, materials; `geometryParams.x` = first attribute corner in `triangles` (positions come first).
+         */
+        static readonly TraversalLibraryWGSL: string;
+        /**
+         * The material library (T5, D-L9 / D-L10) every kernel appends: the `RtMaterial` record (128 bytes, Design Reference field
+         * order) read from `materialRows` (8 vec4 rows per record, then one uv-transform row per record), the six texture-bucket arrays
+         * with their shared repeat sampler, the per-corner attributes (octahedral normal xy, uv) stored after the triangle corners, and
+         * the alpha-tested any-hit: base-colour alpha × the base-colour texture's alpha against the cutoff (Unity's `clip`).
+         */
+        static readonly MaterialLibraryWGSL: string;
+        /**
+         * The shading library (T5, D-L9, D-L18): Babylon's own WGSL BRDF includes (`helperFunctions`, `pbrBRDFFunctions`,
+         * `importanceSampling`, inlined from `ShaderStore.IncludesShadersStoreWGSL` by `ExpandIncludesWGSL`, their `#if` blocks
+         * resolved by the compute preprocessor with `ShadingDefines`), the `RtLight` table, the sky-miss cube (mip 0 × its level, HDRP's `_SkyTexture` rule), the surface
+         * reconstruction at a hit (interpolated normal, normal map, material textures) and `shadeHit()`: emission plus every light's
+         * direct term, unshadowed. Two helpers of `pbrHelperFunctions` are copied (that include calls `textureSample`, which compute
+         * shaders cannot compile).
+         */
+        static readonly ShadingLibraryWGSL: string;
+        /**
+         * The debug hit-normal kernel (T4 step 4): one primary ray per pixel from the camera, the world normal of the closest hit
+         * facing the camera written as `normal × 0.5 + 0.5`, misses dark grey. Output is an rgba8unorm storage texture.
+         * @returns The complete WGSL source (traversal + material libraries + output binding + entry point `main`).
+         */
+        static DebugNormalsKernelWGSL(): string;
+        /**
+         * The primary-shading kernel (T5 debug view): one primary ray per pixel, `shadeHit()` at the closest hit (direct light +
+         * emission, no shadows), the sky cube on a miss. Output is pre-exposed linear radiance in an rgba16float storage texture
+         * (the debug-view pass tone maps it). Compile with `ShadingDefines`.
+         * @returns The complete WGSL source (traversal + material + shading libraries + entry point `main`).
+         */
+        static PrimaryShadingKernelWGSL(): string;
+        /**
+         * The ray-traced shadow kernel (T6, D-L7, Algorithms › shadow rays): one thread per pixel of the camera's prepass (read with v
+         * flipped: Babylon's render targets keep row 0 at the bottom, the kernels' pixel row 0 is the top). The surface is
+         * rebuilt from the prepass view depth (two points of the pixel's ray, so perspective and orthographic cameras both work) and the
+         * prepass normal, then every shadow slot traces `slotSamples` rays toward its light: a cone of half-angle `angularDiameter / 2`
+         * for a directional light, the disc of radius `shapeRadius` facing the surface for a point / spot light, hashed per pixel, slot,
+         * sample and frame. Occluders follow HDRP's ShaderPassRaytracingVisibility any-hit (`occluderTransmittance`, mirrored by
+         * `RayTracedShadows.OccluderTransmittance`) when the slot passes through transparent surfaces, and the ray continues behind
+         * them (closest hits in order, at most `MAX_TRANSPARENT_LAYERS`); the slot's mask is HDRP's integration of the transmitted
+         * colour (`RayTracedShadows.ShadowVisibility`).
+         * Outputs: `outputTexture` (rgba8) = the visibility of slots 0–3, `colorOutputTexture` (rgba16f) = slot 0's colour tint
+         * (transmitted colour / visibility) in rgb and the traced view depth in a (the reprojection test of the materials). Compile with
+         * `ShadingDefines` (the light table lives in the shading library).
+         * @returns The complete WGSL source (traversal + material + shading libraries + entry point `main`).
+         */
+        static ShadowKernelWGSL(): string;
+        /**
+         * The sampling library (T6–T8) every screen-space tracer appends: the PCG hash and its per-pixel random pairs, a perpendicular
+         * axis, cosine-weighted hemisphere directions (RTAO, HDRP `SampleHemisphereCosine`) and GGX visible-normal sampling (reflections,
+         * Heitz 2018). Its constants carry their own names so it can sit next to Babylon's `helperFunctions` include or without it.
+         */
+        static readonly SamplingLibraryWGSL: string;
+        /**
+         * The prepass surface library of the screen-space tracers (T6–T8): a pixel's view depth and normal from the camera's prepass
+         * (read with v flipped: Babylon's render targets keep row 0 at the bottom, the kernels number pixels from the top), and its world
+         * position rebuilt from two points of the pixel's ray (perspective and orthographic cameras alike). The kernel declares
+         * `normalTexture` and a uniform struct with `depthPlane`, `normalParams` and `viewToWorld`.
+         * @param paramsName - The kernel's uniform struct variable (`shadowParams`, `effectParams`).
+         * @returns The WGSL functions.
+         */
+        static SurfaceLibraryWGSL(paramsName: string): string;
+        /**
+         * The per-dispatch parameters of the ambient-occlusion and reflection kernels (T7, T8), bound at the shadow kernel's
+         * parameter slot: `frameParams` = frame index, ray bias, ray length, samples per pixel; the prepass depth plane, normal space
+         * and view-to-world rotation (`SurfaceLibraryWGSL`); `reflectionParams` = min smoothness, smoothness fade start, clamp value,
+         * bounce count; `fallbackParams` = ray-miss hierarchy, last-bounce hierarchy, directional shadow ray length; `layerParams` = the
+         * effect's layer mask as two 16-bit halves, its excluded instance flags and the flags its hits' shadow rays exclude;
+         * `shadingParams` (T9–T11) = clamp value, bounces (GI) or max depth (recursive), ambient probe dimmer, min smoothness (recursive);
+         * `selectionParams` = the recursive renderers' layer mask as two 16-bit halves; the nine pre-scaled spherical harmonics of the
+         * sky cube's irradiance (Babylon's `vSphericalL00…L22`, the ambient term at hits).
+         */
+        static readonly EffectParamsWGSL: string;
+        /**
+         * The lighting of a secondary hit (T8–T11), shared by the reflection, GI, recursive and subsurface kernels (appended after
+         * `EffectParamsWGSL`): the sky's spherical-harmonic irradiance (the ambient probe of HDRP's hit shading), the sky cube at a
+         * roughness, an opaque shadow ray, the diffuse-only direct term, the direct light of every light with one shadow ray each, and
+         * HDRP's HSV clamp of a sample (`RayTracingHSVClamp`: the largest channel bounded, the hue kept).
+         */
+        static readonly HitLightingLibraryWGSL: string;
+        /**
+         * The ray-traced ambient occlusion kernel (T7, a port of HDRP's RaytracingAmbientOcclusion.raytrace): one thread per prepass
+         * pixel, `samplecount` cosine-weighted hemisphere rays of length `raylength` from the surface (offset by the ray bias along the
+         * normal); a ray that escapes counts as visible, any hit occludes (alpha-tested any-hit included). Output (rgba16f): rgb 0 (the
+         * GI channels of `rtLighting0`, T9), a = the visible fraction - HDRP applies `intensity` after the denoiser, so does the
+         * material (`pow(visibility, intensity)`). Background pixels are fully visible.
+         * @returns The complete WGSL source (traversal + material + sampling libraries + entry point `main`).
+         */
+        static AmbientOcclusionKernelWGSL(): string;
+        /**
+         * The ray-traced reflection kernel (T8, after HDRP's RaytracingReflections.raytrace): one thread per prepass pixel whose
+         * prepass smoothness (`PREPASS_REFLECTIVITY` alpha = Babylon's microSurface) reaches `minSmoothness`; the HDRP fade weight between
+         * `minSmoothness` and `smoothnessFadeStart`; `samplecount` GGX visible-normal rays (one for a mirror in single-bounce mode, as
+         * HDRP), each followed for `bounceCount` bounces (Quality) and clamped to `clampValue` per channel (pre-exposed, as HDRP's
+         * exposed clamp). A hit is shaded with emission, every light (one opaque shadow ray each) and the sky's spherical-harmonic
+         * irradiance; the last hit adds the last-bounce fallback (the sky cube at the hit's roughness stands in for probes, which a
+         * compute kernel cannot read). A first-bounce miss resolves by the ray-miss hierarchy: None = black, Sky = the sky cube at mip
+         * 0 × its level (D-L18), ReflectionProbes / ReflectionProbesAndSky = left unresolved so the material keeps its own raster
+         * environment term for that share (Babylon's reflection texture: the probe, else the scene environment).
+         * Output (rgba16f, premultiplied by the fade weight w): rgb = w × the traced radiance, a = w × the resolved share; the
+         * material's environment radiance becomes `rgb + (1 - a) × raster` (`RayTracedReflections.ComposeEnvironment`).
+         * @returns The complete WGSL source (traversal + material + shading + sampling libraries + entry point `main`).
+         */
+        static ReflectionKernelWGSL(): string;
+        /**
+         * The ray-traced global illumination kernel (T9, FR-L5, after HDRP's RayTracingIndirectDiffuse.hlsl and its RT deferred lighting):
+         * one thread per prepass pixel, `samplecount` cosine-weighted rays (one in Performance mode), each followed for `bounceCount`
+         * diffuse bounces (Quality). A hit is lit with its emission and the diffuse lobe of every light (one opaque shadow ray each,
+         * HDRP's `_RayTracingDiffuseLightingOnly`); the last hit adds the last-bounce fallback (`lastBounceIrradiance`); a first ray that
+         * misses resolves by the ray-miss hierarchy (the sky cube at mip 0 × its level, D-L18, standing in for probes; None = black).
+         * Every sample is clamped by HDRP's HSV value against `clampValue` (pre-exposed, as HDRP's exposed clamp). Rays skip
+         * transparent-only and shadows-only renderers and apply the GI layer mask (HDRP's GI acceleration structure).
+         * Output (rgba16f): rgb = the mean incoming radiance over the cosine lobe (Babylon's environment-irradiance convention: the
+         * material multiplies it by its albedo), a = 1. Background pixels are 0.
+         * @returns The complete WGSL source (traversal + material + shading + sampling + hit-lighting libraries + entry point `main`).
+         */
+        static GlobalIlluminationKernelWGSL(): string;
+        /**
+         * The recursive rendering kernel (T10, FR-L8, after HDRP's RaytracingRenderer.raytrace and EvaluateRayTracingForward.hlsl): one
+         * camera ray per pixel (HDRP's primary ray, so a glass pixel gets its own primary hit whatever the prepass holds). A pixel whose
+         * first hit is a renderer of the recursive layer mask (`selectionParams`) is shaded by an explicit stack of rays (WGSL has no
+         * recursion): every hit adds its emission, direct light (one shadow ray per light) and ambient (sky harmonics × dimmer);
+         * a hit at least `minSmoothness` smooth spawns a mirror reflection ray weighted by Fresnel, otherwise the sky at its roughness
+         * stands in (last-bounce hierarchy); a transparent refractive hit spawns a refraction ray (Snell with the material IOR, entering
+         * or leaving by the vertex normal's side; a thin surface - thickness 0 - passes straight through), weighted by (1 - Fresnel) ×
+         * HDRP's transmittance mask (the record's transmission, `refractionTransmittanceMask`) and absorbed inside a solid by Beer-Lambert from its base colour at 1 m; a
+         * transparent non-refractive hit blends what lies behind by its opacity. Total internal reflection spawns no refraction ray
+         * (HDRP's documented limit). A ray never goes deeper than `maxDepth` (the camera ray is depth 1); misses take the ray-miss
+         * hierarchy. Rays skip shadows-only renderers and see every layer.
+         * Output (rgba16f): rgb = the traced colour (pre-exposed), a = the view depth of the recursive hit (0 = no recursive renderer).
+         * @returns The complete WGSL source (traversal + material + shading + sampling + hit-lighting libraries + entry point `main`).
+         */
+        static RecursiveKernelWGSL(): string;
+        /**
+         * The ray-traced subsurface scattering kernel (T11, FR-L9, a port of HDRP's RayTracingSubSurface.raytrace `ScatteringWalk` and
+         * its RT deferred diffuse lighting): one camera ray per pixel; a pixel whose first hit carries a diffusion profile (the
+         * subsurface row of its material: scattering distance in world units, `RayTracingMaterials.PackSubsurface`) runs `samplecount`
+         * random walks - the first step cosine-distributed into the surface (back-Lambertian), then isotropic steps of exponential
+         * length in a channel picked by the throughput-weighted single-scattering albedo, HDRP's remap of the diffuse colour and
+         * scattering distance to sigmaS / sigmaT, at most 16 steps; a walk that leaves the object exits there, one that does not is
+         * killed. The exit point is lit as a white Lambert surface (every light with one shadow ray, plus the sky harmonics as the
+         * ambient probe, dimmer 1 as HDRP's RT SSS sets it), times the walk's throughput. A scattering distance below
+         * `MINIMUM_SCATTERING_DISTANCE` is the surface's own diffuse (the walk exits where it entered with the diffuse colour).
+         * Output (rgba16f): rgb = the scattered diffuse lighting (pre-exposed, it replaces the material's diffuse), a = the view depth
+         * of the surface (0 = no diffusion profile there).
+         * @returns The complete WGSL source (traversal + material + shading + sampling + hit-lighting libraries + entry point `main`).
+         */
+        static SubsurfaceKernelWGSL(): string;
+        /**
+         * The equirectangular mapping the sky CDF uses (T12, D-L18): u = azimuth / 2π from +x toward +z, v = polar angle / π from the
+         * zenith (+y, row 0) to the nadir, in world space (the sky cube's own rotation is applied by `skyRadiance`). Mirrors
+         * `RayTracingPathTracer.EquirectDirection`.
+         */
+        static readonly EquirectLibraryWGSL: string;
+        /**
+         * The sky-luminance kernel (T12, D-L18 / HDRP PathTracingSkySamplingData): one thread per texel of the `outputSize` equirectangular
+         * grid writes the luminance of the sky cube (mip 0 × its level) toward the texel centre into `skyLuminanceOutput`, row by row;
+         * `RayTracingPathTracer.BuildSkyCdf` turns the read-back values into the sampling CDF. Compile with `ShadingDefines`.
+         * @returns The complete WGSL source (traversal + material + shading + equirect libraries + entry point `main`).
+         */
+        static SkyLuminanceKernelWGSL(): string;
+        /**
+         * The progressive path tracer (T12, FR-L10, D-L13, after HDRP's PathTracingMain.raytrace / PathTracingSurface.hlsl): one camera
+         * path per traced pixel and dispatch (the pixels of the current `tilingParameters` tile), its radiance added to an rgba32f
+         * accumulation (rgb = summed radiance, a = the pixel's sample count) read from the previous image and written to the other
+         * (ping-pong). Per path: a jittered camera ray (thin lens when the physical camera's aperture is set), then per hit the
+         * emission (from segment `minimumDepth - 1`), next-event estimation of every light (a directional light with an angular
+         * diameter by its cone, MIS power heuristic against the BSDF; punctual lights by a point of their shape-radius disc) and of
+         * the sky when its CDF is bound (MIS against the BSDF), each with a shadow ray through transparent occluders (HDRP's
+         * visibility: a refractive surface passes its colour × transmittance mask, another transparent one 1 - opacity); a
+         * transparent surface is passed through with probability 1 - opacity; then Russian roulette after `minimumDepth`
+         * (p = clamp(max(throughput), 0.05, 0.95)) and the next direction: a refractive surface refracts (Snell with its IOR, thin
+         * surfaces straight, Beer-Lambert inside a solid) with probability transmission × (1 - F) - the record's transmission is
+         * Babylon's refractionIntensity, HDRP's transmittance mask - otherwise the BRDF is sampled (GGX visible normals or cosine, by the Fresnel / diffuse
+         * weights) - the same BRDF the raster image uses (D-L9). Escaped rays read the sky cube at mip 0 × its level (D-L18) MIS-weighted
+         * against the sky CDF, plus the cone of every directional light they fall in; the camera ray's miss reads the camera-sized
+         * background (the live sky pass) when it is bound. Indirect contributions are clamped to `maximumIntensity` by luminance
+         * (HDRP ClampValue: emission from the third segment, light samples from the second). Secondary segments cross the height fog
+         * (HDRP OpticalDepthHeightFog transmittance + the analytic sky-coloured in-scatter); the camera segment is fogged by the HDRP
+         * fog pass that follows in the chain. The first sample cycle writes the albedo and normal / view-depth AOVs for the denoiser.
+         * Output (rgba16f): the accumulated mean, pre-exposed; NaN never reaches a target (FR-L12). Compile with `ShadingDefines`.
+         * @returns The complete WGSL source (traversal + material + shading + sampling + equirect libraries + entry point `main`).
+         */
+        static PathTracerKernelWGSL(): string;
+        /**
+         * The AOV modulation kernel of the path tracer's denoise (T12): `divide` demodulates the converged image by the albedo AOV (the
+         * denoiser then filters lighting, not texture), the other variant multiplies the filtered lighting by the albedo again. The
+         * albedo is floored at `ALBEDO_FLOOR` so black surfaces never divide by zero.
+         * @param divide - True for the demodulation, false for the remodulation.
+         * @returns The WGSL source (`PathModulateBindings`).
+         */
+        static PathModulateKernelWGSL(divide: boolean): string;
+        /** The bindings of `PathModulateKernelWGSL`. */
+        static readonly PathModulateBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /**
+         * The `rtLighting0` packing kernel (D-L8: GI rgb, ambient-occlusion visibility a): when both effects trace, their denoised
+         * images are merged into one image so the materials bind one sampler for both. The governor (T14) may trace them at different
+         * resolutions: the output takes the larger size and each image is read at its own scaled texel.
+         */
+        static readonly LightingPackKernelWGSL: string;
+        /** The bindings of `LightingPackKernelWGSL`. */
+        static readonly LightingPackBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /**
+         * Inlines Babylon's WGSL includes (`#include<name>` from `ShaderStore.IncludesShadersStoreWGSL`) for a compute kernel (D-L9).
+         * The compute preprocessor resolves `#include` and `#if` but, unlike the material WGSL processor, leaves an include's
+         * `#define NAME value` lines in the code, which WGSL cannot parse; those become `const NAME = value;` here, exactly what the
+         * material processor emits. `#if` / `#ifdef` blocks stay for the preprocessor (driven by `ShadingDefines`).
+         * @param source - WGSL with `#include<name>` lines.
+         * @returns The source with every include inlined.
+         * @throws {Error} When an include is not registered in the shader store.
+         */
+        static ExpandIncludesWGSL(source: string): string;
+        /**
+         * The GLSL fragment twin of a WGSL kernel for the WebGL2 backend (T13, D-L14), translated once per page: the shading library's
+         * inlined WGSL includes are put back as `#include` lines (Babylon's GLSL preprocessor resolves their GLSL twins), then
+         * `RayTracingGlsl.Translate` ports the kernel line by line.
+         * @param key - The cache key (the effect or pass name).
+         * @param wgsl - The WGSL kernel, as the compute backend compiles it.
+         * @param overrides - GLSL definitions replacing translated functions (WebGL2-only rules).
+         * @returns The fragment kernel.
+         */
+        static FragmentKernel(key: string, wgsl: string, overrides?: {
+            [name: string]: string;
+        }): IRtGlslKernel;
+        /**
+         * The WebGL2 override of the path tracer's `primaryBackground`: the camera-sized sky background is read at the pixel's
+         * normalised position (the WebGL2 path tracer traces at half resolution) with v flipped like the WGSL texel read. Written
+         * against the translated kernel's flattened uniforms (`pathParams_shadingParams`, `params_outputSize`).
+         */
+        static readonly PathBackgroundGLSL: string;
+        /**
+         * The WebGL2 surface reduction (T13, D-L14's half-resolution tier): one pixel of the reduced frame takes, of the prepass texels
+         * under it, the nearest surface (smallest non-zero view depth) - its depth, normal, velocity and reflectivity, never a blend of
+         * two surfaces. The tracers rebuild the position on the ray through the reduced pixel's centre, which crosses that block at
+         * its corner: the nearest depth puts the rebuilt point on or in front of the surface (a farther texel would put it behind a
+         * slope and every ray would start inside it). Rows keep the prepass order (row 0 at the bottom).
+         */
+        static readonly SurfaceReductionGLSL: string;
+        /**
+         * The WebGPU twin of `SurfaceReductionGLSL` (T14, the governor's half-resolution tiers): the same nearest-surface rule per
+         * 2 × 2 block, written to four storage images (view depth in rgba32float so a rebuilt position keeps full precision). A
+         * missing velocity or reflectivity image is bound as a 1-pixel placeholder (`scaledTexel` reads its only texel).
+         */
+        static readonly SurfaceReductionKernelWGSL: string;
+        /** The bindings of `SurfaceReductionKernelWGSL`. */
+        static readonly SurfaceReductionBindings: {
+            [name: string]: IRtBindingSlot;
+        };
+        /**
+         * Registers the debug-view fullscreen pass in Babylon's WGSL shader store (once). The pass replaces the frame with the traced
+         * image and keeps the scene alpha. The kernels write row 0 at the top of the screen while the pass's `vUV` has y = 0 at the
+         * bottom, so the traced image is read with v flipped. `rtDebugParams.x` = 1 tone maps a radiance image (primary shading: an
+         * ACES fit, then sRGB encoding, since the pass runs after the camera's own image processing). WGSL only: the debug view
+         * exists only where the WebGPU compute backend runs.
+         */
+        static RegisterShaders(): void;
+        /**
+         * Registers the path tracer's fullscreen pass in Babylon's WGSL shader store (once, T12). The pass is the chain head
+         * (`PostProcessor.HeadSlots.pathTracer`), with its GLSL twin for the WebGL2 backend (T13): it replaces the raster colour with the traced image (read with v flipped: the kernels
+         * write row 0 at the top) and keeps the scene alpha, so every post effect after it (fog, exposure, bloom, tone mapping, grading)
+         * runs on the path-traced radiance exactly as on the raster image. `rtPathTracerParams.x` = 0 shows the raster colour instead
+         * (no sample yet, or "raster while moving").
+         */
+        static RegisterPathTracerShader(): void;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /**
@@ -24314,6 +38409,10 @@ declare namespace TOOLKIT {
         static readonly SLICED_INDIVIDUAL_FACES_FRAMES: number;
         /** The tag prefix the exporter writes on every renderer whose closest probe is this one. */
         static readonly PROBE_TAG_PREFIX: string;
+        /** Babylon's prefiltered-cube roughness to LOD mapping (HDRFiltering), applied to an HDRP probe's box-filtered mips. */
+        static readonly ROUGHNESS_LOD_SCALE: number;
+        /** Unity ReflectionProbeClearFlags.SolidColor (1 is Skybox). */
+        static readonly CLEAR_SOLID_COLOR: number;
         private static _WarnedLowQuality;
         private static _PreviousReflection;
         protected m_probe: BABYLON.ReflectionProbe;
@@ -24322,6 +38421,18 @@ declare namespace TOOLKIT {
         protected m_receivers: BABYLON.AbstractMesh[];
         protected m_materials: BABYLON.Material[];
         protected m_overrides: BABYLON.Material[];
+        /** HDRP parity: the probe intensity x hdrp.indirect.probes, before the pre-exposure ratio. */
+        protected m_baseLevel: number;
+        /** HDRP parity: the pre-exposure the live cube was captured at (the capture renders the pre-exposed scene). */
+        protected m_capturePreExposure: number;
+        /** HDRP parity: the environment polynomial and env / cube level ratio the diffuse SH was last synced for. */
+        protected m_ambientSource: BABYLON.SphericalPolynomial;
+        protected m_ambientRatio: number;
+        /** HDRP parity observers: per frame, per capture face and the live sky's environment updates. */
+        protected m_frameObserver: BABYLON.Observer<BABYLON.Scene>;
+        protected m_captureObserver: BABYLON.Observer<number>;
+        protected m_capturedObserver: BABYLON.Observer<number>;
+        protected m_skyObserver: BABYLON.Observer<BABYLON.Scene>;
         /** The live Babylon probe (null at Low render quality). */
         getReflectionProbe(): BABYLON.ReflectionProbe;
         /** The live cube texture (null at Low render quality). */
@@ -24360,6 +38471,25 @@ declare namespace TOOLKIT {
          */
         static ApplyToReceivers(probe: BABYLON.ReflectionProbe, receivers: BABYLON.AbstractMesh[], materials?: BABYLON.Material[], overrides?: BABYLON.Material[]): void;
         protected awakeRealtimeReflection(): void;
+        /**
+         * The ambient (diffuse) SH a receiver reads from an HDRP probe cube. HDRP reflection probes light specular only - the
+         * diffuse ambient stays the sky's ambient probe - but Babylon PBR takes both from the material's reflection texture, so
+         * the cube carries the environment's own SH, scaled by envLevel / cubeLevel so the shader's level product is unchanged.
+         * Returns null when the environment has no SH or a level is not positive.
+         */
+        static HdrpAmbientFor(environment: BABYLON.BaseTexture, cubeLevel: number): BABYLON.SphericalPolynomial;
+        /**
+         * HDRP parity: HDRP stores a realtime probe unexposed and pre-exposes it when sampled, while this capture renders the
+         * already pre-exposed scene - so the cube level follows the current / capture pre-exposure ratio, the diffuse SH is
+         * the environment's (HdrpAmbientFor), and a once-rendered probe re-captures when the live PBSky environment updates
+         * (HDRP's OnEnable capture sees the finished sky; the first Babylon frame may not), drawing the live sky without its sun
+         * disk as HDRP's sky cubemap does (HdrpPhysicallyBasedSky.setProbeCapture). Roughness reads the capture's
+         * box-filtered mips through ROUGHNESS_LOD_SCALE (HDRP convolves with GGX; Babylon's HDRFiltering bled the bright
+         * horizon into the sharp lobes of a detailed capture, so the plain mip chain is the closer match).
+         */
+        private bindHdrpParity;
+        /** Per frame (HDRP parity): the exposure-ratio level and, when the environment or the level changed, the diffuse SH. */
+        private syncHdrpParity;
         protected destroyRealtimeReflection(): void;
     }
 }
@@ -24939,6 +39069,8 @@ declare namespace TOOLKIT {
         private _angle;
         private _normal;
         private _disabled;
+        /** hdrp-complete-parity T14: the material is an HDRP/Decal PBR decal (TOOLKIT.HdrpDecals), not a graph class. */
+        private _hdrpDecal;
         /** How many times the geometry was built (tests / diagnostics). */
         buildCount: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
@@ -25286,6 +39418,30 @@ declare namespace TOOLKIT {
      * JavaScript RNG (every draw is the seeded ParticleRandom); warnings go through ParticleContract.warnOnce only; no hand-tuned constants.
      * @class ShurikenParticles - All rights reserved (c) 2024 Mackey Kinard
      */
+    /** @hidden A resumable SimulateFamily run (ShurikenParticles): the family, its saved state and the next fixed step. */
+    interface IParticleFamilyRun {
+        family: TOOLKIT.ShurikenParticles[];
+        pre: number[];
+        saved: {
+            paused: boolean;
+            updateSpeed: number;
+        }[];
+        most: number;
+        steps: number;
+        next: number;
+    }
+    /** @hidden A play() prewarm running in slices behind the splash (ShurikenParticles.DeferLoadPrewarm). */
+    interface IParticlePrewarmJob {
+        plan: {
+            coarseSteps: number;
+            coarseDt: number;
+            fineSeconds: number;
+        };
+        coarseNext: number;
+        run: TOOLKIT.IParticleFamilyRun;
+        realSpeed: number;
+        realPaused: boolean;
+    }
     class ShurikenParticles extends TOOLKIT.ScriptComponent {
         /** The parity rewrite. */
         static readonly Version: string;
@@ -25388,11 +39544,13 @@ declare namespace TOOLKIT {
         private _prtHeldUpdateSpeed;
         private _prtOnceApplied;
         private _prtSimulating;
+        private _prtPrewarmJob;
         private readonly _prtRange;
         private _prtTexture;
         private _prtEmissionEntry;
         private _prtEmissionMap;
         private _prtEmissionToken;
+        private _prtHdrpEmission;
         private _prtEmissionEffect;
         private _prtEmissionDefines;
         private _prtEmissionBlend;
@@ -25500,6 +39658,18 @@ declare namespace TOOLKIT {
          * (its own clock never emits, D37 - it only has to take its parent's requests in the frame they were made).
          */
         private static SimulateFamily;
+        /** SimulateFamily's set-up: restarts / prewarm plans, the saved state and the fixed-step count (no step runs). */
+        private static BeginFamilyRun;
+        /**
+         * Runs SimulateFamily's fixed steps from `run.next` until all ran or `deadline` (performance.now ms) passed - at least one
+         * step per call. Each step is { _stepClock; animate(true) } for every member in family order (the parent first).
+         * @returns True when every step ran.
+         */
+        private static StepFamilyRun;
+        /** SimulateFamily's `finally`: the simulating flags cleared and the run's ONE trail flush and mesh step. */
+        private static FinishFamilyRun;
+        /** SimulateFamily's end: each member's paused / updateSpeed restored, the capture hold re-applied (D35, D52). */
+        private static RestoreFamilyRun;
         /** Emitting, or holding live particles, or (withChildren) any child alive (D37). */
         isAlive(withChildren?: boolean): boolean;
         isPlaying(): boolean;
@@ -25562,6 +39732,42 @@ declare namespace TOOLKIT {
          * D35's single loop left the Pack's long-lived fog / dust younger and sparser (GroundFog 110 vs Unity 182 at t = 0.5).
          */
         prewarmSeconds(): number;
+        /**
+         * Prewarms started while a toolkit scene load still holds the splash run in slices of PrewarmSliceMs, a task each, instead
+         * of one block that locks the page (a 50 s prewarm with noise is seconds of work). The same steps run in the same order;
+         * between slices the system is frozen like the capture hold (D35: no emission, no clock, update speed 0). Only systems that
+         * step alone are sliced (no child systems, no sub-emitters - a family steps in lockstep); the reveal waits for every slice
+         * (PendingPrewarms). A system started after the load prewarms in one block as before. Default true.
+         */
+        static DeferLoadPrewarm: boolean;
+        /** Time budget (ms) of one prewarm slice task. */
+        static PrewarmSliceMs: number;
+        private static _prewarmQueues;
+        private static _prewarmPumps;
+        /** Prewarms of the scene still running in slices (0 when none). */
+        static PendingPrewarms(scene: BABYLON.Scene): number;
+        /** Milliseconds from performance.now() (Date.now() where performance is missing). */
+        private static NowMs;
+        /** True when this system's play() prewarm may run in slices: a toolkit scene load still in flight and a system stepping alone. */
+        private canSlicePrewarm;
+        /** Queues this system's prewarm for slices and freezes it until they ran. */
+        private queuePrewarm;
+        /** Runs a pending sliced prewarm to its end at once (a control call - stop, pause, clear, simulate - sees the finished prewarm). */
+        private finishPendingPrewarm;
+        /**
+         * Between two slices nothing runs: Babylon's animate() returns at once on a paused system, nothing emits, the clock holds.
+         * The real paused state and update speed are kept on the job and restored before the next slice.
+         */
+        private freezeForPrewarm;
+        private static SchedulePrewarmSlice;
+        /** One slice task: runs the queued prewarms in order until PrewarmSliceMs passed, then schedules the next slice. */
+        private static RunPrewarmSlice;
+        /**
+         * Runs this system's queued prewarm until `deadline` (at least one step): the coarse half exactly as runCoarsePrewarm, then the
+         * fine steps exactly as simulate(fineSeconds, false, false) - SimulateFamily's own begin / step / finish parts.
+         * @returns True when the prewarm finished (or the system is gone).
+         */
+        private runPrewarmSlice;
         /** The most fixed 1/60 steps one prewarm runs FINE (60 simulated seconds; T35, verifier D-c). The rest runs coarse (D29). */
         static MaxPrewarmSteps: number;
         /** D29 - the step the excess beyond MaxPrewarmSteps fine steps is simulated with, and how many such steps at most. */
@@ -25815,6 +40021,15 @@ declare namespace TOOLKIT {
          * map samples white (Unity's `_EmissionMap` default).
          */
         private applyEmission;
+        /**
+         * hdrp-complete-parity T24 (D8): on a parity HDRP scene a particle system draws with the scene's UNEXPOSED image processing
+         * (SceneManager.GetUnexposedImageProcessing: same tone mapping and grading, exposure 1) - HDRP never exposes a particle's base
+         * colour (ShaderPassForwardUnlit.hlsl), its emission is pre-exposed by weight (applyEmission) and a lit particle is lit by the
+         * pre-exposed lights. Off parity the system keeps the scene configuration. Returns true when the unexposed one was assigned.
+         */
+        static ApplyHdrpImageProcessing(ps: BABYLON.IParticleSystem, scene: BABYLON.Scene): boolean;
+        /** hdrp-complete-parity D8: the material block names an HDRP shader (the ParticleConversions.IgnoresVertexColor family test). */
+        static IsHdrpMaterial(block: any): boolean;
         /** True when the material state carries a non-black emission colour (an Inspector edit to black switches the stock shader back). */
         static EmissionActive(mat: TOOLKIT.IParticleMaterialState): boolean;
         /** Binds the custom effect's uniforms on this system's draw (and runs the effect bookkeeping, effectTick). */
@@ -26242,6 +40457,12 @@ declare namespace TOOLKIT {
          * FIRST image's dimensions (arrays require uniform layer size). Returns a Promise that resolves to
          * the array texture (or null when no URLs are supplied / loading fails). Shared across all callers
          * with the same URL list.
+         * @param scene - The scene the array texture belongs to.
+         * @param urls - One image URL per layer (empty entries are dropped; the list is clamped to the GPU layer limit).
+         * @param options - GPU-result-affecting build options (part of the cache key).
+         * @param onSliceLoaded - Called once per decoded slice with the running decoded count and the clamped slice count. Not part
+         *  of the cache key and never called when the build comes from the cache (default null).
+         * @returns The array texture, or null when there are no URLs or the build failed (never rejects).
          */
         static Build(scene: BABYLON.Scene, urls: string[], options?: {
             samplingMode?: number;
@@ -26250,7 +40471,7 @@ declare namespace TOOLKIT {
             mipmaps?: boolean;
             linearize?: boolean;
             largest?: boolean;
-        }): Promise<BABYLON.RawTexture2DArray>;
+        }, onSliceLoaded?: (decodedCount: number, sliceCount: number) => void): Promise<BABYLON.RawTexture2DArray>;
         /** X10: the array cell for `largest: true` - the largest slice width by the largest slice height (no cap). */
         static LargestCell(slices: Array<{
             width: number;
@@ -26288,15 +40509,16 @@ declare namespace TOOLKIT {
         static LinearizeRgba8(data: Uint8Array): void;
         private static _cacheKey;
         private static _uploadMipChain;
-        /** Box-average (2x2) downsample every layer of a stacked RGBA8 buffer to (dw x dh). Edge-clamped. */
-        private static _downsampleLayers;
+        /** Box-average (2x2) downsample layer L of a stacked RGBA8 buffer (sw x sh) into `out` (dw x dh). Edge-clamped. */
+        private static _downsampleLayer;
         /** GPU cap on Texture2DArray layers: WebGPU device limit `maxTextureArrayLayers`, else WebGL2
          *  `MAX_ARRAY_TEXTURE_LAYERS`. Falls back to the spec-guaranteed floor (256) when it can't be read. */
         private static _maxArrayLayers;
         /** Load every slice URL into a normalized descriptor { width, height, image, pixels }. Browser-decodable
          *  images (png/jpg/webp) come back as an HTMLImageElement; GPU container formats (ktx2/ktx/dds/basis) —
          *  which NO browser can decode through an <img> tag — are routed through Babylon's texture loader and
-         *  read back as RGBA8 pixels instead. */
+         *  read back as RGBA8 pixels instead. `onSliceLoaded` (may be null) hears every slice that finishes decoding, in
+         *  completion order, with the running decoded count and the list's length. */
         private static _loadSlices;
         /**
          * X10: one decode per image URL while arrays are being built - terrains share layers, so the same 2048 slice was decoded
@@ -27000,6 +41222,23 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
+    /** One terrain loading progress update (TerrainBuilder.onLoadProgressObservable / TerrainBuilder.OnLoadProgressObservable). */
+    interface ITerrainLoadProgress {
+        /** The terrain reporting. */
+        terrain: TOOLKIT.TerrainBuilder;
+        /** Stage key: heightmap, collision, textures, surface, trees, details, settle, shaders or complete. */
+        stage: string;
+        /** Readable stage label, e.g. "Loading terrain textures". */
+        label: string;
+        /** Progress inside the stage, 0 to 1. */
+        stageProgress: number;
+        /** Progress of this terrain's whole load, 0 to 1 (never goes back). */
+        progress: number;
+        /** True on the final update: the terrain is completely loaded (or failed / disposed). */
+        complete: boolean;
+        /** True when the terrain could not be built (complete is true as well). */
+        failed: boolean;
+    }
     /**
      * Unity terrain runtime (unity-terrain-system-parity, contract 2). Builds the heightfield, holes, the Havok heightfield
      * collider and the quadtree LOD surface from the TOOLKIT.TerrainBuilder component properties (Design Reference §3, §4.3).
@@ -27008,6 +41247,34 @@ declare namespace TOOLKIT {
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
         private static _registry;
         readonly onBuiltObservable: BABYLON.Observable<TOOLKIT.TerrainBuilder>;
+        /** Loading progress of this terrain, stage by stage (see ITerrainLoadProgress). */
+        readonly onLoadProgressObservable: BABYLON.Observable<TOOLKIT.ITerrainLoadProgress>;
+        /** Fires once when this terrain is completely loaded: built, settled around the loading camera and its shaders compiled (also on failure). */
+        readonly onLoadedObservable: BABYLON.Observable<TOOLKIT.TerrainBuilder>;
+        /** Loading progress of every terrain of every scene (see ITerrainLoadProgress; the terrain's scene is terrain.scene). */
+        static readonly OnLoadProgressObservable: BABYLON.Observable<TOOLKIT.ITerrainLoadProgress>;
+        /** Upper bound (milliseconds) the scene's asset preloader waits for one terrain before it carries on without it. */
+        static PRELOAD_TIMEOUT_MS: number;
+        /** Upper bound (milliseconds) of the load-time settle: surface refinement and detail streaming around the loading camera. */
+        static SETTLE_MS: number;
+        /** Surface node meshes built per settle pass while the loader is up (TerrainSurface.MAX_BUILDS_PER_FRAME while playing). */
+        static SETTLE_SURFACE_BUILDS: number;
+        /** Upper bound (milliseconds) the load waits for the scene's light probe network before compiling probe-lit tree shaders. */
+        static PROBE_WAIT_MS: number;
+        /** Detail chunk build budget per settle pass (milliseconds) while the loader is up (TerrainDetails.BUILD_BUDGET_MS while playing). */
+        static SETTLE_DETAIL_BUDGET_MS: number;
+        /** Loading stages in order, with their share of a terrain's load progress. */
+        private static readonly LOAD_STAGES;
+        private _contractChecked;
+        private _loadPromise;
+        /** The shared LoadingProgress job this terrain reports its load to (opened by startLoad). */
+        private _loadJob;
+        private _preloadClaimed;
+        private _preloading;
+        private _isLoaded;
+        private _loadFailed;
+        private _loadStage;
+        private _loadProgress;
         private _isBuilt;
         private _disposed;
         private _registered;
@@ -27027,7 +41294,15 @@ declare namespace TOOLKIT {
         private static _casters;
         /** Built-in terrain surfaces that cast with their back faces (see MarkBackFaceCaster). */
         private static _backFaceCasters;
+        /** Tree caster slot per mesh (terrain-performance D8); a mesh with no entry is not a slot. */
+        private static _casterSlots;
+        /** The CasterFrame slot value of a mesh that is not a tree caster slot. */
+        private static readonly NO_CASTER_SLOT;
+        /** Per scene: the active-mesh candidate list without tree caster slots (see InstallSlotCandidateFilter). */
+        private static _slotCandidateFilters;
         private static _planes;
+        /** Scratch for one slot's new side planes, compared with the stored ones before they are replaced. */
+        private static _slotPlaneScratch;
         private static _lightPos;
         /** Margin (world metres) around a pass volume before a caster is dropped: texel snapping and filter taps. */
         static readonly CASTER_MARGIN: number;
@@ -27038,8 +41313,26 @@ declare namespace TOOLKIT {
          */
         shadowReach: number;
         readonly shadowLightDirection: BABYLON.Vector3;
+        /** Valid tree caster slots this frame (0 = none: slot 0 casts into every pass). Set by updateShadowSlots (T3). */
+        shadowSlotCount: number;
+        /** Side planes of each tree caster slot from the slot generator's previous frame, 16 numbers per slot. */
+        readonly shadowSlotPlanes: Float32Array;
+        /**
+         * How far (metres) the slot planes moved between the last two frames: the largest plane offset change over every valid
+         * slot, 0 when the planes were not valid both times. Tree slot selection widens its margin by it, because the next
+         * frame's cascades usually move about as far again and slots are chosen against the previous frame's planes.
+         */
+        shadowSlotDrift: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         get isBuilt(): boolean;
+        /** True once the terrain is completely loaded (see onLoadedObservable), also after a failed build. */
+        get isLoaded(): boolean;
+        /** True when the terrain finished loading without being built. */
+        get loadFailed(): boolean;
+        /** Load progress of this terrain, 0 to 1. */
+        get loadProgress(): number;
+        /** The current loading stage key (see ITerrainLoadProgress.stage), "" before the load starts. */
+        get loadStage(): string;
         get contract(): TOOLKIT.ITerrainContract;
         get heightfield(): TOOLKIT.TerrainHeightfield;
         get surfaceRoot(): BABYLON.TransformNode;
@@ -27085,8 +41378,20 @@ declare namespace TOOLKIT {
         getMedianUpdateMs(): number;
         /** Shadow generators this terrain has registered its casters with. */
         get shadowGenerators(): Set<any>;
+        /**
+         * The scene's asset preloader loads the terrain (scene path): the whole build, the settle around the loading camera
+         * and the shader pre-warm run inside one preloader task, so the page loader, ready() and SceneManager.OnSceneReady /
+         * WhenSceneReady wait for the completely loaded terrain while the loader shows the stage progress.
+         */
+        addPreloaderTasks(assetsManager: TOOLKIT.PreloadAssetsManager): void;
         protected awake(): void;
+        /** Validates the exported contract once and registers the terrain (awake or addPreloaderTasks, whichever runs first). */
+        private prepareContract;
+        /** Starts the load once; the promise never rejects and resolves when the terrain is completely loaded (or failed). */
+        private startLoad;
         protected update(): void;
+        /** One frame of the surface quadtree, tree instancing, detail streaming and shadow reach for a camera (update and the load settle). */
+        private tick;
         protected destroy(): void;
         private disposeParts;
         private buildAsync;
@@ -27109,17 +41414,51 @@ declare namespace TOOLKIT {
         private scanShadowGenerators;
         /**
          * D44 shadow reach: the largest Unity shadow distance of the registered generators turned into the radius of the
-         * camera frustum up to that depth (TerrainMath.ShadowReach), and the first directional light's travel direction.
+         * camera frustum up to that depth (TerrainMath.ShadowReach), and the first directional light's travel direction. The
+         * first enabled directional generator is the tree slot generator: updateShadowSlots refreshes the slot planes, drift
+         * and count from it (terrain-performance D8).
+         * @param camera The active camera (its field of view and aspect ratio size the reach).
          */
         private updateShadowReach;
+        /**
+         * Refreshes the tree caster slot planes from the slot generator's previous-frame pass transforms, measures how far they
+         * moved (shadowSlotDrift) and tags the generator with the slot count for CullCasters (terrain-performance D8).
+         * @param generator The first enabled directional shadow generator, or null.
+         */
+        private updateShadowSlots;
         /** Unity's shadow distance behind a generator: the exported one (light metadata), else the CSM range, else the light's. */
         static GetShadowDistance(generator: any): number;
+        /**
+         * Marks a mesh as tree caster slot `slot`, so CullCasters keeps it only in the matching pass of the slot generator, and
+         * takes it out of its scene's active-mesh candidates (InstallSlotCandidateFilter).
+         * @param mesh The slot mesh.
+         * @param slot The slot index (0 to 3).
+         */
+        static SetCasterSlot(mesh: BABYLON.AbstractMesh, slot: number): void;
+        /**
+         * Keeps tree caster slots out of the scene's active-mesh candidates (terrain-performance D8), once per scene. A slot never
+         * draws in a camera pass (layerMask 0), yet every candidate costs a LOD lookup, a readiness check and, when enabled, a
+         * world-matrix and LOD evaluation each frame; the shadow maps draw slots from their own lists (CullCasters), which never
+         * read the active list. Only Babylon's default candidates (every scene mesh) are replaced, by a cached copy without the
+         * slots that is rebuilt when meshes are added or removed; a selection octree or another provider keeps its own
+         * selection untouched. Callers must keep slot world matrices current themselves (TerrainTrees.uploadTarget).
+         * @param scene The scene (ignored when null or already filtered).
+         */
+        static InstallSlotCandidateFilter(scene: BABYLON.Scene): void;
+        /**
+         * Refills a slot candidate filter with every mesh that is not a tree caster slot, in scene order.
+         * @param meshes The scene's meshes.
+         * @param filter The filter to refill (marked clean).
+         */
+        private static RebuildSlotCandidates;
         /** True when the mesh was registered as a terrain caster (tests, diagnostics). */
         static IsTerrainCaster(mesh: BABYLON.AbstractMesh): boolean;
         /**
          * Installs the terrain's per-pass caster list on a generator's shadow map (once; a list installed by someone else is
          * chained in front). Babylon draws every caster into every cascade, face or map; this keeps a terrain caster only
-         * in the passes whose volume it overlaps.
+         * in the passes whose volume it overlaps. The scene-wide Unity caster culling (LightingConversions.ApplyUnityCasterCulling,
+         * which passes the terrain's own casters through) runs AFTER the terrain instead, on the terrain's per-pass output, so the
+         * terrain still gathers its casters from the whole render list once per frame (CasterFrame).
          */
         static InstallCasterCulling(generator: any): void;
         /**
@@ -27145,16 +41484,56 @@ declare namespace TOOLKIT {
         /**
          * One pass of a generator (cascade layer, cube face, or the single map): out receives every non-terrain caster and
          * the terrain casters whose world AABB overlaps the pass volume. The volume is the pass transform's side planes
-         * (open toward the light), plus the light range for point and spot lights.
+         * (open toward the light), plus the light range for point and spot lights. For the tree slot generator (tagged with
+         * tkTreeSlotCount) a tree caster slot is kept only on its matching pass - slot k on pass k, or slot 0 on every pass
+         * while no slot planes are valid (terrain-performance D8); other generators test slots like any terrain caster.
+         * @param generator The shadow generator rendering the pass.
+         * @param pass The pass index (cascade, cube face, or 0).
+         * @param renderList The shadow map's render list (or the list a chained custom list returned).
+         * @param count How many entries of renderList to consider.
+         * @param out The reused output array for this pass (cleared first).
+         * @returns out, filled with the casters to draw in this pass.
          */
         static CullCasters(generator: any, pass: number, renderList: BABYLON.AbstractMesh[], count: number, out: BABYLON.AbstractMesh[]): BABYLON.AbstractMesh[];
         private static _casterFrames;
         /**
          * The render list's casters for this frame, in list order: every non-terrain caster (box NaN) and the enabled, visible
-         * terrain casters with their world AABBs. Rebuilt when the scene render id, the list or its count changes; without a
-         * scene (a bare generator) it is rebuilt on every call.
+         * terrain casters with their world AABBs and each mesh's tree caster slot. Rebuilt when the scene frame id (advanced
+         * once per scene.render; the render id advances per cascade layer), the list or its count changes; without a scene (a
+         * bare generator) it is rebuilt on every call.
+         * @param generator The shadow generator (its shadow map gives the scene).
+         * @param renderList The render list being culled.
+         * @param count How many entries of renderList to consider.
+         * @returns The cached caster set for this frame and list.
          */
         private static CasterFrame;
+        /**
+         * Load-time settle (loader up): drives the surface quadtree, tree instancing and detail streaming for the active camera
+         * with raised budgets until every refined surface node and every detail chunk within reach is built, so nothing pops in
+         * once the loader hides. Ends at SETTLE_MS, without a camera (after 2 s), or on dispose.
+         */
+        private settle;
+        /** Reports a loading stage to the observables and the terrain's LoadingProgress job (which posts to the splash while the scene preloader owns it). */
+        private reportLoad;
+        /** Ends the load once: restores the playing budgets, reports completion and notifies onLoadedObservable. */
+        private finishLoad;
+        /** Resolves when the texture is ready, failed to load or after timeoutMs (null resolves at once). */
+        private static WaitForTexture;
+        /** Combined load progress (0 to 1) of every registered terrain of the scene (1 when there are none). */
+        static GetLoadProgress(scene: BABYLON.Scene): number;
+        /** True when every registered terrain of the scene is completely loaded (also true when there are none). */
+        static IsAllLoaded(scene: BABYLON.Scene): boolean;
+        /**
+         * Splash-screen gate for terrains alone: resolves when every terrain of the scene is completely loaded (built, settled
+         * around the loading camera, shaders compiled) or after the timeout. NEVER rejects and NEVER hangs: true when the
+         * terrains finished, false on timeout or disposal. A terrain registers on awake or with the asset preloader, so the
+         * call waits settleMs for terrains to appear before it resolves on a scene that has none. Scene loads normally gate
+         * on SceneManager.WhenSceneReady, which includes the terrains.
+         * @param scene The scene to wait on.
+         * @param timeoutMs Hard deadline in milliseconds (values <= 0 use PRELOAD_TIMEOUT_MS).
+         * @param settleMs How long to wait for a first terrain before a scene without terrains resolves (default 250).
+         */
+        static WhenAllTerrainsLoaded(scene: BABYLON.Scene, timeoutMs?: number, settleMs?: number): Promise<boolean>;
         /** Upper bound of the D45 shader pre-warm (milliseconds). */
         static PREWARM_MS: number;
         /**
@@ -27464,6 +41843,8 @@ declare namespace TOOLKIT {
         lastCompactMs: number;
         /** Milliseconds spent building chunks in the last update (diagnostics, D43). */
         lastBuildMs: number;
+        /** Chunk build budget per update in milliseconds (BUILD_BUDGET_MS while playing; TerrainBuilder raises it while the loader settles the details). */
+        buildBudgetMs: number;
         private _n;
         private static readonly UP;
         private _qa;
@@ -27521,6 +41902,14 @@ declare namespace TOOLKIT {
         }[];
         /** The layer's main-pass host with room for at least count instances (created or grown on demand). */
         private ensureMain;
+        /**
+         * Babylon's thinInstanceSetBuffer("matrix") keeps the old previous-world buffer (created on the first draw once the scene
+         * needs previous world matrices, e.g. HDRP motion blur velocity), and every draw then writes the grown count into it - on
+         * WebGPU that invalidates the whole frame. Rebuilt at the new size the way Babylon's own _thinInstanceUpdateBufferSize does:
+         * merely disposing it leaves its four previousWorld vertex buffers on the geometry, and the next pipeline then counts them
+         * as four separate buffers (past WebGPU's 8).
+         */
+        private static ResizePreviousMatrices;
         /** The main host's tint buffer: Babylon's "color" for mesh layers, "tkGrassTint" for texture grass (TerrainGrassPlugin). */
         private static TintBuffer;
         /** XZ distance from the camera (Unity-local metres) to the chunk rect. */
@@ -27538,10 +41927,13 @@ declare namespace TOOLKIT {
         /** One host per (layer, chunk) (D40), the §8 mesh detail matrix per kept instance. Null when the chunk has none. */
         private buildMeshHost;
         /**
-         * A host with its own Geometry over the source's GPU vertex and index buffers. Thin-instance "world0..3" buffers
-         * are stored on the geometry (Mesh.setVerticesBuffer), so hosts must never share one Geometry (measured: shared
-         * clones bind another chunk's instance buffer, a WebGPU validation error and a blank canvas). Sharing the GPU
-         * buffers keeps one copy of the vertex data per layer. Falls back to a clone with its own geometry copy.
+         * A host with its own Geometry over the source's GPU vertex and index buffers (TerrainTrees.CreateSharedHost).
+         * Thin-instance "world0..3" buffers are stored on the geometry (Mesh.setVerticesBuffer), so hosts must never share one
+         * Geometry (measured: shared clones bind another chunk's instance buffer, a WebGPU validation error and a blank canvas).
+         * Sharing the GPU buffers keeps one copy of the vertex data per layer. Falls back to a clone with its own geometry copy.
+         * @param rt The detail layer runtime whose source mesh is shared.
+         * @param name The new host's name.
+         * @returns The host, or null when even the clone fallback fails.
          */
         private createHost;
         /** Registers or drops the chunk's castshadows hosts as casters as it enters or leaves the shadow reach (D44). */
@@ -27558,6 +41950,13 @@ declare namespace TOOLKIT {
         private static WorldBox;
         /** Every shadow-casting host currently built (castshadows layers, chunks inside the shadow reach). */
         getMeshes(): BABYLON.AbstractMesh[];
+        /** True once every chunk within reach of the last camera position is built (or there is nothing to stream). */
+        get isSettled(): boolean;
+        /** Chunks built and still queued around the last camera position (loading progress). */
+        getStreamingCounts(): {
+            built: number;
+            queued: number;
+        };
         /** Diagnostics: layers, chunk states, hosts and built instances per layer index. */
         getStats(): {
             layers: number;
@@ -27951,6 +42350,13 @@ declare namespace TOOLKIT {
         prepareDefines(defines: BABYLON.MaterialDefines, scene: BABYLON.Scene, mesh: BABYLON.AbstractMesh): void;
         bindForSubMesh(uniformBuffer: BABYLON.UniformBuffer, scene: BABYLON.Scene, engine: BABYLON.AbstractEngine, subMesh: BABYLON.SubMesh): void;
         getCustomCode(shaderType: string, shaderLanguage?: BABYLON.ShaderLanguage): any;
+        /**
+         * URP's realtime shadow distance fade on each light's shadow (Shadows.hlsl MixRealtimeAndBakedShadows), at the shared light
+         * loop anchor `aggShadow+=shadow;`, which the body re-emits: `shadow` fades to 1 by `saturate(distanceToCamera² * scale + bias)`
+         * (LightingConversions.GetShadowFade). The texture grass is a Standard material, so it does not carry ShadowmaskPlugin, which
+         * applies the same fade to every toolkit PBR material.
+         */
+        static ShadowFadeCode(wgsl: boolean): string;
         /** §10 code for both languages (the WGSL is a line-for-line port). Behind TKGRASS / TKGRASS_BILLBOARD. */
         static BuildCode(wgsl: boolean): {
             [hook: string]: string;
@@ -27997,6 +42403,11 @@ declare namespace TOOLKIT {
         isNearHole(u: number, v: number, paddingMetres: number): boolean;
         /** RGBA8 per-sample normal texture, (n * 0.5 + 0.5) * 255 of the terrain-local normal, BILINEAR, CLAMP, invertY false (D12). */
         createNormalTexture(scene: BABYLON.Scene): BABYLON.RawTexture;
+        /** createNormalTexture in slices (LoadSlicer): the same bytes, the page keeps running between rows. */
+        createNormalTextureAsync(scene: BABYLON.Scene, slicer: TOOLKIT.LoadSlicer): Promise<BABYLON.RawTexture>;
+        /** Fills the normal bytes one sample row per step. */
+        private normalRows;
+        private normalTexture;
         /** RGBA8 (R-1)^2 holes texture (255 solid, 0 hole), NEAREST, CLAMP. Null when there are no holes (D13). */
         createHolesTexture(scene: BABYLON.Scene): BABYLON.RawTexture;
         /** Nodes per side at a pyramid level (node = leafCells * 2^level cells). */
@@ -28007,6 +42418,12 @@ declare namespace TOOLKIT {
          * Level 0 is the leaf (step 1, error 0). Nodes past R-1 are clamped to the edge.
          */
         buildErrorPyramid(leafCells?: number): void;
+        /** buildErrorPyramid in slices (LoadSlicer): the same pyramid, the page keeps running between steps. */
+        buildErrorPyramidAsync(leafCells: number, slicer: TOOLKIT.LoadSlicer): Promise<void>;
+        /** True when buildErrorPyramid already ran with these leaf cells. */
+        hasErrorPyramid(leafCells: number): boolean;
+        /** Builds the pyramid in steps: one level-0 node row, or one coarser node (its full-resolution error scan), per step. */
+        private errorPyramidRows;
         /** Geometric error (metres) of a pyramid node, 0 before buildErrorPyramid. */
         nodeError(level: number, nx: number, nz: number): number;
         /** [min, max] local height of a pyramid node. */
@@ -28148,6 +42565,47 @@ declare namespace TOOLKIT {
         static AabbOutsidePlanes(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, planes: ArrayLike<number>, count: number, margin: number): boolean;
         /** True when the box [min, max] and the sphere (cx, cy, cz, r) overlap. */
         static AabbSphereOverlap(minX: number, minY: number, minZ: number, maxX: number, maxY: number, maxZ: number, cx: number, cy: number, cz: number, r: number): boolean;
+        /**
+         * True when the sphere lies fully outside any of `count` planes stored from `offset` (4 numbers per plane, inside when
+         * a*x + b*y + c*z + d >= 0, the SidePlanes layout).
+         * @param x Sphere centre x, world metres.
+         * @param y Sphere centre y, world metres.
+         * @param z Sphere centre z, world metres.
+         * @param radius Sphere radius in metres (>= 0).
+         * @param planes Normalised plane quadruples.
+         * @param offset Index of the first plane's first number.
+         * @param count How many planes to test.
+         * @returns True when no part of the sphere is inside every plane.
+         */
+        static SphereOutsidePlanes(x: number, y: number, z: number, radius: number, planes: ArrayLike<number>, offset: number, count: number): boolean;
+        /**
+         * Which tree caster slots an instance belongs to (terrain-performance D8): bit k is set when the sphere reaches slot k's four
+         * side planes (16 numbers per slot). With no usable slots the instance goes to slot 0 alone. Allocates nothing.
+         * @param x Instance centre x, world metres.
+         * @param y Instance centre y, world metres.
+         * @param z Instance centre z, world metres.
+         * @param radius Instance radius plus the slot margin, metres.
+         * @param slotPlanes Side planes of every slot, 16 numbers per slot (ignored when slotCount is not 1-4).
+         * @param slotCount Valid slots this frame.
+         * @returns The slot bit mask (0 when the instance reaches no slot).
+         */
+        static CasterSlotMask(x: number, y: number, z: number, radius: number, slotPlanes: ArrayLike<number>, slotCount: number): number;
+        /**
+         * The largest change of a plane offset (the d of a*x + b*y + c*z + d) between two sets of `count` planes stored 4 numbers
+         * each from index 0 - how far parallel planes moved, in metres for normalised planes. Pure; allocates nothing.
+         * @param previous The earlier planes.
+         * @param next The later planes.
+         * @param count How many planes to compare.
+         * @returns The largest absolute offset change (0 when count is 0).
+         */
+        static MaxPlaneOffsetChange(previous: ArrayLike<number>, next: ArrayLike<number>, count: number): number;
+        /**
+         * True when a 4x4 transform can define culling planes: 16 finite numbers, at least one non-zero (a cascade that has not
+         * rendered yet reads all zero).
+         * @param matrix The 16 numbers, or null.
+         * @returns Whether SidePlanes of it is meaningful.
+         */
+        static IsUsableTransform(matrix: ArrayLike<number>): boolean;
         /**
          * Radius of the sphere around the camera that holds the view frustum up to depth `distance` (the corner of the far
          * rectangle): distance * sqrt(1 + tan(fovY/2)^2 * (1 + aspect^2)).
@@ -28308,10 +42766,16 @@ declare namespace TOOLKIT {
         graphUvs: boolean;
         /** Times every node was refrozen after a terrain move (diagnostics, D45). */
         refreezes: number;
+        /** Node meshes built per update (MAX_BUILDS_PER_FRAME while playing; TerrainBuilder raises it while the loader settles the surface). */
+        maxBuildsPerFrame: number;
         constructor(owner: TOOLKIT.TerrainBuilder, hf: TOOLKIT.TerrainHeightfield, material: BABYLON.Material);
         get root(): BABYLON.TransformNode;
         get pixelError(): number;
         set pixelError(v: number);
+        /** True once the quadtree selection for the last camera is complete (every refined node built), or in mesh mode. */
+        get isSettled(): boolean;
+        /** The surface meshes drawn for the current selection (node meshes or adopted legacy meshes). */
+        getActiveMeshes(): BABYLON.AbstractMesh[];
         /** Every surface mesh built so far (node meshes or adopted legacy meshes). */
         getMeshes(): BABYLON.AbstractMesh[];
         build(): void;
@@ -28343,6 +42807,12 @@ declare namespace TOOLKIT {
         static readonly FADE_SECONDS: number;
         /** D45 spatial grid cell size (metres). */
         static readonly GRID_CELL: number;
+        /** Caster slots per casting host: one per cascade a CascadedShadowGenerator supports (at most 4). */
+        static readonly CASTER_SLOTS: number;
+        /** Extra radius (metres) for choosing slots against the previous frame's cascade planes, widened by the planes' drift. */
+        private static readonly SLOT_MARGIN;
+        /** cos(0.5 deg): a smaller dot between light directions counts as the light turning. */
+        private static readonly LIGHT_TURN_DOT;
         /** Per-scene clones of prototype materials, keyed "<templateid>|<material uniqueId>" (D41), with a reference count. */
         private static _materials;
         private _owner;
@@ -28394,6 +42864,12 @@ declare namespace TOOLKIT {
         private _lastPos;
         private _lastDir;
         private _dir;
+        /** The shadow light direction at the last update (zero until a directional light casts). */
+        private _lastLightDirection;
+        /** The owner's valid caster slot count at the last update (-1 before the first): a change re-routes every casting instance. */
+        private _lastSlotCount;
+        /** This update's slot margin in metres: SLOT_MARGIN plus the owner's shadowSlotDrift. */
+        private _slotMargin;
         private _frame;
         private _fading;
         private _dirty;
@@ -28402,9 +42878,16 @@ declare namespace TOOLKIT {
         constructor(owner: TOOLKIT.TerrainBuilder, hf: TOOLKIT.TerrainHeightfield);
         set distance(v: number);
         get distance(): number;
-        /** Every host mesh. */
+        /**
+         * Every mesh the trees own: each camera host, followed by every caster slot mesh (terrain-performance D8).
+         * @returns A new array of the host meshes and then the slot meshes.
+         */
         getMeshes(): BABYLON.AbstractMesh[];
-        /** The hosts that cast shadows (D44): castshadows LOD renderers, never billboards. */
+        /**
+         * The meshes that cast tree shadows (D44, terrain-performance D8): the caster slots of each casting host (castshadows
+         * LOD renderers, never billboards), or the host itself when it has no slots (GPU sharing failed).
+         * @returns A new array of caster meshes.
+         */
         getCasterMeshes(): BABYLON.AbstractMesh[];
         /** Host count and instances drawn per host (diagnostics). */
         getStats(): {
@@ -28414,8 +42897,21 @@ declare namespace TOOLKIT {
             visibleHosts: number;
             colliders: boolean;
         };
+        /**
+         * Builds the tree instancer from the terrain contract: one camera host per LOD renderer of each prototype (plus the
+         * caster slots of each casting host, terrain-performance D8), registers the shadow casters with the owner, decodes the
+         * instances into the spatial grid and builds the tree colliders when the export asks for them. Does nothing without
+         * tree prototypes or instance data; a prototype that fails is skipped with a warning.
+         */
         build(): void;
-        /** Hosts per LOD renderer (§4.4 step 1). Returns null when no LOD produced a host. */
+        /**
+         * Creates the hosts of one prototype (§4.4 step 1): one thin-instance host per renderer mesh of each LOD level, with the
+         * host's shadow-casting flag, its light-probe use and, for a casting host, its caster slots (terrain-performance D8).
+         * @param p The exported tree prototype.
+         * @param tpl The prototype's template node in the scene.
+         * @param cap The prototype's instance count (each host's capacity).
+         * @returns The prototype's runtime data, or null when no LOD produced a host.
+         */
         private buildPrototype;
         /** X10 fix loop 2: a LOD's exported per-renderer light-probe flags (bool[] parallel to renderers); absent = probe-lit (Unity's default). */
         static RendererUsesProbes(flags: any, index: number): boolean;
@@ -28439,6 +42935,8 @@ declare namespace TOOLKIT {
         pollProbes(): void;
         /** X11: gives every probe-lit host its probe buffer + plugin (once, after the network is active). */
         private attachProbeHosts;
+        /** True while probe-lit hosts wait for the scene's light probe network to become active (pollProbes has not settled). */
+        get probesPending(): boolean;
         /** True once any host carries the per-instance probe buffer (diagnostics / tests). */
         get probesAttached(): boolean;
         /** X10 fix loop 2: where on an instance the probes are sampled, as a fraction of its bounds height above its position (0 = Unity's tree position). */
@@ -28454,7 +42952,25 @@ declare namespace TOOLKIT {
          */
         static InterleaveVertexData(mesh: BABYLON.Mesh): number;
         static HasGeometry(m: BABYLON.AbstractMesh): boolean;
+        /**
+         * A new mesh drawing `source`'s geometry from the SAME GPU vertex and index buffers (no copy), with its sub-meshes,
+         * bounding box and material. Instanced buffers of the source (thin-instance matrices and attributes) are not shared.
+         * A half-built mesh is disposed before the error is rethrown.
+         * @param scene The scene.
+         * @param source The mesh whose geometry is shared.
+         * @param name The new mesh's name.
+         * @returns The new mesh.
+         * @throws Error when the source has no index buffer, no vertex buffers, or a vertex buffer without a GPU wrapper.
+         */
+        static CreateSharedHost(scene: BABYLON.Scene, source: BABYLON.Mesh, name: string): BABYLON.Mesh;
         private createHost;
+        /**
+         * Builds the CASTER_SLOTS caster-only meshes of a casting host (terrain-performance D8). When GPU sharing fails the host keeps
+         * no slots and casts itself, as before.
+         * @param host The casting host.
+         * @param capacity Instances each slot can hold (the prototype's instance count).
+         */
+        private createCasterSlots;
         /** D41: one clone per (prototype, source material), named "<material>.<prototype>", with the foliage plugin attached. */
         private hostMaterial;
         /**
@@ -28463,6 +42979,21 @@ declare namespace TOOLKIT {
          * stripped) and counts one reference. Returns source itself when it cannot be cloned (no reference is counted).
          */
         static AcquireMaterial(scene: BABYLON.Scene, key: string, source: BABYLON.Material, cloneName: string): BABYLON.Material;
+        /** The PBR sub-surface state Babylon's PBRMaterial.clone leaves at its defaults (measured on 9.29: translucency, legacy model, tint, textures). */
+        static readonly SUBSURFACE_FIELDS: string[];
+        static readonly SUBSURFACE_COLORS: string[];
+        /**
+         * hdrp-complete-parity T24: copies a PBR source's sub-surface configuration onto its host clone. PBRMaterial.clone drops it, so an
+         * HDRP Translucent tree (SpeedTree8: hdrpsss + hdrptranslucency) lost its transmission on every host. A texture the source binds
+         * after the clone (HdrpLitMaterials binds translucency textures once the glTF textures load) is followed until it arrives.
+         */
+        static CopySubSurface(source: BABYLON.Material, clone: BABYLON.Material): void;
+        /**
+         * hdrp-complete-parity T24: re-attaches the HDRP material plugins a host clone loses (PBRMaterial.clone copies no toolkit plugin):
+         * HdrpLitPlugin with the source's keys (double-sided normal mode - HDRP's Mirror is what darkens back-lit grass -, detail map, unlit
+         * emission, anisotropic IBL, HDRP transmission) and the "hdrp" PipelineLightingPlugin. URP / Built-in clones keep their foliage-plugin path unchanged.
+         */
+        static CopyHdrpPlugins(source: BABYLON.Material, clone: BABYLON.Material): void;
         /** Drops one reference taken by AcquireMaterial and disposes the clone when none remain. */
         static ReleaseMaterial(scene: BABYLON.Scene, key: string): void;
         /**
@@ -28512,10 +43043,28 @@ declare namespace TOOLKIT {
          * D48 (T12.6): the fragment samplers a PBR clone's graph and stock inputs plus the scene will need, estimated BEFORE
          * the first compile - WebGL2 logs a failed link ("texture image units count exceeds MAX_TEXTURE_IMAGE_UNITS") before
          * any measured check can react. Graph (custom) samplers, the stock textures set on the material, the environment
-         * (reflection + BRDF lookup, + irradiance map when the environment has no SH), and per shadow-casting light one map
+         * (reflection + BRDF lookup, + irradiance map when the environment has no SH), the HDRP tube-light tables (TubeLightSamplers), the
+         * ray-traced shadow images (RayTracedSamplers), and per shadow-casting light one map
          * (two for PCSS) plus a spot light's projection texture. The measured check (FitSamplerBudget) stays the safety net.
          */
         static EstimateFragmentSamplers(material: BABYLON.Material, mesh?: BABYLON.AbstractMesh): number;
+        /**
+         * HDRP tube lights: the samplers TOOLKIT.HdrpTubeLightPlugin adds to this material's draw (its LTC / FGD atlas, plus an Eye
+         * graph's caustic LUT), counted as required like the BRDF lookup. Zero until the scene's first tube has attached the plugin
+         * to the material; with a mesh whose defines are already prepared, zero when no tube reaches it.
+         * @param material The PBR material being estimated.
+         * @param mesh The mesh it draws, or null (no defines yet: counted conservatively).
+         * @returns The number of fragment samplers the tube plugin binds.
+         */
+        private static TubeLightSamplers;
+        /**
+         * hdrp-raytracing-polyfill T6: the samplers TOOLKIT.RayTracedLightingPlugin adds to this material's draw (the shadow masks and
+         * the tint / depth image while ray-traced shadows reach it). Zero on every scene that does not ask for ray tracing.
+         * @param material The PBR material being estimated.
+         * @param mesh The mesh it draws, or null (no defines yet: counted while the scene traces shadows).
+         * @returns The number of fragment samplers the ray-tracing plugin binds.
+         */
+        private static RayTracedSamplers;
         /**
          * D48 (T12.6): applies the budget to a Shader Graph clone before its first compile, from EstimateFragmentSamplers - drops
          * the stock textures the graph overwrites (StockTexturesTheGraphOverwrites order) until the estimate fits. Returns the
@@ -28539,8 +43088,13 @@ declare namespace TOOLKIT {
          */
         private refreshWorld;
         /**
-         * §4.4 step 2: LOD selection, maxfulllod, crossfade state, culling and host buffer writes. Only grid cells near the
-         * frustum (within the tree distance) or inside the shadow reach are visited; nothing is allocated per update (D45).
+         * §4.4 step 2: LOD selection, maxfulllod, crossfade state, culling and buffer writes. In-view instances go to the camera
+         * hosts; casting instances (in view, or hidden but inside the shadow reach) go to the caster slots of their casting LOD,
+         * chosen against the previous frame's cascade planes (terrain-performance D8). Only grid cells near the frustum (within
+         * the tree distance) or inside the shadow reach are visited; nothing is allocated per update (D45). The rewrite runs
+         * when the camera moves or turns, the shadow light turns (D9), the valid slot count changes, the terrain moves, a
+         * crossfade is running, or every 15th call.
+         * @param camera The camera the trees are culled and LOD-selected for (the scene's active camera).
          */
         update(camera: BABYLON.Camera): void;
         /** True when the box lies fully outside one of the frustum planes. */
@@ -28554,11 +43108,58 @@ declare namespace TOOLKIT {
         private static TieRank;
         /** k-th smallest of the first count values (k >= 1) by repeated minimum passes (only when the scratch tail is short). */
         private static KthSmallest;
-        /** Appends instance i to every host of the LOD (only the casting hosts when castOnly) and grows the host bounds. */
+        /**
+         * Appends instance `instanceIndex` to a host or slot: its matrix, the fade, its probe SH when the target binds probes, and the
+         * instance's sphere in the target's terrain-local box. A full target ignores the instance.
+         * @param target The camera host or caster slot.
+         * @param instanceIndex The instance index.
+         * @param fade The LOD fade value (1 steady; signed crossfade weight otherwise).
+         */
+        private appendInstance;
+        /**
+         * True when any host of a prototype's LOD level casts shadows (billboard LODs and castshadows:false renderers do not).
+         * @param hosts The instancer's hosts.
+         * @param proto The prototype.
+         * @param lod The LOD level (false when out of range).
+         * @returns Whether the LOD has a casting host.
+         */
+        private static LodCasts;
+        /**
+         * Writes an in-view instance into every camera host of its LOD level.
+         * @param proto The instance's prototype.
+         * @param lod The LOD level (ignored when out of range, e.g. culled).
+         * @param instanceIndex The instance index.
+         * @param fade The LOD fade value.
+         */
         private writeInstance;
+        /**
+         * Writes a casting instance into the caster slots of its casting LOD's hosts (terrain-performance D8): slot k when the
+         * instance's sphere, widened by this update's slot margin, reaches cascade k's previous-frame side planes, slot 0 alone while
+         * none are valid. A casting host without slots (GPU sharing failed) takes shadow-only instances itself, as before.
+         * @param proto The instance's prototype.
+         * @param lod The LOD level that casts for this instance.
+         * @param instanceIndex The instance index.
+         * @param shadowOnly True when the instance is outside the view (state 2).
+         */
+        private writeCaster;
+        /**
+         * Uploads a host's or slot's instances written this update: count, matrices, fades, the probe buffer when bound, the bounding
+         * box, and visibility (an empty target is hidden; a slot must be visible to cast). An empty slot is also disabled, and a
+         * filled slot's world matrix is recomputed here, because slots are not active-mesh candidates (TerrainBuilder
+         * InstallSlotCandidateFilter) and the scene never evaluates them; a camera host stays enabled.
+         * @param target The camera host or caster slot.
+         * @param probeBuffer The host's probe buffer, or null.
+         * @param isSlot True for a caster slot.
+         */
+        private uploadTarget;
         private static Now;
         /** §4.4 step 3: one static PhysicsShapeContainer on "<name>.TreeColliders" (physics v2 only). */
         private buildColliders;
+        /**
+         * Releases everything the instancer created: the tree collider body and shapes, every caster slot and camera host (and
+         * the host multi-materials), the shared material clones it referenced, and the trees root node. Safe to call twice;
+         * a failure is reported as a warning.
+         */
         dispose(): void;
     }
 }
@@ -28726,6 +43327,18 @@ declare namespace TOOLKIT {
         private static _batchWatch;
         /** Scene the outstanding builds belong to (passed to the observable). */
         private static _batchScene;
+        /** Share of the skins loading job given to slice decoding; the rest goes to the built arrays. */
+        private static readonly SKIN_DECODE_WEIGHT;
+        /** Share of the skins loading job given to the built (uploaded) arrays. */
+        private static readonly SKIN_UPLOAD_WEIGHT;
+        /** Detail label while slices are still decoding. */
+        private static readonly SKIN_DECODE_LABEL;
+        /** Detail label once every slice decoded and the arrays are being stacked and uploaded. */
+        private static readonly SKIN_UPLOAD_LABEL;
+        /** Per-scene splash progress of the preloader's skin array builds (one array index per started build), keyed by scene.uniqueId. */
+        private static SkinPreloads;
+        /** Scenes whose dispose already drops their SkinPreloads entry (weak). */
+        private static _skinPreloadWatchedScenes;
         /** Number of skin slice arrays still uploading across the whole app (0 = nothing in flight). */
         static GetPendingSkinBuilds(): number;
         /** True when no skin slice array is currently uploading. NOTE: also true BEFORE the first component
@@ -28758,6 +43371,32 @@ declare namespace TOOLKIT {
         private static SetBatchScene;
         /** Retire one build from the global gate. ALWAYS called — success or failure — so it can never stick. */
         private static NoteBuildFinished;
+        /**
+         * Registers one preloader array build with the scene's skins loading job, opening the job ("Skins") and the scene's
+         * counters on the first build.
+         * @param scene - The scene being loaded.
+         * @param sliceCount - The channel's URL count (corrected by the build's first slice callback).
+         * @returns This build's index in the scene's counters.
+         */
+        private static AddSkinPreload;
+        /** Scene lifecycle: drops the scene's SkinPreloads entry when the scene is disposed (registered once per scene). */
+        private static WatchSkinPreloadScene;
+        /**
+         * Slice callback of one preloader array build: stores the decoded count at the build's index and reports.
+         * @param scene - The scene being loaded.
+         * @param buildIndex - The build's index from AddSkinPreload.
+         * @param decodedCount - Slices of this build decoded so far.
+         * @param sliceCount - Slices in this build's clamped list (replaces the URL count).
+         */
+        private static NoteSkinSliceDecoded;
+        /**
+         * One preloader array build settled (built, failed or null): counts it, reports, and completes the scene's skins job once
+         * every started build has settled (the entry is then dropped so a later batch starts fresh counters).
+         * @param scene - The scene being loaded.
+         */
+        private static NoteSkinArrayBuilt;
+        /** Reports the skins job: 80% decoded slices, 20% settled arrays; decoding label until every slice decoded. */
+        private static ReportSkinPreload;
         /** Wrap a slice-array build so the global gate sees it, whoever started it. Passes the result (and any
          *  rejection) straight through — purely bookkeeping. */
         private static TrackSkinBuild;
@@ -31342,6 +45981,8 @@ declare namespace TOOLKIT {
      * `d = abs(uv - center) * settings.x`, `d.x *= lerp(1, width / height, settings.w)` (the `rounded` aspect term),
      * `d = pow(saturate(d), settings.z)`, `vfactor = pow(saturate(1 - dot(d, d)), settings.y)`,
      * `rgb *= lerp(color, 1, vfactor)`, `a = lerp(1, a, vfactor)`. Multiply blend only, in linear space.
+     * On an LDR camera (`displayEncodedChain`) the materials already gamma-encoded the frame, so the pass decodes to
+     * linear, applies the vignette and re-encodes (multiplying encoded colour darkened the corners about twice as much as Unity).
      *
      * The screen size is read from the post-process size every frame, so the aspect term follows resizes and DPR.
      * The vignette is evaluated on the lens-distorted UV like Unity's Uber (`options.distortion` carries the active
@@ -31428,6 +46069,7 @@ declare namespace TOOLKIT {
          * @param options.distortionSettings The Unity lens-distortion settings SHARED with the lens pass (inspector-truth T3):
          *        the vignette derives the distortion model from them every frame (`LensDistortionPlugin.DeriveModel`), so a
          *        lens edit moves the vignette too; takes precedence over `distortion`.
+         * @param options.displayEncodedChain The camera chain is LDR (gamma-encoded by the materials): read and write display-encoded colour.
          */
         static CreatePostProcess(scene: BABYLON.Scene, camera: BABYLON.Camera, options?: {
             /** Render-target type of the pass (artifact-cleanup T5: HALF_FLOAT on the HDR chain); Babylon's 8-bit default when omitted. */
@@ -31448,6 +46090,11 @@ declare namespace TOOLKIT {
             distortion?: IVignetteDistortion;
             /** The Unity lens-distortion settings shared with the lens pass (inspector-truth T3); derived every frame. */
             distortionSettings?: TOOLKIT.ILensDistortionUnitySettings;
+            /** hdrp-complete-parity T20: HDRP Masked mode -- the loaded mask (alpha) and `opacity` (`TK_VIGNETTE_MASK`). */
+            mask?: BABYLON.BaseTexture;
+            opacity?: number;
+            /** The chain is LDR, so its colour is display-encoded (`DISPLAY_ENCODED_CHAIN`): decode, vignette, re-encode. */
+            displayEncodedChain?: boolean;
         }): BABYLON.PostProcess;
         /**
          * Normalises the `distortion` option: null / undefined / a zero intensity -> null (screen UV); otherwise the
