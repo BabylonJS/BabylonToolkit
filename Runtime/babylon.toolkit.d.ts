@@ -11104,8 +11104,8 @@ declare namespace TOOLKIT {
         private getWGSLSkinEmissiveCode;
     }
 }
-declare namespace PROJECT {
-    /** Topology a runner starts in, as Photon Fusion's GameMode. */
+declare namespace TOOLKIT {
+    /** Topology a runner starts in, as the original API's GameMode. */
     enum GameMode {
         /** One local peer, no transport. */
         Single = 0,
@@ -11120,7 +11120,7 @@ declare namespace PROJECT {
         /** Joins an existing Host session as a client, or creates one as host when none exists. */
         AutoHostOrClient = 5
     }
-    /** Why a runner shut down, as Photon Fusion's ShutdownReason (same member order and values). */
+    /** Why a runner shut down, as the original API's ShutdownReason (same member order and values). */
     enum ShutdownReason {
         Ok = 0,
         Error = 1,
@@ -11145,14 +11145,14 @@ declare namespace PROJECT {
         OperationTimeout = 20,
         OperationCanceled = 21
     }
-    /** Which peers may call an RPC, as Photon Fusion's RpcSources (bit flags). */
+    /** Which peers may call an RPC, as the original API's RpcSources (bit flags). */
     enum RpcSources {
         StateAuthority = 1,
         InputAuthority = 2,
         Proxies = 4,
         All = 7
     }
-    /** Which peers run an RPC, as Photon Fusion's RpcTargets (bit flags). */
+    /** Which peers run an RPC, as the original API's RpcTargets (bit flags). */
     enum RpcTargets {
         StateAuthority = 1,
         InputAuthority = 2,
@@ -11160,7 +11160,7 @@ declare namespace PROJECT {
         All = 7
     }
     /**
-     * Delivery channel of an RPC, as Photon Fusion's RpcChannel. Unreliable frames ride WebTransport datagrams when the
+     * Delivery channel of an RPC, as the original API's RpcChannel. Unreliable frames ride WebTransport datagrams when the
      * game server offers HTTP/3, else the reliable WebSocket (D7).
      */
     enum RpcChannel {
@@ -11177,30 +11177,30 @@ declare namespace PROJECT {
         /** WebTransport or fail with ConnectionRefused. */
         WebTransport = 2
     }
-    /** How a host's own RPC calls report their source, as Photon Fusion's RpcHostMode. */
+    /** How a host's own RPC calls report their source, as the original API's RpcHostMode. */
     enum RpcHostMode {
         SourceIsServer = 0,
         SourceIsHostPlayer = 1
     }
-    /** Lag-compensated query options, as Photon Fusion's HitOptions (bit flags). */
+    /** Lag-compensated query options, as the original API's HitOptions (bit flags). */
     enum HitOptions {
         None = 0,
         IncludePhysics = 1,
         SubtickAccuracy = 4,
         IgnoreInputAuthority = 8
     }
-    /** Shape of a lag-compensated hitbox, as Photon Fusion's HitboxTypes. */
+    /** Shape of a lag-compensated hitbox, as the original API's HitboxTypes. */
     enum HitboxType {
         Box = 1,
         Sphere = 2
     }
-    /** What a lag-compensated query hit, as Photon Fusion's HitType. */
+    /** What a lag-compensated query hit, as the original API's HitType. */
     enum HitType {
         None = 0,
         Hitbox = 1,
         Physics = 2
     }
-    /** Which words a ChangeDetector compares, as Photon Fusion's ChangeDetector.Source. */
+    /** Which words a ChangeDetector compares, as the original API's ChangeDetector.Source. */
     enum ChangeDetectorSource {
         /** The live simulation state. */
         SimulationState = 0,
@@ -11244,20 +11244,20 @@ declare namespace PROJECT {
         Single = 0,
         Additive = 1
     }
-    /** Spawn options, as Photon Fusion's NetworkSpawnFlags (bit flags). */
+    /** Spawn options, as the original API's NetworkSpawnFlags (bit flags). */
     enum NetworkSpawnFlags {
         None = 0,
         DontDestroyOnLoad = 1,
         SharedModeStateAuthMasterClient = 2,
         SharedModeStateAuthLocalPlayer = 4
     }
-    /** A host's answer to a connect request, as Photon Fusion's NetworkRunnerCallbackArgs.ConnectRequest result. */
+    /** A host's answer to a connect request, as the original API's NetworkRunnerCallbackArgs.ConnectRequest result. */
     enum ConnectRequestResult {
         Waiting = 0,
         Accept = 1,
         Refuse = 2
     }
-    /** Why a transport connection closed, as Photon Fusion's NetDisconnectReason. */
+    /** Why a transport connection closed, as the original API's NetDisconnectReason. */
     enum NetDisconnectReason {
         Unknown = 0,
         Requested = 1,
@@ -11299,7 +11299,7 @@ declare namespace PROJECT {
     /** Id range reserved for each player's Shared-mode spawns (D7). */
     const NETWORK_SHARED_ID_PLAYER_STRIDE: number;
     /**
-     * A player in a networked session, as Photon Fusion's PlayerRef (D8).
+     * A player in a networked session, as the original API's PlayerRef (D8).
      * Immutable; compare with equals(), never ===.
      */
     class PlayerRef {
@@ -11348,7 +11348,7 @@ declare namespace PROJECT {
         toString(): string;
     }
     /**
-     * A networked scene reference, as Photon Fusion's SceneRef: an index into NetworkProjectConfig.sceneFiles, or a scene
+     * A networked scene reference, as the original API's SceneRef: an index into NetworkProjectConfig.sceneFiles, or a scene
      * file path. Immutable.
      */
     class SceneRef {
@@ -11466,21 +11466,21 @@ declare namespace PROJECT {
          * @param message The error message, for example "InvalidAuthentication: the token expired".
          * @returns The named reason, or null when the message names none.
          */
-        static reasonFromMessage(message: string): PROJECT.ShutdownReason | null;
+        static reasonFromMessage(message: string): TOOLKIT.ShutdownReason | null;
     }
     /**
      * Builds one instance of a runtime network prefab in code (mario-kart-port D32), for a prefab that is not authored in an asset
      * container. It runs synchronously inside NetworkRunner.spawn and on every peer that receives the spawn, so preload
      * whatever it needs (containers, textures) before NetworkRunner.startGame. The returned root node must already carry
-     * a constructed PROJECT.NetworkObject and every SimulationBehaviour of the prefab (constructing a script component
+     * a constructed TOOLKIT.NetworkObject and every SimulationBehaviour of the prefab (constructing a script component
      * registers it on its node); the runner collects them when it attaches the object.
      * @param runner The runner spawning the object.
      * @param position World spawn position.
      * @param rotation World spawn rotation.
      * @returns The instance's root node.
      */
-    type NetworkRuntimePrefabFactory = (runner: PROJECT.NetworkRunner, position: BABYLON.Vector3, rotation: BABYLON.Quaternion) => BABYLON.TransformNode;
-    /** Runner configuration, as Photon Fusion's NetworkProjectConfig; authored on the Unity NetworkSettings component. */
+    type NetworkRuntimePrefabFactory = (runner: TOOLKIT.NetworkRunner, position: BABYLON.Vector3, rotation: BABYLON.Quaternion) => BABYLON.TransformNode;
+    /** Runner configuration, as the original API's NetworkProjectConfig; authored on the Unity NetworkSettings component. */
     interface NetworkProjectConfig {
         /** Simulation ticks per second. */
         tickRate: number;
@@ -11509,7 +11509,7 @@ declare namespace PROJECT {
         /** Session server URL (default "ws://localhost:2567"). */
         serverUrl: string;
     }
-    /** Result of NetworkRunner.startGame, as Photon Fusion's StartGameResult. */
+    /** Result of NetworkRunner.startGame, as the original API's StartGameResult. */
     interface StartGameResult {
         /** True when the runner started. */
         ok: boolean;
@@ -11518,7 +11518,7 @@ declare namespace PROJECT {
         /** A readable failure message, or null. */
         errorMessage: string | null;
     }
-    /** A session's public description, as Photon Fusion's SessionInfo. */
+    /** A session's public description, as the original API's SessionInfo. */
     interface SessionInfo {
         /** Session name players join by. */
         name: string;
@@ -11538,7 +11538,7 @@ declare namespace PROJECT {
         region: string;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * Growable little-endian byte writer for network frames (D5). The backing array doubles when full, so steady-state
      * writes never allocate.
@@ -11666,7 +11666,7 @@ declare namespace PROJECT {
         private require;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** Kind of one state word; drives wire encoding (D5, A4). */
     enum NetworkWordKind {
         /** Signed integer (int, enum, string length, collection count): zig-zag varint. */
@@ -11731,7 +11731,7 @@ declare namespace PROJECT {
         /** Length of one tick, in seconds. */
         readonly deltaTime: number;
         /** The player this peer plays as (PlayerRef.None on a dedicated server). */
-        readonly localPlayer: PROJECT.PlayerRef;
+        readonly localPlayer: TOOLKIT.PlayerRef;
         /** True on a server or host (and in Single mode): this peer has state authority over every object. */
         readonly isServer: boolean;
         /** Time remote objects are drawn at, in seconds: estimated server time minus the interpolation delay (D15, A6). */
@@ -11741,7 +11741,7 @@ declare namespace PROJECT {
          * @param id The object's network id.
          * @returns The object, or null when no object has that id.
          */
-        findObject(id: number): PROJECT.NetworkObject | null;
+        findObject(id: number): TOOLKIT.NetworkObject | null;
     }
     /** What a value codec needs to resolve references and the current words. */
     interface NetworkedValueOwner {
@@ -11767,11 +11767,11 @@ declare namespace PROJECT {
     /** A plain struct value: field name to field value. */
     type NetworkedStructValue = Record<string, unknown>;
     /**
-     * Factory for networked property definitions, standing in for Fusion's [Networked] and [Capacity] attributes (D3).
+     * Factory for networked property definitions, standing in for the original API's [Networked] and [Capacity] attributes (D3).
      *
      * @example
-     * protected static getNetworkedProperties(): PROJECT.NetworkedPropertyDefinitions {
-     *     return { speed: PROJECT.Networked.float({ precision: 0.01 }), laps: PROJECT.Networked.array(PROJECT.Networked.int(), 5) };
+     * protected static getNetworkedProperties(): TOOLKIT.NetworkedPropertyDefinitions {
+     *     return { speed: TOOLKIT.Networked.float({ precision: 0.01 }), laps: TOOLKIT.Networked.array(TOOLKIT.Networked.int(), 5) };
      * }
      */
     class Networked {
@@ -11922,7 +11922,7 @@ declare namespace PROJECT {
          * @param value The word.
          * @param precision Float quantization step; 0 = float32.
          */
-        static writeWord(writer: PROJECT.NetworkBufferWriter, kind: NetworkWordKind, value: number, precision: number): void;
+        static writeWord(writer: TOOLKIT.NetworkBufferWriter, kind: NetworkWordKind, value: number, precision: number): void;
         /**
          * Reads one word.
          * @param reader The frame reader.
@@ -11930,7 +11930,7 @@ declare namespace PROJECT {
          * @param precision Float quantization step; 0 = float32.
          * @returns The word.
          */
-        static readWord(reader: PROJECT.NetworkBufferReader, kind: NetworkWordKind, precision: number): number;
+        static readWord(reader: TOOLKIT.NetworkBufferReader, kind: NetworkWordKind, precision: number): number;
     }
     /**
      * Reads and writes typed values from state words, per the value mapping of the Design Reference. Used by the
@@ -12061,9 +12061,9 @@ declare namespace PROJECT {
         private static warnOnce;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Fixed-capacity networked array, as Photon Fusion's NetworkArray<T> with [Capacity(N)]. A live view over the
+     * Fixed-capacity networked array, as the original API's NetworkArray<T> with [Capacity(N)]. A live view over the
      * owner's state words: every read and write goes straight to the words, so it replicates and rolls back with them.
      */
     class NetworkArray<T> {
@@ -12082,7 +12082,7 @@ declare namespace PROJECT {
          * @param definition The array property's definition.
          * @param propertyLabel "<Class>.<property>" for warnings and errors.
          */
-        constructor(owner: PROJECT.NetworkedValueOwner, offset: number, definition: PROJECT.NetworkedPropertyDefinition, propertyLabel?: string);
+        constructor(owner: TOOLKIT.NetworkedValueOwner, offset: number, definition: TOOLKIT.NetworkedPropertyDefinition, propertyLabel?: string);
         /** Number of elements (the capacity). */
         get length(): number;
         /**
@@ -12116,7 +12116,7 @@ declare namespace PROJECT {
         private checkIndex;
     }
     /**
-     * Ordered, capacity-bounded networked list, as Photon Fusion's NetworkLinkedList<T>. A live view over the owner's
+     * Ordered, capacity-bounded networked list, as the original API's NetworkLinkedList<T>. A live view over the owner's
      * words: one count word, then the elements packed from index 0.
      */
     class NetworkLinkedList<T> {
@@ -12137,7 +12137,7 @@ declare namespace PROJECT {
          * @param definition The list property's definition.
          * @param propertyLabel "<Class>.<property>" for warnings and errors.
          */
-        constructor(owner: PROJECT.NetworkedValueOwner, offset: number, definition: PROJECT.NetworkedPropertyDefinition, propertyLabel?: string);
+        constructor(owner: TOOLKIT.NetworkedValueOwner, offset: number, definition: TOOLKIT.NetworkedPropertyDefinition, propertyLabel?: string);
         /** Number of elements in the list. */
         get count(): number;
         /** Most elements the list holds. */
@@ -12175,7 +12175,7 @@ declare namespace PROJECT {
         private elementOffset;
     }
     /**
-     * Capacity-bounded networked dictionary, as Photon Fusion's NetworkDictionary<K, V>. A live view over the owner's
+     * Capacity-bounded networked dictionary, as the original API's NetworkDictionary<K, V>. A live view over the owner's
      * words: one count word, then capacity slots of (key, value), then one occupancy word per slot (1 = used).
      */
     class NetworkDictionary<K, V> {
@@ -12202,7 +12202,7 @@ declare namespace PROJECT {
          * @param definition The dictionary property's definition.
          * @param propertyLabel "<Class>.<property>" for warnings.
          */
-        constructor(owner: PROJECT.NetworkedValueOwner, offset: number, definition: PROJECT.NetworkedPropertyDefinition, propertyLabel?: string);
+        constructor(owner: TOOLKIT.NetworkedValueOwner, offset: number, definition: TOOLKIT.NetworkedPropertyDefinition, propertyLabel?: string);
         /** Number of entries. */
         get count(): number;
         /** Most entries the dictionary holds. */
@@ -12246,7 +12246,7 @@ declare namespace PROJECT {
         private valueOffset;
     }
     /**
-     * Button bit set, as Photon Fusion's NetworkButtons: bit i is button i (0 to 31). Immutable value; setters return new
+     * Button bit set, as the original API's NetworkButtons: bit i is button i (0 to 31). Immutable value; setters return new
      * instances.
      */
     class NetworkButtons {
@@ -12310,7 +12310,7 @@ declare namespace PROJECT {
         getReleased(previous: NetworkButtons): NetworkButtons;
     }
     /**
-     * Tick-based timer, as Photon Fusion's TickTimer. Immutable value: it stores the tick it expires at (0 = not running),
+     * Tick-based timer, as the original API's TickTimer. Immutable value: it stores the tick it expires at (0 = not running),
      * so it replicates and rolls back as one word.
      */
     class TickTimer {
@@ -12333,41 +12333,41 @@ declare namespace PROJECT {
          * @param seconds Duration in seconds, rounded up to whole ticks.
          * @returns The timer (targetTick = runner.tick + ceil(seconds / runner.deltaTime)).
          */
-        static createFromSeconds(runner: PROJECT.NetworkRunnerView, seconds: number): TickTimer;
+        static createFromSeconds(runner: TOOLKIT.NetworkRunnerView, seconds: number): TickTimer;
         /**
          * A timer that expires after a number of ticks.
          * @param runner The runner (its current tick).
          * @param ticks Duration in ticks.
          * @returns The timer.
          */
-        static createFromTicks(runner: PROJECT.NetworkRunnerView, ticks: number): TickTimer;
+        static createFromTicks(runner: TOOLKIT.NetworkRunnerView, ticks: number): TickTimer;
         /**
          * Tells whether the timer is running and has reached its tick.
          * @param runner The runner (its current tick).
          * @returns True once runner.tick >= targetTick.
          */
-        expired(runner: PROJECT.NetworkRunnerView): boolean;
+        expired(runner: TOOLKIT.NetworkRunnerView): boolean;
         /**
          * Tells whether the timer has expired or was never started.
          * @param runner The runner (its current tick).
          * @returns True when not running or expired.
          */
-        expiredOrNotRunning(runner: PROJECT.NetworkRunnerView): boolean;
+        expiredOrNotRunning(runner: TOOLKIT.NetworkRunnerView): boolean;
         /**
          * Ticks left until the timer expires.
          * @param runner The runner (its current tick).
          * @returns 0 or more, or null when not running.
          */
-        remainingTicks(runner: PROJECT.NetworkRunnerView): number | null;
+        remainingTicks(runner: TOOLKIT.NetworkRunnerView): number | null;
         /**
          * Seconds left until the timer expires.
          * @param runner The runner (its current tick and tick length).
          * @returns 0 or more, or null when not running.
          */
-        remainingTime(runner: PROJECT.NetworkRunnerView): number | null;
+        remainingTime(runner: TOOLKIT.NetworkRunnerView): number | null;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** Two authoritative snapshots around a render time. */
     interface RemoteSnapshotPair {
         /** Words of the older snapshot (a view into the remote ring; copy it to keep it). */
@@ -12528,7 +12528,7 @@ declare namespace PROJECT {
          * @param kinds Kind of every word.
          * @param precisions Precision of every word.
          */
-        static encodeDelta(writer: PROJECT.NetworkBufferWriter, current: Float64Array, baseline: Float64Array | null, kinds: Uint8Array, precisions: Float32Array): void;
+        static encodeDelta(writer: TOOLKIT.NetworkBufferWriter, current: Float64Array, baseline: Float64Array | null, kinds: Uint8Array, precisions: Float32Array): void;
         /**
          * Reads a delta written by encodeDelta into target: target starts as the baseline (or all zeros), then the changed
          * words are overwritten.
@@ -12539,7 +12539,7 @@ declare namespace PROJECT {
          * @param precisions Precision of every word.
          * @throws NetworkError when a chunk index is outside the target.
          */
-        static decodeDelta(reader: PROJECT.NetworkBufferReader, target: Float64Array, baseline: Float64Array | null, kinds: Uint8Array, precisions: Float32Array): void;
+        static decodeDelta(reader: TOOLKIT.NetworkBufferReader, target: Float64Array, baseline: Float64Array | null, kinds: Uint8Array, precisions: Float32Array): void;
         /**
          * The change mask of one chunk: bit i is set when word (chunk × 32 + i) differs from the baseline.
          * @returns The mask as an unsigned 32-bit number (0 = unchanged).
@@ -12553,9 +12553,9 @@ declare namespace PROJECT {
         private remoteWords;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Behaviour driven by the network runner's tick but holding no networked state, as Photon Fusion's
+     * Behaviour driven by the network runner's tick but holding no networked state, as the original API's
      * SimulationBehaviour. Put it on a network object's node (or a descendant, above any nested NetworkObject): when the
      * object spawns, the runner attaches it and calls spawned, despawned and the other lifecycle methods it defines (A21),
      * fixedUpdateNetwork once per tick where the object is simulated and render once per rendered frame, in the same
@@ -12579,9 +12579,9 @@ declare namespace PROJECT {
          */
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         /** The runner simulating this behaviour, or null before it is attached. */
-        get runner(): PROJECT.NetworkRunner | null;
+        get runner(): TOOLKIT.NetworkRunner | null;
         /** The network object this behaviour belongs to, or null. */
-        get object(): PROJECT.NetworkObject | null;
+        get object(): TOOLKIT.NetworkObject | null;
         /** True while the behaviour is attached to a runner. */
         get isValid(): boolean;
         /** Position among the object's networked behaviours; -1 when not attached to an object. */
@@ -12595,40 +12595,40 @@ declare namespace PROJECT {
          * @param behaviourIndex Position among the object's networked behaviours.
          * @param wordOffset First word of the behaviour's state in the object's words.
          */
-        attachToRunner(runner: PROJECT.NetworkRunnerView, object: PROJECT.NetworkObject, behaviourIndex: number, wordOffset: number): void;
+        attachToRunner(runner: TOOLKIT.NetworkRunnerView, object: TOOLKIT.NetworkObject, behaviourIndex: number, wordOffset: number): void;
         /** Internal: detaches the behaviour from its runner and object (despawn). */
         detachFromRunner(): void;
-        /** Runs once per simulated tick (forward and resimulation), as Fusion's FixedUpdateNetwork. Override it. */
+        /** Runs once per simulated tick (forward and resimulation), as the original API's FixedUpdateNetwork. Override it. */
         fixedUpdateNetwork(): void;
-        /** Runs once per rendered frame after the ticks, as Fusion's Render. Override it. */
+        /** Runs once per rendered frame after the ticks, as the original API's Render. Override it. */
         render(): void;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** A NetworkBehaviour class (its constructor and static declarations), as the accessor installer sees it. */
     interface NetworkBehaviourClass extends Function {
         /** The class's own networked property declarations (D3). */
-        getNetworkedProperties?(): PROJECT.NetworkedPropertyDefinitions;
+        getNetworkedProperties?(): TOOLKIT.NetworkedPropertyDefinitions;
         /** The class's own RPC declarations (D3). */
-        getRpcDefinitions?(): PROJECT.RpcDefinitions;
+        getRpcDefinitions?(): TOOLKIT.RpcDefinitions;
     }
     /**
-     * Networked behaviour, as Photon Fusion's NetworkBehaviour. A subclass declares its networked properties with
+     * Networked behaviour, as the original API's NetworkBehaviour. A subclass declares its networked properties with
      * `declare` fields and a static getNetworkedProperties() (D3); the first construction of each class compiles its word
      * layout (parent class properties first) and installs prototype accessors that read and write the object's state words.
      *
      * @example
-     * class KartState extends PROJECT.NetworkBehaviour {
+     * class KartState extends TOOLKIT.NetworkBehaviour {
      *     public declare lap: number;
-     *     protected static getNetworkedProperties(): PROJECT.NetworkedPropertyDefinitions {
-     *         return { lap: PROJECT.Networked.int() };
+     *     protected static getNetworkedProperties(): TOOLKIT.NetworkedPropertyDefinitions {
+     *         return { lap: TOOLKIT.Networked.int() };
      *     }
      *     public fixedUpdateNetwork(): void {
      *         if (this.hasStateAuthority) this.lap += 1;
      *     }
      * }
      */
-    class NetworkBehaviour extends PROJECT.SimulationBehaviour implements PROJECT.NetworkedValueOwner, PROJECT.NetworkBehaviourIdentity {
+    class NetworkBehaviour extends TOOLKIT.SimulationBehaviour implements TOOLKIT.NetworkedValueOwner, TOOLKIT.NetworkBehaviourIdentity {
         /** Compiled layout of each installed class. */
         private static readonly layouts;
         /** This behaviour's network identity, set when it is attached to an object. */
@@ -12642,7 +12642,7 @@ declare namespace PROJECT {
          */
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         /** The behaviour's network identity: its object's id and its index on that object. */
-        get id(): PROJECT.NetworkBehaviourId;
+        get id(): TOOLKIT.NetworkBehaviourId;
         /** True when this peer has state authority over the behaviour's object. */
         get hasStateAuthority(): boolean;
         /** True when this peer has input authority over the behaviour's object. */
@@ -12650,7 +12650,7 @@ declare namespace PROJECT {
         /** True when this peer has neither state nor input authority over the behaviour's object. */
         get isProxy(): boolean;
         /** The compiled word layout of this behaviour's class. */
-        get networkedLayout(): PROJECT.NetworkedLayout;
+        get networkedLayout(): TOOLKIT.NetworkedLayout;
         /**
          * Internal: attaches the behaviour to its object's words.
          * @param runner The runner.
@@ -12658,27 +12658,27 @@ declare namespace PROJECT {
          * @param behaviourIndex Position among the object's networked behaviours.
          * @param wordOffset First word of the behaviour's state in the object's words.
          */
-        attachToRunner(runner: PROJECT.NetworkRunnerView, object: PROJECT.NetworkObject, behaviourIndex: number, wordOffset: number): void;
+        attachToRunner(runner: TOOLKIT.NetworkRunnerView, object: TOOLKIT.NetworkObject, behaviourIndex: number, wordOffset: number): void;
         /** Internal: detaches the behaviour from its object's words (despawn). */
         detachFromRunner(): void;
-        /** Runs after the object is spawned and its state is ready, as Fusion's Spawned. Override it. */
+        /** Runs after the object is spawned and its state is ready, as the original API's Spawned. Override it. */
         spawned(): void;
         /**
-         * Runs when the object is despawned, as Fusion's Despawned. Override it.
+         * Runs when the object is despawned, as the original API's Despawned. Override it.
          * @param runner The runner that despawned it.
          * @param hasState True while the networked properties can still be read.
          */
-        despawned(runner: PROJECT.NetworkRunner, hasState: boolean): void;
+        despawned(runner: TOOLKIT.NetworkRunner, hasState: boolean): void;
         /**
-         * Whether a server or host sends this behaviour's networked state to a player, as Fusion's ReplicateTo (D30).
+         * Whether a server or host sends this behaviour's networked state to a player, as the original API's ReplicateTo (D30).
          * Override it to hide state from some players; they receive the properties' defaults instead. The answer is asked
          * at every snapshot, so it may change at any time.
          * @param player The receiving player.
          * @returns True (default) to replicate.
          */
-        replicateTo(player: PROJECT.PlayerRef): boolean;
+        replicateTo(player: TOOLKIT.PlayerRef): boolean;
         /**
-         * This tick's input of the object's input authority, as Fusion's GetInput (the out parameter becomes the result,
+         * This tick's input of the object's input authority, as the original API's GetInput (the out parameter becomes the result,
          * D2). Call it in fixedUpdateNetwork. A server gets any player's input; a client only its own (D14).
          * @returns The input struct (StartGameArgs.inputDefinition), or null when this peer has no input for the object.
          */
@@ -12696,20 +12696,20 @@ declare namespace PROJECT {
          */
         canWrite(): boolean;
         /**
-         * Creates a change detector over this behaviour's properties, as Fusion's GetChangeDetector. Keep it (create it in
+         * Creates a change detector over this behaviour's properties, as the original API's GetChangeDetector. Keep it (create it in
          * spawned()) and call detectChanges each frame or tick.
          * @param source Which words to compare: the live state, or a remote snapshot.
          * @param copyInitial True (default) to start from the current words, so only later changes are reported.
          * @returns The detector.
          */
-        getChangeDetector(source: PROJECT.ChangeDetectorSource, copyInitial?: boolean): ChangeDetector;
+        getChangeDetector(source: TOOLKIT.ChangeDetectorSource, copyInitial?: boolean): ChangeDetector;
         /**
-         * The two authoritative snapshots around the runner's remote render time, as Fusion's TryGetSnapshotsBuffers.
+         * The two authoritative snapshots around the runner's remote render time, as the original API's TryGetSnapshotsBuffers.
          * @returns The object's snapshot pair (whole-object words), or null before any snapshot arrived.
          */
-        tryGetSnapshotsBuffers(): PROJECT.RemoteSnapshotPair | null;
+        tryGetSnapshotsBuffers(): TOOLKIT.RemoteSnapshotPair | null;
         /**
-         * A reader for one networked property out of any snapshot words, as Fusion's GetPropertyReader.
+         * A reader for one networked property out of any snapshot words, as the original API's GetPropertyReader.
          * @param propertyName The property's name.
          * @returns The reader.
          * @throws NetworkError when the class declares no such property, or the behaviour is not attached.
@@ -12724,13 +12724,13 @@ declare namespace PROJECT {
          * The networked properties this class adds (D3). Override it in a subclass; parent classes' properties come first.
          * @returns Property name to definition.
          */
-        protected static getNetworkedProperties(): PROJECT.NetworkedPropertyDefinitions;
+        protected static getNetworkedProperties(): TOOLKIT.NetworkedPropertyDefinitions;
         /**
          * The RPCs this class adds (D3). Override it in a subclass; each named method becomes an RPC whose wrapper checks
          * the source rule, sends the call and runs the method where it targets (T6). Parent classes' RPCs come first.
          * @returns Method name to definition.
          */
-        protected static getRpcDefinitions(): PROJECT.RpcDefinitions;
+        protected static getRpcDefinitions(): TOOLKIT.RpcDefinitions;
         /**
          * Compiles a class's layout and installs its prototype accessors and RPC wrappers, once per class.
          * @param behaviourClass The NetworkBehaviour subclass.
@@ -12768,14 +12768,14 @@ declare namespace PROJECT {
         private static installAccessor;
     }
     /**
-     * Detects networked property changes between calls, as Photon Fusion's ChangeDetector. It keeps a copy of the
+     * Detects networked property changes between calls, as the original API's ChangeDetector. It keeps a copy of the
      * behaviour's words and reports the properties whose words differ.
      */
     class ChangeDetector {
         /** Alpha below which SnapshotNearest picks the older snapshot. */
         private static readonly NEAREST_HALFWAY;
         /** Which words are compared. */
-        readonly source: PROJECT.ChangeDetectorSource;
+        readonly source: TOOLKIT.ChangeDetectorSource;
         /** The behaviour's words as of the last copy. */
         private readonly previousWords;
         /**
@@ -12784,7 +12784,7 @@ declare namespace PROJECT {
          * @param source Which words to compare.
          * @param copyInitial True to start from the current words; false to start from zeros (every set property reports).
          */
-        constructor(behaviour: NetworkBehaviour, source: PROJECT.ChangeDetectorSource, copyInitial: boolean);
+        constructor(behaviour: NetworkBehaviour, source: TOOLKIT.ChangeDetectorSource, copyInitial: boolean);
         /**
          * Lists the properties whose words changed since the last copy.
          * @param behaviour The watched behaviour.
@@ -12802,7 +12802,7 @@ declare namespace PROJECT {
         /** @returns True when any word in [offset, offset + wordCount) differs from the copy. */
         private rangeDiffers;
     }
-    /** Reads one networked property out of arbitrary whole-object words (a snapshot), as Photon Fusion's PropertyReader<T>. */
+    /** Reads one networked property out of arbitrary whole-object words (a snapshot), as the original API's PropertyReader<T>. */
     class NetworkPropertyReader<T> {
         /** The property's definition. */
         private readonly definition;
@@ -12816,7 +12816,7 @@ declare namespace PROJECT {
          * @param objectWordOffset The property's first word within the object's words.
          * @param owner Resolves object references while reading.
          */
-        constructor(definition: PROJECT.NetworkedPropertyDefinition, objectWordOffset: number, owner: PROJECT.NetworkedValueOwner);
+        constructor(definition: TOOLKIT.NetworkedPropertyDefinition, objectWordOffset: number, owner: TOOLKIT.NetworkedValueOwner);
         /**
          * Reads the property from whole-object words.
          * @param words The object's words (live, a tick, or a snapshot).
@@ -12828,16 +12828,16 @@ declare namespace PROJECT {
          * @param pair The snapshot pair (NetworkBehaviour.tryGetSnapshotsBuffers).
          * @returns Both values and the pair's alpha.
          */
-        readPair(pair: PROJECT.RemoteSnapshotPair): {
+        readPair(pair: TOOLKIT.RemoteSnapshotPair): {
             from: T;
             to: T;
             alpha: number;
         };
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Network identity component, as Photon Fusion's NetworkObject. Put it on the root of every networked prefab and
+     * Network identity component, as the original API's NetworkObject. Put it on the root of every networked prefab and
      * networked scene object (Unity: BabylonToolkit.Fusion.NetworkObject). It owns the object's id, authority and state
      * words; the NetworkBehaviours on its node and descendants (down to any nested NetworkObject) are its networked
      * behaviours, in that walk order. Plain SimulationBehaviours found on the same walk hold no state but are attached to
@@ -12847,7 +12847,7 @@ declare namespace PROJECT {
         /** Behaviour index and word offset of a plain simulation behaviour: it has no network identity and no words. */
         private static readonly NO_NETWORK_POSITION;
         /** Which timeline the object is drawn on (D15). */
-        renderTimeframe: PROJECT.RenderTimeframe;
+        renderTimeframe: TOOLKIT.RenderTimeframe;
         /** Exported prefab asset GUID (filled by the exporter). */
         private exportedPrefabGuid;
         /** Exported scene object GUID (filled by the exporter for scene instances). */
@@ -12889,13 +12889,13 @@ declare namespace PROJECT {
         /** The network id (D7); 0 before spawn. */
         get id(): number;
         /** The runner the object is spawned on, or null. */
-        get runner(): PROJECT.NetworkRunner | null;
+        get runner(): TOOLKIT.NetworkRunner | null;
         /** True while the object is spawned on a runner. */
         get isValid(): boolean;
         /** The player with input authority (PlayerRef.None when nobody has it). */
-        get inputAuthority(): PROJECT.PlayerRef;
+        get inputAuthority(): TOOLKIT.PlayerRef;
         /** The player with state authority (PlayerRef.None when the server holds it). */
-        get stateAuthority(): PROJECT.PlayerRef;
+        get stateAuthority(): TOOLKIT.PlayerRef;
         /** True when this peer has input authority: the input authority is the local player. */
         get hasInputAuthority(): boolean;
         /** True when this peer has state authority: it is the server or host, or the state authority is the local player. */
@@ -12905,16 +12905,16 @@ declare namespace PROJECT {
         /** True while this peer simulates the object (every spawned object; clients predict everything, D14). */
         get isInSimulation(): boolean;
         /** The networked behaviours on this node and its descendants (not those under a nested NetworkObject), in walk order. */
-        get networkedBehaviours(): PROJECT.NetworkBehaviour[];
+        get networkedBehaviours(): TOOLKIT.NetworkBehaviour[];
         /**
          * Every SimulationBehaviour of the object in walk order: the networked behaviours and the plain simulation
          * behaviours (no networked state) the runner also drives (A21).
          */
-        get simulationBehaviours(): PROJECT.SimulationBehaviour[];
+        get simulationBehaviours(): TOOLKIT.SimulationBehaviour[];
         /** The nearest NetworkObjects on descendants; their own behaviours are not this object's. */
         get nestedObjects(): NetworkObject[];
         /** Internal: the object's state words and tick history, or null before it is attached to a runner. */
-        get stateBuffer(): PROJECT.NetworkStateBuffer | null;
+        get stateBuffer(): TOOLKIT.NetworkStateBuffer | null;
         /** The node's name. */
         get name(): string;
         /** Exported prefab asset GUID ("" for a scene-only object). */
@@ -12945,7 +12945,7 @@ declare namespace PROJECT {
          * Gives a player input authority over the object. Only the state authority may do it.
          * @param player The player (PlayerRef.None removes input authority).
          */
-        assignInputAuthority(player: PROJECT.PlayerRef): void;
+        assignInputAuthority(player: TOOLKIT.PlayerRef): void;
         /** Removes input authority from the object. Only the state authority may do it. */
         removeInputAuthority(): void;
         /**
@@ -12959,7 +12959,7 @@ declare namespace PROJECT {
          * @param player The player.
          * @param alwaysInterested True to always replicate the object to the player.
          */
-        setPlayerAlwaysInterested(player: PROJECT.PlayerRef, alwaysInterested: boolean): void;
+        setPlayerAlwaysInterested(player: TOOLKIT.PlayerRef, alwaysInterested: boolean): void;
         /** Gives up state authority over the object (Shared mode only); it is left without authority, requestable. */
         releaseStateAuthority(): void;
         /**
@@ -12971,7 +12971,7 @@ declare namespace PROJECT {
          * @param stateAuthority The player with state authority (PlayerRef.None for the server).
          * @param inputAuthority The player with input authority (PlayerRef.None for nobody).
          */
-        attachToRunner(runner: PROJECT.NetworkRunnerView, networkId: number, stateAuthority?: PROJECT.PlayerRef, inputAuthority?: PROJECT.PlayerRef): void;
+        attachToRunner(runner: TOOLKIT.NetworkRunnerView, networkId: number, stateAuthority?: TOOLKIT.PlayerRef, inputAuthority?: TOOLKIT.PlayerRef): void;
         /** Internal: detaches the object and its behaviours from the runner (despawn). */
         detachFromRunner(): void;
         /**
@@ -12979,7 +12979,7 @@ declare namespace PROJECT {
          * @param stateAuthority The player with state authority (PlayerRef.None for the server).
          * @param inputAuthority The player with input authority (PlayerRef.None for nobody).
          */
-        setAuthority(stateAuthority: PROJECT.PlayerRef, inputAuthority: PROJECT.PlayerRef): void;
+        setAuthority(stateAuthority: TOOLKIT.PlayerRef, inputAuthority: TOOLKIT.PlayerRef): void;
         /**
          * Internal: collects the simulation behaviours and nested objects once (the prefab hierarchy is fixed after
          * instantiation). Walks this node, then its children depth-first; a child with its own NetworkObject is a nested
@@ -12996,7 +12996,7 @@ declare namespace PROJECT {
         private createStateBuffer;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** First byte of every simulation frame. */
     enum NetworkFrameKind {
         Input = 1,
@@ -13109,7 +13109,7 @@ declare namespace PROJECT {
         /** The server's NETWORK_PROTOCOL_VERSION. */
         protocolVersion: number;
         /** The connections the server accepts. */
-        transports: PROJECT.GameServerTransports;
+        transports: TOOLKIT.GameServerTransports;
         /** True when joins need an auth token. */
         authRequired: boolean;
     }
@@ -13118,7 +13118,7 @@ declare namespace PROJECT {
         /** Always true. */
         webSocket: boolean;
         /** The HTTP/3 endpoint when UDP is enabled, else null. */
-        webTransport: PROJECT.GameServerWebTransport | null;
+        webTransport: TOOLKIT.GameServerWebTransport | null;
     }
     /** The HTTP/3 endpoint of a game server. */
     interface GameServerWebTransport {
@@ -13135,7 +13135,7 @@ declare namespace PROJECT {
         /** The joiner's player id. */
         playerId: number;
         /** The mode the joiner runs in (an AutoHostOrClient joiner gets Host or Client). */
-        gameMode: PROJECT.GameMode;
+        gameMode: TOOLKIT.GameMode;
         /** The host's player id (0 for a dedicated server or a Shared session). */
         hostPlayerId: number;
         /** The Shared-mode master client's player id (0 outside Shared mode). */
@@ -13143,7 +13143,7 @@ declare namespace PROJECT {
         /** The session clock when the welcome was sent, in milliseconds. */
         serverTimeMs: number;
         /** The session's public description. */
-        session: PROJECT.SessionInfo;
+        session: TOOLKIT.SessionInfo;
         /** The session's tick rate; the joiner adopts it (server wins). */
         tickRate: number;
         /** The session's prefab table hash (D9). */
@@ -13161,7 +13161,7 @@ declare namespace PROJECT {
     /** Request a client sends when connecting. */
     interface NetworkConnectRequest {
         sessionName: string;
-        gameMode: PROJECT.GameMode;
+        gameMode: TOOLKIT.GameMode;
         playerCount: number;
         isOpen: boolean;
         isVisible: boolean;
@@ -13193,7 +13193,7 @@ declare namespace PROJECT {
     }
     /** Payload of FUSION_CONTROL_SHUTDOWN. */
     interface NetworkShutdownPayload {
-        reason: PROJECT.ShutdownReason;
+        reason: TOOLKIT.ShutdownReason;
     }
     /** Payload of FUSION_CONTROL_CONNECT_REQUEST. */
     interface NetworkConnectRequestPayload {
@@ -13213,7 +13213,7 @@ declare namespace PROJECT {
         radius: number;
     }
     /** Any control message payload (A16). */
-    type NetworkControlPayload = NetworkWelcome | NetworkPlayerPayload | NetworkHostMigrationPayload | PROJECT.SessionInfo | NetworkShutdownPayload | NetworkConnectRequestPayload | NetworkConnectResultPayload | NetworkAreaPayload;
+    type NetworkControlPayload = NetworkWelcome | NetworkPlayerPayload | NetworkHostMigrationPayload | TOOLKIT.SessionInfo | NetworkShutdownPayload | NetworkConnectRequestPayload | NetworkConnectResultPayload | NetworkAreaPayload;
     /** A client-to-room envelope, decoded. */
     interface NetworkEnvelope {
         route: NetworkRoute;
@@ -13290,7 +13290,7 @@ declare namespace PROJECT {
     }
     /** A decoded ReliableData frame: one chunk of a reliable data transfer (T15). */
     interface NetworkReliableDataFrame {
-        /** The transfer's key (four int32, as Fusion's ReliableKey). */
+        /** The transfer's key (four int32, as the original API's ReliableKey). */
         key: [number, number, number, number];
         /** The whole payload's length, in bytes. */
         totalLength: number;
@@ -13408,13 +13408,13 @@ declare namespace PROJECT {
          * @param writer The frame writer.
          * @param block The block.
          */
-        static writeObjectBlock(writer: PROJECT.NetworkBufferWriter, block: NetworkObjectBlock): void;
+        static writeObjectBlock(writer: TOOLKIT.NetworkBufferWriter, block: NetworkObjectBlock): void;
         /**
          * Reads one object block written by writeObjectBlock.
          * @param reader The frame reader.
          * @returns The block (its delta bytes are a copy).
          */
-        static readObjectBlock(reader: PROJECT.NetworkBufferReader): NetworkObjectBlock;
+        static readObjectBlock(reader: TOOLKIT.NetworkBufferReader): NetworkObjectBlock;
         /**
          * A header with every optional field 0.
          * @param networkId The object id.
@@ -13566,13 +13566,13 @@ declare namespace PROJECT {
          * @param writer The frame writer.
          * @param sceneInfo The load id and scenes.
          */
-        static writeSceneInfoBody(writer: PROJECT.NetworkBufferWriter, sceneInfo: NetworkSceneInfoFrame): void;
+        static writeSceneInfoBody(writer: TOOLKIT.NetworkBufferWriter, sceneInfo: NetworkSceneInfoFrame): void;
         /**
          * Reads a SceneInfo body written by writeSceneInfoBody.
          * @param reader The frame reader.
          * @returns The load id and scenes.
          */
-        static readSceneInfoBody(reader: PROJECT.NetworkBufferReader): NetworkSceneInfoFrame;
+        static readSceneInfoBody(reader: TOOLKIT.NetworkBufferReader): NetworkSceneInfoFrame;
         /**
          * Encodes bytes as base64 (connect tokens and host snapshots in JSON control payloads).
          * @param bytes The bytes.
@@ -13604,7 +13604,7 @@ declare namespace PROJECT {
         private static readerAfterKind;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** Connection a runner talks through; LoopbackTransport and ColyseusTransport implement it. */
     interface INetworkTransport {
         /**
@@ -13612,7 +13612,7 @@ declare namespace PROJECT {
          * @param request The connect request.
          * @returns The session's welcome; rejects with a NetworkError named after the ShutdownReason.
          */
-        connect(request: PROJECT.NetworkConnectRequest): Promise<PROJECT.NetworkWelcome>;
+        connect(request: TOOLKIT.NetworkConnectRequest): Promise<TOOLKIT.NetworkWelcome>;
         /**
          * Sends a simulation frame through the room (D11).
          * @param route Where the room sends it.
@@ -13620,7 +13620,7 @@ declare namespace PROJECT {
          * @param frame The frame.
          * @param channel Reliable or unreliable (unreliable frames ride WebTransport datagrams when available, D7).
          */
-        sendFrame(route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: PROJECT.RpcChannel): void;
+        sendFrame(route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: TOOLKIT.RpcChannel): void;
         /**
          * Sends a control message to the room.
          * @param name The control message name (FUSION_CONTROL_*).
@@ -13654,12 +13654,12 @@ declare namespace PROJECT {
          * @param name The control message name.
          * @param payload The payload.
          */
-        onControl(name: string, payload: PROJECT.NetworkControlPayload): void;
+        onControl(name: string, payload: TOOLKIT.NetworkControlPayload): void;
         /**
          * The connection closed without a disconnect call.
          * @param reason Why.
          */
-        onDisconnected(reason: PROJECT.NetDisconnectReason): void;
+        onDisconnected(reason: TOOLKIT.NetDisconnectReason): void;
     }
     /** Options of a LoopbackHub (A11). */
     interface LoopbackHubOptions {
@@ -13711,13 +13711,13 @@ declare namespace PROJECT {
          * @param deliver Delivers the frame.
          * @param channel The frame's channel.
          */
-        schedule(deliver: () => void, channel: PROJECT.RpcChannel): void;
+        schedule(deliver: () => void, channel: TOOLKIT.RpcChannel): void;
         /**
          * Decides whether a frame is lost.
          * @param channel The frame's channel.
          * @returns True for an unreliable frame that the loss rate drops.
          */
-        shouldDrop(channel: PROJECT.RpcChannel): boolean;
+        shouldDrop(channel: TOOLKIT.RpcChannel): boolean;
         /** @returns The delay of one frame: latency plus uniform jitter, in milliseconds. */
         sampleDelayMs(): number;
         /** @returns The next mulberry32 number in [0, 1). */
@@ -13728,7 +13728,7 @@ declare namespace PROJECT {
      * (client to room, room to client) is delayed by the conditions simulator; frames on one link keep their order.
      * Tests drive delivery with advance(); a realTime hub delivers on timers.
      */
-    class LoopbackHub implements PROJECT.FusionSessionOutputs {
+    class LoopbackHub implements TOOLKIT.FusionSessionOutputs {
         /** Milliseconds between session logic updates in real time (A9). */
         private static readonly SESSION_UPDATE_INTERVAL_MS;
         /** Prefix of the hub's client keys. */
@@ -13769,9 +13769,9 @@ declare namespace PROJECT {
          */
         constructor(options?: LoopbackHubOptions);
         /** The session rules every transport of this hub shares. */
-        get logic(): PROJECT.FusionSessionLogic;
+        get logic(): TOOLKIT.FusionSessionLogic;
         /** The latest published session description, or null. */
-        get sessionMetadata(): PROJECT.SessionInfo | null;
+        get sessionMetadata(): TOOLKIT.SessionInfo | null;
         /** True while the session refuses new joins (full or closed). */
         get isLocked(): boolean;
         /**
@@ -13807,7 +13807,7 @@ declare namespace PROJECT {
          * Records the published session description (FusionSessionOutputs).
          * @param session The description.
          */
-        setSessionMetadata(session: PROJECT.SessionInfo): void;
+        setSessionMetadata(session: TOOLKIT.SessionInfo): void;
         /**
          * Records whether the session refuses joins (FusionSessionOutputs).
          * @param locked True when full or closed.
@@ -13819,7 +13819,7 @@ declare namespace PROJECT {
          * @param request The connect request.
          * @returns The welcome.
          */
-        joinClient(clientKey: string, request: PROJECT.NetworkConnectRequest): PROJECT.NetworkWelcome;
+        joinClient(clientKey: string, request: TOOLKIT.NetworkConnectRequest): TOOLKIT.NetworkWelcome;
         /**
          * Internal: carries a client's frame to the session through the conditions simulator.
          * @param clientKey The sending client.
@@ -13828,7 +13828,7 @@ declare namespace PROJECT {
          * @param frame The frame.
          * @param channel The channel; unreliable frames may be dropped.
          */
-        sendFromClient(clientKey: string, route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: PROJECT.RpcChannel): void;
+        sendFromClient(clientKey: string, route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: TOOLKIT.RpcChannel): void;
         /**
          * Internal: carries a client's control message to the session.
          * @param clientKey The sending client.
@@ -13890,7 +13890,7 @@ declare namespace PROJECT {
          * @param request The connect request.
          * @returns The welcome; rejects with the session's NetworkError.
          */
-        connect(request: PROJECT.NetworkConnectRequest): Promise<PROJECT.NetworkWelcome>;
+        connect(request: TOOLKIT.NetworkConnectRequest): Promise<TOOLKIT.NetworkWelcome>;
         /**
          * Sends a frame through the hub.
          * @param route The route.
@@ -13898,7 +13898,7 @@ declare namespace PROJECT {
          * @param frame The frame.
          * @param channel The channel.
          */
-        sendFrame(route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: PROJECT.RpcChannel): void;
+        sendFrame(route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: TOOLKIT.RpcChannel): void;
         /**
          * Sends a control message through the hub.
          * @param name The control message name.
@@ -13925,10 +13925,10 @@ declare namespace PROJECT {
          * @param name The control message name.
          * @param payload The payload.
          */
-        deliverControl(name: string, payload: PROJECT.NetworkControlPayload): void;
+        deliverControl(name: string, payload: TOOLKIT.NetworkControlPayload): void;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** One connected participant as the session sees it. */
     interface FusionSessionClient {
         /** The transport's key for the connection (a Colyseus session id, or a loopback key). */
@@ -13950,7 +13950,7 @@ declare namespace PROJECT {
          * @param channel The channel the frame was sent on (default Reliable); the room sends Unreliable frames as
          *     datagrams when the client has WebTransport (D7).
          */
-        sendFrame(clientKey: string, sourcePlayerId: number, frame: Uint8Array, channel?: PROJECT.RpcChannel): void;
+        sendFrame(clientKey: string, sourcePlayerId: number, frame: Uint8Array, channel?: TOOLKIT.RpcChannel): void;
         /**
          * Delivers a control message to one client.
          * @param clientKey The receiving client.
@@ -13962,7 +13962,7 @@ declare namespace PROJECT {
          * Publishes the session's description (lobby listing).
          * @param session The description.
          */
-        setSessionMetadata(session: PROJECT.SessionInfo): void;
+        setSessionMetadata(session: TOOLKIT.SessionInfo): void;
         /**
          * Locks or unlocks the session against new joins.
          * @param locked True when the session is full or closed.
@@ -13984,7 +13984,7 @@ declare namespace PROJECT {
          * @param name The control message name.
          * @param payload The payload.
          */
-        receiveControl(name: string, payload: PROJECT.NetworkControlPayload): void;
+        receiveControl(name: string, payload: TOOLKIT.NetworkControlPayload): void;
     }
     /**
      * The rules of one networked session, shared by every host of a session (D10, D12, D31): the in-process LoopbackHub
@@ -14040,7 +14040,7 @@ declare namespace PROJECT {
          */
         constructor(outputs: FusionSessionOutputs);
         /** The session's mode, or null before the first join. */
-        get gameMode(): PROJECT.GameMode | null;
+        get gameMode(): TOOLKIT.GameMode | null;
         /** Every client, connected or held for a reconnect. */
         get players(): FusionSessionClient[];
         /** The host's player id (0 = none, or a dedicated server). */
@@ -14059,21 +14059,21 @@ declare namespace PROJECT {
          * @returns The welcome, also sent to the joiner as FUSION_CONTROL_WELCOME.
          * @throws NetworkError named after the ShutdownReason: GameNotFound, IncompatibleConfiguration, GameIsFull, GameClosed or InvalidArguments.
          */
-        join(clientKey: string, request: PROJECT.NetworkConnectRequest): PROJECT.NetworkWelcome;
+        join(clientKey: string, request: TOOLKIT.NetworkConnectRequest): TOOLKIT.NetworkWelcome;
         /**
          * Receives a client's envelope (route byte + uint16 target + frame) and routes it (D11).
          * @param clientKey The sending client.
          * @param payload The envelope bytes.
          * @param channel The channel the envelope arrived on; the frame is passed on on the same channel (D7).
          */
-        receiveFrame(clientKey: string, payload: Uint8Array, channel?: PROJECT.RpcChannel): void;
+        receiveFrame(clientKey: string, payload: Uint8Array, channel?: TOOLKIT.RpcChannel): void;
         /**
          * Receives a client's control message: a host's connect result, a session update or an area of interest.
          * @param clientKey The sending client.
          * @param name The control message name.
          * @param payload The payload.
          */
-        receiveControl(clientKey: string, name: string, payload: PROJECT.NetworkControlPayload): void;
+        receiveControl(clientKey: string, name: string, payload: TOOLKIT.NetworkControlPayload): void;
         /**
          * Expires the reconnect holds of dropped players (A9).
          * @param nowMilliseconds The session clock.
@@ -14086,14 +14086,14 @@ declare namespace PROJECT {
          * @param frame The frame.
          * @param channel The channel the server sent it on (D7).
          */
-        sendFromServer(route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel?: PROJECT.RpcChannel): void;
+        sendFromServer(route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel?: TOOLKIT.RpcChannel): void;
         /**
          * Sends a control message from the dedicated server (A17). A connect result is applied by the session itself.
          * @param name The control message name.
          * @param payload The payload.
          * @param targetPlayerId The receiving player, or 0 for everyone.
          */
-        sendControlFromServer(name: string, payload: PROJECT.NetworkControlPayload, targetPlayerId: number): void;
+        sendControlFromServer(name: string, payload: TOOLKIT.NetworkControlPayload, targetPlayerId: number): void;
         /**
          * Marks a client dropped and holds its slot for NETWORK_RECONNECT_GRACE_SECONDS (D8). A dropped host is not held
          * while another player is connected: the session migrates to a new host at once (A13, D31).
@@ -14143,7 +14143,7 @@ declare namespace PROJECT {
          * null for an unnamed session of the default size.
          * @returns The server runner's welcome.
          */
-        attachDedicatedServer(serverEndpoint: FusionSessionServerEndpoint, request?: PROJECT.NetworkConnectRequest | null): PROJECT.NetworkWelcome;
+        attachDedicatedServer(serverEndpoint: FusionSessionServerEndpoint, request?: TOOLKIT.NetworkConnectRequest | null): TOOLKIT.NetworkWelcome;
         /**
          * Starts the session from its first join (A10): Host and AutoHostOrClient create a Host session, Shared a Shared one.
          * @param request The creator's request.
@@ -14440,7 +14440,7 @@ declare namespace PROJECT {
         private static error;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * The clock every networking module reads (A6): performance.now() in seconds unless a test or a headless host
      * replaces the source with NetworkClock.setSource.
@@ -14533,22 +14533,22 @@ declare namespace PROJECT {
         private static pushSample;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * One tick of a player's input, as Photon Fusion's NetworkInput. The runner hands one to onInput; game code sets the
+     * One tick of a player's input, as the original API's NetworkInput. The runner hands one to onInput; game code sets the
      * struct it declared as StartGameArgs.inputDefinition, and behaviours read it back with getInput() in
      * fixedUpdateNetwork. The value lives in words, like networked state, so it can be stored per tick and sent.
      *
      * @example
-     * public onInput(runner: PROJECT.NetworkRunner, input: PROJECT.NetworkInput): void {
-     *     input.set({ buttons: new PROJECT.NetworkButtons().set(0, jumpPressed), steer: steerAxis });
+     * public onInput(runner: TOOLKIT.NetworkRunner, input: TOOLKIT.NetworkInput): void {
+     *     input.set({ buttons: new TOOLKIT.NetworkButtons().set(0, jumpPressed), steer: steerAxis });
      * }
      */
-    class NetworkInput implements PROJECT.NetworkedValueOwner {
+    class NetworkInput implements TOOLKIT.NetworkedValueOwner {
         /** The input words: one input struct. */
         readonly words: Float64Array;
         /** Resolves object references in the struct (null outside a runner). */
-        readonly runner: PROJECT.NetworkRunnerView | null;
+        readonly runner: TOOLKIT.NetworkRunnerView | null;
         /** The input struct's definition, or null when the runner was started without one. */
         private readonly definition;
         /** True once a value was set. */
@@ -14558,7 +14558,7 @@ declare namespace PROJECT {
          * @param definition The input struct definition (Networked.struct of StartGameArgs.inputDefinition), or null.
          * @param runner Resolves object references; may be null.
          */
-        constructor(definition: PROJECT.NetworkedPropertyDefinition | null, runner?: PROJECT.NetworkRunnerView | null);
+        constructor(definition: TOOLKIT.NetworkedPropertyDefinition | null, runner?: TOOLKIT.NetworkRunnerView | null);
         /** True when a value was set for this tick. */
         get isValid(): boolean;
         /**
@@ -14588,7 +14588,7 @@ declare namespace PROJECT {
          * @param owner Resolves object references.
          * @returns The struct copy.
          */
-        static readStruct<T>(definition: PROJECT.NetworkedPropertyDefinition, words: Float64Array, owner: PROJECT.NetworkedValueOwner): T;
+        static readStruct<T>(definition: TOOLKIT.NetworkedPropertyDefinition, words: Float64Array, owner: TOOLKIT.NetworkedValueOwner): T;
     }
     /** The remote view a client rendered when it produced a tick's input (D29, for lag compensation in T14). */
     interface NetworkInputView {
@@ -14624,7 +14624,7 @@ declare namespace PROJECT {
          * Creates the codec of one input struct.
          * @param definition The input struct definition (Networked.struct of StartGameArgs.inputDefinition).
          */
-        constructor(definition: PROJECT.NetworkedPropertyDefinition);
+        constructor(definition: TOOLKIT.NetworkedPropertyDefinition);
         /** Words per input. */
         get wordCount(): number;
         /**
@@ -14693,7 +14693,7 @@ declare namespace PROJECT {
         clear(): void;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** One network prefab: where it lives and its identity (D9). A container prefab or a runtime prefab. */
     interface NetworkPrefabEntry {
         /** The asset container holding the prefab; absent for a runtime prefab. */
@@ -14703,10 +14703,10 @@ declare namespace PROJECT {
         /** The exported prefab asset GUID (the node name when the export carries none), or the runtime prefab's key. */
         guid: string;
         /** The factory that builds a runtime prefab's instance; absent for a container prefab. */
-        factory?: PROJECT.NetworkRuntimePrefabFactory;
+        factory?: TOOLKIT.NetworkRuntimePrefabFactory;
     }
     /**
-     * The table of network prefabs, identical on every peer (D9): the root nodes carrying a PROJECT.NetworkObject inside
+     * The table of network prefabs, identical on every peer (D9): the root nodes carrying a TOOLKIT.NetworkObject inside
      * the asset containers listed in NetworkProjectConfig.prefabContainers, plus the runtime prefabs of
      * NetworkProjectConfig.runtimePrefabs, sorted by prefab GUID. A prefab's id is its index; the table hash
      * (FNV-1a over the sorted GUIDs) is compared when a peer joins.
@@ -14737,7 +14737,7 @@ declare namespace PROJECT {
          * @param runtimePrefabs Runtime prefab factories by GUID (NetworkProjectConfig.runtimePrefabs), or null for none.
          * @throws NetworkError when a runtime prefab GUID is also a container prefab's GUID.
          */
-        load(scene: BABYLON.Scene, rootUrl: string, containerFiles: string[], runtimePrefabs?: Record<string, PROJECT.NetworkRuntimePrefabFactory>): Promise<void>;
+        load(scene: BABYLON.Scene, rootUrl: string, containerFiles: string[], runtimePrefabs?: Record<string, TOOLKIT.NetworkRuntimePrefabFactory>): Promise<void>;
         /**
          * Finds a prefab's id by GUID, then by node name.
          * @param nameOrGuid The prefab GUID or root node name.
@@ -14778,14 +14778,14 @@ declare namespace PROJECT {
         private static isNetworkObjectClass;
     }
 }
-declare namespace PROJECT {
-    /** Supplies the node instances of spawned network objects, as Photon Fusion's INetworkObjectProvider. */
+declare namespace TOOLKIT {
+    /** Supplies the node instances of spawned network objects, as the original API's INetworkObjectProvider. */
     interface INetworkObjectProvider {
         /**
          * Called once when the runner starts.
          * @param runner The runner.
          */
-        initialize(runner: PROJECT.NetworkRunner): void;
+        initialize(runner: TOOLKIT.NetworkRunner): void;
         /**
          * Returns a new (or pooled) instance of a prefab.
          * @param runner The runner.
@@ -14794,7 +14794,7 @@ declare namespace PROJECT {
          * @param rotation World rotation.
          * @returns The instance's root node (it carries the NetworkObject).
          */
-        acquirePrefabInstance(runner: PROJECT.NetworkRunner, prefabId: number, position: BABYLON.Vector3, rotation: BABYLON.Quaternion): BABYLON.TransformNode;
+        acquirePrefabInstance(runner: TOOLKIT.NetworkRunner, prefabId: number, position: BABYLON.Vector3, rotation: BABYLON.Quaternion): BABYLON.TransformNode;
         /**
          * Takes back a despawned instance.
          * @param runner The runner.
@@ -14802,17 +14802,17 @@ declare namespace PROJECT {
          * @param prefabId The prefab id (NETWORK_SCENE_OBJECT_PREFAB_ID for a scene object).
          * @param isSceneObject True for a networked scene object.
          */
-        releaseInstance(runner: PROJECT.NetworkRunner, instance: BABYLON.TransformNode, prefabId: number, isSceneObject: boolean): void;
+        releaseInstance(runner: TOOLKIT.NetworkRunner, instance: BABYLON.TransformNode, prefabId: number, isSceneObject: boolean): void;
         /**
          * Called once when the runner shuts down.
          * @param runner The runner.
          */
-        shutdown(runner: PROJECT.NetworkRunner): void;
+        shutdown(runner: TOOLKIT.NetworkRunner): void;
     }
     /**
      * The default provider: instantiates prefabs from the prefab table's containers, builds runtime prefabs through their
      * factories, and disposes released instances.
-     * Subclass it to pool instances (as Fusion Karts' FusionObjectPoolRoot does).
+     * Subclass it to pool instances (as the networked karts sample's FusionObjectPoolRoot does).
      */
     class NetworkObjectProviderDefault implements INetworkObjectProvider {
         /** Suffix of instance node names, so they read apart from the container's prefab nodes. */
@@ -14821,7 +14821,7 @@ declare namespace PROJECT {
          * Nothing to prepare for the default provider.
          * @param runner The runner.
          */
-        initialize(runner: PROJECT.NetworkRunner): void;
+        initialize(runner: TOOLKIT.NetworkRunner): void;
         /**
          * Instantiates the prefab and places it. A runtime prefab is built by its factory, which gets the spawn
          * position and rotation too.
@@ -14832,7 +14832,7 @@ declare namespace PROJECT {
          * @returns The instance's root node.
          * @throws NetworkError for an unknown prefab id, a failed instantiation, or a factory that returns no node.
          */
-        acquirePrefabInstance(runner: PROJECT.NetworkRunner, prefabId: number, position: BABYLON.Vector3, rotation: BABYLON.Quaternion): BABYLON.TransformNode;
+        acquirePrefabInstance(runner: TOOLKIT.NetworkRunner, prefabId: number, position: BABYLON.Vector3, rotation: BABYLON.Quaternion): BABYLON.TransformNode;
         /**
          * Destroys a released instance (scene objects included).
          * @param runner The runner.
@@ -14840,12 +14840,12 @@ declare namespace PROJECT {
          * @param prefabId The prefab id.
          * @param isSceneObject True for a networked scene object.
          */
-        releaseInstance(runner: PROJECT.NetworkRunner, instance: BABYLON.TransformNode, prefabId: number, isSceneObject: boolean): void;
+        releaseInstance(runner: TOOLKIT.NetworkRunner, instance: BABYLON.TransformNode, prefabId: number, isSceneObject: boolean): void;
         /**
          * Nothing to release for the default provider.
          * @param runner The runner.
          */
-        shutdown(runner: PROJECT.NetworkRunner): void;
+        shutdown(runner: TOOLKIT.NetworkRunner): void;
         /**
          * Clones the prefab's hierarchy out of its container, with fresh script component instances.
          * @param runner The runner (its prefab table names the container and node).
@@ -14853,7 +14853,7 @@ declare namespace PROJECT {
          * @returns The instance's root node.
          * @throws NetworkError for an unknown prefab id, a runtime prefab (it has no container) or a failed instantiation.
          */
-        protected instantiatePrefab(runner: PROJECT.NetworkRunner, prefabId: number): BABYLON.TransformNode;
+        protected instantiatePrefab(runner: TOOLKIT.NetworkRunner, prefabId: number): BABYLON.TransformNode;
         /**
          * Builds a runtime prefab's instance through its factory.
          * @param runner The runner.
@@ -14870,22 +14870,22 @@ declare namespace PROJECT {
          * @param prefabId The prefab id.
          * @param instance The instance's root node.
          */
-        protected destroyPrefabInstance(runner: PROJECT.NetworkRunner, prefabId: number, instance: BABYLON.TransformNode): void;
+        protected destroyPrefabInstance(runner: TOOLKIT.NetworkRunner, prefabId: number, instance: BABYLON.TransformNode): void;
     }
 }
-declare namespace PROJECT {
-    /** One RPC's rules, as Photon Fusion's [Rpc(...)] attribute. */
+declare namespace TOOLKIT {
+    /** One RPC's rules, as the original API's [Rpc(...)] attribute. */
     interface RpcAttributes {
         /** Which peers may call it. */
-        sources: PROJECT.RpcSources;
+        sources: TOOLKIT.RpcSources;
         /** Which peers run it. */
-        targets: PROJECT.RpcTargets;
+        targets: TOOLKIT.RpcTargets;
         /** Run it on the caller too when the caller is a target (default true). */
         invokeLocal?: boolean;
         /** Delivery channel (default Reliable). */
-        channel?: PROJECT.RpcChannel;
+        channel?: TOOLKIT.RpcChannel;
         /** On a host, whether the host's calls count as the server's or the host player's (default SourceIsServer). */
-        hostMode?: PROJECT.RpcHostMode;
+        hostMode?: TOOLKIT.RpcHostMode;
         /** A client's call runs on the server at the start of the next tick, not mid-tick (default true). */
         tickAligned?: boolean;
         /** The first argument is a PlayerRef naming the one player that runs it, as [RpcTarget] (default false). */
@@ -14894,11 +14894,11 @@ declare namespace PROJECT {
     /** One RPC: its rules and the definitions of its arguments (the target player argument excluded). */
     interface RpcDefinition {
         attributes: RpcAttributes;
-        parameters: PROJECT.NetworkedPropertyDefinition[];
+        parameters: TOOLKIT.NetworkedPropertyDefinition[];
     }
     /** The RPCs a NetworkBehaviour class declares, by method name (D3). */
     type RpcDefinitions = Record<string, RpcDefinition>;
-    /** Builds RPC definitions, standing in for Photon Fusion's [Rpc] attribute (D3). */
+    /** Builds RPC definitions, standing in for the original API's [Rpc] attribute (D3). */
     class Rpc {
         /**
          * Defines an RPC with the defaults filled in: invokeLocal true, channel Reliable, hostMode SourceIsServer,
@@ -14908,20 +14908,20 @@ declare namespace PROJECT {
          * @returns The frozen definition.
          *
          * @example
-         * protected static getRpcDefinitions(): PROJECT.RpcDefinitions {
-         *     return { rpcSetName: PROJECT.Rpc.define({ sources: PROJECT.RpcSources.InputAuthority, targets: PROJECT.RpcTargets.StateAuthority }, [PROJECT.Networked.string(16)]) };
+         * protected static getRpcDefinitions(): TOOLKIT.RpcDefinitions {
+         *     return { rpcSetName: TOOLKIT.Rpc.define({ sources: TOOLKIT.RpcSources.InputAuthority, targets: TOOLKIT.RpcTargets.StateAuthority }, [TOOLKIT.Networked.string(16)]) };
          * }
          */
-        static define(attributes: RpcAttributes, parameters?: PROJECT.NetworkedPropertyDefinition[]): RpcDefinition;
+        static define(attributes: RpcAttributes, parameters?: TOOLKIT.NetworkedPropertyDefinition[]): RpcDefinition;
     }
-    /** Delivery info passed as the last argument of every RPC call, as Photon Fusion's RpcInfo. */
+    /** Delivery info passed as the last argument of every RPC call, as the original API's RpcInfo. */
     class RpcInfo {
         /** The caller's tick when it called. */
         readonly tick: number;
         /** The calling player (PlayerRef.None for the server). */
-        readonly source: PROJECT.PlayerRef;
+        readonly source: TOOLKIT.PlayerRef;
         /** The channel it came on. */
-        readonly channel: PROJECT.RpcChannel;
+        readonly channel: TOOLKIT.RpcChannel;
         /** True when the call ran on the caller itself (invokeLocal). */
         readonly isInvokeLocal: boolean;
         /**
@@ -14931,7 +14931,7 @@ declare namespace PROJECT {
          * @param channel The channel.
          * @param isInvokeLocal True for a local invocation.
          */
-        constructor(tick: number, source: PROJECT.PlayerRef, channel: PROJECT.RpcChannel, isInvokeLocal: boolean);
+        constructor(tick: number, source: TOOLKIT.PlayerRef, channel: TOOLKIT.RpcChannel, isInvokeLocal: boolean);
     }
     /** One RPC as a class's table holds it. */
     interface NetworkRpcEntry {
@@ -14942,7 +14942,7 @@ declare namespace PROJECT {
         /** The definition. */
         definition: RpcDefinition;
         /** The argument word layout. */
-        layout: PROJECT.NetworkedLayout;
+        layout: TOOLKIT.NetworkedLayout;
         /** The method game code wrote (the wrapper calls it). */
         original: (...args: unknown[]) => void;
     }
@@ -14955,9 +14955,9 @@ declare namespace PROJECT {
         /** The definition. */
         definition: RpcDefinition;
         /** The argument word layout. */
-        layout: PROJECT.NetworkedLayout;
+        layout: TOOLKIT.NetworkedLayout;
         /** Runs it. */
-        handler: (runner: PROJECT.NetworkRunner, args: unknown[], info: RpcInfo) => void;
+        handler: (runner: TOOLKIT.NetworkRunner, args: unknown[], info: RpcInfo) => void;
     }
     /** A decoded RPC frame header (Data shapes). */
     interface NetworkRpcFrameHeader {
@@ -14970,7 +14970,7 @@ declare namespace PROJECT {
         /** The caller's tick. */
         tick: number;
         /** The channel. */
-        channel: PROJECT.RpcChannel;
+        channel: TOOLKIT.RpcChannel;
         /** The one target player, or 0 for every target. */
         targetPlayerId: number;
     }
@@ -15000,7 +15000,7 @@ declare namespace PROJECT {
          * @param definition The RPC.
          * @returns The layout (one property per argument).
          */
-        static compileArguments(definition: RpcDefinition): PROJECT.NetworkedLayout;
+        static compileArguments(definition: RpcDefinition): TOOLKIT.NetworkedLayout;
         /**
          * Calls a static RPC from game code (NetworkRunner.invokeStaticRpc). The caller must hold one of the RPC's source
          * roles: StateAuthority is the server, the host or the Shared master client; every other peer is a proxy. It runs
@@ -15009,7 +15009,7 @@ declare namespace PROJECT {
          * @param entry The registered static RPC.
          * @param args Its arguments.
          */
-        static invokeStatic(runner: PROJECT.NetworkRunner, entry: NetworkStaticRpcEntry, args: unknown[]): void;
+        static invokeStatic(runner: TOOLKIT.NetworkRunner, entry: NetworkStaticRpcEntry, args: unknown[]): void;
         /**
          * Applies a received RPC frame: resolves the object and behaviour (dropped silently when gone), checks the source
          * rule against the sender's role, decodes the arguments and runs the original method with an RpcInfo.
@@ -15017,7 +15017,7 @@ declare namespace PROJECT {
          * @param sourcePlayerId The sending player.
          * @param frame The Rpc frame.
          */
-        static receive(runner: PROJECT.NetworkRunner, sourcePlayerId: number, frame: Uint8Array): void;
+        static receive(runner: TOOLKIT.NetworkRunner, sourcePlayerId: number, frame: Uint8Array): void;
         /**
          * The call a wrapper makes: checks that this peer may call the RPC, sends it and runs it locally when it should.
          * @param behaviour The behaviour the RPC was called on.
@@ -15138,7 +15138,7 @@ declare namespace PROJECT {
         private static label;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * The client side of Host/Client and dedicated sessions (T12.1, D14, D18): it decodes the server's snapshots into each
      * object's confirmed ring and remote snapshots, spawns and despawns what they announce, rewinds every object to the
@@ -15191,7 +15191,7 @@ declare namespace PROJECT {
          * @param runner The runner.
          * @param simulation The runner's simulation.
          */
-        constructor(runner: PROJECT.NetworkRunner, simulation: PROJECT.NetworkSimulation);
+        constructor(runner: TOOLKIT.NetworkRunner, simulation: TOOLKIT.NetworkSimulation);
         /** The newest applied snapshot's server tick, or -1 before the first. */
         get latestServerTick(): number;
         /** True once the client predicts ahead of the server. */
@@ -15239,7 +15239,7 @@ declare namespace PROJECT {
          * two applied snapshots around the remote render time.
          * @returns The view (both ticks the newest snapshot's before two have arrived).
          */
-        currentView(): PROJECT.NetworkInputView;
+        currentView(): TOOLKIT.NetworkInputView;
         /**
          * The view of a server time: the tick at or before it, the next tick, and where the time falls between them (a
          * server records hitboxes at every tick, and a snapshot of tick k holds the state at time k × tick length).
@@ -15327,7 +15327,7 @@ declare namespace PROJECT {
         private static storeConfirmed;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** What a server or host keeps about one connected client (T12). */
     interface NetworkClientReplicationState {
         /** The client's player id. */
@@ -15380,7 +15380,7 @@ declare namespace PROJECT {
          * @param runner The runner.
          * @param simulation The runner's simulation.
          */
-        constructor(runner: PROJECT.NetworkRunner, simulation: PROJECT.NetworkSimulation);
+        constructor(runner: TOOLKIT.NetworkRunner, simulation: TOOLKIT.NetworkSimulation);
         /** Forgets every client, despawn and send (a fresh run or a shutdown). */
         reset(): void;
         /**
@@ -15522,11 +15522,11 @@ declare namespace PROJECT {
         private static emptyDelta;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** What the simulation keeps per spawned object. */
     interface NetworkObjectEntry {
         /** The object. */
-        object: PROJECT.NetworkObject;
+        object: TOOLKIT.NetworkObject;
         /** Its prefab id (NETWORK_SCENE_OBJECT_PREFAB_ID for a scene object). */
         prefabId: number;
         /** True for a networked scene object. */
@@ -15534,7 +15534,7 @@ declare namespace PROJECT {
         /** False when runner.setIsSimulated turned its fixedUpdateNetwork off. */
         simulated: boolean;
         /** The flags it was spawned with. */
-        spawnFlags: PROJECT.NetworkSpawnFlags;
+        spawnFlags: TOOLKIT.NetworkSpawnFlags;
         /** True once the session knows the object (its spawn block was sent, or it came from the network). */
         spawnSent: boolean;
         /** The words last sent in Shared mode, or null to send at the next send. */
@@ -15544,7 +15544,7 @@ declare namespace PROJECT {
         /** Behaviours with onChangedRender properties and their hidden change detectors (T6 step 8). */
         renderWatchers: NetworkRenderWatcher[];
         /** The object's pose replicators (NetworkTransform, NetworkRigidbody), restored and captured around each tick. */
-        poseBehaviours: PROJECT.NetworkTRSP[];
+        poseBehaviours: TOOLKIT.NetworkTRSP[];
     }
     /** Running totals the stats overlay turns into rates (T8). */
     interface NetworkSimulationCounters {
@@ -15564,41 +15564,41 @@ declare namespace PROJECT {
         /** Its network id. */
         networkId: number;
         /** The player with state authority. */
-        stateAuthority: PROJECT.PlayerRef;
+        stateAuthority: TOOLKIT.PlayerRef;
         /** The player with input authority. */
-        inputAuthority: PROJECT.PlayerRef;
+        inputAuthority: TOOLKIT.PlayerRef;
         /** Its spawn flags. */
-        spawnFlags: PROJECT.NetworkSpawnFlags;
+        spawnFlags: TOOLKIT.NetworkSpawnFlags;
         /** A copy of its words. */
         words: Float64Array;
     }
     /** A behaviour's hidden change detector for its onChangedRender properties. */
     interface NetworkRenderWatcher {
         /** The behaviour. */
-        behaviour: PROJECT.NetworkBehaviour;
+        behaviour: TOOLKIT.NetworkBehaviour;
         /** Its SimulationState change detector. */
-        detector: PROJECT.ChangeDetector;
+        detector: TOOLKIT.ChangeDetector;
         /** The method to call per changed property name. */
         methods: Map<string, string>;
     }
     /** Everything needed to attach a newly acquired object to the simulation. */
     interface NetworkSpawnRequest {
         /** The object's identity component. */
-        object: PROJECT.NetworkObject;
+        object: TOOLKIT.NetworkObject;
         /** Its prefab id (NETWORK_SCENE_OBJECT_PREFAB_ID for a scene object). */
         prefabId: number;
         /** Its network id (D7). */
         networkId: number;
         /** The player with state authority (PlayerRef.None for the server). */
-        stateAuthority: PROJECT.PlayerRef;
+        stateAuthority: TOOLKIT.PlayerRef;
         /** The player with input authority (PlayerRef.None for nobody). */
-        inputAuthority: PROJECT.PlayerRef;
+        inputAuthority: TOOLKIT.PlayerRef;
         /** True for a networked scene object. */
         isSceneObject: boolean;
         /** Called after the object is attached, before awake and spawned (a remote spawn applies its received state here). */
-        onBeforeSpawned?: (runner: PROJECT.NetworkRunner, object: PROJECT.NetworkObject) => void;
+        onBeforeSpawned?: (runner: TOOLKIT.NetworkRunner, object: TOOLKIT.NetworkObject) => void;
         /** The spawn flags (default None). */
-        spawnFlags?: PROJECT.NetworkSpawnFlags;
+        spawnFlags?: TOOLKIT.NetworkSpawnFlags;
         /** True when the session already knows the object (a remote spawn). */
         isRemoteSpawn?: boolean;
     }
@@ -15664,14 +15664,14 @@ declare namespace PROJECT {
         /** Running totals for the stats overlay. */
         readonly counters: NetworkSimulationCounters;
         /** Internal: the server and host side of Host/Client and dedicated sessions (T12). */
-        readonly serverReplicator: PROJECT.NetworkServerReplicator;
+        readonly serverReplicator: TOOLKIT.NetworkServerReplicator;
         /** Internal: the client side of Host/Client and dedicated sessions (T12.1). */
-        readonly clientPredictor: PROJECT.NetworkClientPredictor;
+        readonly clientPredictor: TOOLKIT.NetworkClientPredictor;
         /**
          * Creates the simulation of a runner. The runner creates it.
          * @param runner The runner.
          */
-        constructor(runner: PROJECT.NetworkRunner);
+        constructor(runner: TOOLKIT.NetworkRunner);
         /** The current tick. */
         get tick(): number;
         /** Length of one tick, in seconds. */
@@ -15689,11 +15689,11 @@ declare namespace PROJECT {
         /** True during the last forward tick of a rendered frame. */
         get isLastTick(): boolean;
         /** The input struct definition, or null. */
-        get inputStructDefinition(): PROJECT.NetworkedPropertyDefinition | null;
+        get inputStructDefinition(): TOOLKIT.NetworkedPropertyDefinition | null;
         /** The last rendered frame's length, in seconds (what render-time smoothing such as error correction decays by). */
         get frameDeltaSeconds(): number;
         /** Internal: the Input frame codec of the input struct, or null when the runner has no input definition. */
-        get inputFrameCodec(): PROJECT.NetworkInputFrameCodec | null;
+        get inputFrameCodec(): TOOLKIT.NetworkInputFrameCodec | null;
         /** Internal: the id this peer's next server or host spawn takes (D7), as a host migration snapshot records it. */
         get nextHostedSpawnId(): number;
         /** The simulation clock scale (D18): the client predictor's on a Host/Client client, else 1. */
@@ -15711,7 +15711,7 @@ declare namespace PROJECT {
          * @param inputDefinition The input struct definition, or null.
          * @param physicsStepper The stepper the runner took control of, or null.
          */
-        reset(startTick: number, inputDefinition: PROJECT.NetworkedPropertyDefinition | null, physicsStepper: TOOLKIT.PhysicsFixedStep | null): void;
+        reset(startTick: number, inputDefinition: TOOLKIT.NetworkedPropertyDefinition | null, physicsStepper: TOOLKIT.PhysicsFixedStep | null): void;
         /**
          * Advances the simulation by one rendered frame (A8): received frames, forward ticks, send, render.
          * @param frameDeltaSeconds The frame's length, in seconds.
@@ -15758,7 +15758,7 @@ declare namespace PROJECT {
          * @param networkObject The object.
          * @param words Its words.
          */
-        restoreObjectWords(networkObject: PROJECT.NetworkObject, words: Float64Array): void;
+        restoreObjectWords(networkObject: TOOLKIT.NetworkObject, words: Float64Array): void;
         /**
          * Allocates the next spawn id of this peer (D7).
          * @returns The id.
@@ -15771,7 +15771,7 @@ declare namespace PROJECT {
          * @param request The object, its id, authorities and options.
          * @returns The spawned object.
          */
-        attachSpawnedObject(request: NetworkSpawnRequest): PROJECT.NetworkObject;
+        attachSpawnedObject(request: NetworkSpawnRequest): TOOLKIT.NetworkObject;
         /**
          * Despawns an object: despawned() on each behaviour, then it leaves the simulation and its instance goes back to
          * the object provider.
@@ -15779,15 +15779,15 @@ declare namespace PROJECT {
          * @param hasState Passed to despawned(): true while the networked properties are still meaningful.
          * @param releaseInstance True to hand the instance to the object provider (false keeps the node).
          */
-        despawnObject(networkObject: PROJECT.NetworkObject, hasState: boolean, releaseInstance: boolean): void;
+        despawnObject(networkObject: TOOLKIT.NetworkObject, hasState: boolean, releaseInstance: boolean): void;
         /**
          * Finds a spawned object.
          * @param networkId The id.
          * @returns The object, or null.
          */
-        findObject(networkId: number): PROJECT.NetworkObject | null;
+        findObject(networkId: number): TOOLKIT.NetworkObject | null;
         /** @returns Every spawned object, in ascending network id. */
-        getAllObjects(): PROJECT.NetworkObject[];
+        getAllObjects(): TOOLKIT.NetworkObject[];
         /** @returns Internal: every spawned object's entry, in ascending network id (a copy of the list). */
         getEntries(): NetworkObjectEntry[];
         /**
@@ -15796,13 +15796,13 @@ declare namespace PROJECT {
          * @param networkObject The object.
          * @returns True when it is simulated here.
          */
-        isObjectSimulated(networkObject: PROJECT.NetworkObject): boolean;
+        isObjectSimulated(networkObject: TOOLKIT.NetworkObject): boolean;
         /**
          * Turns an object's fixedUpdateNetwork on or off (runner.setIsSimulated).
          * @param networkObject The object.
          * @param simulated True to simulate it.
          */
-        setSimulated(networkObject: PROJECT.NetworkObject, simulated: boolean): void;
+        setSimulated(networkObject: TOOLKIT.NetworkObject, simulated: boolean): void;
         /**
          * Stores a player's input for a tick (the local onInput, or a received input packet in T12).
          * @param player The player.
@@ -15810,21 +15810,21 @@ declare namespace PROJECT {
          * @param words The input words.
          * @param view The remote view the player rendered at that tick (T14), or null.
          */
-        storePlayerInput(player: PROJECT.PlayerRef, tick: number, words: Float64Array, view?: PROJECT.NetworkInputView | null): void;
+        storePlayerInput(player: TOOLKIT.PlayerRef, tick: number, words: Float64Array, view?: TOOLKIT.NetworkInputView | null): void;
         /**
          * Internal: a player's stored input words for a tick.
          * @param player The player.
          * @param tick The tick.
          * @returns A view of the words, or null when that tick is not stored.
          */
-        findPlayerInputWords(player: PROJECT.PlayerRef, tick: number): Float64Array | null;
+        findPlayerInputWords(player: TOOLKIT.PlayerRef, tick: number): Float64Array | null;
         /**
          * Internal: the remote view a player rendered at a stored input tick (T14 lag compensation reads it).
          * @param player The player.
          * @param tick The tick.
          * @returns The view, or null.
          */
-        findPlayerInputView(player: PROJECT.PlayerRef, tick: number): PROJECT.NetworkInputView | null;
+        findPlayerInputView(player: TOOLKIT.PlayerRef, tick: number): TOOLKIT.NetworkInputView | null;
         /**
          * A player's input at the current tick (D14). A client only reads its own input; a server reads every player's.
          * When a server has no input for the tick it raises onInputMissing once per tick per player (the callback may set
@@ -15832,7 +15832,7 @@ declare namespace PROJECT {
          * @param player The player.
          * @returns The input struct, or null.
          */
-        getInputForPlayer<T>(player: PROJECT.PlayerRef): T | null;
+        getInputForPlayer<T>(player: TOOLKIT.PlayerRef): T | null;
         /**
          * Internal: rewinds every object to a confirmed server tick and re-simulates up to a tick (T12.1 step 3.4-3.5). The
          * live words become the confirmed words, the tick becomes the server tick, then each later tick runs as a
@@ -15930,7 +15930,7 @@ declare namespace PROJECT {
          * @param header The spawn block's header (prefab id and authorities).
          * @param adoptState Puts the received state into the object's words, before awake and spawned run.
          */
-        spawnRemoteObject(header: PROJECT.NetworkObjectBlockHeader, adoptState: (networkObject: PROJECT.NetworkObject) => void): void;
+        spawnRemoteObject(header: TOOLKIT.NetworkObjectBlockHeader, adoptState: (networkObject: TOOLKIT.NetworkObject) => void): void;
         /**
          * Attaches an object the session or server announced, with the authorities of its spawn block.
          * @param networkObject The object's identity component.
@@ -15961,7 +15961,7 @@ declare namespace PROJECT {
          * @param networkObject The object.
          * @param inputAuthority The new input authority.
          */
-        changeInputAuthority(networkObject: PROJECT.NetworkObject, inputAuthority: PROJECT.PlayerRef): void;
+        changeInputAuthority(networkObject: TOOLKIT.NetworkObject, inputAuthority: TOOLKIT.PlayerRef): void;
         /**
          * Applies an AuthorityResult frame (T6 step 2): the new state authority, a cleared remote ring (the old holder's
          * timeline ends), a full send from a peer that gained it, and stateAuthorityChanged() where defined.
@@ -15979,7 +15979,7 @@ declare namespace PROJECT {
          * until it comes back with full state.
          * @param networkObject The object.
          */
-        despawnOutOfInterest(networkObject: PROJECT.NetworkObject): void;
+        despawnOutOfInterest(networkObject: TOOLKIT.NetworkObject): void;
         /**
          * Feeds a pong into the runner's clock sync.
          * @param frame The Pong frame.
@@ -16063,38 +16063,38 @@ declare namespace PROJECT {
         private static playerRefOf;
     }
 }
-declare namespace PROJECT {
-    /** Photon Fusion's runner callbacks (INetworkRunnerCallbacks); every method is optional. */
+declare namespace TOOLKIT {
+    /** The original API's runner callbacks (INetworkRunnerCallbacks); every method is optional. */
     interface INetworkRunnerCallbacks {
-        onPlayerJoined?(runner: NetworkRunner, player: PROJECT.PlayerRef): void;
-        onPlayerLeft?(runner: NetworkRunner, player: PROJECT.PlayerRef): void;
+        onPlayerJoined?(runner: NetworkRunner, player: TOOLKIT.PlayerRef): void;
+        onPlayerLeft?(runner: NetworkRunner, player: TOOLKIT.PlayerRef): void;
         /** Fill the local player's input for the tick being simulated (runner.tick). */
-        onInput?(runner: NetworkRunner, input: PROJECT.NetworkInput): void;
+        onInput?(runner: NetworkRunner, input: TOOLKIT.NetworkInput): void;
         /** A server has no input for a player at this tick; set `input` to supply one. */
-        onInputMissing?(runner: NetworkRunner, player: PROJECT.PlayerRef, input: PROJECT.NetworkInput): void;
-        onShutdown?(runner: NetworkRunner, reason: PROJECT.ShutdownReason): void;
+        onInputMissing?(runner: NetworkRunner, player: TOOLKIT.PlayerRef, input: TOOLKIT.NetworkInput): void;
+        onShutdown?(runner: NetworkRunner, reason: TOOLKIT.ShutdownReason): void;
         onConnectedToServer?(runner: NetworkRunner): void;
-        onDisconnectedFromServer?(runner: NetworkRunner, reason: PROJECT.NetDisconnectReason): void;
+        onDisconnectedFromServer?(runner: NetworkRunner, reason: TOOLKIT.NetDisconnectReason): void;
         /** Host or server: a player asks to join; call request.accept(), refuse() or waiting(). Unanswered requests are accepted. */
         onConnectRequest?(runner: NetworkRunner, request: NetworkConnectRequestArgs, token: Uint8Array): void;
-        onConnectFailed?(runner: NetworkRunner, reason: PROJECT.ShutdownReason): void;
+        onConnectFailed?(runner: NetworkRunner, reason: TOOLKIT.ShutdownReason): void;
         onUserSimulationMessage?(runner: NetworkRunner, message: Uint8Array): void;
-        onReliableDataReceived?(runner: NetworkRunner, player: PROJECT.PlayerRef, key: ReliableKey, data: Uint8Array): void;
-        onReliableDataProgress?(runner: NetworkRunner, player: PROJECT.PlayerRef, key: ReliableKey, progress: number): void;
-        onSessionListUpdated?(runner: NetworkRunner, sessions: PROJECT.SessionInfo[]): void;
+        onReliableDataReceived?(runner: NetworkRunner, player: TOOLKIT.PlayerRef, key: ReliableKey, data: Uint8Array): void;
+        onReliableDataProgress?(runner: NetworkRunner, player: TOOLKIT.PlayerRef, key: ReliableKey, progress: number): void;
+        onSessionListUpdated?(runner: NetworkRunner, sessions: TOOLKIT.SessionInfo[]): void;
         onCustomAuthenticationResponse?(runner: NetworkRunner, data: Record<string, unknown>): void;
         onSceneLoadStart?(runner: NetworkRunner): void;
         onSceneLoadDone?(runner: NetworkRunner): void;
-        onObjectEnterAOI?(runner: NetworkRunner, object: PROJECT.NetworkObject, player: PROJECT.PlayerRef): void;
-        onObjectExitAOI?(runner: NetworkRunner, object: PROJECT.NetworkObject, player: PROJECT.PlayerRef): void;
+        onObjectEnterAOI?(runner: NetworkRunner, object: TOOLKIT.NetworkObject, player: TOOLKIT.PlayerRef): void;
+        onObjectExitAOI?(runner: NetworkRunner, object: TOOLKIT.NetworkObject, player: TOOLKIT.PlayerRef): void;
         /**
          * The host left and the session elected a new one (D31). Shut this runner down with ShutdownReason.HostMigration
          * and start a new runner with StartGameArgs.hostMigrationToken = token (and hostMigrationResume on the new host).
          * A runner whose callbacks do not handle it shuts down with HostMigration.
          */
-        onHostMigration?(runner: NetworkRunner, token: PROJECT.HostMigrationToken): void;
+        onHostMigration?(runner: NetworkRunner, token: TOOLKIT.HostMigrationToken): void;
     }
-    /** Key of a reliable data transfer, as Photon Fusion's ReliableKey (four int32). */
+    /** Key of a reliable data transfer, as the original API's ReliableKey (four int32). */
     type ReliableKey = [number, number, number, number];
     /** Per-behaviour lifecycle interfaces (duck-typed: the runner calls the method when a behaviour defines it, A21). */
     interface ISpawned {
@@ -16104,10 +16104,10 @@ declare namespace PROJECT {
         despawned(runner: NetworkRunner, hasState: boolean): void;
     }
     interface IPlayerJoined {
-        playerJoined(player: PROJECT.PlayerRef): void;
+        playerJoined(player: TOOLKIT.PlayerRef): void;
     }
     interface IPlayerLeft {
-        playerLeft(player: PROJECT.PlayerRef): void;
+        playerLeft(player: TOOLKIT.PlayerRef): void;
     }
     interface IAfterSpawned {
         afterSpawned(): void;
@@ -16131,18 +16131,18 @@ declare namespace PROJECT {
         inputAuthorityLost(): void;
     }
     /** What spawn accepts: a prefab id, a prefab GUID or name, or a NetworkObject (prefab node or instance). */
-    type NetworkPrefabReference = number | string | PROJECT.NetworkObject;
+    type NetworkPrefabReference = number | string | TOOLKIT.NetworkObject;
     /** A NetworkBehaviour subclass, as getAllBehaviours takes it. */
-    type NetworkBehaviourConstructor<T extends PROJECT.NetworkBehaviour> = new (transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: object, alias?: string) => T;
-    /** Networked scene info, as Photon Fusion's NetworkSceneInfo (T8). */
+    type NetworkBehaviourConstructor<T extends TOOLKIT.NetworkBehaviour> = new (transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: object, alias?: string) => T;
+    /** Networked scene info, as the original API's NetworkSceneInfo (T8). */
     interface NetworkSceneInfo {
         sceneCount: number;
-        scenes: PROJECT.SceneRef[];
+        scenes: TOOLKIT.SceneRef[];
         loadId: number;
     }
-    /** Start arguments, as Photon Fusion's StartGameArgs (the fields Fusion Karts and the spec need). */
+    /** Start arguments, as the original API's StartGameArgs (the fields the networked karts sample and the spec need). */
     interface StartGameArgs {
-        gameMode: PROJECT.GameMode;
+        gameMode: TOOLKIT.GameMode;
         /** Session to create or join (default ""). */
         sessionName?: string;
         /** Most players (default 8). */
@@ -16156,39 +16156,39 @@ declare namespace PROJECT {
          * The networked scene the page already shows (slot 0, load id 0). The runner does not load it: the page loaded it
          * before startGame; runner.loadScene changes scenes afterwards.
          */
-        scene?: PROJECT.SceneRef;
+        scene?: TOOLKIT.SceneRef;
         /** Default NetworkSceneManagerDefault. */
-        sceneManager?: PROJECT.INetworkSceneManager;
+        sceneManager?: TOOLKIT.INetworkSceneManager;
         /** Default NetworkObjectProviderDefault. */
-        objectProvider?: PROJECT.INetworkObjectProvider;
+        objectProvider?: TOOLKIT.INetworkObjectProvider;
         /** Bytes the host sees in onConnectRequest. */
         connectionToken?: Uint8Array;
         authValues?: Record<string, string>;
         /** Token the game server verifies when auth is enabled (Photon AuthValues equivalent, D26). */
         authToken?: string;
         /** Which connection to use (default Auto, D25). */
-        transportPreference?: PROJECT.NetworkTransportPreference;
+        transportPreference?: TOOLKIT.NetworkTransportPreference;
         /** Overrides the scene's NetworkSettings, which override the defaults (D6). */
-        config?: Partial<PROJECT.NetworkProjectConfig>;
-        /** The game's input struct, as Fusion's INetworkInput (D3); default NetworkRunner.setDefaultInputDefinition's. */
-        inputDefinition?: PROJECT.NetworkedStructDefinition;
+        config?: Partial<TOOLKIT.NetworkProjectConfig>;
+        /** The game's input struct, as the original API's INetworkInput (D3); default NetworkRunner.setDefaultInputDefinition's. */
+        inputDefinition?: TOOLKIT.NetworkedStructDefinition;
         /** The connection outside Single mode (default: a ColyseusTransport to NetworkProjectConfig.serverUrl, D23). */
-        transport?: PROJECT.INetworkTransport;
+        transport?: TOOLKIT.INetworkTransport;
         customLobbyName?: string;
         /** Default true. */
         enableClientSessionCreation?: boolean;
         /** Restarts after a host migration (D31): the token onHostMigration delivered; gameMode is its gameMode. */
-        hostMigrationToken?: PROJECT.HostMigrationToken;
+        hostMigrationToken?: TOOLKIT.HostMigrationToken;
         /**
          * Called on the new host once it is connected, before onPlayerJoined: re-spawn the token's objects with
          * runner.spawnFromMigration (scene objects are already restored in place).
          */
         hostMigrationResume?: (runner: NetworkRunner) => void;
     }
-    /** A host-side connect request, as Photon Fusion's NetworkRunnerCallbackArgs.ConnectRequest. */
+    /** A host-side connect request, as the original API's NetworkRunnerCallbackArgs.ConnectRequest. */
     class NetworkConnectRequestArgs {
         /** The joining player. */
-        readonly player: PROJECT.PlayerRef;
+        readonly player: TOOLKIT.PlayerRef;
         /** The joining player's identity as the game server verified it, or null when the server does not authenticate. */
         readonly authIdentity: Readonly<Record<string, unknown>> | null;
         /** Sends the answer to the session. */
@@ -16203,9 +16203,9 @@ declare namespace PROJECT {
          * @param respond Sends the answer to the session.
          * @param authIdentity The player's verified identity (D12), or null.
          */
-        constructor(player: PROJECT.PlayerRef, respond: (accepted: boolean) => void, authIdentity?: Readonly<Record<string, unknown>> | null);
+        constructor(player: TOOLKIT.PlayerRef, respond: (accepted: boolean) => void, authIdentity?: Readonly<Record<string, unknown>> | null);
         /** The answer so far. */
-        get result(): PROJECT.ConnectRequestResult;
+        get result(): TOOLKIT.ConnectRequestResult;
         /** Lets the player in. */
         accept(): void;
         /** Turns the player away; it shuts down with ConnectionRefused. */
@@ -16268,7 +16268,7 @@ declare namespace PROJECT {
         /** Input or shared-state packets per second a client sends. */
         get clientSendRate(): number;
         /** When a client steps physics. */
-        get physicsSimulation(): PROJECT.PhysicsSimulationMode;
+        get physicsSimulation(): TOOLKIT.PhysicsSimulationMode;
         /** Lag compensation history, in milliseconds. */
         get lagCompensationBufferMs(): number;
         /** Shortest remote interpolation delay, in milliseconds. */
@@ -16302,7 +16302,7 @@ declare namespace PROJECT {
         /** Receives the exported bag value. */
         private set serverUrl(value);
         /** @returns The authored values as a configuration. */
-        toConfig(): PROJECT.NetworkProjectConfig;
+        toConfig(): TOOLKIT.NetworkProjectConfig;
     }
     /** Where a runner is in its life. */
     enum NetworkRunnerState {
@@ -16313,16 +16313,16 @@ declare namespace PROJECT {
         Shutdown = 4
     }
     /**
-     * The networking runner, as Photon Fusion's NetworkRunner: one per peer, several may run in one page (multi-peer).
+     * The networking runner, as the original API's NetworkRunner: one per peer, several may run in one page (multi-peer).
      * It starts and stops the session, owns the prefab table, the object provider, the callbacks and the players, and is
      * the public face of the NetworkSimulation tick loop. All state lives on the instance.
      *
      * @example
-     * const runner = new PROJECT.NetworkRunner(scene);
+     * const runner = new TOOLKIT.NetworkRunner(scene);
      * runner.addCallbacks({ onPlayerJoined: (activeRunner, player) => { if (activeRunner.isServer) activeRunner.spawn("Kart", spawnPoint, null, player); } });
-     * const result = await runner.startGame({ gameMode: PROJECT.GameMode.Host, sessionName: "race", inputDefinition: KartInput.definition() });
+     * const result = await runner.startGame({ gameMode: TOOLKIT.GameMode.Host, sessionName: "race", inputDefinition: KartInput.definition() });
      */
-    class NetworkRunner implements PROJECT.NetworkRunnerView {
+    class NetworkRunner implements TOOLKIT.NetworkRunnerView {
         /** Every runner that is starting or running. */
         private static readonly runnerInstances;
         /** Players a session accepts when StartGameArgs does not say. */
@@ -16341,18 +16341,18 @@ declare namespace PROJECT {
         private static readonly NETWORK_SETTINGS_CLASS;
         /** Static RPCs by name hash: a code registry (handlers take the runner), not session state (A16). */
         private static readonly staticRpcs;
-        /** The game's input struct for runners started without StartGameArgs.inputDefinition: a code registry, as Fusion's INetworkInput type. */
+        /** The game's input struct for runners started without StartGameArgs.inputDefinition: a code registry, as the original API's INetworkInput type. */
         private static defaultInputDefinition;
         /** Internal: the tick loop (tests and tools only, A8). */
-        readonly simulation: PROJECT.NetworkSimulation;
-        /** Lag-compensated hitbox queries, as Fusion's Runner.LagCompensation (D29). */
-        readonly lagCompensation: PROJECT.HitboxManager;
+        readonly simulation: TOOLKIT.NetworkSimulation;
+        /** Lag-compensated hitbox queries, as the original API's Runner.LagCompensation (D29). */
+        readonly lagCompensation: TOOLKIT.HitboxManager;
         /** Internal: area-of-interest bookkeeping (D30). */
-        readonly interest: PROJECT.NetworkInterest;
+        readonly interest: TOOLKIT.NetworkInterest;
         /** Internal: chunked reliable data transfer (T15). */
-        readonly reliableData: PROJECT.NetworkReliableData;
+        readonly reliableData: TOOLKIT.NetworkReliableData;
         /** Internal: host migration snapshots and resume (D31). */
-        readonly hostMigration: PROJECT.NetworkHostMigration;
+        readonly hostMigration: TOOLKIT.NetworkHostMigration;
         /** True when this peer supplies input through onInput (default true; false on a dedicated server). */
         provideInput: boolean;
         /** Token sent with every matchmaking call, the lobby included; startGame copies StartGameArgs.authToken here (D26). */
@@ -16435,11 +16435,11 @@ declare namespace PROJECT {
         /** True while the transport is connected. */
         get isConnectedToServer(): boolean;
         /** The mode the runner runs in, or null before start. */
-        get gameMode(): PROJECT.GameMode | null;
+        get gameMode(): TOOLKIT.GameMode | null;
         /** The local player (PlayerRef.None on a dedicated server). */
-        get localPlayer(): PROJECT.PlayerRef;
+        get localPlayer(): TOOLKIT.PlayerRef;
         /** Every player in the session, in id order. */
-        get activePlayers(): PROJECT.PlayerRef[];
+        get activePlayers(): TOOLKIT.PlayerRef[];
         /** The current tick. */
         get tick(): number;
         /** Simulation ticks per second. */
@@ -16475,29 +16475,29 @@ declare namespace PROJECT {
         /** True when this peer may spawn: a running server, host, Single or Shared peer. */
         get canSpawn(): boolean;
         /** The session's description. */
-        get sessionInfo(): PROJECT.SessionInfo;
+        get sessionInfo(): TOOLKIT.SessionInfo;
         /** The merged configuration (defaults < NetworkSettings < StartGameArgs.config). */
-        get config(): PROJECT.NetworkProjectConfig;
+        get config(): TOOLKIT.NetworkProjectConfig;
         /** The scene the runner simulates. */
         get scene(): BABYLON.Scene;
         /** The object provider (set at startGame). */
-        get objectProvider(): PROJECT.INetworkObjectProvider;
+        get objectProvider(): TOOLKIT.INetworkObjectProvider;
         /** The scene manager (set at startGame). */
-        get sceneManager(): PROJECT.INetworkSceneManager;
+        get sceneManager(): TOOLKIT.INetworkSceneManager;
         /** True when this peer decides the networked scenes: a server, host or Single runner, or the Shared master client. */
         get hasSceneAuthority(): boolean;
         /** Internal: true while a networked scene load runs (received frames wait for it). */
         get isSceneLoading(): boolean;
         /** Internal: the networked scenes, in slot order (a copy). */
-        get networkedSceneEntries(): PROJECT.NetworkSceneEntry[];
+        get networkedSceneEntries(): TOOLKIT.NetworkSceneEntry[];
         /** Internal: the networked scene load id (T12 snapshots carry it). */
         get sceneLoadId(): number;
         /** Internal: the prefab table. */
-        get prefabTable(): PROJECT.NetworkPrefabTable;
+        get prefabTable(): TOOLKIT.NetworkPrefabTable;
         /** Internal: the session clock estimate. */
-        get timeSync(): PROJECT.NetworkTimeSync;
+        get timeSync(): TOOLKIT.NetworkTimeSync;
         /** Internal: the connection, or null in Single mode. */
-        get transport(): PROJECT.INetworkTransport | null;
+        get transport(): TOOLKIT.INetworkTransport | null;
         /** Internal: the simulation clock scale (D18; 1 except on predicting clients). */
         get simulationTimeScale(): number;
         /** Internal: the Shared-mode master client's player id (0 outside Shared mode). */
@@ -16505,27 +16505,27 @@ declare namespace PROJECT {
         /** Internal: the player id the server acts as (the host's id; 0 for a dedicated server or a Shared session). */
         get serverPlayerId(): number;
         /**
-         * Registers an RPC that belongs to no object, as Fusion's static [Rpc] methods (A16). Register it on every peer
+         * Registers an RPC that belongs to no object, as the original API's static [Rpc] methods (A16). Register it on every peer
          * before calling it; the handler receives the runner it arrived on.
          * @param name The RPC name (its FNV-1a hash identifies it on the wire).
          * @param definition Its rules and argument definitions.
          * @param handler Runs it.
          * @throws NetworkError when another name has the same hash.
          */
-        static registerStaticRpc(name: string, definition: PROJECT.RpcDefinition, handler: (runner: NetworkRunner, args: unknown[], info: PROJECT.RpcInfo) => void): void;
+        static registerStaticRpc(name: string, definition: TOOLKIT.RpcDefinition, handler: (runner: NetworkRunner, args: unknown[], info: TOOLKIT.RpcInfo) => void): void;
         /**
-         * Registers the game's input struct for every runner started without StartGameArgs.inputDefinition, as Fusion's
+         * Registers the game's input struct for every runner started without StartGameArgs.inputDefinition, as the original API's
          * INetworkInput type is known to every build of the game. A dedicated server started by the server package uses
          * it: the game's script bundle registers it when it loads.
          * @param definition The input struct's fields (the same on every peer).
          */
-        static setDefaultInputDefinition(definition: PROJECT.NetworkedStructDefinition | null): void;
+        static setDefaultInputDefinition(definition: TOOLKIT.NetworkedStructDefinition | null): void;
         /**
          * Internal: a registered static RPC by name hash.
          * @param hash The name hash.
          * @returns The entry, or null.
          */
-        static findStaticRpc(hash: number): PROJECT.NetworkStaticRpcEntry | null;
+        static findStaticRpc(hash: number): TOOLKIT.NetworkStaticRpcEntry | null;
         /**
          * Calls a registered static RPC on every other peer (and locally when invokeLocal).
          * @param name The RPC name.
@@ -16538,16 +16538,16 @@ declare namespace PROJECT {
          * @param networkObject The object.
          * @param release True to release instead of request.
          */
-        requestStateAuthority(networkObject: PROJECT.NetworkObject, release: boolean): void;
+        requestStateAuthority(networkObject: TOOLKIT.NetworkObject, release: boolean): void;
         /**
          * Starts the runner: merges the configuration, loads the prefab table, connects (outside Single mode), takes the
          * scene's physics stepping, registers the scene's networked objects and hooks the frame loop (T5 step 3).
          * @param args The start arguments.
          * @returns { ok: true } once running; on failure { ok: false } with the reason (onConnectFailed is raised too).
          */
-        startGame(args: StartGameArgs): Promise<PROJECT.StartGameResult>;
+        startGame(args: StartGameArgs): Promise<TOOLKIT.StartGameResult>;
         /**
-         * Re-spawns one object of a host migration snapshot on the new host, as Fusion's Spawn with a resume snapshot
+         * Re-spawns one object of a host migration snapshot on the new host, as the original API's Spawn with a resume snapshot
          * object (D31): the same network id, input authority and words. Call it from StartGameArgs.hostMigrationResume.
          * Scene objects are restored in place before the callback; for them it returns the restored object.
          * @param prefab The prefab to instantiate (id, GUID or name, or a NetworkObject), or null to use prefabId.
@@ -16557,14 +16557,14 @@ declare namespace PROJECT {
          * @returns The spawned (or already present) object.
          * @throws NetworkError on a runner that is not a running server or host, or for an unknown prefab.
          */
-        spawnFromMigration(prefab: NetworkPrefabReference | null, prefabId: number, token: PROJECT.HostMigrationToken, index: number): PROJECT.NetworkObject;
+        spawnFromMigration(prefab: NetworkPrefabReference | null, prefabId: number, token: TOOLKIT.HostMigrationToken, index: number): TOOLKIT.NetworkObject;
         /**
          * Stops the runner (T5 step 6): despawns every object (despawned(runner, false)), hands physics back, unhooks the
          * frame loop, disconnects and raises onShutdown.
          * @param destroyObjects True (default) to release every instance to the object provider.
          * @param reason Why (default Ok).
          */
-        shutdown(destroyObjects?: boolean, reason?: PROJECT.ShutdownReason): Promise<void>;
+        shutdown(destroyObjects?: boolean, reason?: TOOLKIT.ShutdownReason): Promise<void>;
         /**
          * Registers callback objects.
          * @param callbacks Objects implementing any INetworkRunnerCallbacks methods.
@@ -16591,78 +16591,78 @@ declare namespace PROJECT {
          * @returns The spawned object.
          * @throws NetworkError on a Host/Client client, before start, for an unknown prefab, or a prefab without a NetworkObject.
          */
-        spawn(prefab: NetworkPrefabReference, position?: BABYLON.Vector3, rotation?: BABYLON.Quaternion, inputAuthority?: PROJECT.PlayerRef, onBeforeSpawned?: (runner: NetworkRunner, object: PROJECT.NetworkObject) => void, flags?: PROJECT.NetworkSpawnFlags): PROJECT.NetworkObject;
+        spawn(prefab: NetworkPrefabReference, position?: BABYLON.Vector3, rotation?: BABYLON.Quaternion, inputAuthority?: TOOLKIT.PlayerRef, onBeforeSpawned?: (runner: NetworkRunner, object: TOOLKIT.NetworkObject) => void, flags?: TOOLKIT.NetworkSpawnFlags): TOOLKIT.NetworkObject;
         /**
          * Despawns a network object: despawned(runner, true) on its behaviours, then the instance goes back to the
          * object provider. Only the object's state authority may despawn it; in Shared mode the session forwards the
          * despawn to every other peer (T6 step 1).
          * @param networkObject The object.
          */
-        despawn(networkObject: PROJECT.NetworkObject): void;
+        despawn(networkObject: TOOLKIT.NetworkObject): void;
         /**
          * Tells whether an object is spawned on this runner.
          * @param objectOrId The object or its network id.
          * @returns True while it is spawned.
          */
-        exists(objectOrId: PROJECT.NetworkObject | number): boolean;
+        exists(objectOrId: TOOLKIT.NetworkObject | number): boolean;
         /**
          * Finds a spawned object (NetworkRunnerView).
          * @param id The network id.
          * @returns The object, or null.
          */
-        findObject(id: number): PROJECT.NetworkObject | null;
+        findObject(id: number): TOOLKIT.NetworkObject | null;
         /** @returns Every spawned object, in ascending network id. */
-        getAllNetworkObjects(): PROJECT.NetworkObject[];
+        getAllNetworkObjects(): TOOLKIT.NetworkObject[];
         /**
          * Every spawned behaviour of a class (subclasses included).
          * @param behaviourClass The NetworkBehaviour subclass.
          * @returns The behaviours, in object id then behaviour order.
          */
-        getAllBehaviours<T extends PROJECT.NetworkBehaviour>(behaviourClass: NetworkBehaviourConstructor<T>): T[];
+        getAllBehaviours<T extends TOOLKIT.NetworkBehaviour>(behaviourClass: NetworkBehaviourConstructor<T>): T[];
         /**
-         * Remembers a player's main object (as Fusion's SetPlayerObject).
+         * Remembers a player's main object (as the original API's SetPlayerObject).
          * @param player The player.
          * @param networkObject The object, or null to forget it.
          */
-        setPlayerObject(player: PROJECT.PlayerRef, networkObject: PROJECT.NetworkObject): void;
+        setPlayerObject(player: TOOLKIT.PlayerRef, networkObject: TOOLKIT.NetworkObject): void;
         /**
          * A player's main object.
          * @param player The player.
          * @returns The object, or null.
          */
-        getPlayerObject(player: PROJECT.PlayerRef): PROJECT.NetworkObject | null;
+        getPlayerObject(player: TOOLKIT.PlayerRef): TOOLKIT.NetworkObject | null;
         /**
-         * A player's main object, as Fusion's TryGetPlayerObject (the out parameter becomes the result, D2).
+         * A player's main object, as the original API's TryGetPlayerObject (the out parameter becomes the result, D2).
          * @param player The player.
          * @returns The object, or null.
          */
-        tryGetPlayerObject(player: PROJECT.PlayerRef): PROJECT.NetworkObject | null;
+        tryGetPlayerObject(player: TOOLKIT.PlayerRef): TOOLKIT.NetworkObject | null;
         /**
          * Internal: forgets a despawned object's player assignments.
          * @param networkObject The despawned object.
          */
-        forgetPlayerObject(networkObject: PROJECT.NetworkObject): void;
+        forgetPlayerObject(networkObject: TOOLKIT.NetworkObject): void;
         /**
          * Turns an object's fixedUpdateNetwork on or off.
          * @param networkObject The object.
          * @param simulated True to simulate it.
          */
-        setIsSimulated(networkObject: PROJECT.NetworkObject, simulated: boolean): void;
+        setIsSimulated(networkObject: TOOLKIT.NetworkObject, simulated: boolean): void;
         /**
          * A player's input at the current tick (D14): a server reads any player's, a client only its own.
          * @param player The player.
          * @returns The input struct, or null.
          */
-        getInputForPlayer<T>(player: PROJECT.PlayerRef): T | null;
+        getInputForPlayer<T>(player: TOOLKIT.PlayerRef): T | null;
         /**
          * A player's round-trip time, in seconds (T12 step 4): on a host or server, each client's from its snapshot
          * acknowledgements; on a client or Shared peer, its own from its pings; 0 otherwise (the host's own player).
          * @param player The player.
          * @returns The round trip, or 0 when unknown.
          */
-        getPlayerRtt(player: PROJECT.PlayerRef): number;
+        getPlayerRtt(player: TOOLKIT.PlayerRef): number;
         /**
-         * Adds an area of interest for a player, as Fusion's AddPlayerAreaOfInterest (D30). A server or host replicates the
+         * Adds an area of interest for a player, as the original API's AddPlayerAreaOfInterest (D30). A server or host replicates the
          * player's area-of-interest objects only while one of its areas holds them; the areas are cleared after every
          * snapshot build, so call it every tick (from fixedUpdateNetwork). In Shared mode the local player's area is
          * reported to the session every 0.5 s.
@@ -16670,34 +16670,34 @@ declare namespace PROJECT {
          * @param position World center.
          * @param radius Radius, in meters.
          */
-        addPlayerAreaOfInterest(player: PROJECT.PlayerRef, position: BABYLON.Vector3, radius: number): void;
+        addPlayerAreaOfInterest(player: TOOLKIT.PlayerRef, position: BABYLON.Vector3, radius: number): void;
         /**
          * Makes a player always (or no longer always) receive an area-of-interest object, wherever its areas are, as
-         * Fusion's SetPlayerAlwaysInterested.
+         * the original API's SetPlayerAlwaysInterested.
          * @param player The player.
          * @param networkObject The object.
          * @param alwaysInterested True to always replicate it to the player.
          */
-        setPlayerAlwaysInterested(player: PROJECT.PlayerRef, networkObject: PROJECT.NetworkObject, alwaysInterested: boolean): void;
+        setPlayerAlwaysInterested(player: TOOLKIT.PlayerRef, networkObject: TOOLKIT.NetworkObject, alwaysInterested: boolean): void;
         /**
-         * Whether a player receives an object, as Fusion's IsInterestedIn: on a server or host, its relevance at the last
+         * Whether a player receives an object, as the original API's IsInterestedIn: on a server or host, its relevance at the last
          * snapshot build; on a client (for its own player), whether it is not out of interest.
          * @param networkObject The object.
          * @param player The player.
          * @returns True when the player receives the object.
          */
-        isInterestedIn(networkObject: PROJECT.NetworkObject, player: PROJECT.PlayerRef): boolean;
+        isInterestedIn(networkObject: TOOLKIT.NetworkObject, player: TOOLKIT.PlayerRef): boolean;
         /**
-         * Sends a payload of any size to one player, reliably and in 16 KB chunks, as Fusion's SendReliableDataToPlayer.
+         * Sends a payload of any size to one player, reliably and in 16 KB chunks, as the original API's SendReliableDataToPlayer.
          * The receiver gets onReliableDataProgress per chunk and onReliableDataReceived with the whole payload.
          * @param player The receiving player.
          * @param key The transfer's key (four whole numbers).
          * @param data The payload.
          * @returns False when the runner has no connection.
          */
-        sendReliableDataToPlayer(player: PROJECT.PlayerRef, key: ReliableKey, data: Uint8Array): boolean;
+        sendReliableDataToPlayer(player: TOOLKIT.PlayerRef, key: ReliableKey, data: Uint8Array): boolean;
         /**
-         * Sends a payload of any size to the server or host, reliably and in 16 KB chunks, as Fusion's
+         * Sends a payload of any size to the server or host, reliably and in 16 KB chunks, as the original API's
          * SendReliableDataToServer.
          * @param key The transfer's key (four whole numbers).
          * @param data The payload.
@@ -16712,18 +16712,18 @@ declare namespace PROJECT {
          * @param channel Reliable or unreliable.
          * @returns False when there is no connection.
          */
-        sendFrame(route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: PROJECT.RpcChannel): boolean;
+        sendFrame(route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: TOOLKIT.RpcChannel): boolean;
         /**
-         * Joins the session lobby, as Fusion's JoinSessionLobby (T9 step 6): the server's listed sessions arrive through
+         * Joins the session lobby, as the original API's JoinSessionLobby (T9 step 6): the server's listed sessions arrive through
          * onSessionListUpdated, again after every change, until shutdown. It may be called before startGame. The server is
          * NetworkProjectConfig.serverUrl (StartGameArgs.config, else the scene's NetworkSettings).
-         * @param lobbyName Fusion's custom lobby name; this port has one lobby per server, so a name other than the
+         * @param lobbyName The original API's custom lobby name; this port has one lobby per server, so a name other than the
          * default only logs a warning and the shared lobby is joined.
          * @throws NetworkError when the Colyseus client is missing or the server cannot be reached.
          */
         joinSessionLobby(lobbyName?: string): Promise<void>;
         /**
-         * Loads a networked scene on every peer, as Fusion's LoadScene (D32, T8). Only the scene authority calls it (server,
+         * Loads a networked scene on every peer, as the original API's LoadScene (D32, T8). Only the scene authority calls it (server,
          * host, Single runner or Shared master client); the others follow its SceneInfo. A Single load replaces the scene:
          * every object is despawned except DontDestroyOnLoad spawns, which are re-spawned in the new scene. An Additive
          * load appends the scene into the next free slot (1-15).
@@ -16733,16 +16733,16 @@ declare namespace PROJECT {
          * @throws NetworkError when this peer is not the scene authority, the runner is not running, the reference is
          * invalid or every additive slot is taken.
          */
-        loadScene(scene: PROJECT.SceneRef, mode?: PROJECT.LoadSceneMode): Promise<void>;
+        loadScene(scene: TOOLKIT.SceneRef, mode?: TOOLKIT.LoadSceneMode): Promise<void>;
         /**
-         * Unloads an additively loaded networked scene on every peer, as Fusion's UnloadScene. Scene authority only.
+         * Unloads an additively loaded networked scene on every peer, as the original API's UnloadScene. Scene authority only.
          * @param scene The scene reference it was loaded with.
          * @returns Resolves once this peer's unload is done.
          * @throws NetworkError when this peer is not the scene authority or the runner is not running.
          */
-        unloadScene(scene: PROJECT.SceneRef): Promise<void>;
+        unloadScene(scene: TOOLKIT.SceneRef): Promise<void>;
         /**
-         * The networked scenes, as Fusion's TryGetSceneInfo (the out parameter becomes the result, D2).
+         * The networked scenes, as the original API's TryGetSceneInfo (the out parameter becomes the result, D2).
          * @returns The scene count, scenes and load id, or null when no networked scene is known.
          */
         tryGetSceneInfo(): NetworkSceneInfo | null;
@@ -16751,7 +16751,7 @@ declare namespace PROJECT {
          * received frames wait until it is done. Failures are logged.
          * @param sceneInfo The load id and scenes.
          */
-        receiveSceneInfo(sceneInfo: PROJECT.NetworkSceneInfoFrame): void;
+        receiveSceneInfo(sceneInfo: TOOLKIT.NetworkSceneInfoFrame): void;
         /**
          * Raises onSessionListUpdated with the lobby's current list.
          * @param sessions The listed sessions.
@@ -17045,7 +17045,7 @@ declare namespace PROJECT {
         private static removeInstance;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * Pure pose math for networked transforms (D16): cubic Hermite and Catmull-Rom curves, extrapolation and the decay of
      * error correction. Every method writes into a result argument and allocates nothing, so it can run per object per
@@ -17157,7 +17157,7 @@ declare namespace PROJECT {
         clear(): void;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** First word of each TRSP property within a behaviour's words. */
     interface NetworkTRSPOffsets {
         /** trspPosition (3 words). */
@@ -17231,7 +17231,7 @@ declare namespace PROJECT {
         private static readVector3;
     }
     /**
-     * Shared pose replication, as Photon Fusion's NetworkTRSP: the node's position, rotation, optional scale, velocities, a
+     * Shared pose replication, as the original API's NetworkTRSP: the node's position, rotation, optional scale, velocities, a
      * teleport counter and an optional networked parent live in networked words. Each tick the runner restores the node from
      * the words before fixedUpdateNetwork and captures it back after physics; each rendered frame it draws a smooth pose on
      * the object's timeframe (D15): Local between the last two ticks, Remote from authoritative snapshots (interpolated or
@@ -17239,7 +17239,7 @@ declare namespace PROJECT {
      * when one is set (the root keeps the simulated pose), else to the root node. Render poses never go into the words.
      * Use the subclasses NetworkTransform and NetworkRigidbody.
      */
-    class NetworkTRSP extends PROJECT.NetworkBehaviour {
+    class NetworkTRSP extends TOOLKIT.NetworkBehaviour {
         /** Registered class name of the network identity component. */
         private static readonly NETWORK_OBJECT_CLASS;
         /** Rotation changes whose half-angle sine is below this count as no rotation. */
@@ -17272,7 +17272,7 @@ declare namespace PROJECT {
         /** Exported: whether the networked parent is replicated. */
         private exportedSyncParent;
         /** The visual offset that hides authoritative jumps. */
-        protected readonly errorCorrection: PROJECT.ErrorCorrection;
+        protected readonly errorCorrection: TOOLKIT.ErrorCorrection;
         /** TRSP property offsets within this behaviour's words, resolved on first use. */
         private offsets;
         /** The pose words as last captured or restored into the node and body, to tell when the words changed under them. */
@@ -17338,13 +17338,13 @@ declare namespace PROJECT {
         /** Sets the child node that draws the smooth pose (null draws on the root). */
         set interpolationTarget(value: BABYLON.TransformNode | null);
         /** How remote snapshots are interpolated: Linear, or Hermite (cubic, D16). */
-        get interpolationMode(): PROJECT.InterpolationMode;
+        get interpolationMode(): TOOLKIT.InterpolationMode;
         /** Sets how remote snapshots are interpolated. */
-        set interpolationMode(value: PROJECT.InterpolationMode);
+        set interpolationMode(value: TOOLKIT.InterpolationMode);
         /** Whether remote poses interpolate behind the server or extrapolate to its estimated present (D16). */
-        get renderMode(): PROJECT.PoseRenderMode;
+        get renderMode(): TOOLKIT.PoseRenderMode;
         /** Sets whether remote poses interpolate or extrapolate. */
-        set renderMode(value: PROJECT.PoseRenderMode);
+        set renderMode(value: TOOLKIT.PoseRenderMode);
         /** The longest extrapolation, in seconds (default 0.25); past it the pose holds. */
         get maxExtrapolationSeconds(): number;
         /** Sets the longest extrapolation, in seconds. */
@@ -17367,7 +17367,7 @@ declare namespace PROJECT {
          * at or above 2^31 survive the wire (A4).
          * @returns The definitions.
          */
-        protected static getNetworkedProperties(): PROJECT.NetworkedPropertyDefinitions;
+        protected static getNetworkedProperties(): TOOLKIT.NetworkedPropertyDefinitions;
         /**
          * Starts replication. The state authority writes the spawn pose into the words, so the first tick keeps it; so does
          * a peer that has no state for the object yet (a scene object keeps its authored pose until the first state
@@ -17377,7 +17377,7 @@ declare namespace PROJECT {
         /** A timeline change (Local ⇄ Remote) would pop the drawn pose: smooth it with error correction instead. */
         stateAuthorityChanged(): void;
         /**
-         * Moves the object instantly, as Fusion's Teleport: the teleport counter increments, so no peer interpolates between
+         * Moves the object instantly, as the original API's Teleport: the teleport counter increments, so no peer interpolates between
          * the old and the new pose. Needs state authority.
          * @param position The new position (local to the parent); null keeps it.
          * @param rotation The new rotation (local to the parent); null keeps it.
@@ -17426,7 +17426,7 @@ declare namespace PROJECT {
         /** Makes the next restore treat the words as changed, so everything they drive is put back (a body's velocities). */
         protected invalidateSyncedPose(): void;
         /** @returns The interpolation mode used when the bag has none (NetworkTransform Linear, NetworkRigidbody Hermite). */
-        protected getDefaultInterpolationMode(): PROJECT.InterpolationMode;
+        protected getDefaultInterpolationMode(): TOOLKIT.InterpolationMode;
         /**
          * Writes the velocity words after a capture. The base derives them from the pose change since the previous tick, as
          * NetworkTransform does; NetworkRigidbody reads its body instead.
@@ -17453,7 +17453,7 @@ declare namespace PROJECT {
          * @param fromTangent Receives the tangent at the older pose, in meters per second.
          * @param toTangent Receives the tangent at the newer pose, in meters per second.
          */
-        protected computeHermiteTangents(pair: PROJECT.RemoteSnapshotPair, from: NetworkPose, to: NetworkPose, fromTangent: BABYLON.Vector3, toTangent: BABYLON.Vector3): void;
+        protected computeHermiteTangents(pair: TOOLKIT.RemoteSnapshotPair, from: NetworkPose, to: NetworkPose, fromTangent: BABYLON.Vector3, toTangent: BABYLON.Vector3): void;
         /** @returns The TRSP property offsets within this behaviour's words. */
         protected getOffsets(): NetworkTRSPOffsets;
         /**
@@ -17619,13 +17619,13 @@ declare namespace PROJECT {
         protected static ensureRotationQuaternion(node: BABYLON.TransformNode): BABYLON.Quaternion;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Replicates a node's transform, as Photon Fusion's NetworkTransform (Unity: BabylonToolkit.Fusion.NetworkTransform).
+     * Replicates a node's transform, as the original API's NetworkTransform (Unity: BabylonToolkit.Fusion.NetworkTransform).
      * Put it on a networked object whose node moves by script. Its velocity words are derived from the pose change of each
      * tick, and remote snapshots interpolate linearly by default (Hermite mode estimates tangents by Catmull-Rom, D16).
      */
-    class NetworkTransform extends PROJECT.NetworkTRSP {
+    class NetworkTransform extends TOOLKIT.NetworkTRSP {
         /**
          * Creates the component. The toolkit constructs script components from exported metadata.
          * @param transform The node the component is on.
@@ -17636,9 +17636,9 @@ declare namespace PROJECT {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Havok-backed rigidbody replication, as Photon Fusion's NetworkRigidbody3D (Unity: BabylonToolkit.Fusion.NetworkRigidbody).
+     * Havok-backed rigidbody replication, as the original API's NetworkRigidbody3D (Unity: BabylonToolkit.Fusion.NetworkRigidbody).
      * Put it on a networked object whose node has a physics body. The runner steps physics on the network tick (D19), so
      * this component owns the body's presentation (D20): the toolkit's RigidbodyInterpolator is released at spawn, the
      * velocity words come from the body, a changed state (resimulation, a received state) teleports the body back with its
@@ -17646,7 +17646,7 @@ declare namespace PROJECT {
      * A body this peer does not simulate (a Shared-mode proxy, or every body of a Host/Client client whose physicsSimulation
      * is Disabled) is kinematic and follows the newest state.
      */
-    class NetworkRigidbody extends PROJECT.NetworkTRSP {
+    class NetworkRigidbody extends TOOLKIT.NetworkTRSP {
         /** The body's motion type as exported, restored whenever this peer simulates it. */
         private simulatedMotionType;
         /** True after a restore woke the body: its activation goes back to the simulation after the next step. */
@@ -17676,20 +17676,20 @@ declare namespace PROJECT {
          * @param runner The runner that despawned the object.
          * @param hasState True while the networked properties can still be read.
          */
-        despawned(runner: PROJECT.NetworkRunner, hasState: boolean): void;
+        despawned(runner: TOOLKIT.NetworkRunner, hasState: boolean): void;
         /** A Shared-mode authority change switches the body between simulated and kinematic, then smooths the pose. */
         stateAuthorityChanged(): void;
         /** Internal: captures the stepped pose and velocities, and hands the body's activation back after a wake. */
         captureSimulatedPose(): void;
         /** @returns Hermite: rigidbodies have replicated velocities to use as tangents. */
-        protected getDefaultInterpolationMode(): PROJECT.InterpolationMode;
+        protected getDefaultInterpolationMode(): TOOLKIT.InterpolationMode;
         /**
          * Writes the body's linear and angular velocities into the words (the base derivation when there is no body).
          * @param words The object's live words.
          * @param previous The pose before this capture.
          * @param isInitial True at spawn.
          */
-        protected writeVelocityWords(words: Float64Array, previous: PROJECT.NetworkPose, isInitial: boolean): void;
+        protected writeVelocityWords(words: Float64Array, previous: TOOLKIT.NetworkPose, isInitial: boolean): void;
         /**
          * The D20 restore when the words changed under the body: the body is teleported to the node's (restored) pose, gets
          * the words' velocities and is woken. A kinematic proxy body follows with zero velocities, so it never drifts.
@@ -17697,8 +17697,8 @@ declare namespace PROJECT {
          * @param pose The pose in the words.
          * @param wordsChanged True when the words differ from the last capture or restore.
          */
-        protected restoreBodyState(pose: PROJECT.NetworkPose, wordsChanged: boolean): void;
-        /** Moves the body with the node after teleport(); its velocities are kept, as in Fusion. */
+        protected restoreBodyState(pose: TOOLKIT.NetworkPose, wordsChanged: boolean): void;
+        /** Moves the body with the node after teleport(); its velocities are kept, as in the original API. */
         protected onTeleported(): void;
         /**
          * Makes the body dynamic (as exported) where this peer simulates the object and kinematic where it only draws it,
@@ -17721,16 +17721,16 @@ declare namespace PROJECT {
         private getHavokPlugin;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Replicates a TOOLKIT.Animator, as Photon Fusion's NetworkMecanimAnimator (Unity: BabylonToolkit.Fusion.NetworkMecanimAnimator).
+     * Replicates a TOOLKIT.Animator, as the original API's NetworkMecanimAnimator (Unity: BabylonToolkit.Fusion.NetworkMecanimAnimator).
      * Put it next to the Animator on a networked object. The state authority writes the animator's parameters, current
      * state per layer (full path hash and normalized time) and layer weights into networked words after every tick;
      * proxies apply them in render(). Triggers travel as counters: call setTrigger on this component (not on the
      * animator) so every peer fires them once. The words are fixed-capacity, since the layout cannot depend on the
      * controller: 32 parameters and 8 layers are synced; a bigger controller warns once and syncs the first ones.
      */
-    class NetworkMecanimAnimator extends PROJECT.NetworkBehaviour {
+    class NetworkMecanimAnimator extends TOOLKIT.NetworkBehaviour {
         /** Most parameters synced. */
         static readonly MAX_PARAMETERS: number;
         /** Most layers synced. */
@@ -17764,15 +17764,15 @@ declare namespace PROJECT {
         /** Scratch: a layer's current state, created at spawn. */
         private stateInfo;
         /** Parameter values, by parameter slot (Int and Bool as numbers). */
-        parameters: PROJECT.NetworkArray<number>;
+        parameters: TOOLKIT.NetworkArray<number>;
         /** Current state full path hash, by layer. */
-        stateHashes: PROJECT.NetworkArray<number>;
+        stateHashes: TOOLKIT.NetworkArray<number>;
         /** Current state normalized time, by layer. */
-        stateTimes: PROJECT.NetworkArray<number>;
+        stateTimes: TOOLKIT.NetworkArray<number>;
         /** Layer weights, by layer. */
-        layerWeights: PROJECT.NetworkArray<number>;
+        layerWeights: TOOLKIT.NetworkArray<number>;
         /** Trigger counters, by parameter slot: each setTrigger increments one. */
-        triggerCounters: PROJECT.NetworkArray<number>;
+        triggerCounters: TOOLKIT.NetworkArray<number>;
         /**
          * Creates the component. The toolkit constructs script components from exported metadata.
          * @param transform The node the component is on.
@@ -17806,7 +17806,7 @@ declare namespace PROJECT {
          * trigger counters.
          * @returns The definitions.
          */
-        protected static getNetworkedProperties(): PROJECT.NetworkedPropertyDefinitions;
+        protected static getNetworkedProperties(): TOOLKIT.NetworkedPropertyDefinitions;
         /**
          * Finds the animator and builds the parameter and layer lists from its controller. A freshly instantiated prefab's
          * animator has not run awake yet (the toolkit wakes components on the next rendered frame) and has no controller,
@@ -17818,7 +17818,7 @@ declare namespace PROJECT {
         /** A proxy applies the words to its animator: parameters, triggers, states and layer weights. */
         render(): void;
         /**
-         * Fires a trigger on every peer, as Fusion's NetworkMecanimAnimator.SetTrigger: the state authority increments the
+         * Fires a trigger on every peer, as the original API's NetworkMecanimAnimator.SetTrigger: the state authority increments the
          * trigger's counter (proxies fire it once when they see the change) and fires it locally.
          * @param nameOrHash The trigger parameter's name or name hash.
          * @param passThroughOnInputAuthority True to also fire it locally on the input authority (which is not the state
@@ -17897,9 +17897,9 @@ declare namespace PROJECT {
         private static writeParameter;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Loads and unloads the networked scenes of a runner, as Photon Fusion's INetworkSceneManager. The runner decides when
+     * Loads and unloads the networked scenes of a runner, as the original API's INetworkSceneManager. The runner decides when
      * (every peer follows the scene authority's SceneInfo, T8) and the scene manager does the loading. Pass a custom one in
      * StartGameArgs.sceneManager.
      */
@@ -17908,7 +17908,7 @@ declare namespace PROJECT {
          * Called once when the runner starts.
          * @param runner The runner.
          */
-        initialize(runner: PROJECT.NetworkRunner): void;
+        initialize(runner: TOOLKIT.NetworkRunner): void;
         /** Called once when the runner shuts down. */
         shutdown(): void;
         /** True while a load or unload runs. */
@@ -17919,12 +17919,12 @@ declare namespace PROJECT {
          * @param mode Single replaces the runner's scene; Additive appends into it.
          * @returns The scene the runner runs on afterwards (a new scene for Single, the same scene for Additive).
          */
-        loadScene(scene: PROJECT.SceneRef, mode: PROJECT.LoadSceneMode): Promise<BABYLON.Scene>;
+        loadScene(scene: TOOLKIT.SceneRef, mode: TOOLKIT.LoadSceneMode): Promise<BABYLON.Scene>;
         /**
          * Unloads an additively loaded scene.
          * @param scene The scene reference.
          */
-        unloadScene(scene: PROJECT.SceneRef): Promise<void>;
+        unloadScene(scene: TOOLKIT.SceneRef): Promise<void>;
     }
     /**
      * The default scene manager (D32): networked scenes load in-page, one at a time. A Single load swaps the runner's
@@ -17938,7 +17938,7 @@ declare namespace PROJECT {
         /** Name of the default camera added to a scene that exported none (engine.html). */
         private static readonly DEFAULT_CAMERA_NAME;
         /** The runner from initialize, or null. */
-        protected runner: PROJECT.NetworkRunner | null;
+        protected runner: TOOLKIT.NetworkRunner | null;
         /** True while a load or unload runs. */
         private busy;
         /** The root nodes each additive scene added, by scene reference text. */
@@ -17949,7 +17949,7 @@ declare namespace PROJECT {
          * Keeps the runner whose scenes this manager loads.
          * @param runner The runner.
          */
-        initialize(runner: PROJECT.NetworkRunner): void;
+        initialize(runner: TOOLKIT.NetworkRunner): void;
         /** Forgets the runner and the additive scene records. */
         shutdown(): void;
         /**
@@ -17960,12 +17960,12 @@ declare namespace PROJECT {
          * @returns The scene the runner runs on afterwards.
          * @throws NetworkError when the reference names no scene file, or the manager was not initialized.
          */
-        loadScene(scene: PROJECT.SceneRef, mode: PROJECT.LoadSceneMode): Promise<BABYLON.Scene>;
+        loadScene(scene: TOOLKIT.SceneRef, mode: TOOLKIT.LoadSceneMode): Promise<BABYLON.Scene>;
         /**
          * Removes what an additive load of the scene added (its root nodes and their descendants).
          * @param scene The scene reference.
          */
-        unloadScene(scene: PROJECT.SceneRef): Promise<void>;
+        unloadScene(scene: TOOLKIT.SceneRef): Promise<void>;
         /**
          * Swaps a page's scene for a freshly loaded one, mirroring the engine page's scene loader (A19,
          * `Template/Master/engine.html:695-750`):
@@ -17988,7 +17988,7 @@ declare namespace PROJECT {
          * @param scene The scene reference that loaded.
          * @param babylonScene The scene the runner runs on now.
          */
-        protected onSceneLoaded(scene: PROJECT.SceneRef, babylonScene: BABYLON.Scene): Promise<void>;
+        protected onSceneLoaded(scene: TOOLKIT.SceneRef, babylonScene: BABYLON.Scene): Promise<void>;
         /**
          * Appends a scene file into the runner's scene and records the root nodes it added.
          * @param scene The scene reference.
@@ -18020,7 +18020,7 @@ declare namespace PROJECT {
         private static replacePageScene;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * The network stats overlay (T8 step 4): a Babylon GUI panel, top-right, with the runner's mode, tick, round trip,
      * traffic, resimulations, remote buffer depth, error corrections and interpolation delay, refreshed every 250 ms, plus
@@ -18028,7 +18028,7 @@ declare namespace PROJECT {
      * through Babylon GUI (no DOM), so it also works where the page has no document.
      *
      * @example
-     * PROJECT.NetworkStats.show(runner);   // F8 toggles it afterwards
+     * TOOLKIT.NetworkStats.show(runner);   // F8 toggles it afterwards
      */
     class NetworkStats {
         /** Seconds between text refreshes. */
@@ -18070,7 +18070,7 @@ declare namespace PROJECT {
         /** The shown overlay, or null (one per page). */
         private static current;
         /** The runner the overlay shows. */
-        readonly runner: PROJECT.NetworkRunner;
+        readonly runner: TOOLKIT.NetworkRunner;
         /** The fullscreen GUI texture. */
         private readonly texture;
         /** The panel holding the text and sliders. */
@@ -18103,14 +18103,14 @@ declare namespace PROJECT {
          * the panel.
          * @param runner The runner to show.
          */
-        static show(runner: PROJECT.NetworkRunner): void;
+        static show(runner: TOOLKIT.NetworkRunner): void;
         /** Removes the overlay: the F8 observer, the refresh observer and the GUI texture. */
         static hide(): void;
         /**
          * Shows or hides the panel (F8). With no overlay for this runner, shows one.
          * @param runner The runner.
          */
-        static toggle(runner: PROJECT.NetworkRunner): void;
+        static toggle(runner: TOOLKIT.NetworkRunner): void;
         /** Refreshes the text now (tests and tools; the overlay refreshes itself every 250 ms). */
         static refreshNow(): void;
         /**
@@ -18158,7 +18158,7 @@ declare namespace PROJECT {
         private static remoteBufferDepth;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
      * The Colyseus browser client module the transport and lobby call: the subset of `@colyseus/sdk` 0.18.5 they use
      * (D23). Declared here rather than as the ambient Colyseus namespace (APP/types/colyseus.d.ts) because the UMD and ESM
@@ -18166,7 +18166,7 @@ declare namespace PROJECT {
      */
     interface ColyseusClientModule {
         /** The client class: `new Client("http://host:port")`, or `new Client("https://host:port", { protocol: "h3" })` for WebTransport. */
-        Client: new (endpoint: string, options?: PROJECT.ColyseusClientOptions) => ColyseusClient;
+        Client: new (endpoint: string, options?: TOOLKIT.ColyseusClientOptions) => ColyseusClient;
     }
     /** Options of the Colyseus SDK client the transport uses. */
     interface ColyseusClientOptions {
@@ -18253,7 +18253,7 @@ declare namespace PROJECT {
         /** Token for the server's auth (empty: none). */
         authToken?: string;
         /** Which connection to use (default Auto). */
-        transportPreference?: PROJECT.NetworkTransportPreference;
+        transportPreference?: TOOLKIT.NetworkTransportPreference;
     }
     /**
      * Delays deliveries by a NetworkConditionsSimulator's latency and jitter while keeping their order, as a WebSocket
@@ -18271,13 +18271,13 @@ declare namespace PROJECT {
          * Creates a queue.
          * @param conditions Latency, jitter and loss; read on every push, so changes apply at once.
          */
-        constructor(conditions: PROJECT.NetworkConditionsSimulator);
+        constructor(conditions: TOOLKIT.NetworkConditionsSimulator);
         /**
          * Delivers after the simulated delay, in order, or drops an unreliable delivery.
          * @param deliver Makes the delivery.
          * @param channel The delivery's channel.
          */
-        push(deliver: () => void, channel: PROJECT.RpcChannel): void;
+        push(deliver: () => void, channel: TOOLKIT.RpcChannel): void;
         /** Forgets every delivery not yet made. */
         clear(): void;
         /** Starts the timer of the next due delivery, unless one is running or nothing waits. */
@@ -18293,19 +18293,19 @@ declare namespace PROJECT {
      * HTTP/3 and a probe succeeds, else over WebSocket (D25); over WebTransport small unreliable frames travel as
      * datagrams (FUSION_UNRELIABLE_TO_ROOM / FUSION_UNRELIABLE_FROM_ROOM, D7). The Colyseus client is resolved at connect
      * time, never imported: ColyseusTransport.ClientModule when
-     * an ESM host set it, else globalThis.Colyseus (the @colyseus/sdk script the exporter's Fusion Networking option adds).
+     * an ESM host set it, else globalThis.Colyseus (the @colyseus/sdk script the exporter's Babylon Toolkit Networking option adds).
      * It is the runner's default transport outside Single mode. A NetworkConditionsSimulator delays (and for unreliable
      * frames drops) traffic in both directions, so the stats overlay sliders work over Colyseus too.
      *
      * @example
      * // ESM host: provide the client module once, before startGame.
-     * PROJECT.ColyseusTransport.ClientModule = await import("@colyseus/sdk");
-     * await runner.startGame({ gameMode: PROJECT.GameMode.Shared, sessionName: "race", transport: new PROJECT.ColyseusTransport("ws://localhost:2567") });
+     * TOOLKIT.ColyseusTransport.ClientModule = await import("@colyseus/sdk");
+     * await runner.startGame({ gameMode: TOOLKIT.GameMode.Shared, sessionName: "race", transport: new TOOLKIT.ColyseusTransport("ws://localhost:2567") });
      */
-    class ColyseusTransport implements PROJECT.INetworkTransport {
+    class ColyseusTransport implements TOOLKIT.INetworkTransport {
         /** The Colyseus client module an ESM host provides (`await import("@colyseus/sdk")`); null to use globalThis.Colyseus. */
-        static ClientModule: PROJECT.ColyseusClientModule | null;
-        /** Room type of a Fusion session on the server. */
+        static ClientModule: TOOLKIT.ColyseusClientModule | null;
+        /** Room type of a network session on the server. */
         static readonly SESSION_ROOM_NAME: string;
         /** Room type of the session lobby on the server. */
         static readonly LOBBY_ROOM_NAME: string;
@@ -18330,7 +18330,7 @@ declare namespace PROJECT {
         /** True once the missing-client error was logged (the error policy logs it once). */
         private static missingClientReported;
         /** Latency, jitter and loss applied to traffic in both directions (the stats overlay sliders). */
-        readonly conditions: PROJECT.NetworkConditionsSimulator;
+        readonly conditions: TOOLKIT.NetworkConditionsSimulator;
         /** The session server URL as configured (ws://, wss://, http:// or https://). */
         readonly serverUrl: string;
         /** Outgoing frames and control messages, in send order. */
@@ -18356,7 +18356,7 @@ declare namespace PROJECT {
          * @param serverUrl The session server, e.g. "ws://localhost:2567" (NetworkProjectConfig.serverUrl).
          * @param options The auth token and connection preference (default: no token, Auto).
          */
-        constructor(serverUrl: string, options?: PROJECT.ColyseusTransportOptions);
+        constructor(serverUrl: string, options?: TOOLKIT.ColyseusTransportOptions);
         /** True between a successful connect and a disconnect. */
         get isConnected(): boolean;
         /** "WebSocket" or "WebTransport" once connected, else "WebSocket" (the stats overlay's link line). */
@@ -18366,9 +18366,9 @@ declare namespace PROJECT {
          * @returns The module.
          * @throws NetworkError with MISSING_CLIENT_MESSAGE (logged once with console.error) when neither is available.
          */
-        static resolveClientModule(): PROJECT.ColyseusClientModule;
+        static resolveClientModule(): TOOLKIT.ColyseusClientModule;
         /**
-         * The HTTP(S) endpoint PROJECT.ColyseusClient takes for a session server URL (ws:// maps to http://, wss:// to https://).
+         * The HTTP(S) endpoint TOOLKIT.ColyseusClient takes for a session server URL (ws:// maps to http://, wss:// to https://).
          * @param serverUrl The configured URL.
          * @returns The HTTP(S) endpoint.
          */
@@ -18379,7 +18379,7 @@ declare namespace PROJECT {
          * @param httpEndpoint The server's HTTP(S) endpoint.
          * @returns The description, or null.
          */
-        static fetchServerInfo(httpEndpoint: string): Promise<PROJECT.GameServerInfo | null>;
+        static fetchServerInfo(httpEndpoint: string): Promise<TOOLKIT.GameServerInfo | null>;
         /**
          * Tries a WebTransport session to the server and closes it (D25): true when it is ready within
          * webTransportProbeTimeoutMs, false on failure, timeout, or a browser without WebTransport. A server with a pinned
@@ -18399,7 +18399,7 @@ declare namespace PROJECT {
          * IncompatibleConfiguration when the server speaks another protocol version, ConnectionRefused when WebTransport
          * was required and is unavailable, InvalidArguments for Server or Single mode, or MISSING_CLIENT_MESSAGE.
          */
-        connect(request: PROJECT.NetworkConnectRequest): Promise<PROJECT.NetworkWelcome>;
+        connect(request: TOOLKIT.NetworkConnectRequest): Promise<TOOLKIT.NetworkWelcome>;
         /**
          * Sends a frame inside a route envelope (D11), after the simulated delay.
          * @param route Where the room sends it.
@@ -18408,7 +18408,7 @@ declare namespace PROJECT {
          * @param channel The channel: over WebTransport a small Unreliable frame is a datagram, everything else goes on the
          *     reliable stream (D7); the simulator may drop unreliable frames.
          */
-        sendFrame(route: PROJECT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: PROJECT.RpcChannel): void;
+        sendFrame(route: TOOLKIT.NetworkRoute, targetPlayerId: number, frame: Uint8Array, channel: TOOLKIT.RpcChannel): void;
         /**
          * Sends a control message, after the simulated delay and in order with the frames.
          * @param name The control message name (FUSION_CONTROL_*).
@@ -18419,7 +18419,7 @@ declare namespace PROJECT {
          * Sets where received frames, control messages and the disconnect go.
          * @param handlers The callbacks.
          */
-        setHandlers(handlers: PROJECT.NetworkTransportHandlers): void;
+        setHandlers(handlers: TOOLKIT.NetworkTransportHandlers): void;
         /** Leaves the room (a consented leave: the session does not hold the slot). */
         disconnect(): Promise<void>;
         /**
@@ -18552,9 +18552,9 @@ declare namespace PROJECT {
          * @param onSessionsChanged Receives the whole session list after every change.
          * @param authToken Token for the server's auth (empty: none).
          */
-        constructor(serverUrl: string, onSessionsChanged: (sessions: PROJECT.SessionInfo[]) => void, authToken?: string);
+        constructor(serverUrl: string, onSessionsChanged: (sessions: TOOLKIT.SessionInfo[]) => void, authToken?: string);
         /** The listed sessions (a copy). */
-        get sessions(): PROJECT.SessionInfo[];
+        get sessions(): TOOLKIT.SessionInfo[];
         /** True while joined. */
         get isJoined(): boolean;
         /**
@@ -18588,11 +18588,11 @@ declare namespace PROJECT {
         private static toSessionInfo;
     }
 }
-declare namespace PROJECT {
-    /** One lag-compensated query result, as Photon Fusion's LagCompensatedHit. */
+declare namespace TOOLKIT {
+    /** One lag-compensated query result, as the original API's LagCompensatedHit. */
     interface LagCompensatedHit {
         /** Whether a hitbox or a physics body was hit. */
-        type: PROJECT.HitType;
+        type: TOOLKIT.HitType;
         /** The world point hit (an overlap reports the point of contact nearest the query shape's center). */
         point: BABYLON.Vector3;
         /** The world surface normal at the point. */
@@ -18600,7 +18600,7 @@ declare namespace PROJECT {
         /** Distance from the ray origin, in meters (0 for overlaps). */
         distance: number;
         /** The hitbox hit, or null for a physics hit. */
-        hitbox: PROJECT.Hitbox | null;
+        hitbox: TOOLKIT.Hitbox | null;
         /** The physics body hit, or null for a hitbox hit. */
         physicsBody: BABYLON.PhysicsBody | null;
         /** The node hit: the hitbox's node, or the physics body's node. */
@@ -18625,7 +18625,7 @@ declare namespace PROJECT {
         hitboxes: HitboxPose[];
     }
     /**
-     * One shape a lag-compensated query can hit, as Photon Fusion's Hitbox (Unity: BabylonToolkit.Fusion.Hitbox). Put it
+     * One shape a lag-compensated query can hit, as the original API's Hitbox (Unity: BabylonToolkit.Fusion.Hitbox). Put it
      * on a node under a HitboxRoot; the root collects it when the object spawns. A Box hitbox is an oriented box of half
      * extents boxExtents; a Sphere hitbox has sphereRadius. Both are centered at offset in the node's space.
      */
@@ -18659,9 +18659,9 @@ declare namespace PROJECT {
         /** Reads the exported property bag (A1). */
         protected awake(): void;
         /** The shape: Box or Sphere. */
-        get type(): PROJECT.HitboxType;
+        get type(): TOOLKIT.HitboxType;
         /** Sets the shape. */
-        set type(value: PROJECT.HitboxType);
+        set type(value: TOOLKIT.HitboxType);
         /** Sphere radius, in meters (Sphere hitboxes). */
         get sphereRadius(): number;
         /** Sets the sphere radius, in meters. */
@@ -18679,7 +18679,7 @@ declare namespace PROJECT {
         /** Sets the layer, 0 to 31. */
         set layer(value: number);
         /** The root that collected this hitbox, or null before its object spawned. */
-        get root(): PROJECT.HitboxRoot | null;
+        get root(): TOOLKIT.HitboxRoot | null;
         /** Index in the root's hitbox list, or -1 before its object spawned. */
         get hitboxIndex(): number;
         /** The shape's world center now (the node's current world matrix × offset). */
@@ -18689,7 +18689,7 @@ declare namespace PROJECT {
          * @param root The root, or null to unbind.
          * @param index The index in the root's list, or -1.
          */
-        bindToRoot(root: PROJECT.HitboxRoot | null, index: number): void;
+        bindToRoot(root: TOOLKIT.HitboxRoot | null, index: number): void;
         /**
          * Whether the hitbox is on one of a layer mask's layers.
          * @param layerMask The mask (-1 for every layer).
@@ -18698,12 +18698,12 @@ declare namespace PROJECT {
         isOnLayer(layerMask: number): boolean;
     }
     /**
-     * The root of an object's hitboxes, as Photon Fusion's HitboxRoot (Unity: BabylonToolkit.Fusion.HitboxRoot). Put it
+     * The root of an object's hitboxes, as the original API's HitboxRoot (Unity: BabylonToolkit.Fusion.HitboxRoot). Put it
      * on a networked object; at spawn it collects every Hitbox on its node and descendants (not under a nested
      * NetworkObject) and registers with the runner's lag compensation. broadRadius is the radius, around the root node
      * plus offset, of the sphere a query must touch before its hitboxes are tested.
      */
-    class HitboxRoot extends PROJECT.NetworkBehaviour {
+    class HitboxRoot extends TOOLKIT.NetworkBehaviour {
         /** Default broad-phase radius, in meters. */
         private static readonly DEFAULT_BROAD_RADIUS;
         /** Registered class name of the network identity component. */
@@ -18735,7 +18735,7 @@ declare namespace PROJECT {
         /** Sets the broad-phase center offset (a Vector3 or an exported { x, y, z } value). */
         set offset(value: BABYLON.Vector3);
         /** The collected hitboxes (a copy of the list), empty before spawn. */
-        get hitboxes(): PROJECT.Hitbox[];
+        get hitboxes(): TOOLKIT.Hitbox[];
         /** Collects the hitboxes and registers with the runner's lag compensation. */
         spawned(): void;
         /**
@@ -18743,19 +18743,19 @@ declare namespace PROJECT {
          * @param runner The runner.
          * @param hasState True while the networked state is still meaningful.
          */
-        despawned(runner: PROJECT.NetworkRunner, hasState: boolean): void;
+        despawned(runner: TOOLKIT.NetworkRunner, hasState: boolean): void;
         /**
          * Turns one hitbox on or off for queries on this peer.
          * @param hitbox One of this root's hitboxes.
          * @param active True to let queries hit it.
          */
-        setHitboxActive(hitbox: PROJECT.Hitbox, active: boolean): void;
+        setHitboxActive(hitbox: TOOLKIT.Hitbox, active: boolean): void;
         /**
          * Whether a hitbox takes part in queries.
          * @param hitbox One of this root's hitboxes.
          * @returns True when it is active (false for a hitbox of another root).
          */
-        isHitboxActive(hitbox: PROJECT.Hitbox): boolean;
+        isHitboxActive(hitbox: TOOLKIT.Hitbox): boolean;
         /** Walks the object's nodes and binds every Hitbox found, in walk order. */
         private collectHitboxes;
         /**
@@ -18766,16 +18766,16 @@ declare namespace PROJECT {
         private collectFromNode;
     }
     /**
-     * Lag compensation, as Photon Fusion's HitboxManager (runner.lagCompensation, D29). On a server or host it records
+     * Lag compensation, as the original API's HitboxManager (runner.lagCompensation, D29). On a server or host it records
      * every registered HitboxRoot's hitbox poses after each forward tick into a ring of ceil(lagCompensationBufferMs ×
      * tickRate / 1000) ticks. A query for a player tests the other objects' hitboxes as that player saw them: at the
      * remote view its input of the current tick carries (interpolated between the two ticks with SubtickAccuracy, the
      * nearest tick otherwise), and the player's own objects at the current tick. On a client the poses it draws each frame
      * are recorded instead, so client-side queries see what the player sees. Queries return null (or 0 hits) and warn once
-     * in Shared mode, where Fusion has no lag compensation.
+     * in Shared mode, where the original API has no lag compensation.
      *
      * @example
-     * const hit = runner.lagCompensation.raycast(muzzle, forward, 40, object.inputAuthority, PROJECT.HitOptions.SubtickAccuracy | PROJECT.HitOptions.IgnoreInputAuthority);
+     * const hit = runner.lagCompensation.raycast(muzzle, forward, 40, object.inputAuthority, TOOLKIT.HitOptions.SubtickAccuracy | TOOLKIT.HitOptions.IgnoreInputAuthority);
      * if (hit != null && hit.hitbox != null) applyDamage(hit.hitbox.root);
      */
     class HitboxManager {
@@ -18805,7 +18805,7 @@ declare namespace PROJECT {
          * Creates the lag compensation of a runner. The runner creates it.
          * @param runner The runner.
          */
-        constructor(runner: PROJECT.NetworkRunner);
+        constructor(runner: TOOLKIT.NetworkRunner);
         /** Ticks the history ring keeps: ceil(lagCompensationBufferMs × tickRate / 1000). */
         get historyCapacity(): number;
         /** Ticks the history ring holds now (at most historyCapacity). */
@@ -18825,12 +18825,12 @@ declare namespace PROJECT {
          * Internal: a HitboxRoot spawned; its hitboxes take part in queries from now on.
          * @param root The root.
          */
-        registerRoot(root: PROJECT.HitboxRoot): void;
+        registerRoot(root: TOOLKIT.HitboxRoot): void;
         /**
          * Internal: a HitboxRoot despawned; its history is dropped.
          * @param root The root.
          */
-        unregisterRoot(root: PROJECT.HitboxRoot): void;
+        unregisterRoot(root: TOOLKIT.HitboxRoot): void;
         /**
          * Internal: records every root's hitbox poses at a forward tick (server, host and Single, after the tick's state
          * capture, D29 step 2).
@@ -18852,7 +18852,7 @@ declare namespace PROJECT {
          * @param layerMask Hitbox layers to test (default every layer).
          * @returns The nearest hit, or null.
          */
-        raycast(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, player: PROJECT.PlayerRef, options?: PROJECT.HitOptions, layerMask?: number): LagCompensatedHit | null;
+        raycast(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, player: TOOLKIT.PlayerRef, options?: TOOLKIT.HitOptions, layerMask?: number): LagCompensatedHit | null;
         /**
          * Casts a ray and collects every hit, nearest first.
          * @param origin World origin.
@@ -18864,7 +18864,7 @@ declare namespace PROJECT {
          * @param layerMask Hitbox layers to test (default every layer).
          * @returns How many hits were found.
          */
-        raycastAll(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, player: PROJECT.PlayerRef, results: LagCompensatedHit[], options?: PROJECT.HitOptions, layerMask?: number): number;
+        raycastAll(origin: BABYLON.Vector3, direction: BABYLON.Vector3, length: number, player: TOOLKIT.PlayerRef, results: LagCompensatedHit[], options?: TOOLKIT.HitOptions, layerMask?: number): number;
         /**
          * Collects the hitboxes a sphere overlaps, as a player saw them.
          * @param center World center.
@@ -18875,7 +18875,7 @@ declare namespace PROJECT {
          * @param layerMask Hitbox layers to test (default every layer).
          * @returns How many hitboxes overlap.
          */
-        overlapSphere(center: BABYLON.Vector3, radius: number, player: PROJECT.PlayerRef, results: LagCompensatedHit[], options?: PROJECT.HitOptions, layerMask?: number): number;
+        overlapSphere(center: BABYLON.Vector3, radius: number, player: TOOLKIT.PlayerRef, results: LagCompensatedHit[], options?: TOOLKIT.HitOptions, layerMask?: number): number;
         /**
          * Collects the hitboxes an oriented box overlaps, as a player saw them.
          * @param center World center.
@@ -18887,7 +18887,7 @@ declare namespace PROJECT {
          * @param layerMask Hitbox layers to test (default every layer).
          * @returns How many hitboxes overlap.
          */
-        overlapBox(center: BABYLON.Vector3, extents: BABYLON.Vector3, rotation: BABYLON.Quaternion, player: PROJECT.PlayerRef, results: LagCompensatedHit[], options?: PROJECT.HitOptions, layerMask?: number): number;
+        overlapBox(center: BABYLON.Vector3, extents: BABYLON.Vector3, rotation: BABYLON.Quaternion, player: TOOLKIT.PlayerRef, results: LagCompensatedHit[], options?: TOOLKIT.HitOptions, layerMask?: number): number;
         /**
          * A hitbox's pose as a player saw it (the pose a query for that player tests).
          * @param hitbox The hitbox.
@@ -18897,7 +18897,7 @@ declare namespace PROJECT {
          * @param subtickAccuracy True to interpolate between the view's two ticks (default false: the nearest tick).
          * @returns False when the hitbox has no registered root.
          */
-        positionRotation(hitbox: PROJECT.Hitbox, player: PROJECT.PlayerRef, position: BABYLON.Vector3, rotation: BABYLON.Quaternion, subtickAccuracy?: boolean): boolean;
+        positionRotation(hitbox: TOOLKIT.Hitbox, player: TOOLKIT.PlayerRef, position: BABYLON.Vector3, rotation: BABYLON.Quaternion, subtickAccuracy?: boolean): boolean;
         /**
          * Internal: an empty root pose to fill.
          * @returns The pose.
@@ -18910,7 +18910,7 @@ declare namespace PROJECT {
          * @returns The node's world matrix.
          */
         static computeWorldMatrixChain(node: BABYLON.TransformNode): BABYLON.Matrix;
-        /** @returns True outside Shared mode; in Shared mode warns once and returns false (Fusion has no lag compensation there). */
+        /** @returns True outside Shared mode; in Shared mode warns once and returns false (the original API has no lag compensation there). */
         private allowsQueries;
         /**
          * The pose of a root a query for a player tests: its own objects now (none with IgnoreInputAuthority); on a client
@@ -19089,7 +19089,7 @@ declare namespace PROJECT {
         private static projectedRadius;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** One player's area of interest: a sphere around a world position. */
     interface NetworkInterestArea {
         /** World center. */
@@ -19126,19 +19126,19 @@ declare namespace PROJECT {
          * Creates the interest bookkeeping of a runner. The runner creates it.
          * @param runner The runner.
          */
-        constructor(runner: PROJECT.NetworkRunner);
+        constructor(runner: TOOLKIT.NetworkRunner);
         /** Shared mode: the local player's last added area, or null before the first. */
         get lastLocalArea(): NetworkInterestArea | null;
         /** Forgets everything (a fresh run or a shutdown). */
         reset(): void;
         /**
-         * Adds an area of interest for a player until the next snapshot build (call it every tick, as Fusion's
+         * Adds an area of interest for a player until the next snapshot build (call it every tick, as the original API's
          * AddPlayerAreaOfInterest).
          * @param player The player.
          * @param position World center.
          * @param radius Radius, in meters.
          */
-        addArea(player: PROJECT.PlayerRef, position: BABYLON.Vector3, radius: number): void;
+        addArea(player: TOOLKIT.PlayerRef, position: BABYLON.Vector3, radius: number): void;
         /** Forgets the areas added since the last snapshot build (D30: after every build). */
         clearAreas(): void;
         /**
@@ -19147,21 +19147,21 @@ declare namespace PROJECT {
          * @param networkObject The object.
          * @param alwaysInterested True to replicate it to the player wherever it is.
          */
-        setAlwaysInterested(player: PROJECT.PlayerRef, networkObject: PROJECT.NetworkObject, alwaysInterested: boolean): void;
+        setAlwaysInterested(player: TOOLKIT.PlayerRef, networkObject: TOOLKIT.NetworkObject, alwaysInterested: boolean): void;
         /**
          * Whether an object is relevant to a player now (D30).
          * @param networkObject The object.
          * @param playerId The player's id.
          * @returns True when the player should receive it.
          */
-        isRelevant(networkObject: PROJECT.NetworkObject, playerId: number): boolean;
+        isRelevant(networkObject: TOOLKIT.NetworkObject, playerId: number): boolean;
         /**
-         * Whether a player received an object at the last evaluation (server and host), as Fusion's IsInterestedIn.
+         * Whether a player received an object at the last evaluation (server and host), as the original API's IsInterestedIn.
          * @param networkObject The object.
          * @param playerId The player's id.
          * @returns True for an object without area of interest, or one relevant to the player at the last snapshot build.
          */
-        wasRelevant(networkObject: PROJECT.NetworkObject, playerId: number): boolean;
+        wasRelevant(networkObject: TOOLKIT.NetworkObject, playerId: number): boolean;
         /**
          * Shared mode: sends the local player's last area to the session every NETWORK_AREA_REPORT_INTERVAL_SECONDS, so the
          * session forwards area-of-interest objects only where they are relevant (T15 step 3).
@@ -19174,7 +19174,7 @@ declare namespace PROJECT {
          * @param objects The spawned objects.
          * @param playerIds The clients' player ids.
          */
-        evaluate(objects: PROJECT.NetworkObject[], playerIds: number[]): void;
+        evaluate(objects: TOOLKIT.NetworkObject[], playerIds: number[]): void;
         /**
          * Forgets a despawned object (its always-interested players and relevance).
          * @param networkId The object's id.
@@ -19191,13 +19191,13 @@ declare namespace PROJECT {
          * @param prefabId Its prefab id.
          * @param sceneObject The kept identity component of a networked scene object, or null for a prefab instance.
          */
-        reserveOutOfInterest(networkId: number, prefabId: number, sceneObject: PROJECT.NetworkObject | null): void;
+        reserveOutOfInterest(networkId: number, prefabId: number, sceneObject: TOOLKIT.NetworkObject | null): void;
         /**
          * Client: an object came back into this peer's interest.
          * @param networkId The object's id.
          * @returns The kept scene object to attach again, or null (a prefab instance is acquired anew).
          */
-        releaseOutOfInterest(networkId: number): PROJECT.NetworkObject | null;
+        releaseOutOfInterest(networkId: number): TOOLKIT.NetworkObject | null;
         /**
          * Client: whether an object is out of this peer's interest (known, but not replicated to it now).
          * @param networkId The object's id.
@@ -19213,9 +19213,9 @@ declare namespace PROJECT {
         private raiseInterestChange;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /**
-     * Reliable data transfer of one runner, as Photon Fusion's SendReliableDataToPlayer / SendReliableDataToServer (T15):
+     * Reliable data transfer of one runner, as the original API's SendReliableDataToPlayer / SendReliableDataToServer (T15):
      * a payload of any size is split into 16 KB ReliableData frames on the reliable channel. The receiver gathers the
      * chunks per sender and key, raises onReliableDataProgress after every chunk and onReliableDataReceived with the whole
      * payload once it is complete.
@@ -19231,7 +19231,7 @@ declare namespace PROJECT {
          * Creates the reliable data transfer of a runner. The runner creates it.
          * @param runner The runner.
          */
-        constructor(runner: PROJECT.NetworkRunner);
+        constructor(runner: TOOLKIT.NetworkRunner);
         /** Forgets every partly received transfer (a fresh run or a shutdown). */
         reset(): void;
         /**
@@ -19242,7 +19242,7 @@ declare namespace PROJECT {
          * @param data The payload.
          * @returns False when there is no connection.
          */
-        send(route: PROJECT.NetworkRoute, targetPlayerId: number, key: PROJECT.ReliableKey, data: Uint8Array): boolean;
+        send(route: TOOLKIT.NetworkRoute, targetPlayerId: number, key: TOOLKIT.ReliableKey, data: Uint8Array): boolean;
         /**
          * Takes in one received chunk: progress after every chunk, the payload once complete.
          * @param sourcePlayerId The sending player.
@@ -19257,7 +19257,7 @@ declare namespace PROJECT {
         private static normalizeKey;
     }
 }
-declare namespace PROJECT {
+declare namespace TOOLKIT {
     /** One object of a host migration snapshot. */
     interface HostMigrationObject {
         /** Its network id, kept by the new host. */
@@ -19280,7 +19280,7 @@ declare namespace PROJECT {
         /** The id the host's next spawn would have taken (D7). */
         nextHostedId: number;
         /** The networked scenes. */
-        sceneInfo: PROJECT.NetworkSceneInfoFrame;
+        sceneInfo: TOOLKIT.NetworkSceneInfoFrame;
         /** Every object, in ascending network id. */
         objects: HostMigrationObject[];
     }
@@ -19298,7 +19298,7 @@ declare namespace PROJECT {
          * @param runner The host's runner.
          * @returns The HostSnapshot frame.
          */
-        static capture(runner: PROJECT.NetworkRunner): Uint8Array;
+        static capture(runner: TOOLKIT.NetworkRunner): Uint8Array;
         /**
          * Encodes a HostSnapshot frame.
          * @param data The snapshot.
@@ -19319,7 +19319,7 @@ declare namespace PROJECT {
          * @returns The words.
          * @throws NetworkError when the instance's word count differs (another build of the prefab).
          */
-        static decodeWords(object: HostMigrationObject, stateBuffer: PROJECT.NetworkStateBuffer): Float64Array;
+        static decodeWords(object: HostMigrationObject, stateBuffer: TOOLKIT.NetworkStateBuffer): Float64Array;
         /**
          * One object's snapshot entry.
          * @param entry The object's simulation entry.
@@ -19328,7 +19328,7 @@ declare namespace PROJECT {
         private static describeObject;
     }
     /**
-     * What a runner needs to continue a session after its host left, as Photon Fusion's HostMigrationToken (D31). Every
+     * What a runner needs to continue a session after its host left, as the original API's HostMigrationToken (D31). Every
      * remaining runner receives one in onHostMigration: the elected player's says Host, the others' Client. Pass it to the
      * new runner's startGame as hostMigrationToken.
      */
@@ -19338,7 +19338,7 @@ declare namespace PROJECT {
         /** The elected host's player id. */
         readonly newHostPlayerId: number;
         /** The mode the receiving runner restarts in: Host for the elected player, Client otherwise. */
-        readonly gameMode: PROJECT.GameMode;
+        readonly gameMode: TOOLKIT.GameMode;
         /** The old host's last uploaded snapshot (a HostSnapshot frame; empty when it never uploaded one). */
         readonly snapshot: Uint8Array;
         /** The receiving runner's player id; the restarted runner resumes it. */
@@ -19361,11 +19361,11 @@ declare namespace PROJECT {
         /** The id the new host's next spawn takes (D7). */
         get nextHostedId(): number;
         /** The networked scenes when the snapshot was taken (none without a snapshot). */
-        get sceneInfo(): PROJECT.NetworkSceneInfoFrame;
+        get sceneInfo(): TOOLKIT.NetworkSceneInfoFrame;
         /** @returns How many objects the snapshot holds, scene objects included. */
         getObjectCount(): number;
         /**
-         * One object of the snapshot, as Fusion's GetResumeSnapshotNetworkObjects entries.
+         * One object of the snapshot, as the original API's GetResumeSnapshotNetworkObjects entries.
          * @param index From 0 to getObjectCount() − 1.
          * @returns The object.
          * @throws NetworkError for an index outside the snapshot.
@@ -19388,7 +19388,7 @@ declare namespace PROJECT {
          * Creates the host migration of a runner. The runner creates it.
          * @param runner The runner.
          */
-        constructor(runner: PROJECT.NetworkRunner);
+        constructor(runner: TOOLKIT.NetworkRunner);
         /** Forgets the upload clock (a fresh run). */
         reset(): void;
         /**
@@ -19401,7 +19401,7 @@ declare namespace PROJECT {
          * @param payload The message.
          * @returns The token.
          */
-        createToken(payload: PROJECT.NetworkHostMigrationPayload): HostMigrationToken;
+        createToken(payload: TOOLKIT.NetworkHostMigrationPayload): HostMigrationToken;
         /**
          * The new host restores the snapshot's scene objects in place: their words are copied over the registered scene
          * objects with the same ids.
@@ -28488,6 +28488,7 @@ declare namespace TOOLKIT {
         private _isAudioSpatial;
         private _playToken;
         private _sceneRevealed;
+        private _stoppedBeforeReveal;
         getSoundClip(): BABYLON.StaticSound | BABYLON.Sound;
         /** Register handler that is triggered when the audio clip is ready */
         onReadyObservable: BABYLON.Observable<BABYLON.StaticSound | BABYLON.Sound>;
@@ -28504,7 +28505,10 @@ declare namespace TOOLKIT {
          * plays as soon as it is ready.
          */
         protected revealAudioSource(): void;
-        /** Plays a play-on-awake source once its clip is decoded and its scene is shown - never behind the splash screen. */
+        /**
+         * Plays a play-on-awake source once its clip is decoded and its scene is shown - never behind the splash screen. A source
+         * that game code stopped before the reveal stays stopped: in Unity its play on awake had already sounded and been stopped.
+         */
         private playOnAwake;
         protected startAudioSource(): void;
         /**
@@ -28756,7 +28760,13 @@ declare namespace TOOLKIT {
         static NormalizeMode(mode: string): string;
         static Logarithmic(distance: number, minDistance: number, maxDistance: number): number;
         static Linear(distance: number, minDistance: number, maxDistance: number): number;
-        /** Samples a custom table over distance / maxDistance (linear between entries, held at both ends). */
+        /**
+         * Unity's custom rolloff is a volume curve on a 0 to 1 axis: an attenuation never amplifies, nor goes below silence.
+         * @param value An attenuation read off a custom curve or table.
+         * @returns The attenuation within [0, 1].
+         */
+        static ClampVolume(value: number): number;
+        /** Samples a custom table over distance / maxDistance (linear between entries, held at both ends), within [0, 1]. */
         static Custom(distance: number, minDistance: number, maxDistance: number, table: ArrayLike<number>): number;
         /** The rolloff attenuation of `mode` at `distance`. */
         static Attenuation(mode: string, distance: number, minDistance: number, maxDistance: number, table: ArrayLike<number>): number;
@@ -40414,6 +40424,8 @@ declare namespace TOOLKIT {
         private static readonly DEFAULT_CAPSULE;
         /** The DR-12.2 input defaults. */
         private static readonly DEFAULT_INPUT;
+        /** The starting mouse sensitivity: a quarter of the exported Unity rate (half the third-person controller's). */
+        static readonly DefaultMouseSensitivity: number;
         /** Fires on any player input, even while control is disabled. */
         readonly onInputActivityObservable: BABYLON.Observable<void>;
         /** Fires on a left click while the pointer is locked, or a gamepad south press. */
@@ -40463,6 +40475,9 @@ declare namespace TOOLKIT {
         get cameraTarget(): BABYLON.TransformNode;
         /** The camera attached to the camera target, or null while detached. */
         get camera(): BABYLON.Camera;
+        /** Multiplies the exported mouse look rate; starts at `DefaultMouseSensitivity` (0.25). Game code can bind it to a settings slider. */
+        get mouseSensitivity(): number;
+        set mouseSensitivity(value: number);
         /** The Havok character (the shared Starter Assets body), or null until the first physics frame. */
         get characterController(): BABYLON.PhysicsCharacterController;
         /** Resolves the camera target, starts listening to input and binds the exported touch controls. */
@@ -40666,6 +40681,8 @@ declare namespace TOOLKIT {
         settings: TOOLKIT.IFirstPersonInputSettings;
         /** When true, gamepad A does not request a jump (a hologram is targeted; D13). */
         jumpSuppressedForGamepad: boolean;
+        /** Multiplies the exported mouse look rate; starts at half (1 = `settings.mouseLookDegreesPerPixel` as exported). */
+        mouseSensitivity: number;
         private readonly scene;
         private readonly heldKeys;
         private readonly frame;
@@ -40794,7 +40811,8 @@ declare namespace TOOLKIT {
         /** Builds the move from the keys, replaced by the left stick when it is deflected further, else by the touch joystick. */
         private buildMove;
         /**
-         * Builds the look in degrees: mouse pixels × degrees per pixel (no frame time), stick and touch × frame time.
+         * Builds the look in degrees: mouse pixels × degrees per pixel × mouse sensitivity (no frame time), stick and touch
+         * × frame time.
          * @param deltaTime Frame time in seconds.
          */
         private buildLook;
@@ -66259,6 +66277,8 @@ declare namespace TOOLKIT {
         private readonly characterVelocity;
         /** Scratch vector for the feet position read back from Havok. */
         private readonly characterPosition;
+        /** Scratch vector for the end of the blocked-fall cast. */
+        private readonly fallCastEnd;
         /** Scratch vector for the horizontal move the push probe follows. */
         private readonly pushDirection;
         /** The Havok body ids of the colliders on the player's own hierarchy; the character's contacts skip them. */
@@ -66341,6 +66361,19 @@ declare namespace TOOLKIT {
          * @param stepDeltaTime The sub-step length in seconds.
          */
         move(horizontalVelocity: BABYLON.Vector3, verticalVelocity: number, grounded: boolean, stepDeltaTime: number): void;
+        /**
+         * Finishes a falling step that Havok stopped short of walkable ground, down to one skin width above it, as Unity's
+         * CharacterController falls until it touches. Babylon's simplex solver treats every contact in the manifold as already
+         * touching (it never reads the contact's positive plane distance), so a fall stops as soon as Havok's cast sees the
+         * ground below. When that happens further above the floor than Havok's contact reach (keep distance + contact
+         * tolerance), the next support query finds nothing, the next cast stops the fall again, and the player hung a few
+         * centimetres up, never grounded and never able to jump again (about one landing in three). The capsule is cast down
+         * by the fall this step still owes (element access to Havok's own cast, so the player's own colliders stay ignored) and
+         * dropped onto the first walkable hit; a steep or missing hit leaves Havok's result alone.
+         * @param heightBeforeStep The capsule centre's height before Havok's integration, in metres.
+         * @param fallDistance How far the motor's vertical velocity falls this step, in metres.
+         */
+        private finishBlockedFall;
         /**
          * A falling step that ends on walkable ground stops one skin width above it, as Unity's CharacterController stops a
          * fall at contact: Havok lets the landing step sink into its keep distance, which showed as the feet dipping below
@@ -69097,6 +69130,8 @@ declare namespace TOOLKIT {
         private static readonly DEFAULT_CAPSULE;
         /** The Starter Assets input defaults (third person has no rotation speed, D8). */
         private static readonly DEFAULT_INPUT;
+        /** The starting mouse sensitivity: half the exported Unity rate. */
+        static readonly DefaultMouseSensitivity: number;
         /** Fires on any player input, even while control is disabled. */
         readonly onInputActivityObservable: BABYLON.Observable<void>;
         /** Fires on a left click while the pointer is locked, or a gamepad south press. */
@@ -69166,6 +69201,9 @@ declare namespace TOOLKIT {
         get motor(): TOOLKIT.ThirdPersonMotor;
         /** The node Cinemachine follows (Unity CinemachineCameraTarget); the player node when none was exported. */
         get cameraTarget(): BABYLON.TransformNode;
+        /** Multiplies the exported mouse look rate; starts at `DefaultMouseSensitivity` (0.5). Game code can bind it to a settings slider. */
+        get mouseSensitivity(): number;
+        set mouseSensitivity(value: number);
         /** The Havok character (the shared Starter Assets body), or null until the first physics frame. */
         get characterController(): BABYLON.PhysicsCharacterController;
         /**
