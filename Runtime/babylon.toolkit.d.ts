@@ -35,6 +35,50 @@ declare namespace TOOLKIT {
         static SmoothFrameDelta: boolean;
         /** One frame-delta smoother per engine (see `SmoothFrameDelta`). */
         private static readonly FrameDeltaSmoothers;
+        /** The containers already warned that their instanced copies could not be paired with their sources. */
+        private static readonly UnpairedCopyWarnings;
+        /** Average frame time in milliseconds at or below which the FPS counter is green (Unreal's `t.TargetFrameTimeThreshold`). */
+        static FPSTargetFrameTime: number;
+        /** Average frame time in milliseconds above which the FPS counter is red; between this and `FPSTargetFrameTime` it is yellow (Unreal's `t.UnacceptableFrameTimeThreshold`). */
+        static FPSUnacceptableFrameTime: number;
+        /** How often the FPS counter text refreshes, in milliseconds. Checked at the engine's end of frame, so a stopped render loop or a hidden tab refreshes nothing. */
+        static FPSRefreshInterval: number;
+        /** Inset of the FPS counter from both edges of its corner, in CSS pixels; the device safe-area inset is added on top. */
+        static FPSScreenPadding: number;
+        /** The FPS counter element: created by the first `ShowFPS(true)`, hidden (never removed) by `ShowFPS(false)`, reused after. */
+        private static FPSCounterElement;
+        /** The counter's first line, `NN.NN FPS`. */
+        private static FPSFrameRateLine;
+        /** The counter's second line, `NN.NN ms`. */
+        private static FPSFrameTimeLine;
+        /** The engine the visible counter reads; null while hidden, so no engine is held past a hide or a dispose. */
+        private static FPSCounterEngine;
+        /** The counter's end-of-frame observer on `FPSCounterEngine` (null while hidden). */
+        private static FPSEndFrameObserver;
+        /** The counter's dispose observer on `FPSCounterEngine` (null while hidden). */
+        private static FPSEngineDisposeObserver;
+        /** `GetTimeMilliseconds()` of the last refresh. */
+        private static FPSLastRefreshTime;
+        /** The frame rate on screen in hundredths (-1 before the first write), so unchanged values are never rewritten. */
+        private static FPSShownFrameRateHundredths;
+        /** The frame time on screen in hundredths of a millisecond (-1 before the first write). */
+        private static FPSShownFrameTimeHundredths;
+        /** The colour on screen ("" before the first write). */
+        private static FPSShownColor;
+        /** Unreal `stat fps` green. */
+        private static readonly FPS_GOOD_COLOR;
+        /** Unreal `stat fps` yellow. */
+        private static readonly FPS_WARNING_COLOR;
+        /** Unreal `stat fps` red. */
+        private static readonly FPS_BAD_COLOR;
+        /** The counter is a developer diagnostic and sits above the canvas, the splash and every game overlay. */
+        private static readonly FPS_COUNTER_Z_INDEX;
+        /** Small monospaced text, so the digits do not jitter sideways as they change. */
+        private static readonly FPS_COUNTER_FONT;
+        /** A dark outline that keeps the text readable over bright and dark scenes without a panel. */
+        private static readonly FPS_COUNTER_TEXT_SHADOW;
+        /** The counter shows two decimals; values are compared in hundredths. */
+        private static readonly HUNDREDTHS_PER_UNIT;
         /** light-probe-network D46: a node carrying extras.metadata.lightprobes is loaded as its own mesh, never as a hardware instance, so every exported renderer keeps its own probe (Unity's model). Set false before loading to restore instancing for probe-lit nodes (they then share their source node's probe). */
         static DeinstanceProbeLitNodes: boolean;
         /** Cached physics engine time step used to resume the simulation after a pause. */
@@ -470,6 +514,70 @@ declare namespace TOOLKIT {
         /** Get the delta time animation ratio for 60 fps */
         static GetAnimationRatio(scene: BABYLON.Scene): number;
         /**
+         * Shows or hides an Unreal Engine `stat fps` style frame counter: the average frame rate over the average frame
+         * time, coloured green, yellow or red against `FPSTargetFrameTime` / `FPSUnacceptableFrameTime`. It reads what
+         * BabylonJS already measures every frame, refreshes every `FPSRefreshInterval` ms and does no work while hidden.
+         * Calling it again while showing moves the one counter (an omitted corner means `TopRight`) or follows another
+         * engine; it never adds a second counter. Without a `document` (headless runtime) or an engine it logs one
+         * warning and does nothing.
+         * @param value True to show the counter, false to hide it.
+         * @param corner The viewport corner (default `TOOLKIT.ScreenCorner.TopRight`); an unknown value falls back to it with a warning.
+         * @param engine The engine to measure (default the last created engine).
+         * @example TOOLKIT.SceneManager.ShowFPS(true, TOOLKIT.ScreenCorner.BottomLeft);
+         */
+        static ShowFPS(value: boolean, corner?: TOOLKIT.ScreenCorner, engine?: BABYLON.AbstractEngine): void;
+        /** Whether the FPS counter is showing (so a key binding can toggle it with `ShowFPS(!IsFPSVisible())`). */
+        static IsFPSVisible(): boolean;
+        /**
+         * The average frames per second BabylonJS measured (`engine.getFps()`, a rolling average over the engine's
+         * performance monitor window). Never the paced toolkit delta.
+         * @param engine The engine to read (default the last created engine).
+         * @returns Frames per second, or 0 without an engine or before a valid measurement.
+         */
+        static GetFramesPerSecond(engine?: BABYLON.AbstractEngine): number;
+        /**
+         * The average frame time BabylonJS measured (`engine.performanceMonitor.averageFrameTime`), matching `GetFramesPerSecond`.
+         * @param engine The engine to read (default the last created engine).
+         * @returns Milliseconds per frame, or 0 without an engine or before a valid measurement.
+         */
+        static GetAverageFrameMilliseconds(engine?: BABYLON.AbstractEngine): number;
+        /** Creates the counter element and its two lines once, and (re)attaches it to the page body when it is detached. */
+        private static CreateFPSCounterElement;
+        /**
+         * Returns a valid corner: an omitted corner is `TopRight`; an unknown value is `TopRight` with one warning.
+         * @param corner The requested corner.
+         * @returns The corner to place the counter in.
+         */
+        private static ResolveScreenCorner;
+        /**
+         * Anchors the counter to a corner, inset by `FPSScreenPadding` plus the safe-area inset on both touching edges,
+         * with its text aligned to that side. A one-off placement at the call; the refresh never touches it.
+         * @param corner The corner to anchor to.
+         */
+        private static PlaceFPSCounter;
+        /**
+         * Moves the counter's observers to an engine and refreshes at once, so the counter is never blank.
+         * @param engine The engine to follow.
+         */
+        private static FollowFPSEngine;
+        /** End of every frame while visible: one time comparison, and a refresh once `FPSRefreshInterval` has passed. */
+        private static UpdateFPSCounter;
+        /**
+         * Writes the engine's average frame rate, frame time and band colour, each only when it changed.
+         * @param now `GetTimeMilliseconds()` of this refresh.
+         */
+        private static RefreshFPSCounter;
+        /**
+         * The Unreal `stat fps` colour for an average frame time, read from the threshold statics at every refresh.
+         * @param frameMilliseconds Average frame time in milliseconds.
+         * @returns Green at or below `FPSTargetFrameTime`, red above `FPSUnacceptableFrameTime`, yellow between.
+         */
+        private static GetFPSBandColor;
+        /** Hides the counter and drops its observers and engine (`ShowFPS(false)`, or the followed engine disposing). */
+        private static HideFPSCounter;
+        /** Removes the counter's observers from the followed engine and forgets that engine. */
+        private static DetachFPSCounter;
+        /**
          * Sets whether the toolkit scene simulation is playing (true) or paused for editing (false).
          * When paused: the script component life-cycle (awake/start/update/late/step/fixed) is halted and the
          * physics world simulation is frozen (time step set to 0). When resumed: the physics time step is
@@ -692,8 +800,69 @@ declare namespace TOOLKIT {
         static InstantiatePrefabFromContainer(container: BABYLON.AssetContainer, prefabName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.TransformNode;
         /** Instantiate all the raw models from an asset container. (Cloned Hierarchy) */
         static InstantiateModelsFromContainer(container: BABYLON.AssetContainer, nameFunction?: (sourceName: string) => string, createInstances?: boolean, cloneMaterials?: boolean, rebuildBoundingInfo?: boolean, filterPredicate?: any): BABYLON.TransformNode[];
-        /** Instantiate the specified prefab asset hierarchy from an asset container. (Instanced Hierarchy) */
+        /**
+         * Instantiates the whole asset container as an instanced hierarchy (hardware instances where Babylon can make them)
+         * and parses the copy's script components and physics.
+         * Each copy gets its own toolkit metadata before it is parsed, as cloned prefabs do, so every copy - the first and
+         * every later one - gets its own script components, bodies and triggers, and keeps its inactive parts hidden and
+         * bodiless until it activates them. Each copy also gets its own ids, as prefab clones do: every node records its
+         * design-time sourceid, and the vertex animation controller, animator and timeline ids are new per copy, so its
+         * Animator, director and vertex animation bind to that copy only. The container is never changed: its source nodes
+         * stay unparsed and keep their exported ids, so later spawns and prefab clones from the same container still work.
+         * @param container defines the asset container to instantiate
+         * @param newName defines an optional name for the copy's root transform
+         * @param newParent defines an optional parent for the copy's root transform
+         * @param newPosition defines an optional position for the copy's root transform
+         * @param newRotation defines an optional rotation for the copy's root transform
+         * @param newScaling defines an optional scaling for the copy's root transform
+         * @param cloneAnimations defines an option to clone the source-tagged animation groups onto the copy (true by default)
+         * @param makeNewMaterials defines an option to clone the materials instead of sharing them (false by default)
+         * @param rebuildBoundingInfo defines an option to rebuild the bounding info of the copied transforms (false by default)
+         * @returns the entries Babylon instantiated (root nodes, skeletons and animation groups)
+         */
         static CreateInstancedModelsFromContainer(container: BABYLON.AssetContainer, newName?: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>, cloneAnimations?: boolean, makeNewMaterials?: boolean, rebuildBoundingInfo?: boolean): BABYLON.InstantiatedEntries;
+        /**
+         * Gives every node copied by instantiateModelsToScene its own toolkit metadata before it is parsed, and its own ids.
+         * Babylon's clones share their source's metadata object and its hardware instances get none, so without this the
+         * first copy's parse marks the container's sources parsed and every later copy is skipped. Copies are paired with
+         * their sources by walking both hierarchies in the same order, as Babylon creates them; each paired copy then gets
+         * its per-copy ids through TOOLKIT.Utilities.RemapCloneIdentity (one remap for the whole spawn, hardware instances
+         * included), as prefab clones do. When the two walks differ in length or names, each copy gets a copy of the
+         * metadata it shares instead, keeps the exported ids, and the container is warned about once. Either way the
+         * container's own metadata objects are never written.
+         * @param container defines the asset container the copies were instantiated from
+         * @param copiedRoots defines the root nodes instantiateModelsToScene returned
+         * @returns the spawn's remap when the copies were paired with their sources, else null
+         */
+        private static AssignInstancedCopyMetadata;
+        /**
+         * Gives each copy that could not be paired with its source a copy of the metadata it shares, keeping the exported
+         * ids, and warns once per container that its copies keep those ids and its hardware instances get no components.
+         * @param container defines the asset container the copies were instantiated from
+         * @param copiedNodes defines every copied node
+         */
+        private static AssignUnpairedCopyMetadata;
+        /**
+         * Gives each Timeline-baked group Babylon copied for this spawn (already retargeted to the copy) the copy's new
+         * timeline key, in a new metadata object, so the copy's director plays its own groups. Babylon's copy may share the
+         * container group's metadata object, so that object is never written.
+         * @param animationGroups defines the animation groups instantiateModelsToScene returned
+         * @param remap defines the spawn's remap
+         */
+        private static RemapInstancedTimelineGroups;
+        /**
+         * Returns the asset container's root nodes in the order instantiateModelsToScene walks them: the parentless
+         * transform nodes first, then the parentless meshes.
+         * @param container defines the asset container
+         * @returns the container's root nodes
+         */
+        private static GetContainerRootNodes;
+        /**
+         * Lists every node of the given hierarchies, each root followed by all of its descendants in hierarchy order.
+         * @param rootNodes defines the roots of the hierarchies to walk
+         * @returns the roots and their descendants
+         */
+        private static FlattenNodeHierarchies;
         /** Clones the specified transform node asset into the scene. (Transform Node) */
         static CloneTransformNode(container: BABYLON.AssetContainer, nodeName: string, newName: string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, newPosition?: BABYLON.Nullable<BABYLON.Vector3>, newRotation?: BABYLON.Nullable<BABYLON.Quaternion>, newScaling?: BABYLON.Nullable<BABYLON.Vector3>): BABYLON.TransformNode;
         /** Clones the specified abstract mesh asset into the scene. (Abtract Mesh) */
@@ -2075,6 +2244,8 @@ declare namespace TOOLKIT {
         private _transform;
         private _scriptReady;
         private _scriptRevealed;
+        /** True when the scene was revealed before this component started (its node was disabled): reveal() runs right after its first start(). */
+        private _revealAfterStart;
         private _registeredClassname;
         private _registerComponentAlias;
         private _lateUpdateObserver;
@@ -2193,7 +2364,9 @@ declare namespace TOOLKIT {
         static AwakeInstance(instance: TOOLKIT.ScriptComponent): void;
         private static LateInstance;
         private static AfterInstance;
+        /** Runs a started component's step() before each physics step, while its node is enabled (the same gate as update()). */
         private static StepInstance;
+        /** Runs a started component's fixed() after each physics step, while its node is enabled (the same gate as update()). */
         private static FixedInstance;
         private static ReadyInstance;
         /**
@@ -2202,7 +2375,9 @@ declare namespace TOOLKIT {
          * builds the game, and the splash's PREWARM pass runs last. reveal() waits for the splash to start fading
          * (SceneManager.WhenSceneRevealed): the place to start music, intro timers and anything the player should see or hear
          * from the start. A late instance (an instantiated prefab, a component created in code) gets it right after its
-         * ready(). Never runs for a component destroyed first, nor for a scene disposed before its reveal.
+         * ready(). A component whose node is disabled at the reveal and that has not started yet waits (D7, Unity's
+         * lifecycle): it gets reveal() right after its first start(), once the node is enabled. Never runs for a component
+         * destroyed first, nor for a scene disposed before its reveal.
          * @param instance The component instance.
          */
         private static ScheduleRevealInstance;
@@ -2290,6 +2465,13 @@ declare namespace TOOLKIT {
         High = 0,
         Medium = 1,
         Low = 2
+    }
+    /** A corner of the page viewport, for corner-anchored diagnostics such as `SceneManager.ShowFPS`. */
+    enum ScreenCorner {
+        TopLeft = 0,
+        TopRight = 1,
+        BottomLeft = 2,
+        BottomRight = 3
     }
     enum GamepadType {
         None = -1,
@@ -6568,9 +6750,30 @@ declare namespace TOOLKIT {
          * @param entity The node being parsed: a mesh, a skinned mesh holder or a multi-primitive parent.
          */
         private static HideMeshesThatWriteNothing;
+        /**
+         * Keeps a skinned renderer's drawn mesh in step with its node's active state. The glTF loader draws a skinned
+         * renderer through a separate `<name>.Skin` mesh parented beside the skeleton, not under the renderer's node, so
+         * disabling the node (an object inactive in Unity, `metadata.enabled === false`) never reached it and the renderer
+         * drew anyway: Water Park's inactive water sheets (`Sea_B`, `Sea_F`) and cubemap mesh covered the underwater view.
+         * Each skin mesh takes its node's effective enabled state now and follows every later change, made on the node or
+         * on an ancestor (a Timeline Activation track, a script's SetActive), as an inactive GameObject's
+         * SkinnedMeshRenderer draws nothing in Unity. A node without a skin mesh is left alone and costs nothing.
+         * @param entity The parsed node: a skinned renderer's node, or a multi-primitive parent whose primitives are skinned.
+         */
+        private static FollowNodeEnabledState;
         private static DoParseSceneComponents;
         private static DoProcessPendingScripts;
         private static DoProcessPendingShadows;
+        /**
+         * Builds the Havok bodies of the parsed nodes with physics metadata, once every node of the load (or clone) is parsed
+         * and so has its final enabled state. Each body follows its node's active state (D6, PhysicsActivationTracker): a
+         * node inactive in the hierarchy (its own flag or an ancestor's; a renderer a LOD group switched off still counts as
+         * active) gets no body until it is activated, and a body whose node becomes inactive is suspended - kept, but out of the
+         * simulation (RigidbodyPhysics.SuspendPhysicsBody; rebuilt only where Havok's native API is missing) - as Unity keeps an
+         * inactive GameObject's colliders out of the simulation.
+         * @param scene The scene being set up.
+         * @param physicList The parsed nodes with physics metadata.
+         */
         private static DoProcessPendingPhysics;
         private static DoProcessPendingFreezes;
         private static SetupCameraComponent;
@@ -7068,12 +7271,24 @@ declare namespace TOOLKIT {
      * Unity's reflection probe choice for renderers that are instantiated at run time - racers and items spawned from a
      * container exported from a scene without probes. A static renderer of the scene gets its probe from the exporter
      * (reflectionCubemapFile); a runtime clone has none, so its PBR material fell back to the scene environment (or to the
-     * light probe SH carrier) and lost the probe's specular: metal karts on a probe-lit track reflected the skybox instead
-     * of the probe. Every mesh added after the scene is ready whose PBR material carries no real reflection cube takes the
-     * probe whose bounds contain the mesh centre - the highest importance, then the smallest volume (Unity's Simple usage);
-     * when none contains it the material keeps the scene environment, Unity's skybox fallback. The choice is made at spawn
-     * and applied per material (clones of one container share materials); a material the mesh is given later (an Animator's
-     * per-renderer clone) gets the same probe. The choice is not re-evaluated as the mesh moves.
+     * light probe SH carrier) and lost the probe's specular. Every mesh added after the scene is ready (or handed over with
+     * Track) whose PBR material carries no real reflection cube reflects the probe whose bounds contain the mesh centre - the
+     * highest importance, then the smallest volume (Unity's Simple usage) - and the choice follows the mesh: every
+     * RECHOOSE_INTERVAL_FRAMES frames a mesh whose centre is in another probe's bounds takes that probe, and one that left every
+     * probe goes back to its own reflection (Unity's skybox fallback).
+     * The probe is applied per mesh, never on a material another instance draws with:
+     *  - a material of an asset container, or one meshes of several instances share (item copies of one container), is never
+     *    changed: the mesh draws a copy of it made for that probe (ProbeMaterialFor: one copy per material and probe cube, the
+     *    textures shared, only cubes the scene already loaded or loads for the probe), so each copy reflects the probe it is in
+     *    and the shared material no longer flips between the light probe carrier and a probe cube for every copy at once;
+     *  - a material only one instance draws with (an Animator's per-renderer clone, a kart's own copy) takes the cube in place,
+     *    and a material other code swaps in later gets the same probe.
+     * Each probe copy draws with the same shader as its material does in a probe, so at each reveal-time warm-up round
+     * (SceneShaderWarmup.OnBeforePrewarmObservable) every followed mesh registers the variant it does not draw now - the probe copy,
+     * or its own material - with SceneShaderWarmup.WarmMaterialVariant, once a probe cube has loaded
+     * (its irradiance texture, which picks the shader's irradiance path, is known only then); a mesh whose own material takes the cube
+     * in place (an Animator's per-renderer clone) registers a warm-up copy of that material with the cube, or without it. Nothing
+     * compiles when a copy enters or leaves a probe during play.
      * @class ReflectionProbeVolumes - All rights reserved (c) 2024 Mackey Kinard
      */
     class ReflectionProbeVolumes {
@@ -7085,6 +7300,8 @@ declare namespace TOOLKIT {
         private static readonly DEFAULT_IMPORTANCE;
         /** Level used when an exported probe does not state one. */
         private static readonly DEFAULT_LEVEL;
+        /** Frames between two checks of the followed meshes for a probe change (a probe's bounds are large; a mesh crosses them rarely). */
+        static RECHOOSE_INTERVAL_FRAMES: number;
         /** The registered probes of each scene. */
         private static readonly SceneStates;
         /**
@@ -7094,6 +7311,21 @@ declare namespace TOOLKIT {
          * @param exported The scene metadata `reflectionprobes` list (raw exported JSON).
          */
         static Register(scene: BABYLON.Scene, rootUrl: string, exported: unknown[]): void;
+        /**
+         * Follows a run-time mesh's reflection probe from now on and applies the probe at its centre at once: game code that
+         * spawns content (a pooled item copy) calls it right after making the mesh, so its first frame already reflects the probe it
+         * is in instead of waiting for the added-mesh queue (SETTLE_FRAMES). Does nothing in a scene without probes, for a mesh
+         * already followed, one without a material, or an instanced mesh (it draws with its source mesh's material).
+         * @param mesh The mesh.
+         */
+        static Track(mesh: BABYLON.AbstractMesh): void;
+        /**
+         * The cube of the probe Unity picks for a world point, among the scene's registered probes.
+         * @param scene The scene.
+         * @param point The world point.
+         * @returns The probe's cube, or null when the scene has no probes or none contains the point.
+         */
+        static CubeAt(scene: BABYLON.Scene, point: BABYLON.Vector3): BABYLON.BaseTexture;
         /**
          * The probe Unity picks for a world point: among the probes whose bounds contain it, the highest importance, then the
          * smallest volume.
@@ -7111,7 +7343,8 @@ declare namespace TOOLKIT {
          */
         static ParseProbe(entry: unknown): IReflectionProbeVolume;
         /**
-         * Queues every mesh added from now on and gives it its probe a few frames later; stops with the scene.
+         * Queues every mesh added from now on and gives it its probe a few frames later; every frame follows material swaps and,
+         * every RECHOOSE_INTERVAL_FRAMES frames, moves; stops with the scene.
          * @param scene The scene (ready).
          * @param state The scene's registered probes.
          */
@@ -7124,24 +7357,176 @@ declare namespace TOOLKIT {
          */
         private static AssignSettledMeshes;
         /**
-         * Re-applies the chosen probe to a watched mesh whose material was swapped, and stops watching disposed meshes.
+         * Applies the chosen probe again to a followed mesh whose material other code swapped (an Animator's clone, a kart's own
+         * copy), and stops following disposed meshes. Before the reveal a swap between a material and its own copies is the warm-up
+         * drawing the other variant: it is only noted, so the warm-up's frames are not undone. After the reveal the mesh is given the
+         * material its probe asks for again (a warm-up that put back the wrong one of the family does not stick).
+         * @param scene The scene.
          * @param state The scene's registered probes.
          */
         private static FollowMaterialSwaps;
         /**
-         * Chooses the probe at one mesh's centre, applies it and watches the mesh for material swaps.
+         * Every RECHOOSE_INTERVAL_FRAMES frames, gives each followed, enabled mesh whose centre is now in another probe's bounds (or in
+         * none) that probe. A hidden mesh is left until it is shown again.
          * @param scene The scene.
          * @param state The scene's registered probes.
-         * @param mesh The added mesh.
+         */
+        private static FollowMoves;
+        /**
+         * Starts following a mesh: chooses the probe at its centre and applies it (a mesh in no probe is followed too, so it takes a
+         * probe once it moves into one).
+         * @param scene The scene.
+         * @param state The scene's registered probes.
+         * @param mesh The mesh.
          */
         private static Assign;
         /**
-         * Gives a mesh's PBR material(s) the probe cube when they have no real reflection cube of their own (none, or only
-         * the light probe SH carrier).
-         * @param mesh The mesh.
-         * @param cube The probe cube.
+         * Chooses the probe at a followed mesh's centre and applies it when it changed (or always, `force`).
+         * @param scene The scene.
+         * @param state The scene's registered probes.
+         * @param entry The followed mesh.
+         * @param force True to apply even when the probe is the same.
          */
-        private static ApplyCube;
+        private static ChooseForMesh;
+        /**
+         * Puts a followed mesh's probe on it: a shared material (UsesProbeCopies) is replaced on this mesh by its copy for the probe
+         * (or by itself again when no probe holds the mesh); a material only this instance draws with takes the cube in place.
+         * @param state The scene's registered probes.
+         * @param entry The followed mesh.
+         */
+        private static ApplyProbe;
+        /**
+         * Puts a cube on a material's PBR materials in place when they hold no real reflection cube (none, the light probe SH
+         * carrier, or a cube this class put there); a null cube gives each one back the reflection texture it had.
+         * @param state The scene's registered probes.
+         * @param material The material (or multi-material).
+         * @param cube The probe cube, or null for none.
+         * @param scene The scene (its light probe carrier).
+         */
+        private static ApplyInPlace;
+        /**
+         * True when a mesh must draw a probe copy of its material rather than change it: the material needs a probe (one of its PBR
+         * materials holds no real reflection cube) and another instance draws with it too - it belongs to an asset container (every
+         * copy of the container shares it) or meshes under more than one root node use it.
+         * @param state The scene's registered probes.
+         * @param material The material.
+         * @returns True for probe copies.
+         */
+        private static UsesProbeCopies;
+        /**
+         * True when one of a material's PBR materials holds no real reflection cube: none, or the light probe SH carrier (or a copy
+         * of it). A cube this class put on in place still counts as none.
+         * @param state The scene's registered probes.
+         * @param material The material (or multi-material).
+         * @returns True when the probe applies.
+         */
+        private static NeedsProbe;
+        /**
+         * The PBR materials of a material: itself, or a multi-material's PBR sub-materials.
+         * @param material The material.
+         * @returns The PBR materials.
+         */
+        private static PbrMaterialsOf;
+        /**
+         * The material a probe copy was made from, or the material itself.
+         * @param state The scene's registered probes.
+         * @param material The material.
+         * @returns Its base material.
+         */
+        private static BaseOf;
+        /**
+         * A shared material's copy for one probe cube, made once: the material cloned with its own textures shared (not copied),
+         * the toolkit's pipeline lighting carried over (as the Animator's clones do), and the cube as the reflection of every PBR
+         * material that held no real cube. A multi-material gets a multi-material of such copies.
+         * @param state The scene's registered probes.
+         * @param base The shared material.
+         * @param cube The probe cube.
+         * @returns The copy.
+         */
+        private static ProbeMaterialFor;
+        /**
+         * A multi-material whose PBR sub-materials that need the probe are replaced by their probe copies.
+         * @param state The scene's registered probes.
+         * @param base The multi-material.
+         * @param cube The probe cube.
+         * @returns The new multi-material.
+         */
+        private static CopyMultiMaterial;
+        /**
+         * One material's probe copy (see ProbeMaterialFor).
+         * @param state The scene's registered probes.
+         * @param base The material.
+         * @param cube The probe cube.
+         * @returns The copy.
+         */
+        private static CopyForProbe;
+        /**
+         * Clones a material while each of its textures clones to itself, so the copy shares the texture objects (Babylon's clone
+         * otherwise makes a new texture per slot, which reloads or waits before it draws).
+         * @param material The material.
+         * @param name The copy's name.
+         * @returns The copy.
+         */
+        private static CloneSharingTextures;
+        /**
+         * The name of a material's probe copy: the material's name and the probe cube's name.
+         * @param material The material.
+         * @param cube The probe cube.
+         * @returns The name.
+         */
+        private static ProbeCopyName;
+        /**
+         * At each reveal-time warm-up round, registers for every followed mesh the probe variant it does not draw now
+         * (SceneShaderWarmup.WarmMaterialVariant): with a shared material, its probe copy when it draws its own material and its own
+         * material when it draws a probe copy; with a material it owns (which takes the cube in place, an Animator's per-renderer
+         * clone), a warm-up copy of that material with the cube, or with its own reflection while it holds the cube. Every probe cube
+         * gives the same shader, so one cube serves: the first probe cube that has loaded (its irradiance texture, which picks the
+         * shader's irradiance path, is known only then); none yet, a later round tries again. Every followed mesh registers its own.
+         * @param scene The scene.
+         * @param state The scene's registered probes.
+         */
+        private static WarmProbeVariantsBeforeReveal;
+        /**
+         * Registers each followed mesh's other probe variant with the warm-up (WarmProbeVariantsBeforeReveal).
+         * @param scene The scene.
+         * @param state The scene's registered probes.
+         */
+        private static RegisterProbeVariants;
+        /**
+         * The material a mesh drawing `material` will also draw with as it enters or leaves a probe.
+         * @param state The scene's registered probes.
+         * @param material The material the mesh draws now.
+         * @param cube A loaded probe cube.
+         * @returns The other variant, or null when the probe never changes the material (it has a real cube of its own).
+         */
+        private static OtherProbeVariant;
+        /**
+         * A warm-up copy of a material that takes the probe in place: the material with the cube (or, with a null cube, with the
+         * reflection it had before the probe), made once. It only ever draws behind the splash; it counts as the material's own
+         * (BaseOf), so following the mesh treats it as the material itself.
+         * @param state The scene's registered probes.
+         * @param material The material.
+         * @param cube The probe cube, or null for the material's own reflection.
+         * @returns The copy.
+         */
+        private static WarmCopyFor;
+        /**
+         * The first registered probe's cube that the scene has loaded.
+         * @param scene The scene.
+         * @param state The scene's registered probes.
+         * @returns The cube, or null when none has loaded yet.
+         */
+        private static LoadedProbeCube;
+        /**
+         * Whether a reflection texture is the light probe SH carrier or a copy of it. Babylon's `Material.clone` clones the
+         * material's textures, so an Animator's per-renderer clone (and the kart kit's anti-gravity copy of that) holds a
+         * copy of the carrier, never the scene's carrier itself; matched by identity only, the copy kept the clone off its
+         * probe, and probe-lit karts lost the probe's specular reflections (Rainbow Road's racers looked flat and matte).
+         * @param reflection A material's reflection texture.
+         * @param carrier The scene's carrier, or null when the scene has none.
+         * @returns True for the carrier or a clone of it.
+         */
+        private static IsCarrier;
         /**
          * The probe's cube: the one the scene's own materials already loaded for that file, else a new prefiltered load at
          * the exported level (the level the static materials' loader gives it).
@@ -7449,6 +7834,37 @@ declare namespace TOOLKIT {
         private static NowMs;
     }
 }
+declare namespace TOOLKIT {
+    /**
+     * Releases, at the reveal, the load-time copies a running scene no longer needs, so the heap the game plays in is smaller
+     * and a later major collection has fewer objects to mark and move.
+     *
+     * Babylon builds each mesh's bounding box from its vertex positions and keeps, per mesh, an array of one Vector3 per
+     * vertex (`_internalAbstractMeshDataInfo._positions`) next to the geometry's own vertex data. For a mesh with no skeleton
+     * and no morph targets that array is an exact copy of the geometry's positions, and every mesh sharing a geometry keeps
+     * its own copy (Water Park: 241 meshes, 88,711 vectors, about 10 MB). Picking and collisions read the mesh's `_positions`,
+     * which falls back to the geometry's array, built once on demand and shared - the same values, so nothing changes.
+     *
+     * Skinned and morphed meshes keep their array: it holds the posed positions picking uses. Bounding boxes, the item pool,
+     * shared containers and everything a later scene or the next race reuses are left alone. No collection is forced; the
+     * released arrays go with the next one V8 runs on its own.
+     * @class SceneLoadCaches - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class SceneLoadCaches {
+        /**
+         * Drops the per-mesh position copies of a scene's meshes that have neither skeleton nor morph targets.
+         * @param scene The scene being revealed.
+         * @returns The number of position vectors released.
+         */
+        static ReleaseAtReveal(scene: BABYLON.Scene): number;
+        /**
+         * Drops one mesh's position copy when it equals the geometry's own positions (no skeleton, no morph targets).
+         * @param mesh The mesh.
+         * @returns The number of position vectors released (0 when the mesh keeps its array).
+         */
+        private static ReleaseMeshPositions;
+    }
+}
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
     /** Result of a scene shader warm-up (SceneShaderWarmup.RunAsync). */
@@ -7500,7 +7916,11 @@ declare namespace TOOLKIT {
         static PREWARM_MAX_ROUNDS: number;
         /** Pause (ms) between two checks of a pass waiting for the scene loads in flight ("loading" step). */
         static PREWARM_LOAD_POLL_MS: number;
-        /** False leaves disabled and invisible meshes out of the reveal-time pass. */
+        /**
+         * False leaves disabled and invisible meshes out of the reveal-time pass. True (default) compiles them, never enabled, in every pass
+         * they draw in once shown: main pass, the shadow-caster pass of every shadow generator that casts them, the effect layers that will
+         * include them and the depth renderers (IsHiddenMeshReady), on both engines.
+         */
         static WarmHiddenMeshesOnReveal: boolean;
         /** False leaves effect layers, mirrors, probes and render-target cameras out of the reveal-time pass. */
         static WarmRenderPassesOnReveal: boolean;
@@ -7529,7 +7949,13 @@ declare namespace TOOLKIT {
          * uniform and non-uniform; a game registers its pooled copies).
          */
         static WarmScaleVariantsOnReveal: boolean;
-        /** Optional units (hidden meshes, render passes) are given up this long (ms) after every required unit is ready. */
+        /**
+         * Optional units (hidden meshes, render passes) are given up this long (ms) after every required unit is ready and no unit
+         * has become ready since, once each was checked: the grace restarts whenever a unit becomes ready, so a queue still finishing
+         * (WebGL2 compiles a long one in order) is waited for and a stalled unit is not. Measured against the older fixed grace (from the
+         * last required unit only) on both engines: the same reveal where nothing stalls, and no shader left to compile after the reveal
+         * where a queue was still finishing. The pass deadline still bounds the whole wait.
+         */
         static OPTIONAL_UNIT_GRACE_MS: number;
         /** Names listed by the "gave up" warning of a reveal-time pass. */
         private static GIVEN_UP_NAMES_SHOWN;
@@ -7555,6 +7981,8 @@ declare namespace TOOLKIT {
         private static RevealStates;
         /** Units (meshes, post processes, effect layers, render targets, particle systems, participants) a warm-up readied or gave up on: a later pass counts only the others as new. */
         private static WarmedUnits;
+        /** The stand-in unit target of each mesh checked as hidden content (HiddenUnitOf). */
+        private static readonly HiddenUnits;
         /** Reveal-time passes in progress per scene: a second caller (the automatic hide and the engine.html loader) shares the running pass. */
         private static RevealPasses;
         /** Scenes whose PREWARM is showing on the splash: from the start of their pass until its "ready" step or the scene's disposal. */
@@ -7567,7 +7995,7 @@ declare namespace TOOLKIT {
          * since), hidden meshes (disabled or invisible ones, compiled but never enabled), render passes (effect layers, mirrors, probes,
          * custom and camera render targets), hidden copies of registered prefabs (WarmPrefab), the whole scene's GPU pipelines (WebGPU,
          * frustum clipping off) and idle particle systems (drawn once, invisibly). Hidden meshes and render passes are optional: they are
-         * given up OPTIONAL_UNIT_GRACE_MS after every required unit is ready. When a scene load finished during a round, the pass runs
+         * given up OPTIONAL_UNIT_GRACE_MS after every required unit is ready and no unit became ready since. When a scene load finished during a round, the pass runs
          * another round for what it added (at most PREWARM_MAX_ROUNDS). Each step is reported to the splash (SplashNarrator), which shows
          * PREWARM as OPTIMIZING GRAPHICS with a plain subtitle; units an earlier warm-up readied pass in a few milliseconds. The reveal path
          * posts the "ready" step (PostPrewarmStatus) right before the fade, and the splash shows READY. One pass runs at a
@@ -7593,12 +8021,28 @@ declare namespace TOOLKIT {
         private static BeginPrewarmShowing;
         /**
          * The pass behind PrepareGameAsync (one at a time per scene): rounds of RunRevealRoundAsync, each after the scene loads in flight
-         * finished, again while a load finished during the round (at most PREWARM_MAX_ROUNDS), then a last wait for the loads still in
-         * flight. The rounds' counts add up. Never rejects.
+         * finished, again while a load finished during the round or a mesh no warm-up has seen was created during it (HasUnwarmedMeshes;
+         * at most PREWARM_MAX_ROUNDS), then a last wait for the loads still in flight. The rounds' counts add up. Never rejects.
          * @param scene - The scene about to be revealed.
          * @returns The summed counts of every round (timedOut when any round timed out).
          */
         private static RunRevealPassAsync;
+        /**
+         * True when the scene holds a mesh no warm-up has readied or given up on yet (WarmedUnits) that a reveal-time round would warm: an
+         * enabled, visible mesh, or - with WarmHiddenMeshesOnReveal - a disabled or invisible one (CollectMeshes, CollectHiddenMeshes). A
+         * round collects its units when it starts, so a mesh created while it ran (a particle mesh renderer built by a component that
+         * awoke during the round) was never compiled and drew its shaders after the reveal.
+         * @param scene - The scene being prewarmed.
+         * @returns True when another round has something to warm.
+         */
+        private static HasUnwarmedMeshes;
+        /**
+         * The unit target that stands for a mesh checked as hidden content (IsHiddenMeshReady), the same object every round, so that check
+         * runs once whatever an earlier warm-up did with the mesh itself.
+         * @param mesh - The hidden mesh.
+         * @returns Its stand-in object.
+         */
+        private static HiddenUnitOf;
         /**
          * Waits while a toolkit scene load is in flight for the scene (SceneManager.IsSceneLoadComplete), reporting the "loading" step every
          * PREWARM_LOAD_POLL_MS (the loads report their own progress to the splash).
@@ -7661,11 +8105,16 @@ declare namespace TOOLKIT {
         private static MapPrefabCopyMeshes;
         /** Disabled or invisible non-instanced meshes with sub-meshes and a material. */
         private static CollectHiddenMeshes;
-        /** True when the effect layer (glow, highlight) has compiled its effect for every enabled, visible mesh it draws. */
+        /**
+         * True when the effect layer (glow, highlight) has compiled its effect for every enabled, visible mesh it draws. A hidden mesh the
+         * layer will include once shown is checked by its own unit (IsHiddenMeshReady).
+         */
         private static IsEffectLayerReady;
         /**
          * Stage 1 of RunAsync: polls every unit until all are ready, the deadline passes or the scene is disposed. Optional units are given up
-         * OPTIONAL_UNIT_GRACE_MS after every required unit is ready (they then count as ready, named once in the console in development builds).
+         * OPTIONAL_UNIT_GRACE_MS after every required unit is ready and no unit became ready since: each unit that becomes ready restarts the
+         * grace, so units still finishing are waited for and a stalled one is given up (they then count as ready, named once in the console
+         * in development builds). No optional unit is given up before every required unit is ready, nor before a poll has checked it.
          * `onProgress` gets the ready and total units after each poll, and for a reveal-time pass (options) the PREWARM step (CurrentEffectStep).
          * Each unit is checked in the render pass of every camera of the pass (PassCameras).
          */
@@ -7679,6 +8128,7 @@ declare namespace TOOLKIT {
          * @param unitReady - Which units are ready, by index; updated in place.
          * @param pollDeadline - SceneShaderWarmup.NowMs() after which no further unit is checked in this poll.
          * @param cameras - The cameras whose render passes are checked (PassCameras); none checks the current pass.
+         * @param unitChecked - Marks each unit this poll checked, by index (null: not recorded).
          * @returns How many units became ready in this check.
          */
         private static CheckUnits;
@@ -7716,7 +8166,13 @@ declare namespace TOOLKIT {
         private static CollectWarmCameras;
         /**
          * Marks every optional unit still not ready as ready (given up; remembered in WarmedUnits so a later reveal does not wait on it
-         * again - the safety net covers it) and names them once in development builds.
+         * again - the safety net covers it) and names them once in development builds. With `unitChecked`, a unit no poll has reached
+         * yet is kept: giving it up would leave its shaders never started (a poll's time budget reaches a long list of hidden units over
+         * several polls), so it is checked, at least once, by a later poll.
+         * @param units - The stage's units.
+         * @param unitReady - Which units are ready, by index; updated in place.
+         * @param unitChecked - Which units a poll has checked, by index (null: every unit counts as checked).
+         * @returns How many units were given up.
          */
         private static GiveUpOptionalUnits;
         /**
@@ -7741,7 +8197,8 @@ declare namespace TOOLKIT {
         static LogLateCompileSummary(scene: BABYLON.Scene): void;
         /**
          * Records that the scene's splash screen is being revealed (SceneManager.HideSplashScreen and the engine.html loader call it),
-         * and tells SceneManager.OnSceneRevealedObservable (play-on-awake audio waits for it).
+         * and tells SceneManager.OnSceneRevealedObservable (play-on-awake audio waits for it). Releases the load-time copies the
+         * running scene no longer needs (SceneLoadCaches.ReleaseAtReveal).
          * Starts the late-compile detector (development builds) and, on WebGPU, the no-freeze safety net; both end with the scene.
          * Once per scene; later calls do nothing.
          * @param scene - The scene being revealed.
@@ -7790,6 +8247,18 @@ declare namespace TOOLKIT {
         private static IsParticleSystemDisposed;
         /** The particle stage of a reveal-time pass: idle participants, and idle plain systems that no participant owns. */
         private static CollectParticleWarmups;
+        /**
+         * Runs the particle stage (DrawParticleSystemsOnceAsync) once per camera phase, each phase drawing only its camera(s)
+         * (SwapDrawnCameras), so each camera draws the systems as it does in play: its own image processing set up, with no switch of the
+         * scene-wide setting inside a frame (a particle component that builds its effect while updating reads that setting). Stops after a
+         * phase that timed out. The progress runs on across the phases; the outcome is the last phase's, timed out when any phase was.
+         * @param scene - The scene being prepared.
+         * @param batch - The stage (CollectParticleWarmups).
+         * @param phases - The camera phases, in order (WarmCameraPhases); null draws the game's own camera(s).
+         * @param onProgress - Called with the finished and total units, scaled over the phases.
+         * @returns What the last phase run did.
+         */
+        private static DrawParticleSystemsPerCameraAsync;
         /**
          * Draws the stage's systems once behind the splash: plain systems emit one invisible particle (zero colour, zero quad scale, D8) and
          * participants start their own warm draw; each stays drawn for PARTICLE_WARM_FRAMES rendered frames (its effect compiled, its GPU
@@ -7868,6 +8337,58 @@ declare namespace TOOLKIT {
          * @returns True when ready.
          */
         private static IsOutlineReady;
+        /**
+         * True when a disabled or invisible mesh is ready in every pass it will draw in once the game shows it, on both engines: its main
+         * pass (IsMeshReady, which includes the pre-pass outputs of the camera's material defines), the shadow-caster effect of every shadow
+         * generator whose map casts it (IsShadowCasterReady: casting does not depend on the lights that light the mesh), the effect layers
+         * that will include it (IsReadyInEffectLayers) and the scene's depth renderers (IsReadyInDepthRenderers). Nothing is enabled.
+         * Every check runs, even after one is not ready, so all of them start compiling in the same poll.
+         * @param mesh - The hidden mesh.
+         * @returns True when ready in every pass (a disposed mesh, or a check that throws, counts as ready).
+         */
+        private static IsHiddenMeshReady;
+        /**
+         * True when every shadow generator of the scene whose shadow map casts the mesh (its renderList holds the mesh, or it has no
+         * renderList) has compiled its depth effect for each of the mesh's sub-meshes in each of the map's render passes (one per cascade or
+         * cube face). Mesh.isReady checks only the generators of the lights that light the mesh, so a caster outside a light's per-object
+         * selection compiled its shadow effect the first time it cast. engine.currentRenderPassId is restored.
+         * @param mesh - The mesh.
+         * @returns True when ready (a check that throws counts as ready).
+         */
+        private static IsShadowCasterReady;
+        /**
+         * True when one shadow generator has compiled the mesh's depth effect in every render pass of its map, or does not cast the mesh.
+         * Leaves engine.currentRenderPassId on the last pass checked (IsShadowCasterReady restores it).
+         * @param engine - The scene's engine.
+         * @param generator - The shadow generator.
+         * @param mesh - The mesh.
+         * @param useInstances - True when the mesh draws with hardware instances.
+         * @returns True when ready or not cast by this generator.
+         */
+        private static IsCasterReadyForGenerator;
+        /**
+         * True when every effect layer of the scene that will include the mesh (glow, highlight: EffectLayer.hasMesh) has compiled its
+         * effect for each of the mesh's sub-meshes, checked in the layer's own render pass as Scene.isReady checks an enabled mesh.
+         * engine.currentRenderPassId is restored.
+         * @param mesh - The mesh.
+         * @returns True when ready (a layer whose check throws counts as ready).
+         */
+        private static IsReadyInEffectLayers;
+        /**
+         * True when every enabled depth renderer of the scene (scene.enableDepthRenderer: depth of field, SSAO, soft particles) has
+         * compiled its depth effect for each sub-mesh it would draw (a sub-mesh with a material that writes depth and has vertices), as
+         * Scene.isReady checks an enabled mesh.
+         * @param mesh - The mesh.
+         * @returns True when ready (a renderer whose check throws counts as ready).
+         */
+        private static IsReadyInDepthRenderers;
+        /**
+         * True when the mesh draws with hardware instances (thin instances, or instances on an engine that supports them), the rule
+         * Scene.isReady uses for its per-mesh stages.
+         * @param mesh - The mesh.
+         * @returns True for an instanced draw.
+         */
+        private static UsesHardwareInstances;
         /** Milliseconds from performance.now() (Date.now() where performance is missing). */
         private static NowMs;
         /** Share of the warm-up fraction the effect stage fills when a pipeline stage follows (RunAsync). */
@@ -8000,7 +8521,8 @@ declare namespace TOOLKIT {
          * Gives every mesh of the scene that holds a thin-instance matrix buffer but no instance (a particle mesh renderer between
          * bursts, a pool drawn later) one zero-scale placeholder instance for the round (WarmEmptyThinInstancesOnReveal), so the round
          * compiles - and on WebGPU draws - the instanced variant the mesh is drawn with once instances show (INSTANCES, THIN_INSTANCES,
-         * INSTANCESCOLOR): without instances a mesh is compiled as a plain mesh. The buffer's first matrix is kept and put back.
+         * INSTANCESCOLOR): without instances a mesh is compiled as a plain mesh. Its attributes are marked dirty, so defines prepared before
+         * (without instances) are read again. The buffer's first matrix is kept and put back.
          * @param scene - The scene being prewarmed.
          * @returns The placeholders to remove at the end of the round (RemoveThinInstancePlaceholders).
          */
@@ -8037,6 +8559,99 @@ declare namespace TOOLKIT {
          * @param shown - What ShowHiddenMeshesForDraws changed.
          */
         private static RestoreHiddenMeshes;
+        /**
+         * Makes every shadow map that casts one of the shown hidden meshes (its renderList holds the mesh, or it has none) draw it during the
+         * pipeline stage even when the map's custom render list would leave it out: a caster culling list (LightingConversions'
+         * cascade and range culling) drops a mesh outside the pass, and a pooled copy resting far from the camera then built its
+         * shadow pipeline the first time it cast during play. The map's own getCustomRenderList is wrapped (its result gets the
+         * missing casters appended, as a new array) and every shadow map renders again on the next frame, so a render-once map draws
+         * them too. RestoreShadowCasterLists undoes it.
+         * @param scene - The scene being prewarmed.
+         * @param shown - The hidden meshes the stage draws (ShowHiddenMeshesForDraws).
+         * @returns What was wrapped, for RestoreShadowCasterLists.
+         */
+        private static KeepHiddenCastersInShadowMaps;
+        /**
+         * Gives each shadow map KeepHiddenCastersInShadowMaps wrapped its own custom render list back (left alone when something else
+         * replaced it meanwhile).
+         * @param wraps - What KeepHiddenCastersInShadowMaps wrapped.
+         */
+        private static RestoreShadowCasterLists;
+        /** Frames each material of a material variant is drawn for in a row by the pipeline stage (AlternateMaterialVariants). */
+        private static readonly MATERIAL_VARIANT_FRAMES;
+        /** Per scene: meshes that also draw with another material during play (WarmMaterialVariant). */
+        private static readonly MaterialVariants;
+        /**
+         * Registers a material a mesh will also draw with during play - a copy of its material another system swaps in (a reflection
+         * probe's copy, ReflectionProbeVolumes) - so the next reveal-time pass compiles the mesh with it in every pass it draws in
+         * (IsHiddenMeshReady, the material swapped in for the check only) and, on WebGPU, draws it on every other frame of the pipeline
+         * stage. The mesh keeps its own material; nothing is enabled. A pair is registered once.
+         * @param mesh - The mesh.
+         * @param material - The other material.
+         */
+        static WarmMaterialVariant(mesh: BABYLON.AbstractMesh, material: BABYLON.Material): void;
+        /**
+         * The scene's registered material variants whose mesh and material still exist (the others are dropped).
+         * @param scene - The scene.
+         * @returns The variants.
+         */
+        private static CollectMaterialVariants;
+        /**
+         * True when a mesh is ready with its variant material in every pass it draws in: the variant is swapped in for the check and
+         * the mesh's own material put back at once.
+         * @param variant - The variant.
+         * @returns True when ready.
+         */
+        private static IsMaterialVariantReady;
+        /**
+         * IsHiddenMeshReady for the mesh's scaling state now and, for a mesh whose scale changes during play (a WarmScaleVariants mesh),
+         * for its other NONUNIFORMSCALING state too: a material variant is drawn in either.
+         * @param mesh - The mesh.
+         * @returns True when ready in every state checked.
+         */
+        private static IsReadyInBothScaleStates;
+        /**
+         * Makes the frames of the reveal-time pipeline stage draw each material variant not drawn yet and the mesh's own material in
+         * turn, MATERIAL_VARIANT_FRAMES frames each (so each is drawn in both states of a scale variant that switches every frame), and
+         * the GPU pipelines of both are built behind the splash.
+         * @param scene - The scene being prewarmed.
+         * @returns What to undo (RestoreMaterialVariants), or null when there is no variant to draw.
+         */
+        private static AlternateMaterialVariants;
+        /**
+         * Ends AlternateMaterialVariants: each mesh draws its own material again (left alone when other code gave it another one
+         * meanwhile) and its variant counts as drawn.
+         * @param scene - The scene being prewarmed.
+         * @param draw - What AlternateMaterialVariants changed (null: nothing).
+         */
+        private static RestoreMaterialVariants;
+        /** Per scene: the effects it keeps compiled (PinEffect), released when the scene is disposed. */
+        private static readonly PinnedEffects;
+        /**
+         * Keeps every effect the scene's engine has compiled so far (at each reveal-time round and at the reveal): Babylon releases an
+         * effect once no draw wrapper holds it - a mesh given another material (a reflection probe's copy, an Animator's clone) resets
+         * its draw cache - and the next draw that needs it compiled it again after the reveal, the very shader the warm-up made.
+         * @param scene - The scene.
+         */
+        private static PinCompiledEffects;
+        /**
+         * Keeps the effects a mesh's sub-meshes hold in every render pass (main, shadow, effect layer, depth) - before the warm-up swaps
+         * its material, which would otherwise release them.
+         * @param mesh - The mesh.
+         */
+        private static PinMeshEffects;
+        /**
+         * Takes one reference on an effect for the scene (once), so Babylon never releases it while the scene lives; the scene's
+         * disposal gives every reference back.
+         * @param scene - The scene.
+         * @param effect - The effect (null or a released one is ignored).
+         */
+        private static PinEffect;
+        /**
+         * Gives back the scene's references on its pinned effects (an effect nothing else holds is released).
+         * @param scene - The disposed scene.
+         */
+        private static UnpinEffects;
         /** A render id no frame has: a sub-mesh's defines marked with it are checked again (ForgetReadyThisFrame). */
         private static readonly NO_RENDER_ID;
         /** The stand-in unit target of each mesh's other scaling variant (WarmedUnits remembers it across rounds). */
@@ -8116,36 +8731,47 @@ declare namespace TOOLKIT {
          */
         private static RestoreHiddenEmitters;
         /**
-         * Makes every frame of the reveal-time pipeline stage draw each warm camera in its own render pass: scene.activeCameras is set to
-         * the active camera(s) followed by the other warm cameras. scene.activeCamera is never assigned. Babylon leaves it on the last
-         * camera it drew, so after every frame it is put back quietly (no onActiveCameraChanged) to the game's camera: the one active
-         * before the stage, or the one the game switched to since (KeepGameCameraSwitch). Assigning scene.activeCameras notifies nothing
-         * (Babylon's onActiveCamerasChanged fires on array changes only). Pushing into or splicing scene.activeCameras during the stage
-         * edits the swapped-in array and is not carried over to the restored one.
-         * @param scene - The scene being prewarmed.
-         * @param warmCameras - The pass's cameras (CollectWarmCameras); null or none beyond the active camera(s) changes nothing.
-         * @returns What was changed, for RestoreWarmCameras (null when nothing was).
+         * Makes every frame draw exactly the cameras given, in order, each in its own render pass, until RestoreWarmCameras: scene.activeCameras
+         * is set to them. The game's camera stays scene.activeCamera for the game: before each frame the first camera drawn is made active
+         * quietly (no onActiveCameraChanged), so Babylon's own assignment of scene.activeCameras[0] finds it in place, and after the frame the
+         * game's camera is put back quietly (the one active before, or the one the game switched to since: KeepGameCameraSwitch).
+         * Likewise scene.imageProcessingConfiguration.applyByPostProcess, which Babylon's pre-pass renderer sets for each camera it draws:
+         * between frames it holds the game's value, so game code reading it while it updates (a particle component building its effect)
+         * sees what it sees in play, and before the draws it gets back the value the drawn camera left, so the pre-pass renderer finds
+         * nothing to change and no material is marked dirty. Both values are set quietly (no observer notified). Assigning
+         * scene.activeCameras notifies nothing (Babylon's onActiveCamerasChanged fires on array changes only).
+         * @param scene - The scene being prewarmed (between two frames, its image processing set up for the game's camera).
+         * @param drawnCameras - The cameras every frame draws, first one first (none disposed).
+         * @returns What was changed, for RestoreWarmCameras.
          */
-        private static DrawWarmCameras;
+        private static SwapDrawnCameras;
         /**
          * Keeps a camera switch the game made during the pipeline stage (scripts keep running behind the splash): the new camera is the one
          * put back after each frame and at the restore, and it is drawn first, so Babylon's own per-frame activeCamera assignment (to
          * scene.activeCameras[0]) matches it and never notifies. Babylon's switching between the drawn cameras is quiet, so only a real
          * switch (or Babylon's removeCamera) arrives here.
          * @param scene - The scene being prewarmed.
-         * @param swap - The running swap (DrawWarmCameras).
+         * @param swap - The running swap (SwapDrawnCameras).
          */
         private static KeepGameCameraSwitch;
         /**
-         * Undoes DrawWarmCameras: scene.activeCameras gets back the very value it had (null stays null, the same array object otherwise)
-         * and scene.activeCamera the game's camera (the one active before the stage, or the one the game switched to since), quietly. A
+         * Undoes SwapDrawnCameras: scene.activeCameras gets back the very value it had (null stays null, the same array object otherwise),
+         * scene.activeCamera the game's camera (the one active before the stage, or the one the game switched to since) and
+         * scene.imageProcessingConfiguration.applyByPostProcess the game camera's value, quietly. A
          * camera removed from the scene during the stage is dropped from the restored array, as Babylon's removeCamera would have done.
          * Left alone when the scene was disposed (Babylon's dispose clears both; restoring would bring disposed cameras back) and when
          * something else assigned scene.activeCameras meanwhile; activeCamera is then left where the last frame left it.
          * @param scene - The scene being prewarmed.
-         * @param swap - What DrawWarmCameras changed (null: nothing).
+         * @param swap - What SwapDrawnCameras changed (null: nothing).
          */
         private static RestoreWarmCameras;
+        /**
+         * Sets scene.imageProcessingConfiguration.applyByPostProcess without notifying its observers (no material is marked dirty), as a
+         * camera swap of the pipeline and particle stages holds it between frames (SwapDrawnCameras).
+         * @param scene - The scene.
+         * @param applyByPostProcess - The value to hold.
+         */
+        private static SetApplyByPostProcessQuietly;
         /**
          * Sets scene.activeCamera without notifying onActiveCameraChanged, as Babylon itself switches it while drawing several cameras.
          * Null is set too (the game cleared its camera); a camera no longer in the scene is not.
@@ -8157,6 +8783,41 @@ declare namespace TOOLKIT {
         private static SkipFrustumClipping;
         /** Restores the frustum clipping SkipFrustumClipping changed (left alone when something else changed it meanwhile). */
         private static RestoreFrustumClipping;
+        /**
+         * The camera sets the reveal-time pipeline stage draws one after another: first the game's own camera(s) as they are (null: no
+         * swap), then every other warm camera on its own. A camera drawn alone is drawn as it is in play, as the first camera of its frame,
+         * so its image processing is set up as in play (Babylon's pre-pass renderer chooses scene.imageProcessingConfiguration.applyByPostProcess
+         * per camera, and only for the first one). Drawing them all in every frame flipped that scene-wide setting once per camera, and each
+         * flip marked every submesh of every material dirty: on a scene of about a thousand materials that cost about one second of main
+         * thread per frame, and the stage drew a dozen such frames.
+         * @param scene - The scene being prewarmed.
+         * @param warmCameras - The pass's cameras (CollectWarmCameras); null or none beyond the active camera(s) gives the game's cameras only.
+         * @returns The phases in drawing order; null stands for the game's own camera(s).
+         */
+        private static WarmCameraPhases;
+        /**
+         * Runs WaitForPipelines once per camera phase (WarmCameraPhases), each phase drawing only its camera(s) (SwapDrawnCameras), until
+         * every phase is quiet or the deadline passes. The progress counts run on across the phases.
+         * @param scene - The scene being prewarmed.
+         * @param pipelines - The engine's asynchronous pipeline state.
+         * @param deadline - SceneShaderWarmup.NowMs() after which the stage stops waiting.
+         * @param phases - The camera phases, in order; null draws the game's own camera(s).
+         * @param onProgress - Called after each frame with the compiled and requested pipeline counts.
+         * @returns Resolves true when the deadline passed before every phase was quiet.
+         */
+        private static WaitForPipelinesPerCamera;
+        /**
+         * Runs one step per camera phase, in order: each phase's camera(s) are swapped in (SwapDrawnCameras; a null phase keeps the game's
+         * own cameras) for the whole step and put back after it (RestoreWarmCameras). A phase whose cameras were all disposed meanwhile is
+         * skipped; the run stops after a step that `isTimedOut` says timed out, or once the scene is disposed.
+         * @param scene - The scene being prewarmed.
+         * @param phases - The camera phases (WarmCameraPhases).
+         * @param noPhaseRun - The result when no step runs.
+         * @param runStep - Runs the phase's step (it may render frames) and resolves with its result.
+         * @param isTimedOut - True for a step result that ends the run.
+         * @returns The last step's result.
+         */
+        private static RunCameraPhasesAsync;
         /**
          * Renders frames (the render loop keeps running) until the scene's draws request no new pipeline for PIPELINE_SETTLE_FRAMES
          * frames and none is still compiling, or the deadline passes. Reports `onProgress(compiled, requested)` after each frame.
@@ -8240,14 +8901,20 @@ declare namespace TOOLKIT {
         /** The engine's asynchronous pipeline state the safety net holds for the scene (null when off or on WebGL). */
         pipelines: TOOLKIT.IAsyncPipelineState;
     }
-    /** @hidden The cameras a reveal-time pipeline stage draws instead of the active ones (SceneShaderWarmup.DrawWarmCameras). */
+    /** @hidden The cameras a reveal-time pipeline stage draws instead of the active ones (SceneShaderWarmup.SwapDrawnCameras). */
     interface IWarmCameraSwap {
         /** scene.activeCameras before the stage, the same array object (null when it was null). */
         previousActiveCameras: BABYLON.Camera[];
         /** The game's camera: scene.activeCamera before the stage, or the one the game switched to during it. */
         previousActiveCamera: BABYLON.Camera;
-        /** The array scene.activeCameras holds during the stage: the game's camera(s), then every other warm camera. */
+        /** The array scene.activeCameras holds during the stage: the cameras it draws (the game's camera(s) first when it draws them). */
         drawnCameras: BABYLON.Camera[];
+        /** scene.imageProcessingConfiguration.applyByPostProcess for the game's camera, held between frames during the stage. */
+        gameApplyByPostProcess: boolean;
+        /** applyByPostProcess as the last frame's draws left it, given back before the next frame's draws. */
+        drawnApplyByPostProcess: boolean;
+        /** The before-render observer that makes the first drawn camera active quietly before each frame (null once removed). */
+        drawObserver: BABYLON.Observer<BABYLON.Scene>;
         /** The after-render observer that puts scene.activeCamera back after each frame (null once removed). */
         frameObserver: BABYLON.Observer<BABYLON.Scene>;
         /** The onActiveCameraChanged observer that keeps a game's camera switch (KeepGameCameraSwitch; null with several active cameras or once removed). */
@@ -8404,6 +9071,18 @@ declare namespace TOOLKIT {
         /** Sets the state. */
         _updateNonUniformScalingState(value: boolean): boolean;
     }
+    /** @hidden An effect layer's main render target (EffectLayer._mainTexture, 9.30): the render pass its effects are checked in. */
+    interface IEffectLayerTarget {
+        /** The layer's main texture. */
+        _mainTexture?: BABYLON.RenderTargetTexture;
+    }
+    /** @hidden A scene with Babylon's depth renderers (scene.enableDepthRenderer), keyed by camera id. */
+    interface IDepthRendererScene {
+        /** The depth renderers. */
+        _depthRenderer?: {
+            [key: string]: BABYLON.DepthRenderer;
+        };
+    }
     /** @hidden The readiness check of Babylon's outline renderer (renderOutline / renderOverlay). */
     interface IOutlineReadiness {
         /** True when the outline shader for the sub-mesh is compiled (starts compiling it otherwise). */
@@ -8451,6 +9130,59 @@ declare namespace TOOLKIT {
         /** Its visibility before the stage. */
         wasVisible: boolean;
     }
+    /** @hidden A material a mesh also draws with during play (SceneShaderWarmup.WarmMaterialVariant); also its warm-up unit target. */
+    interface IMaterialVariant {
+        /** The mesh. */
+        mesh: BABYLON.AbstractMesh;
+        /** The other material. */
+        material: BABYLON.Material;
+        /** True once a reveal-time pipeline stage drew it. */
+        drawn: boolean;
+    }
+    /** @hidden The reveal-time pipeline stage's alternation of material variants (AlternateMaterialVariants). */
+    interface IMaterialVariantDraw {
+        /** Each variant drawn, with the mesh's own material when the stage began. */
+        entries: {
+            variant: TOOLKIT.IMaterialVariant;
+            ownMaterial: BABYLON.Material;
+        }[];
+        /** True while the current frames draw the variants. */
+        drawingVariant: boolean;
+        /** Frames the stage has drawn so far. */
+        frames: number;
+        /** The frame observer that switches the materials. */
+        frameObserver: BABYLON.Observer<BABYLON.Scene>;
+    }
+    /** @hidden An engine's cache of compiled effects (9.30), keyed by shader names and defines. */
+    interface IEffectCacheEngine {
+        /** The compiled effects. */
+        _compiledEffects?: {
+            [key: string]: BABYLON.Effect;
+        };
+    }
+    /** @hidden Babylon's reference count of an effect (9.30): it is released when the count reaches 0. */
+    interface IPinnableEffect {
+        /** Holders of the effect. */
+        _refCount: number;
+        /** True once released. */
+        _isDisposed: boolean;
+    }
+    /** @hidden A sub-mesh's draw wrappers, one per render pass (9.30). */
+    interface ISubMeshDrawWrappers {
+        /** The wrappers, indexed by render pass id. */
+        _drawWrappers?: BABYLON.DrawWrapper[];
+    }
+    /** @hidden A render target's custom render list (RenderTargetTexture.getCustomRenderList). */
+    type CustomRenderListFunction = (layerOrFace: number, renderList: readonly BABYLON.AbstractMesh[], renderListLength: number) => BABYLON.AbstractMesh[];
+    /** @hidden A shadow map whose custom render list the reveal-time pipeline stage wrapped (KeepHiddenCastersInShadowMaps). */
+    interface IShadowCasterListWrap {
+        /** The shadow map. */
+        shadowMap: BABYLON.RenderTargetTexture;
+        /** Its own custom render list. */
+        customList: TOOLKIT.CustomRenderListFunction;
+        /** The wrapper that keeps the shown hidden casters. */
+        keptList: TOOLKIT.CustomRenderListFunction;
+    }
     /** @hidden A hidden copy one reveal-time pass draws. */
     interface IPrefabWarmCopy {
         /** The cloned prefab root (CloneAssetContainerItem path; null otherwise). */
@@ -8462,7 +9194,7 @@ declare namespace TOOLKIT {
     interface IWarmupUnit {
         /** The object warmed (mesh, post process, effect layer or render target); WarmedUnits remembers it. */
         target: object;
-        /** True for a unit the warm-up gives up on OPTIONAL_UNIT_GRACE_MS after every required unit is ready. */
+        /** True for a unit the warm-up gives up on OPTIONAL_UNIT_GRACE_MS after every required unit is ready and no unit became ready since. */
         optional: boolean;
         /** Name shown when the warm-up gives up on it. */
         name: string;
@@ -9144,6 +9876,52 @@ declare namespace TOOLKIT {
 }
 declare namespace TOOLKIT {
     /**
+     * Stores the bone matrices of small skeletons in shader uniforms instead of a bone texture, on WebGPU and WebGL2.
+     *
+     * Babylon keeps a material's textures in one material context shared by every mesh that uses the material, and binds a
+     * skinned mesh's bone texture (`boneSampler`) into it at each draw. Unity scenes export many skinned renderers that share a
+     * material but each own a small skeleton (a swaying tree, an item box, a gondola: one root bone each), so every one of
+     * those draws swaps the shared context's bone texture. On WebGPU that marks the draw's bind groups dirty and Babylon walks
+     * its bind-group cache for the draw again, a walk that turns each texture id into a string key allocated in the old
+     * generation: about 0.9 MB of garbage a second on Water Park, which grew the heap until a major collection paused a frame
+     * in the second lap.
+     *
+     * A skeleton of at most `MAX_UNIFORM_BONES` bones keeps its matrices in the `mBones` uniform array instead (Babylon's
+     * other bone path, the same math and the same look): no per-mesh texture is bound, the shared context stays clean and
+     * the draws reuse their bind groups. It also drops one bone-texture upload per small skeleton per frame. Larger skeletons
+     * (characters) keep the texture, which has no uniform-count limit.
+     *
+     * The choice is made once the skeleton has its bones, before any material compiles for it, so the shader warm-up
+     * compiles the uniform variant and no late compile follows: the toolkit's own copies (prefab and container instances,
+     * warm-up copies) decide right after cloning (`Apply` / `ApplyAll`), and every other skeleton a microtask after Babylon
+     * adds it to the scene (the glTF loader and `Skeleton.clone` add every bone synchronously after the constructor).
+     * @class SkeletonBoneStorage - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class SkeletonBoneStorage {
+        /** The largest bone count whose matrices are kept in uniforms (a few matrices per draw, far inside every device's limit). */
+        static readonly MAX_UNIFORM_BONES: number;
+        /**
+         * Installs the rule for a scene: the skeletons it already has and every skeleton added later (loads, prefab copies,
+         * pooled items). Idempotent.
+         * @param scene The scene being loaded.
+         */
+        static InstallForScene(scene: BABYLON.Scene): void;
+        /**
+         * Moves a small skeleton's bone matrices from the bone texture to uniforms. A skeleton with no bones yet, more than
+         * `MAX_UNIFORM_BONES` bones, or already on uniforms is left as it is.
+         * @param skeleton The skeleton.
+         * @returns True when the skeleton was switched to uniforms.
+         */
+        static Apply(skeleton: BABYLON.Skeleton): boolean;
+        /**
+         * Applies the rule to every skeleton of a freshly made copy (for example `instantiateModelsToScene`'s skeletons).
+         * @param skeletons The skeletons, or null.
+         */
+        static ApplyAll(skeletons: BABYLON.Skeleton[]): void;
+    }
+}
+declare namespace TOOLKIT {
+    /**
      * Draws a skybox at the far plane, like Unity's skybox draw: clip z = w x (1 - 1e-6), so no part of the sky mesh is
      * ever cut by the camera's far clip (the exported sky box reaches the far plane, and a graph sky's mesh lies beyond
      * it) and everything nearer than the far plane draws over it whatever the draw order.
@@ -9732,12 +10510,23 @@ declare namespace TOOLKIT {
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
+    /** The per-copy ids one spawn hands out, shared by every node that spawn copies. */
+    interface ICloneIdentityRemap {
+        /** Original id → this spawn's new id, for vertex controllers, timeline keys and animators. */
+        newIds: {
+            [originalId: string]: string;
+        };
+        /** The original animator ids found on the spawn's nodes, in the order first seen. */
+        sourceAnimatorIds: string[];
+    }
     /**
      * Babylon Utility Classes
      * @class Utilities - All rights reserved (c) 2024 Mackey Kinard
      */
     class Utilities {
         private static UpVector;
+        /** The component properties that hold a per-instance id: vertex animation controllers and timeline keys. */
+        private static readonly CloneIdentityPropertyKeys;
         private static AuxVector;
         private static ZeroVector;
         private static TempMatrix;
@@ -9994,6 +10783,18 @@ declare namespace TOOLKIT {
         /** TODO */
         static ParseChildTransform(parent: BABYLON.TransformNode, source: TOOLKIT.IUnityTransform, defaultValue?: BABYLON.TransformNode): BABYLON.TransformNode;
         /**
+         * Runs code that creates a new material (a `material.clone()`) with the scene's material dirty mechanism held, and gives back
+         * what it returned. Every property setter of a material walks every sub-mesh of the scene to mark the ones that use it
+         * dirty; a clone is made by setting each property in turn, so on a 1,500-mesh track one clone cost about 100 ms of walks
+         * that found nothing (the new material is on no mesh yet). Released without Babylon's "complete update" (the public
+         * `scene.blockMaterialDirtyMechanism = false` marks every material of the scene dirty). Only for code that creates
+         * materials: a change to an existing material made inside `create` would not mark its meshes dirty.
+         * @param scene - The scene the material is created in.
+         * @param create - Creates the material(s) and returns the result.
+         * @returns What `create` returned.
+         */
+        static CreateMaterialsHeld<T>(scene: BABYLON.Scene, create: () => T): T;
+        /**
          * The node's world matrix, up to date now - the result of computeWorldMatrix(true) without its cost to the rest of
          * the scene. A forced recompute also forces every ancestor and marks each one updated, which puts every other node
          * under those ancestors out of date: one forced call per frame on a prop of a level makes the whole level recompute
@@ -10149,6 +10950,45 @@ declare namespace TOOLKIT {
          * @returns the transform node that was duplicated
          */
         static CloneAssetContainerItem(container: BABYLON.AssetContainer, assetName: string, nameFunction?: (sourceName: string) => string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, makeNewMaterials?: boolean, cloneAnimations?: boolean, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.TransformNode;
+        /**
+         * Gives one copied node its per-copy identity. Records the design time node id as sourceid (copies get brand
+         * new node ids, so serialized guid references can only be resolved back to copied nodes through it), then
+         * remaps the vertex animation controller ids, timeline keys and animator id through the spawn's shared remap,
+         * so every node of one copy agrees on the new ids and different copies never share a controller, a director
+         * or an Animator. Acts only when the copy carries toolkit metadata. (Internal Use Only)
+         * @param source defines the container node the copy was made from
+         * @param clone defines the copied node, whose metadata must already be its own (never the source's object)
+         * @param remap defines the per-spawn remap shared by every node one spawn copies
+         */
+        static RemapCloneIdentity(source: BABYLON.Node, clone: BABYLON.Node, remap: TOOLKIT.ICloneIdentityRemap): void;
+        /**
+         * Records the design time node id on the copy: the source's own sourceid when it has one, else the source's id.
+         * @param source defines the container node the copy was made from
+         * @param cloneToolkit defines the copy's toolkit metadata
+         */
+        private static RecordCloneSourceId;
+        /**
+         * Remaps the vertex animation controller ids and timeline keys of the copy's components. The
+         * TOOLKIT.VertexAnimationController registry is keyed by the vertexcontroller guid, so without a remap every
+         * copy would share one controller (one playback clock and one renderer mesh map) and only the last one would animate.
+         * @param components defines the copy's component list (already the copy's own objects)
+         * @param remap defines the per-spawn remap shared by every node one spawn copies
+         */
+        private static RemapCloneComponentIds;
+        /**
+         * Gives the copy's Animator a new id, recording the original in the remap's source animator ids (in the order
+         * first seen) and the original → new pair in its new ids, so the spawn's animation groups can follow it.
+         * @param cloneToolkit defines the copy's toolkit metadata
+         * @param remap defines the per-spawn remap shared by every node one spawn copies
+         */
+        private static RemapCloneAnimatorId;
+        /**
+         * Gets this spawn's new id for an original id, creating it the first time the original is seen.
+         * @param originalId defines the exported id
+         * @param remap defines the per-spawn remap shared by every node one spawn copies
+         * @returns the new id every node of this spawn shares for the original id
+         */
+        private static GetRemappedCloneId;
         static AssignAnimationGroupsToInstance(root: BABYLON.TransformNode, groups: BABYLON.AnimationGroup[]): void;
         static AssignAnimationGroupsToNode(transform: BABYLON.TransformNode, groups: BABYLON.AnimationGroup[]): void;
         static UnitySlopeAngleToCosine(unitySlopeAngleDegrees: number): number;
@@ -10783,11 +11623,22 @@ declare namespace TOOLKIT {
         /** Computes and applies one mesh's list; touches Babylon only when the list really changed. */
         private select;
         /**
-         * True for a renderer that moves through the scene's lights: skinned, or under a node whose physics body is not
-         * static (karts, thrown items). Its light count is kept stable (SelectLights fillToLimit), so it never compiles a
-         * new shader variant mid-play when it drives into or out of a light's range.
+         * True for a renderer that moves through the scene's lights: skinned, under a node whose physics body is not
+         * static (karts, thrown items), or part of a prefab copy made at run time (a node carrying the design-time id that
+         * `InstantiatePrefabFromContainer` stamps on its clones: pooled items, explosions, effects the game places wherever
+         * they are needed, with or without a body). Its light count is kept stable (SelectLights fillToLimit), so it never
+         * compiles a new shader variant mid-play when it drives into or out of a light's range, or is shown somewhere other
+         * than where the warm-up drew it: a pooled explosion warmed at its rest pose with no lamp in reach compiled a new
+         * variant the first time it went off beside one (Mario Circuit).
          */
         static IsMovingRenderer(mesh: BABYLON.AbstractMesh): boolean;
+        /**
+         * Whether a node belongs to a prefab copy made at run time: `InstantiatePrefabFromContainer` records the design-time
+         * id of the source node on every clone (`metadata.toolkit.sourceid`). Nodes loaded with the scene carry none.
+         * @param node A node.
+         * @returns True for a node of a run-time prefab copy.
+         */
+        private static IsPrefabCopy;
         /** A material draws at most maxSimultaneousLights of a mesh's list: make room for the Unity selection. */
         private static RaiseMaterialLimit;
         /** Throttled: queue meshes that moved, and meshes near lights that moved. */
@@ -13583,6 +14434,8 @@ declare namespace TOOLKIT {
     const FUSION_CONTROL_CONNECT_RESULT: string;
     /** Control message, client to room: the client's area of interest (NetworkAreaPayload, T15). */
     const FUSION_CONTROL_AREA: string;
+    /** Control message: a server notice for the players (NetworkNoticePayload, game-server-admin-console D13). */
+    const FUSION_CONTROL_NOTICE: string;
     /** The game server's public description (GET /game-server/info). */
     interface GameServerInfo {
         /** Always "Babylon Game Server". */
@@ -13677,6 +14530,23 @@ declare namespace TOOLKIT {
     /** Payload of FUSION_CONTROL_SHUTDOWN. */
     interface NetworkShutdownPayload {
         reason: TOOLKIT.ShutdownReason;
+        /** An operator message (admin kick or close), or absent. */
+        message?: string;
+    }
+    /** How prominent a server notice is. */
+    type NetworkNoticeSeverity = "info" | "warning" | "critical";
+    /** Payload of FUSION_CONTROL_NOTICE: a message from the server's operators. */
+    interface NetworkNoticePayload {
+        /** Unique per notice. */
+        noticeId: string;
+        /** The text to show (at most 500 characters). */
+        text: string;
+        /** How prominent the notice is: it picks the banner colour and how long the banner stays. */
+        severity: TOOLKIT.NetworkNoticeSeverity;
+        /** Seconds until the announced event (maintenance), or null. */
+        countdownSeconds: number | null;
+        /** Server time the notice was sent, in milliseconds since the epoch. */
+        sentAtMilliseconds: number;
     }
     /** Payload of FUSION_CONTROL_CONNECT_REQUEST. */
     interface NetworkConnectRequestPayload {
@@ -13696,7 +14566,7 @@ declare namespace TOOLKIT {
         radius: number;
     }
     /** Any control message payload (A16). */
-    type NetworkControlPayload = NetworkWelcome | NetworkPlayerPayload | NetworkHostMigrationPayload | TOOLKIT.SessionInfo | NetworkShutdownPayload | NetworkConnectRequestPayload | NetworkConnectResultPayload | NetworkAreaPayload;
+    type NetworkControlPayload = NetworkWelcome | NetworkPlayerPayload | NetworkHostMigrationPayload | TOOLKIT.SessionInfo | NetworkShutdownPayload | NetworkConnectRequestPayload | NetworkConnectResultPayload | NetworkAreaPayload | NetworkNoticePayload;
     /** A client-to-room envelope, decoded. */
     interface NetworkEnvelope {
         route: NetworkRoute;
@@ -16576,6 +17446,8 @@ declare namespace TOOLKIT {
          * A runner whose callbacks do not handle it shuts down with HostMigration.
          */
         onHostMigration?(runner: NetworkRunner, token: TOOLKIT.HostMigrationToken): void;
+        /** A notice from the server's operators arrived (toolkit only); see NetworkRunner.ShowServerNotices. */
+        onServerNotice?(runner: NetworkRunner, notice: TOOLKIT.NetworkNoticePayload): void;
     }
     /** Key of a reliable data transfer, as the original API's ReliableKey (four int32). */
     type ReliableKey = [number, number, number, number];
@@ -16806,8 +17678,15 @@ declare namespace TOOLKIT {
      * const result = await runner.startGame({ gameMode: TOOLKIT.GameMode.Host, sessionName: "race", inputDefinition: KartInput.definition() });
      */
     class NetworkRunner implements TOOLKIT.NetworkRunnerView {
+        /**
+         * Show server notices and kick/close messages in the built-in NetworkNoticeBanner (toolkit only). Default true; a
+         * game that draws its own from onServerNotice and shutdownMessage sets it false.
+         */
+        static ShowServerNotices: boolean;
         /** Every runner that is starting or running. */
         private static readonly runnerInstances;
+        /** Notice id prefix of the banner a kick or close message shows (game-server-admin-console R27). */
+        private static readonly SHUTDOWN_NOTICE_ID_PREFIX;
         /** Players a session accepts when StartGameArgs does not say. */
         private static readonly DEFAULT_PLAYER_COUNT;
         /** Milliseconds per second. */
@@ -16892,6 +17771,8 @@ declare namespace TOOLKIT {
         private sceneLoading;
         /** The session lobby joined by joinSessionLobby, or null. */
         private sessionLobby;
+        /** The operator message of the last server-side shutdown (admin kick or close), or null. */
+        private lastShutdownMessage;
         /**
          * Creates a runner for a scene. Call startGame to run it.
          * @param scene The scene to simulate.
@@ -16985,6 +17866,8 @@ declare namespace TOOLKIT {
         get simulationTimeScale(): number;
         /** Internal: the Shared-mode master client's player id (0 outside Shared mode). */
         get sharedMasterClientPlayerId(): number;
+        /** The operator message that came with the last server-side shutdown (admin kick or close), or null (toolkit only). */
+        get shutdownMessage(): string | null;
         /** Internal: the player id the server acts as (the host's id; 0 for a dedicated server or a Shared session). */
         get serverPlayerId(): number;
         /**
@@ -17331,11 +18214,25 @@ declare namespace TOOLKIT {
          */
         private handleConnectRequest;
         /**
-         * The session ends for this peer: a joiner still waiting for admission fails its start with the reason (a refused
-         * connect request); a running peer shuts down.
+         * The session ends for this peer: a joiner still waiting for admission fails its start with the reason and the
+         * operator's message (a refused connect request); a running peer keeps the message, shuts down and, while
+         * ShowServerNotices is true, shows a non-empty message in the banner (game-server-admin-console R27).
          * @param reason Why.
+         * @param message The operator message (admin kick or close), or null.
          */
         private handleShutdownControl;
+        /**
+         * A notice from the server's operators: raises onServerNotice, then shows it in the banner while
+         * ShowServerNotices is true.
+         * @param notice The notice.
+         */
+        private handleServerNotice;
+        /**
+         * The banner notice of a kick or close message: critical, so it stays until hidden (R27).
+         * @param message The operator message.
+         * @returns The notice.
+         */
+        private static createShutdownNotice;
         /**
          * The connection closed by itself: raise onDisconnectedFromServer and shut down.
          * @param reason Why it closed.
@@ -18759,8 +19656,15 @@ declare namespace TOOLKIT {
          * Delivers after the simulated delay, in order, or drops an unreliable delivery.
          * @param deliver Makes the delivery.
          * @param channel The delivery's channel.
+         * @param controlName The control message name of a control delivery, or null for a frame (see drainMatching).
          */
-        push(deliver: () => void, channel: TOOLKIT.RpcChannel): void;
+        push(deliver: () => void, channel: TOOLKIT.RpcChannel, controlName?: string | null): void;
+        /**
+         * Makes the queued control deliveries whose name matches now, in queue order, and removes them; the rest stay
+         * queued. A delivery may clear the queue (a delivered shutdown disconnects), which never skips a matched one.
+         * @param predicate True for the control message names to deliver now.
+         */
+        drainMatching(predicate: (controlName: string) => boolean): void;
         /** Forgets every delivery not yet made. */
         clear(): void;
         /** Starts the timer of the next due delivery, unless one is running or nothing waits. */
@@ -18995,8 +19899,24 @@ declare namespace TOOLKIT {
          */
         private receiveControl;
         /**
+         * The start error of a shutdown before the welcome: the reason name and the operator's message, if any
+         * ("DisconnectedByPluginLogic: spam"), which NetworkError.reasonFromMessage reads back.
+         * @param payload The shutdown payload.
+         * @returns The error.
+         */
+        private static shutdownError;
+        /**
+         * True for the control messages a leave must not lose: a kick or close reason and a server notice (R28).
+         * @param controlName The control message name.
+         * @returns True to deliver it before the queue is cleared.
+         */
+        private static isLeaveSurvivingControl;
+        /**
          * The room closed for this client after the welcome. A leave this transport asked for is not reported; anything
-         * else (the server closed, or automatic reconnection gave up) is reported as a disconnect.
+         * else (the server closed, or automatic reconnection gave up) is reported as a disconnect. A queued shutdown or
+         * notice is delivered first (R28): a kick or close arrives just before the server closes the room, and with
+         * simulated latency it is still queued. When that shutdown starts the runner's own disconnect, the leave is not
+         * reported again.
          * @param code The WebSocket close code.
          */
         private handleLeave;
@@ -19570,6 +20490,144 @@ declare namespace TOOLKIT {
          * @returns The projected half length.
          */
         private static projectedRadius;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * The built-in server notice banner (game-server-admin-console D13): a Babylon GUI panel, centred at the top of the
+     * screen, that shows a notice from the server's operators, or the message of an admin kick or close. Its border and
+     * countdown line take the severity's colour; info notices hide after 10 s, warnings after 20 s, and critical ones stay
+     * until hidden. A notice with a countdown shows the time left, refreshed once a second. There is one banner per scene,
+     * and it is disposed with the scene. It is not a runner callback, so it outlives the runner's shutdown (a kick message
+     * stays on screen). It draws only through Babylon GUI (no DOM).
+     *
+     * The runner shows it while NetworkRunner.ShowServerNotices is true; a game that draws its own notices sets that false
+     * and handles onServerNotice and NetworkRunner.shutdownMessage instead.
+     *
+     * @example
+     * TOOLKIT.NetworkNoticeBanner.show(scene, { noticeId: "n1", text: "Maintenance soon", severity: "warning", countdownSeconds: 300, sentAtMilliseconds: Date.now() });
+     * TOOLKIT.NetworkNoticeBanner.hide(scene);
+     */
+    class NetworkNoticeBanner {
+        /** Seconds a banner stays on screen, by severity; 0 keeps it until hidden (R23). */
+        static readonly HIDE_AFTER_SECONDS_BY_SEVERITY: Record<TOOLKIT.NetworkNoticeSeverity, number>;
+        /** Border and countdown colour, by severity. */
+        private static readonly COLOR_BY_SEVERITY;
+        /** The severity used for a value this runtime does not know. */
+        private static readonly FALLBACK_SEVERITY;
+        /** Panel background. */
+        private static readonly BACKGROUND_COLOR;
+        /** Message text colour. */
+        private static readonly TEXT_COLOR;
+        /** Font family. */
+        private static readonly FONT_FAMILY;
+        /** Message font size, in pixels. */
+        private static readonly MESSAGE_FONT_SIZE_PIXELS;
+        /** Countdown font size, in pixels. */
+        private static readonly COUNTDOWN_FONT_SIZE_PIXELS;
+        /** Height of the countdown line, in pixels. */
+        private static readonly COUNTDOWN_HEIGHT_PIXELS;
+        /** Share of the screen width the banner takes. */
+        private static readonly WIDTH_FRACTION;
+        /** Widest banner, in pixels. */
+        private static readonly MAXIMUM_WIDTH_PIXELS;
+        /** Distance from the top of the screen, in pixels. */
+        private static readonly MARGIN_PIXELS;
+        /** Inner padding, in pixels. */
+        private static readonly PADDING_PIXELS;
+        /** Border width, in pixels. */
+        private static readonly BORDER_THICKNESS_PIXELS;
+        /** Corner radius, in pixels. */
+        private static readonly CORNER_RADIUS_PIXELS;
+        /** Seconds per minute, for the countdown's m:ss form. */
+        private static readonly SECONDS_PER_MINUTE;
+        /** Milliseconds per second. */
+        private static readonly MILLISECONDS_PER_SECOND;
+        /** Name of the banner's GUI texture. */
+        private static readonly TEXTURE_NAME;
+        /** The scene the banner draws on. */
+        private readonly scene;
+        /** The fullscreen GUI texture. */
+        private readonly texture;
+        /** The bordered panel. */
+        private readonly panel;
+        /** The notice text. */
+        private readonly messageText;
+        /** The countdown line (hidden when the notice has no countdown). */
+        private readonly countdownText;
+        /** The refresh observer on the scene's before-render observable. */
+        private readonly refreshObserver;
+        /** Removes the banner when its scene is disposed. */
+        private readonly disposeObserver;
+        /** Date.now() time when the banner hides itself, or null to stay until hidden. */
+        private hideAtMilliseconds;
+        /** Date.now() time the countdown reaches zero, or null when the notice has none. */
+        private countdownEndMilliseconds;
+        /** The panel width last applied, in pixels. */
+        private appliedWidthPixels;
+        /**
+         * Builds the banner on a scene. Use NetworkNoticeBanner.show.
+         * @param scene The scene to draw on.
+         */
+        private constructor();
+        /**
+         * True while a banner is on a scene.
+         * @param scene The scene.
+         * @returns True when shown.
+         */
+        static isShown(scene: BABYLON.Scene): boolean;
+        /**
+         * The banner's current text (the notice text, then the countdown line when there is one), or "" when none is shown
+         * (tests and tools).
+         * @param scene The scene.
+         * @returns The text.
+         */
+        static text(scene: BABYLON.Scene): string;
+        /**
+         * Shows a notice on a scene, replacing the one shown there. Nothing happens on a disposed scene.
+         * @param scene The scene to draw on.
+         * @param notice The notice.
+         */
+        static show(scene: BABYLON.Scene, notice: TOOLKIT.NetworkNoticePayload): void;
+        /**
+         * Removes a scene's banner: its observers and its GUI texture.
+         * @param scene The scene.
+         */
+        static hide(scene: BABYLON.Scene): void;
+        /**
+         * Writes a notice into the banner and starts its hide and countdown clocks.
+         * @param notice The notice.
+         * @param nowMilliseconds The current Date.now() time.
+         */
+        private present;
+        /**
+         * Runs every frame: fits the width to the screen, hides the banner when its time is up and rewrites the countdown
+         * line when its whole-second value changes (so the text is written about once a second).
+         * @param nowMilliseconds The current Date.now() time.
+         */
+        private refresh;
+        /** Sets the panel to 60 % of the screen width, at most 720 px, when that width changed. */
+        private fitWidth;
+        /** Removes the observers and disposes the GUI texture. */
+        private dispose;
+        /**
+         * A severity this runtime knows: a newer server's unknown value is shown as info.
+         * @param severity The notice's severity.
+         * @returns The severity to draw.
+         */
+        private static knownSeverity;
+        /**
+         * The countdown line.
+         * @param remainingSeconds Whole seconds left, zero or more.
+         * @returns "Starts in m:ss", or "Starting now" at zero.
+         */
+        private static formatCountdown;
+        /** @returns The top-centre panel (its width is set by fitWidth). */
+        private static createPanel;
+        /** @returns The wrapping notice text, as tall as its lines. */
+        private static createMessageText;
+        /** @returns The one-line countdown text. */
+        private static createCountdownText;
     }
 }
 declare namespace TOOLKIT {
@@ -20994,6 +22052,24 @@ declare namespace TOOLKIT {
          */
         static steeringFromError(smoothedError: number, turnSpeedDivider: number, kartYawRateDegreesPerSecond: number): number;
         /**
+         * The point to steer at on a gate-to-gate segment: the kart's projection onto the segment moved `lookAheadMeters`
+         * further along it, or the segment's end (the gate) once that passes it.
+         *
+         * Aiming at a point on the line rather than at the far gate is what brings a kart that crossed the previous gate off
+         * its centre back onto the line the gates lay. The original computer driver turns its transform freely and always
+         * crosses a gate near its centre (`ComputerDriver.cs:321-339`), so for it the gate is the line; a kart steered
+         * through `drive()` slides wide out of a bend, and aimed at a gate 100 m away it runs a straight chord from wherever
+         * it is. On Mario Circuit's twisted bridge that chord passes the rock at the bridge mouth with about a metre to
+         * spare (T5, F13).
+         * @param position The kart's world position.
+         * @param segmentStart The gate passed last.
+         * @param segmentEnd The gate being steered toward.
+         * @param lookAheadMeters How far past the kart's projection to aim, meters; zero or less aims at the gate.
+         * @param result Receives the point.
+         * @returns `result`.
+         */
+        static lookAheadOnSegment(position: BABYLON.Vector3, segmentStart: BABYLON.Vector3, segmentEnd: BABYLON.Vector3, lookAheadMeters: number, result: BABYLON.Vector3): BABYLON.Vector3;
+        /**
          * Frame-rate independent stand-in for SmoothDamp(y, target, ref 0, 2.5 * dt): exponential approach at rate 1 / (2.5 / 60 s).
          * @param current The previous smoothed error.
          * @param target This frame's unsmoothed error.
@@ -21790,6 +22866,15 @@ declare namespace TOOLKIT {
         static readonly DRIVABLE_TAGS: string[];
         /** Below this normal height an untagged-for-anti-gravity surface is a wall the kart cannot hold. */
         static readonly WALKABLE_NORMAL_Y: number;
+        /**
+         * Free space a kart needs above a surface to be set down on it, meters: the `SURFACE_LIFT` plus the kart's chassis
+         * sphere (`StandardKartController.sphereRadius`, 1.64 m) with a little margin. A surface with less room under
+         * something solid (a floor beneath an overhanging road) would wedge the chassis between the two, where it can
+         * neither drive nor fall, and every rescue there would put it back in the same trap.
+         */
+        static readonly KART_CLEARANCE: number;
+        /** How far off the surface the clearance ray starts, meters, so it never meets the surface it rises from. */
+        private static readonly CLEARANCE_RAY_OFFSET;
         /** Ray directions of the search (26 around the point), normalized once. */
         private static readonly SEARCH_DIRECTIONS;
         /** A surface whose normal is within this `dot` of the preferred up counts as the same road. */
@@ -21819,6 +22904,16 @@ declare namespace TOOLKIT {
          * @returns The rotation (left-handed: right = up × forward).
          */
         static surfaceRotation(surfaceUp: BABYLON.Vector3, heading: BABYLON.Vector3): BABYLON.Quaternion;
+        /**
+         * Whether a kart set down on a surface has room there: no static scenery facing the surface within
+         * `KART_CLEARANCE` along its normal (the underside of a road overhead). Triggers do not count (the query skips
+         * them), nor does a face turned away from the surface (the kart would already be inside that body, the case the
+         * search itself rules out), nor do moving bodies (karts, the kart being rescued, items): they are gone a moment later.
+         * @param surface The candidate surface.
+         * @param query The placement's ray query.
+         * @returns True when the kart fits above the surface.
+         */
+        private static hasKartClearance;
         /**
          * The tag of the node a ray hit.
          * @param hit A ray result with a hit.
@@ -22279,6 +23374,8 @@ declare namespace TOOLKIT {
          * side from the sign of the steering on the entry frame; a small value picks it without a full-lock yaw kick.
          */
         static readonly DRIFT_ENTRY_STEERING_MARGIN: number;
+        /** Below this distance to the aim point its direction is unreliable and the error is not rescaled, meters. */
+        static readonly MIN_AIM_DISTANCE_METERS: number;
         /** Divider of the original per-frame yaw, `smoothedError / turnSpeedDivider` degrees (`ComputerDriver.cs:109`). */
         turnSpeedDivider: number;
         /** Speed cap while racing normally (`ComputerDriver.cs:160-167`). */
@@ -22302,6 +23399,15 @@ declare namespace TOOLKIT {
          * against scenery, or one that fell off the track). 0 turns the recovery off.
          */
         stuckRecoverySeconds: number;
+        /**
+         * How far ahead along the line from the gate passed last to the current gate a racing driver aims, meters
+         * (`KartPathSteering.lookAheadOnSegment`). About the gate spacing on most courses, so only a long gap between two
+         * gates steers differently from the original's aim at the gate: there a kart that crossed the last gate wide is
+         * brought back onto the line instead of running a straight chord across the road (Mario Circuit's twisted bridge,
+         * where that chord grazed the rock at the bridge mouth). 0 aims at the gate, as `ComputerDriver.cs` does. Not used by
+         * the race-end autopilot, which drives the player's kart and keeps the original aim.
+         */
+        lineLookAheadMeters: number;
         /** Random source in [0, 1) for the start-boost roll and the per-lap path pick; replace it for a seeded race. */
         randomSource: () => number;
         /** The kart this driver steers, found on the same root in `start()`. */
@@ -22339,6 +23445,8 @@ declare namespace TOOLKIT {
         private wedgeSkipsObstacle;
         /** Whether the kart was auto-driving (a Bullet Bill) last frame, so the frame the ride ends picks the gate back up. */
         private wasAutoDriving;
+        /** The point steered at this frame, reused so the per-frame aim allocates nothing. */
+        private readonly steeringTarget;
         /** Handler on the kart's trigger observable, kept so `destroy()` can remove it. */
         private triggerObserver;
         /**
@@ -22477,12 +23585,26 @@ declare namespace TOOLKIT {
         /** Writes the kart's speed cap: the autopilot speed, or the rubber-band rule (`ComputerDriver.cs:156-168`). */
         private updateSpeedCap;
         /**
-         * Smooths the direction error toward the gate and converts it to a steering input (`ComputerDriver.cs:321-339`).
+         * Smooths the direction error and converts it to a steering input (`ComputerDriver.cs:321-339`).
+         *
+         * The error is the original's toward the gate in size and points at `aimPoint` in direction: the original's error
+         * grows with the distance to its target, so aiming at a nearer point on the line with that point's own error would
+         * steer more softly than the original exactly where a kart has to come back from wide. Rescaled to the gate's
+         * distance, a kart on the line steers as before and a kart off it turns back with the original's authority.
          * @param gate The gate being steered toward.
          * @param deltaSeconds Frame length in seconds.
          * @returns Steering input in [-1, 1].
          */
         private computeSteering;
+        /**
+         * Where the driver steers this frame: a point `lineLookAheadMeters` ahead on the line from the gate passed last to
+         * the current gate, or the gate itself before the first gate, on the race-end autopilot, or once that point
+         * reaches the gate (`KartPathSteering.lookAheadOnSegment`).
+         * @param gate The gate being steered toward.
+         * @param position The kart's world position.
+         * @returns The point, in a reused vector.
+         */
+        private aimPoint;
         /**
          * Whether the kart may drift on a drift-tagged gate: enough forward speed and the wheels down (`ComputerDriver.cs:438`).
          * @returns True to hold the drift input.
@@ -25044,8 +26166,22 @@ declare namespace TOOLKIT {
      * (Mario Circuit's bridge-wall flip, as reported).
      */
     const ANTI_GRAVITY_FOLD_MIN_TRAVEL_DOT: number;
-    /** Lowest `up · worldUp` at which a kart may open its glider (0: not upside down). */
+    /**
+     * Lowest `up · worldUp` at which a kart may open its glider (0: not upside down). On anti-gravity road the same
+     * figure is read against the ROAD's up instead (`canDeployGlider`): a kart is upside down there only when it is
+     * inverted on its own road.
+     */
     const GLIDER_DEPLOY_MIN_UP: number;
+    /**
+     * Lowest `roadUp · worldUp` of an anti-gravity road from which a kart may open its glider: down to 120 degrees from
+     * world up, so a wall ride deploys and a ceiling does not.
+     *
+     * A wall's up is horizontal. Mario Circuit's anti-gravity glider ramp is such a wall: its road up is
+     * (-0.41, 0.05, -0.91) and the karts on it read `up.y` 0.036-0.056 at the lip, so the world-up test
+     * (`GLIDER_DEPLOY_MIN_UP`) passed or failed on a few degrees of lean, and the kart that failed it flew off the
+     * ramp with its glider shut — the AI karts' intermittent "thrown launch" there (F13).
+     */
+    const GLIDER_DEPLOY_MIN_ROAD_UP: number;
     /** The trick variant's pause after the canopy opens, before the payout. */
     const GLIDER_TRICK_PAYOUT_DELAY: number;
     /** `Player.cs:1178`. The trick variant's payout, seconds of boost. */
@@ -26891,7 +28027,13 @@ declare namespace TOOLKIT {
         /**
          * Whether the kart may open its glider: not while upside down (no glide ramp launches a kart inverted, and an
          * open glider writes a world-level attitude).
-         * @returns True when the kart's up axis points above the horizon.
+         *
+         * On anti-gravity road "upside down" is judged against the road the kart rides, not world up: the road's up
+         * (`lastGroundedUp`, the surface normal, which the kart's lean does not move) must not be a ceiling, and the
+         * kart must not be inverted on it. A wall ride's up is horizontal, so the world-up test alone decided a wall
+         * ramp's deploy on a few degrees of lean (see `GLIDER_DEPLOY_MIN_ROAD_UP`).
+         * @returns True when the kart's up axis points above the horizon, or, on anti-gravity road, when the road is a
+         *     floor or a wall and the kart is upright on it.
          */
         protected canDeployGlider(): boolean;
         /**
@@ -37079,6 +38221,25 @@ declare namespace TOOLKIT {
         private static readonly InstanceIndex;
         /** The transform node among the root and its descendants whose recorded design-time id is sourceId, or null. */
         private static findInInstance;
+        /**
+         * Per scene: node id → node, from one pass over the scene's node lists. A scene-level reference (an Animator that is
+         * not inside a prefab clone) was resolved with `Scene.getNodeById`, a linear search over every node per curve entry:
+         * on a 10,401-node track one Animator's first bind took about 620 ms. Same freshness rule as `InstanceIndex`.
+         */
+        private static readonly SceneIndex;
+        /**
+         * The node with an id in a scene, or null: what `TOOLKIT.SceneManager.GetTransformNodeByID` returns, through the
+         * scene's id index.
+         * @param scene The scene.
+         * @param id The node id.
+         * @returns The node, or null when no node has that id.
+         */
+        private static findInScene;
+        /**
+         * Indexes a scene's nodes by id in `Scene.getNodeById`'s order (meshes, transform nodes, lights, cameras, then
+         * skeleton bones); the first node with an id wins, as that search would.
+         */
+        private static BuildSceneIndex;
         /** Indexes the root and its descendants by design-time id; the first node in traversal order wins, as a linear search would. */
         private static BuildInstanceIndex;
     }
@@ -39117,6 +40278,8 @@ declare namespace TOOLKIT {
         /** Scenes whose active-camera changes the listener already follows. */
         private static readonly listenerFollowedScenes;
         private static AUDIO_ENGINE_V2_OPTIONS;
+        /** Clip files whose download started when a source was created (`prefetchClip`), per scene: play url -> the file's bytes, or null when the download failed. */
+        private static readonly PrefetchedClips;
         private _audio;
         private _name;
         private _loop;
@@ -39153,6 +40316,22 @@ declare namespace TOOLKIT {
         /** Register handler that is triggered when the audio clip is ready */
         onReadyObservable: BABYLON.Observable<BABYLON.StaticSound | BABYLON.Sound>;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /**
+         * Starts downloading the clip when the source is created instead of when it wakes. A source on an inactive node or on a
+         * pooled copy wakes the first time it is shown (an item's explosion), so its clip was downloaded during play. Created
+         * behind the loading screen with its scene or container copy, the source now downloads it there, once per url and
+         * scene; `awakeAudioSource` decodes those bytes. Preloader sources (the scene's own preload tasks) and streamed
+         * sources (an HTML audio element) are left as they are.
+         */
+        private prefetchClip;
+        /**
+         * A copy of a prefetched clip's bytes (the decoder may take the buffer it is given), or null when the url was not
+         * prefetched in this scene or its download failed (the source then loads the url itself, as before).
+         * @param scene - The source's scene.
+         * @param playUrl - The clip's url.
+         * @returns The bytes, or null.
+         */
+        private static TakePrefetchedClip;
         protected awake(): void;
         protected start(): void;
         protected reveal(): void;
@@ -60066,14 +61245,7 @@ declare namespace TOOLKIT {
         random: TOOLKIT.ParticleRandom;
         ringBuffer: number;
         spawned: number;
-        deathLog: {
-            position: BABYLON.Vector3;
-            velocity: BABYLON.Vector3;
-            color: BABYLON.Color4;
-            size: number;
-            angle: number;
-            time: number;
-        }[];
+        deathLog: TOOLKIT.IParticleDeathRecord[];
         cullRadius: number;
         particleBounds?: TOOLKIT.IParticleBounds;
         family: string;
@@ -60131,6 +61303,15 @@ declare namespace TOOLKIT {
         normal?: BABYLON.Vector3;
         time?: number;
         lifeTime?: number;
+    }
+    /** One entry of a system's death log (the AC-6 read-back): a death copied in, with the system's clock at the death in seconds. */
+    interface IParticleDeathRecord {
+        position: BABYLON.Vector3;
+        velocity: BABYLON.Vector3;
+        color: BABYLON.Color4;
+        size: number;
+        angle: number;
+        time: number;
     }
     /** What a sibling renderer needs from its system (D25): passed by the component, never the component itself. */
     interface IParticleAuxHost {
@@ -60801,6 +61982,16 @@ declare namespace TOOLKIT {
          * standard shader's emissive clamp. A null block = the fallback texture with additive blending (Error policy).
          */
         static MaterialFromBlock(scene: BABYLON.Scene, name: string, block: TOOLKIT.IParticleMaterialBlock, onEntry: (entry: TOOLKIT.IParticleTextureEntry) => void, forceWrap?: boolean, lit?: boolean): BABYLON.StandardMaterial;
+        /**
+         * MaterialFromBlock's settings, applied to its brand-new material (see there).
+         * @param scene The scene.
+         * @param material The new material.
+         * @param block The particle material block, or null for the fallback.
+         * @param onEntry Receives the texture-cache entry.
+         * @param forceWrap True to load the texture with wrap addressing.
+         * @param lit True for a lit material.
+         */
+        private static ConfigureBlockMaterial;
         /** The block chain (Error policy): the trail block when it carries a `family` (the NEW shape), else the system's own block, else null. */
         static BlockOf(material: TOOLKIT.IParticleMaterialBlock, fallback: TOOLKIT.IParticleMaterialBlock): TOOLKIT.IParticleMaterialBlock;
         /** Re-reads the module's editable values (Inspector truth, D52): called by the constructor and by every step. */
@@ -73178,6 +74369,8 @@ declare namespace TOOLKIT {
         static ReleaseFrozenAxes(body: BABYLON.PhysicsBody): void;
         /** One physics step of frozen-axis holding for a scene (runs after each Havok step). */
         protected static ApplyFrozenAxes(scene: BABYLON.Scene): void;
+        /** The bodies taken out of the simulation while their node is inactive (SuspendPhysicsBody). */
+        private static readonly SuspendedBodies;
         private static StaticSyncBodies;
         private static StaticSyncObservers;
         /**
@@ -73221,6 +74414,110 @@ declare namespace TOOLKIT {
         private static ReleasePhysicsScene;
         /** globalThis.HKP keeps the plugin's body map (and so the scene) alive after Scene.dispose - drop it when the plugin dies. */
         private static ReleasePluginOnDispose;
+        /**
+         * Builds the exported body of a node that is inactive in the hierarchy only once it becomes active, as Unity keeps an
+         * inactive GameObject's colliders out of the simulation. The node is watched through Babylon's
+         * `onEffectiveEnabledStateChangedObservable`, which also reports a change made on an ancestor; on the first active
+         * state SetupPhysicsComponent runs with activation tracking, so the body then follows later changes too.
+         * @param scene The scene the node belongs to.
+         * @param node The node with exported physics metadata, currently inactive.
+         */
+        static SetupPhysicsWhenActive(scene: BABYLON.Scene, node: BABYLON.TransformNode): void;
+        /**
+         * Finishes a body built from exported metadata. A kinematic Rigidbody (ANIMATED) is driven by its transform every
+         * step. A collider without a Rigidbody is exported kinematic AND truestatic (STATIC): it follows its transform only
+         * when the transform moves (TrackStaticCollider) instead of being force-synced to Havok on every step. A dynamic
+         * body takes Unity's Rigidbody interpolation (exported physics.interpolation) on the fixed timestep.
+         * @param entity The node whose body was just built (nothing happens without a body).
+         * @param motionType The exported motion type.
+         * @param isKinematic The exported kinematic flag.
+         */
+        static FinishExportedBody(entity: BABYLON.TransformNode, motionType: BABYLON.PhysicsMotionType, isKinematic: boolean): void;
+        /**
+         * Rebuilds the body of a complex compound root from the child colliders that are active now, after a child was
+         * activated or deactivated, or when the root itself becomes active again. Children disposed by the loader (their
+         * collider nodes) keep the item they were built with; a child activated for the first time builds its item now.
+         * A live body is replaced in place and keeps its motion type, mass properties, damping, gravity factor and velocity;
+         * a body restored after the root's deactivation keeps its motion type and mass and starts at rest, as Unity resets a
+         * reactivated Rigidbody.
+         * @param root The complex compound root (it must have been built with activation tracking).
+         * @param savedState The state captured when the root was deactivated, or null to keep the live body's state.
+         * @returns The new body, or null when no included collider is left (the root then has no body until one is activated).
+         */
+        static RebuildCompoundBody(root: BABYLON.TransformNode, savedState?: TOOLKIT.IPhysicsBodyState): BABYLON.PhysicsBody;
+        /**
+         * Captures what a body was configured with (motion type, shape, mass, damping, gravity, pre-step, static sync,
+         * frozen axes, velocity and collision events), so the same body can be rebuilt after it was disposed.
+         * @param body A live body.
+         * @returns The captured state.
+         */
+        static CapturePhysicsBodyState(body: BABYLON.PhysicsBody): TOOLKIT.IPhysicsBodyState;
+        /**
+         * Takes a body out of the simulation: its state is captured, its frozen-axis hold released and the body disposed
+         * (Babylon clears `transformNode.physicsBody`). The shape is kept, so the body can be rebuilt from the state.
+         * @param body A live body.
+         * @returns The state captured before the body was disposed.
+         */
+        static ReleasePhysicsBody(body: BABYLON.PhysicsBody): TOOLKIT.IPhysicsBodyState;
+        /**
+         * Rebuilds a disposed body on its node from a captured state, at the node's current pose and at rest.
+         * @param scene The scene the node belongs to.
+         * @param node The node the body was built on.
+         * @param state The state captured when the body was released.
+         * @returns The new body.
+         */
+        static RestorePhysicsBody(scene: BABYLON.Scene, node: BABYLON.TransformNode, state: TOOLKIT.IPhysicsBodyState): BABYLON.PhysicsBody;
+        /**
+         * Takes a body out of the simulation and keeps it: it is removed from its Havok world (no contacts, triggers or
+         * integration) and its transform sync is paused, while the body object, its shape and every observer stay, and
+         * `transformNode.physicsBody` still points at it. A script may keep calling it (velocities, masks) in the meantime.
+         * @param body A live body.
+         * @returns True when it was suspended; false when Havok's native API or the body's plugin data is not available
+         * (the caller then disposes it).
+         */
+        static SuspendPhysicsBody(body: BABYLON.PhysicsBody): boolean;
+        /**
+         * Puts a suspended body back into the simulation at its node's current pose and at rest (as a body rebuilt after
+         * deactivation starts at rest), with its transform sync as it was.
+         * @param body The body SuspendPhysicsBody took out.
+         * @param node The node it is built on.
+         * @param disableSync The body's `disableSync` before it was suspended.
+         */
+        static ResumePhysicsBody(body: BABYLON.PhysicsBody, node: BABYLON.TransformNode, disableSync: boolean): void;
+        /**
+         * Whether a body is out of the simulation because its node is inactive (SuspendPhysicsBody): it keeps existing,
+         * but nothing collides with it, triggers it or moves it until its node is active again.
+         * @param body A body.
+         * @returns True while the body is suspended.
+         */
+        static IsBodySuspended(body: BABYLON.PhysicsBody): boolean;
+        /**
+         * Havok's native API, world and body id for a body (its floating-origin world region's world).
+         * @param body A body.
+         * @returns The handles, or null when Havok's native API or the body's plugin data is not available.
+         */
+        private static GetHavokBodyWorld;
+        /**
+         * Applies a captured state to a newly built body (the shape is the caller's). A dynamic body takes the captured
+         * velocity only with `keepVelocity`. Collision observers subscribed on the old body are handed to the new one.
+         * @param body The new body.
+         * @param state The captured state.
+         * @param keepVelocity True to carry the linear and angular velocity over (a live rebuild); false starts at rest.
+         */
+        static ApplyPhysicsBodyState(body: BABYLON.PhysicsBody, state: TOOLKIT.IPhysicsBodyState, keepVelocity: boolean): void;
+        /**
+         * Disposes the container shape of a replaced compound body. A lone root mesh shape (the body shape itself) and
+         * the cached child shapes inside the container are kept.
+         */
+        private static DisposeCompoundContainer;
+        /**
+         * Reads the per-body collision observable Havok keeps by body id (`getCollisionObservable` / `getCollisionEndedObservable`).
+         * It is read from the plugin's map rather than through the getter, which would create an empty one.
+         * @returns The observable components subscribed to, or null when there is none (or the plugin keeps no such map).
+         */
+        private static ReadBodyEventObservable;
+        /** Hands a collision observable over to a rebuilt body, so observers added on the old body keep receiving its events. */
+        private static WriteBodyEventObservable;
         /**
          * Enables Havok physics on a scene.
          * With `fixedTimeStep` (the default, and every export without `deltaworldstep`), physics runs on Unity's fixed
@@ -73275,7 +74572,18 @@ declare namespace TOOLKIT {
          * @param maximumDeltaTime Unity's `Time.maximumDeltaTime` in seconds; invalid values use 1/3.
          */
         static ConfigurePhysicsStepping(scene: BABYLON.Scene, fixedTimeStep: boolean, subTimeStep: number, fixedDeltaTime: number, maximumDeltaTime: number): void;
-        static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.TransformNode): void;
+        /**
+         * Builds the Havok body of a node from its exported `metadata.toolkit` physics and collision data.
+         * With `trackActivation` (the exported-metadata path: the scene parser and SetupPhysicsWhenActive), the body follows
+         * the node's active state as in Unity (D6): it is disposed while the node is inactive in the hierarchy and rebuilt
+         * when it is active again, and a complex compound root leaves inactive child colliders out of its shape until they
+         * are activated. A component that builds its own body (StandardKartController's bench rig) leaves it off, so its
+         * body is never touched.
+         * @param scene The scene being set up.
+         * @param entity The node with exported physics metadata.
+         * @param trackActivation True to register the body with PhysicsActivationTracker (default false).
+         */
+        static SetupPhysicsComponent(scene: BABYLON.Scene, entity: BABYLON.TransformNode, trackActivation?: boolean): void;
         protected static GetPhysicsMaterialCombine(unity: number): number;
         protected static GetCachedPhysicsMeshShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number): BABYLON.PhysicsShapeMesh;
         protected static GetCachedPhysicsConvexHullShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, meshkey: string, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, layer: number, filter: number, trigger?: boolean): BABYLON.PhysicsShapeConvexHull;
@@ -73334,6 +74642,35 @@ declare namespace TOOLKIT {
          * @returns The shape, or null when the root has no own solid mesh collider or no mesh to build it from.
          */
         protected static CreateCompoundRootMeshShape(scene: BABYLON.Scene, entity: BABYLON.TransformNode, collision: any, layer: number, filter: number): BABYLON.PhysicsShape;
+        /**
+         * Builds the container item of one solid child collider of a complex compound root: its shape (from the shape cache)
+         * and its placement under the root. The impostor follows the child's collider type; a MeshCollider always builds a
+         * convex hull, as a compound child.
+         * @param scene The scene being set up.
+         * @param root The complex compound root.
+         * @param childnode The child with a non-trigger `metadata.toolkit.collision`.
+         * @param collision The child's collision metadata.
+         * @param childmasks The child's collision masks (its own layer plus the root's CollisionFilter override).
+         * @returns The item, or null when the collider has nothing to build from (a mesh collider without its collider mesh).
+         */
+        static CreateCompoundChildItem(scene: BABYLON.Scene, root: BABYLON.TransformNode, childnode: BABYLON.TransformNode, collision: any, childmasks: TOOLKIT.IPhysicsCollisionMasks): TOOLKIT.PhyscisContainerData;
+        /**
+         * Creates the body of a complex compound root from its child collider items and its own mesh collider. A lone root
+         * mesh is the body shape itself; otherwise every item (the root mesh last) goes into one container shape carrying the
+         * root's masks. The Rigidbody settings (gravity, drag, freeze, mass) come from the exported physics metadata.
+         * @param scene The scene being set up.
+         * @param entity The complex compound root.
+         * @param childItems The included child collider items.
+         * @param rootMeshShape The root's own mesh collider shape, or null.
+         * @param motionType The body's motion type.
+         * @param physics The root's exported `metadata.toolkit.physics`.
+         * @param mass The body mass in kilograms.
+         * @param centerOfMass The local centre of mass.
+         * @param layermask The root's membership mask.
+         * @param filtermask The root's collide mask (null keeps the legacy mask).
+         * @returns The body, or null when there is no collider to build it from.
+         */
+        static CreateComplexCompoundBody(scene: BABYLON.Scene, entity: BABYLON.TransformNode, childItems: TOOLKIT.PhyscisContainerData[], rootMeshShape: BABYLON.PhysicsShape, motionType: BABYLON.PhysicsMotionType, physics: any, mass: number, centerOfMass: BABYLON.Vector3, layermask: number, filtermask: number): BABYLON.PhysicsBody;
         protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.TransformNode, element: any, impostortype: number, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, sitems: TOOLKIT.PhyscisContainerData[], item: TOOLKIT.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
         protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
         static GetPhysicsHeapSize(): number;
@@ -73687,6 +75024,260 @@ declare namespace TOOLKIT {
         membership: number;
         collide: number;
     }
+    /**
+     * Keeps the Havok bodies built from exported metadata in step with their nodes' active state, as Unity does with an
+     * inactive GameObject's colliders (D6): a body is disposed while its node is inactive in the hierarchy and rebuilt when
+     * the node is active again, and a node inactive at load gets its body only when it is first activated. Each tracked
+     * node is watched through `onEffectiveEnabledStateChangedObservable`, which Babylon fires for the node's own
+     * `setEnabled` and for an ancestor's, and creates only on the nodes watched here, so untracked nodes cost nothing.
+     * The watch ends when the node is disposed. Only metadata-built bodies are tracked: a body a component builds itself
+     * is never touched. A node is active when it and every ancestor are enabled, except that a renderer a LOD group
+     * switches off (TOOLKIT.UnityLodGroups) still counts as active: Unity's LODGroup only toggles renderers, so colliders
+     * on LOD levels stay in the simulation.
+     */
+    class PhysicsActivationTracker {
+        /** The watch of every tracked body node. */
+        private static readonly BodyEntries;
+        /** The child collider bookkeeping of every tracked complex compound root. */
+        private static readonly CompoundRecords;
+        /** Per scene, the renderers its LOD groups switch, and the group list (and its length) that set was built from. */
+        private static readonly LevelOfDetailRenderers;
+        /**
+         * Whether a node is active in the hierarchy the way Unity sees it (`activeInHierarchy`): the node and every ancestor
+         * are enabled, where a renderer switched off by a LOD group counts as enabled (Unity's LODGroup toggles renderers,
+         * not GameObjects).
+         * @param node The node.
+         * @returns True when the node's exported colliders belong in the simulation.
+         */
+        static IsActiveInHierarchy(node: BABYLON.Node): boolean;
+        /**
+         * Whether a node is a renderer of one of its scene's LOD groups (TOOLKIT.UnityLodGroups toggles those with setEnabled).
+         * The set is rebuilt only when the scene's group list changed. A level renderer that is an ancestor of another
+         * level's renderer is toggled through isVisible instead, so it never needs the exception.
+         * @param node The node.
+         * @returns True for a LOD level renderer.
+         */
+        static IsLevelOfDetailRenderer(node: BABYLON.Node): boolean;
+        /**
+         * Tracks the exported body of a node. A node already tracked keeps its watch (a deferred node's first build
+         * registers again from SetupPhysicsComponent).
+         * @param scene The scene the node belongs to.
+         * @param node The node the body is (or will be) built on.
+         * @param build Builds the body the first time the node is active; null when the body is built already.
+         * @param built True when the body was built now (or the node was set up and simply has no body).
+         */
+        static TrackBody(scene: BABYLON.Scene, node: BABYLON.TransformNode, build: () => void, built: boolean): void;
+        /**
+         * Stops tracking a node: its observers are removed and its compound bookkeeping dropped. Runs on node dispose.
+         * @param node The tracked node.
+         */
+        static Untrack(node: BABYLON.TransformNode): void;
+        /**
+         * True when the node's exported body is tracked.
+         * @param node The node.
+         * @returns True while the node is watched.
+         */
+        static IsTracked(node: BABYLON.TransformNode): boolean;
+        /**
+         * Starts the child collider bookkeeping of a complex compound root, before its children are walked.
+         * @param scene The scene being set up.
+         * @param root The complex compound root.
+         * @param motionType The root's exported motion type.
+         * @param isKinematic The root's exported kinematic flag.
+         * @param physics The root's exported `metadata.toolkit.physics`.
+         * @param mass The body mass in kilograms.
+         * @param centerOfMass The local centre of mass.
+         * @param layermask The root's membership mask.
+         * @param filtermask The root's collide mask (null keeps the legacy mask).
+         * @returns The record (the root mesh shape and children are added while the root is set up).
+         */
+        static CreateCompoundRecord(scene: BABYLON.Scene, root: BABYLON.TransformNode, motionType: BABYLON.PhysicsMotionType, isKinematic: boolean, physics: any, mass: number, centerOfMass: BABYLON.Vector3, layermask: number, filtermask: number): TOOLKIT.IPhysicsCompoundRecord;
+        /**
+         * The child collider bookkeeping of a complex compound root.
+         * @param root The root.
+         * @returns The record, or null when the root was not built with activation tracking.
+         */
+        static GetCompoundRecord(root: BABYLON.TransformNode): TOOLKIT.IPhysicsCompoundRecord;
+        /**
+         * Adds a solid child collider to a compound root's bookkeeping and watches its active state: activating or
+         * deactivating it while the root is active rebuilds the root's body. A child the loader disposes keeps its item.
+         * @param record The root's record.
+         * @param node The child collider node.
+         * @param item The item built for it now, or null when it was left out (inactive).
+         * @param buildItem Builds its item when it is first included.
+         */
+        static TrackCompoundChild(record: TOOLKIT.IPhysicsCompoundRecord, node: BABYLON.TransformNode, item: TOOLKIT.PhyscisContainerData, buildItem: () => TOOLKIT.PhyscisContainerData): void;
+        /**
+         * The items of a compound root's included children: an active child (its item built on first use), or a child the
+         * loader disposed that was built before.
+         * @param record The root's record.
+         * @returns The items, in child order.
+         */
+        static CollectCompoundItems(record: TOOLKIT.IPhysicsCompoundRecord): TOOLKIT.PhyscisContainerData[];
+        /**
+         * The node became active: resumes the body suspended at deactivation (the same body object, so a script holding it keeps a
+         * live body), else builds the body the first time, else rebuilds one from the state saved when it had to be disposed.
+         * @param entry The node's tracking entry.
+         */
+        private static OnBodyNodeActivated;
+        /**
+         * The node became inactive: its body leaves the simulation. A body built on the node alone is taken out of the
+         * Havok world and kept, so a script's reference to it (`transform.physicsBody`) stays valid, as a Unity Rigidbody
+         * outlives its GameObject's SetActive(false): Water Park's trolley deactivated itself, then stopped its own body,
+         * which a disposed body threw on and the throw ended the render loop. A compound root (its shape changes with its
+         * children) and a body without Havok's native API are disposed, their state kept for the rebuild.
+         */
+        private static OnBodyNodeDeactivated;
+        /**
+         * A child collider of a compound root changed state. Babylon notifies descendants before the node that changed, so
+         * while the root itself is being deactivated or reactivated (root inactive, or not yet marked active again) the
+         * root's own handler does the work, once.
+         */
+        private static OnCompoundChildChanged;
+        /**
+         * Watches what can change a node's Unity active state: the node's own effective-enabled state, and, above each LOD
+         * level renderer in its chain, that renderer's parent. While a LOD group has a level switched off, Babylon reports
+         * nothing to the nodes at or below it when an ancestor changes (their effective state is already off), so the change
+         * is heard one level up.
+         * @param node The tracked node.
+         * @param onChanged Called on every reported change (the caller re-evaluates IsActiveInHierarchy).
+         * @returns The observers, for RemoveActivityObservers.
+         */
+        private static ObserveActivity;
+        /** Removes the observers ObserveActivity added. */
+        private static RemoveActivityObservers;
+        /** Removes a compound child's observers. */
+        private static RemoveChildObservers;
+    }
+    /** The LOD level renderers of one scene, as PhysicsActivationTracker last collected them. */
+    interface ILevelOfDetailRendererCache {
+        /** The switcher's group list the set was built from. */
+        groups: TOOLKIT.IUnityLodGroup[];
+        /** Its length then. */
+        groupCount: number;
+        /** Every level renderer of those groups. */
+        renderers: WeakSet<BABYLON.Node>;
+    }
+    /** One effective-enabled observer that reports a tracked node's activity, and the node it is on. */
+    interface IPhysicsActivityObserver {
+        /** The observed node (the tracked node, or the parent of a LOD level renderer above it). */
+        node: BABYLON.Node;
+        /** The observer on its onEffectiveEnabledStateChangedObservable. */
+        observer: BABYLON.Observer<boolean>;
+    }
+    /** Havok's native API, the world a body is in and the body's id (RigidbodyPhysics.GetHavokBodyWorld). */
+    interface IHavokBodyWorld {
+        /** Havok's native API (`HavokPlugin._hknp`). */
+        native: any;
+        /** The body's world region's Havok world. */
+        world: any;
+        /** The body's Havok id. */
+        bodyId: any;
+    }
+    /** The watch of one tracked body node (PhysicsActivationTracker). */
+    interface IPhysicsActivationEntry {
+        /** The node the body is built on. */
+        node: BABYLON.TransformNode;
+        /** The scene the node belongs to. */
+        scene: BABYLON.Scene;
+        /** Builds the body the first time the node is active (a node inactive at load), or null. */
+        build: () => void;
+        /** True once the body was built (or the node was set up), so activation rebuilds instead of building. */
+        built: boolean;
+        /** The node's Unity active state at the last change (PhysicsActivationTracker.IsActiveInHierarchy). */
+        active: boolean;
+        /** The state of the body disposed at deactivation, until it is rebuilt. */
+        savedState: TOOLKIT.IPhysicsBodyState;
+        /** The body taken out of the simulation at deactivation and kept (RigidbodyPhysics.SuspendPhysicsBody), until it is resumed. */
+        suspendedBody?: BABYLON.PhysicsBody;
+        /** The suspended body's own `disableSync`, restored when it is resumed. */
+        suspendedDisableSync?: boolean;
+        /** The effective-enabled observers that report the node's activity (PhysicsActivationTracker.ObserveActivity). */
+        activityObservers: TOOLKIT.IPhysicsActivityObserver[];
+        /** The node's dispose observer. */
+        disposeObserver: BABYLON.Observer<BABYLON.Node>;
+    }
+    /** The child collider bookkeeping of a complex compound root built with activation tracking. */
+    interface IPhysicsCompoundRecord {
+        /** The scene the root belongs to. */
+        scene: BABYLON.Scene;
+        /** The complex compound root. */
+        root: BABYLON.TransformNode;
+        /** The root's exported motion type. */
+        motionType: BABYLON.PhysicsMotionType;
+        /** The root's exported kinematic flag. */
+        isKinematic: boolean;
+        /** The root's exported `metadata.toolkit.physics`. */
+        physics: any;
+        /** The body mass in kilograms. */
+        mass: number;
+        /** The local centre of mass. */
+        centerOfMass: BABYLON.Vector3;
+        /** The root's membership mask. */
+        layermask: number;
+        /** The root's collide mask (null keeps the legacy mask). */
+        filtermask: number;
+        /** The root's own mesh collider shape, or null. */
+        rootMeshShape: BABYLON.PhysicsShape;
+        /** The root's solid child colliders. */
+        children: TOOLKIT.IPhysicsCompoundChild[];
+        /** False from the root's deactivation until its own reactivation handler runs. */
+        rootActive: boolean;
+    }
+    /** One solid child collider of a tracked complex compound root. */
+    interface IPhysicsCompoundChild {
+        /** The child collider node. */
+        node: BABYLON.TransformNode;
+        /** Its container item, or null until it is first included. */
+        item: TOOLKIT.PhyscisContainerData;
+        /** Builds its container item. */
+        buildItem: () => TOOLKIT.PhyscisContainerData;
+        /** The child's Unity active state at the last change (PhysicsActivationTracker.IsActiveInHierarchy). */
+        active: boolean;
+        /** True once the node was disposed (the loader disposes non-persistent collider nodes); its item stays included. */
+        disposed: boolean;
+        /** The effective-enabled observers that report the child's activity (PhysicsActivationTracker.ObserveActivity). */
+        activityObservers: TOOLKIT.IPhysicsActivityObserver[];
+        /** The child's dispose observer. */
+        disposeObserver: BABYLON.Observer<BABYLON.Node>;
+    }
+    /** What a body was configured with, captured so it can be rebuilt after it was disposed (RigidbodyPhysics.CapturePhysicsBodyState). */
+    interface IPhysicsBodyState {
+        /** The motion type. */
+        motionType: BABYLON.PhysicsMotionType;
+        /** The shape (kept alive: the body's dispose does not dispose it). */
+        shape: BABYLON.PhysicsShape;
+        /** The mass properties. */
+        massProperties: BABYLON.PhysicsMassProperties;
+        /** The linear damping. */
+        linearDamping: number;
+        /** The angular damping. */
+        angularDamping: number;
+        /** The gravity factor. */
+        gravityFactor: number;
+        /** The pre-step type. */
+        prestepType: BABYLON.PhysicsPrestepType;
+        /** True when the body was a static collider synced by RigidbodyPhysics.TrackStaticCollider. */
+        staticSynced: boolean;
+        /** The frozen world axes held by RigidbodyPhysics.HoldFrozenAxes, or null. */
+        frozenAxes: {
+            x: boolean;
+            y: boolean;
+            z: boolean;
+        };
+        /** The linear velocity in metres per second. */
+        linearVelocity: BABYLON.Vector3;
+        /** The angular velocity in radians per second. */
+        angularVelocity: BABYLON.Vector3;
+        /** True when collision callbacks were enabled. */
+        collisionCallbackEnabled: boolean;
+        /** True when collision-ended callbacks were enabled. */
+        collisionEndedCallbackEnabled: boolean;
+        /** The body's collision observable, when one was created. */
+        collisionObservable: BABYLON.Observable<any>;
+        /** The body's collision-ended observable, when one was created. */
+        collisionEndedObservable: BABYLON.Observable<any>;
+    }
 }
 declare namespace TOOLKIT {
     /**
@@ -73823,7 +75414,7 @@ declare namespace TOOLKIT {
         protected awake(): void;
         protected update(): void;
         /** One step: age the points, drop the expired, emit the current position when it moved minVertexDistance (and emitting). */
-        advance(position: BABYLON.Vector3, dt: number): void;
+        advance(position: BABYLON.Vector3, dt: number, emit?: boolean): void;
         private draw;
         protected destroy(): void;
     }
@@ -74184,6 +75775,13 @@ declare namespace TOOLKIT {
         static resolve(scene: BABYLON.Scene, url: string): string;
         /** Loads once per resolved url (and address mode) per scene, increments `refs`, calls `apply` when ready (synchronously when already loaded) or with `null` when failed. */
         static request(scene: BABYLON.Scene, url: string, apply: (texture: BABYLON.Texture, entry: TOOLKIT.IParticleTextureEntry) => void, wrap?: boolean): TOOLKIT.IParticleTextureEntry;
+        /**
+         * Calls `apply` once an entry's load has settled: now when it is loaded or failed, else with the entry's other waiting
+         * callbacks. Takes no reference (the caller already holds one from `request`).
+         * @param entry The entry from `request`.
+         * @param apply Receives the texture (null when the load failed) and the entry.
+         */
+        static whenSettled(entry: TOOLKIT.IParticleTextureEntry, apply: (texture: BABYLON.Texture, entry: TOOLKIT.IParticleTextureEntry) => void): void;
         /** Decrements `refs`; at 0 disposes the texture and deletes the entry. Null-safe. */
         static release(scene: BABYLON.Scene, entry: TOOLKIT.IParticleTextureEntry): void;
         /** Marks the entry ready (size from the loaded texture) or failed (one warning per url), then runs every waiting apply once. */
@@ -74382,6 +75980,8 @@ declare namespace TOOLKIT {
         private _prtPrewarmJob;
         private readonly _prtRange;
         private _prtTexture;
+        /** The renderer texture requested when the component was created (`preloadRendererTexture`); released by `destroy`. */
+        private _prtPreloadedTexture;
         private _prtEmissionEntry;
         private _prtEmissionMap;
         private _prtEmissionToken;
@@ -74434,6 +76034,16 @@ declare namespace TOOLKIT {
         private _prtReqSafe;
         private _prtInherit;
         private _prtDeathLogNext;
+        /**
+         * Per scene, every component created for it and not destroyed yet, in creation order (a component whose node was
+         * disposed outside `destroy()` is pruned by the next `RegisteredIn` read). The sub-emitter lookups
+         * (`_resolveSubEmitters`, `FindByInstanceId`) read it instead of walking every node of the scene: on Toad Harbor's
+         * 10,400 nodes each lookup cost about 14 ms, and systems resolving on their first step after coming into view made an
+         * 82 ms frame in the first lap.
+         */
+        private static readonly Registered;
+        /** Deaths the death log keeps (the AC-6 read-back), the oldest overwritten once it is full. */
+        private static readonly DEATH_LOG_SIZE;
         private _prtCulled;
         /** World distance the cull box keeps around the live particles of a World / Custom space system: the largest start size. */
         private _prtCullParticleMargin;
@@ -74450,6 +76060,26 @@ declare namespace TOOLKIT {
         private _prtWorldMeanScale;
         private readonly _prtScratch;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Adds this component to its scene's registry (`Registered`). */
+        private register;
+        /**
+         * The scene's components (`Registered`) whose node is still there, pruning the rest from the registry as it reads it.
+         * A node disposed with `node.dispose()` rather than through `destroy()` never leaves the set on its own, so every read
+         * drops the components whose node is gone instead of keeping them (and their node) alive for the scene's lifetime.
+         * The dead components are collected first and deleted after the walk, so the set is never changed while it is iterated.
+         * @param scene The scene.
+         * @returns The live components, in creation order.
+         */
+        private static RegisteredIn;
+        /**
+         * Starts loading the system's renderer texture when the component is created instead of when it wakes. A system on an
+         * inactive node or on a pooled copy wakes the first time it is shown (`awake` runs on its first update), so its texture
+         * was downloaded during play: the green shell's glow, every race, on every track. Created behind the loading screen
+         * with its scene or container copy, the component now loads it there. The request is the one `applyRenderer` makes
+         * (same url and address mode, the cache shares one texture), so `awake` finds it loaded. A failed load is reported by
+         * that later request as before.
+         */
+        private preloadRendererTexture;
         /**
          * Hides the geometry of the node the particle system lives on. A Unity GameObject holds one Renderer, and on a
          * particle system's GameObject that is the ParticleSystemRenderer, so a MeshFilter mesh left on it (exported with
@@ -74694,6 +76324,24 @@ declare namespace TOOLKIT {
          * whole `prewarmSeconds()`. Both entry points - `play()` and `SimulateFamily`'s restart path - use this one plan.
          */
         private prewarmPlan;
+        /**
+         * D39 Pause and Catch-up: brings a system that comes back into view up to the time it was culled. Unity catches up in
+         * one large step; here the seconds older than the longest start lifetime run in coarse steps of `CoarsePrewarmStep`
+         * (every particle born then has died by the end, so only the clock and the emission timeline need them), and only the
+         * last lifetime runs in fine 1/60 steps, where the particles alive at the end are born. A 5 s catch-up of a 1 s
+         * fountain is then about 100 steps instead of 300: on Water Park 15 to 22 fountains coming into view in one frame
+         * cost 77 to 94 ms of fine steps.
+         * @param seconds The seconds to catch up (already clamped to one duration).
+         */
+        private catchUp;
+        /**
+         * The catch-up plan (`catchUp`): fine 1/60 steps for the last longest-start-lifetime seconds, the excess before them
+         * in coarse steps; `fineSeconds + coarseSteps x coarseDt` is the whole `seconds`. A system whose lifetime is not
+         * finite catches up in fine steps only.
+         * @param seconds The seconds to catch up.
+         * @returns The plan, in the shape `runCoarsePrewarm` runs.
+         */
+        private catchUpPlan;
         /** D29 - the coarse half of a prewarm plan, run exactly as SimulateFamily runs one member (paused / updateSpeed saved and restored). */
         private runCoarsePrewarm;
         /** main.startDelay sampled once per play (D36); 0 with a warning on a looping prewarm system (Unity disables the delay there). */
@@ -74906,6 +76554,15 @@ declare namespace TOOLKIT {
          * emitFrom also raises the child's manualEmitCount, so a child that animates later in this frame creates them now.
          */
         private _drainDeaths;
+        /**
+         * The death log: the last DEATH_LOG_SIZE deaths, kept for the read-back (a ring once full). Each slot is a record of its
+         * own that a death is copied into. Keeping the step's event objects themselves alive until 256 later deaths pushed them
+         * out moved them to the old generation, and the evictions of a track's hundreds of systems (fountains die by the hundred
+         * a second) grew it until a major collection paused a frame for 49 ms in the second lap of Water Park.
+         * @param event The death event of this step.
+         * @param time The system's clock at the death, seconds.
+         */
+        private recordDeath;
         /**
          * Awake step 6 (D26): a mesh shape (6 / 13 / 14) samples `meshRef` (GetTransformNodeByID(String(nodeId)), then GetMesh(nodeName);
          * a node without vertex data falls back to its `<name>.Detail` / first child mesh, and a name without vertex data to the
