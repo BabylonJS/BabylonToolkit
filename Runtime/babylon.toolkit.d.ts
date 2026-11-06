@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.34.1 - R1) */
+        /** Gets the toolkit framework version string (9.34.10 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -200,6 +200,8 @@ declare namespace TOOLKIT {
         /** Hidden layer mask value (Unity Layer 28 - Value: 268435456) */
         static readonly HiddenLayerMask: number;
         private static _HideLoadingScreen;
+        /** The fade a HideLoadingScreen call asked for while its scene is revealed first. */
+        private static _FadeLoadingScreen;
         static CVTOOLS_NAME: string;
         static CVTOOLS_MESH: string;
         static CVTOOLS_HAND: string;
@@ -283,15 +285,19 @@ declare namespace TOOLKIT {
          */
         static LoadRuntimeAssets(assetsManager: BABYLON.AssetsManager, requiredFilenames: string[], readyHandler: () => void, maxTimeout?: number, debugMode?: boolean): Promise<void>;
         /**
-         * Shows the default loading screen panel
+         * Shows the default loading screen panel, with the splash stages on it (LoadingScreenStages). It counts as the page's splash,
+         * so the reveal waits for it. On a page that painted its own cover (engine.html) the stages go on that cover instead.
          * @param engine The engine instance.
          * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
-         * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+         * @param defaultLoadingUIMarginTop The top margin of the loading stages (status line and bar). Default 150px.
          */
         static ShowLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, hideLoadingUIWithEngine?: boolean, defaultLoadingUIMarginTop?: string): void;
         /**
-         * Hides the default loading screen panel
+         * Hides the default loading screen panel. While the stages are on it and the engine's last scene is not revealed yet, the screen
+         * ends like every splash: this returns at once, PREWARM runs behind the screen (HideSplashScreen), it shows Ready, the
+         * reveal is recorded, and then it fades.
          * @param engine The engine instance.
+         * @param fade Fade the screen out. Default true.
          */
         static HideLoadingScreen(engine: BABYLON.Engine | BABYLON.WebGPUEngine | BABYLON.AbstractEngine, fade?: boolean): void;
         /** Force the engine loading screen to be hidden (Triple Check Loading Screen Hidden) */
@@ -371,7 +377,8 @@ declare namespace TOOLKIT {
         /**
          * True while the page's splash screen is up: shown and not yet fading out (both kinds fade by setting an inline opacity of 0).
          * The React splash is `#xbabylonjsSplashScreen` (its inner `#xbabylonjsLoadingDiv` never fades itself, so only the outer one
-         * counts); the exported engine.html loader is `#xbabylonjsLoadingDiv` alone.
+         * counts); the exported engine.html loader is `#xbabylonjsLoadingDiv` alone. Without either, the built-in loading screen counts
+         * (ShowLoadingScreen, LoadingScreenStages).
          * @returns False when there is no document or no splash element.
          */
         static IsSplashScreenShowing(): boolean;
@@ -2728,7 +2735,7 @@ declare namespace TOOLKIT {
      * @param projectScriptBundleUrl specified project script bundle. Default (default.playground.js).
      * @param showDefaultLoadingScreen show the default loading screen. Default false.
      * @param hideLoadingUIWithEngine hide the loading screen with engine.hideLoadingUI. When set to false, you must manually hide the loading screen using TOOLKIT.SceneManager.HideLoadingScreen when the scene is ready. Default true.
-     * @param defaultLoadingUIMarginTop The top margin of the loading text. Default 150px.
+     * @param defaultLoadingUIMarginTop The top margin of the loading stages (status line and bar). Default 150px.
      * @param trackDevicePixelRatio re-apply the hardware scaling level (1 / window.devicePixelRatio) and resize the engine whenever the device pixel ratio changes (a window moved between displays, browser zoom). Default true when hardwareScalingLevel is not set, false when it is.
      */
     interface IRuntimeOptions {
@@ -7070,6 +7077,138 @@ declare namespace TOOLKIT {
         private static HookSceneDispose;
         /** Drops the scene's jobs and posting state and cancels pending trailing / held-detail posts. */
         private static ForgetScene;
+    }
+}
+declare namespace TOOLKIT {
+    /** The stage elements on one cover (Babylon clones its loading screen div per canvas or engine view). */
+    interface ILoadingScreenStageView {
+        /** The loading screen div they sit on. */
+        screen: HTMLElement;
+        /** The status line and bar, under the spinner. */
+        stage: HTMLElement;
+        /** The status line. */
+        status: HTMLElement;
+        /** The detail line, bottom right. */
+        details: HTMLElement;
+        /** The bar's fill. */
+        fill: HTMLElement;
+        /** The fill's sliding animation until the first real progress, null when it does not slide. */
+        slide: ReturnType<HTMLElement["animate"]>;
+    }
+    /**
+     * The toolkit's default splash: the status line, bar and detail line, fed by SceneManager.OnLoaderStatusObservable, on a cover of
+     * logo and spinner that is up before the toolkit loads. Two covers carry it. The built-in loading screen
+     * (SceneManager.ShowLoadingScreen, the Playground's showDefaultLoadingScreen) is Babylon's default screen: it counts as the page's
+     * splash (SceneManager.IsSplashScreenShowing), so the reveal waits for it, and SceneManager.HideLoadingScreen ends it through the same
+     * last stages as every splash: PREWARM, Ready, the reveal, the fade. engine.html paints its own cover inline, so the player sees it
+     * while the scripts download, and turns the same showDefaultLoadingScreen flag on: ShowLoadingScreen finds that cover and the stages
+     * take it over. React splash screens and a custom BABYLON.ILoadingScreen are left alone.
+     */
+    class LoadingScreenStages {
+        /** The status line until the first report. */
+        static START_TEXT: string;
+        /** The bar's color. */
+        static BAR_COLOR: string;
+        /** Duration of one slide of the bar before its first real progress, in milliseconds. */
+        static SLIDE_DURATION_MS: number;
+        /** One element per loading screen div while the screen is up. */
+        private static Views;
+        /** The OnLoaderStatusObservable observer while the screen is up. */
+        private static Observer;
+        /** SceneManager.HostDefersSceneStatus before the screen took the status line. */
+        private static PreviousHostDefers;
+        /** The loading state of the bar's last value. */
+        private static BarState;
+        /** The bar's value (0-1), null before the first real progress. */
+        private static BarProgress;
+        /**
+         * Puts the stages on a displayed loading screen and follows the loader status until the screen fades.
+         * @param loadingScreen - The engine's loading screen.
+         * @param marginTop - The stage's distance below the middle of the screen.
+         */
+        static Attach(loadingScreen: any, marginTop: string): void;
+        /**
+         * The cover a page painted before the toolkit loaded (engine.html's #xbabylonjsLoadingDiv). A React splash has its own div of that
+         * name inside #xbabylonjsSplashScreen, and that one is not a cover: React splash screens render their own stages.
+         * @returns The cover, or null when the page has none.
+         */
+        static FindPageCover(): HTMLElement;
+        /**
+         * Puts the stages on a cover the page painted itself (engine.html), which the player has been looking at since the page opened.
+         * @param screen - The cover.
+         * @param marginTop - The stage's distance below the middle of the screen.
+         */
+        static AttachScreen(screen: HTMLElement, marginTop: string): void;
+        /**
+         * Starts the stages on the given covers.
+         * @param covers - One div per canvas or engine view.
+         * @param marginTop - The stage's distance below the middle of the screen.
+         */
+        private static Begin;
+        /**
+         * True while the screen is up and not fading (its hide sets an inline opacity of 0).
+         * @returns False when no screen was attached or it has gone.
+         */
+        static IsShowing(): boolean;
+        /**
+         * The scene that still has to be revealed before the screen can hide.
+         * @param engine - The engine hiding its loading screen.
+         * @returns The engine's last scene, or null when the screen can hide now.
+         */
+        static SceneToReveal(engine: BABYLON.AbstractEngine): BABYLON.Scene;
+        /**
+         * Fades out a cover the page painted itself (AttachScreen) and removes it once it has faded.
+         * @param screen - The cover.
+         */
+        static FadeScreen(screen: HTMLElement): void;
+        /**
+         * The loading state of the bar's last value: from 1 on the toolkit owns the bar, so a page stops posting its own download percent.
+         * @returns The state, -1 before the toolkit's first report.
+         */
+        static GetBarState(): number;
+        /**
+         * Shows one status update on the stages: null fields stay as they are, and the bar only moves forward within one loading state
+         * (the download, state -1, follows the file progress as is). This is what the loader status does, and what a page posts for work
+         * of its own before the scene loads (engine.html: the content download).
+         * @param status - The status line.
+         * @param details - The detail line.
+         * @param progress - The bar, 0-1.
+         * @param state - The loading state.
+         */
+        static ShowStatus(status: string, details: string, progress: number, state: number): void;
+        /** Stops following the loader status. The stage stays on the screen, so it fades with it. */
+        static Detach(removeStages?: boolean): void;
+        /**
+         * Builds the stage elements on one cover.
+         * @param screen - The cover.
+         * @param marginTop - The stage's distance below the middle of the screen.
+         * @returns The view.
+         */
+        private static CreateView;
+        /**
+         * Slides the bar's fill until the first real progress (a full, faint bar for a player who asked for less motion).
+         * @param fill - The fill.
+         * @returns The animation, or null when it does not slide.
+         */
+        private static StartSlide;
+        /**
+         * Follows the loader status until the screen has faded.
+         * @param update - The update.
+         */
+        private static OnLoaderStatus;
+        /**
+         * The bar's value after an update.
+         * @param progress - The update's progress.
+         * @param state - The update's loading state.
+         * @returns The value, or null when the update has no progress.
+         */
+        private static NextBarProgress;
+        /**
+         * Turns an all-capitals line into sentence case (mixed-case text is shown as it is).
+         * @param text - The line.
+         * @returns The text to show.
+         */
+        private static ToSentenceCase;
     }
 }
 declare namespace TOOLKIT {
@@ -12691,7 +12830,8 @@ declare namespace TOOLKIT {
      *   80-99 %, Ready 100 % (LOADING_SHARE, SHADERS_SHARE) - that only moves forward, glides toward the real progress and creeps slowly
      *   while work is pending, so it never sits still or jumps. While SceneManager.PrecompileShaders is false Loading Scene is the only
      *   headline before Ready, so its band is the whole bar and the loads' own stages fill it (LOADED_SHARE_WITHOUT_PRECOMPILE).
-     * Both page splash screens show it: engine.html and the React splash read SceneManager.OnLoaderStatusObservable.
+     * Every splash screen shows it through SceneManager.OnLoaderStatusObservable: the default splash (LoadingScreenStages, on engine.html
+     * and the built-in loading screen) and the React splash.
      */
     class SplashNarrator {
         /** Every report the narrator receives, before it chooses what to show (tests and host pages that want the raw detail). */
