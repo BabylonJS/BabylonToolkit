@@ -19,6 +19,17 @@ declare namespace TOOLKIT {
         static EnableDebugMode: boolean;
         /** Set the allow user input flag */
         static EnableUserInput: boolean;
+        /**
+         * Turns the toolkit's shader precompiling and shader caching on (default) or off. False loads scenes the way plain Babylon
+         * loads them: no shader code cache (IndexedDB), no draw hold or load-time shader stage, no PREWARM ("Optimizing Graphics")
+         * before the splash fades, no asynchronous WebGPU pipelines or post-reveal safety net, no late-compile detector, no Prepare
+         * graphics priming and no splash frame thinning. Shaders then compile the first time something draws.
+         * Set it before InitializeRuntime: the shader code cache reads it there; the warm-up reads it at every scene load and reveal.
+         * @example TOOLKIT.SceneManager.PrecompileShaders = false; // before TOOLKIT.SceneManager.InitializeRuntime(engine)
+         */
+        static PrecompileShaders: boolean;
+        /** True unless PrecompileShaders was set to false (a missing value keeps the default, on). */
+        static IsPrecompilingShaders(): boolean;
         /** Enable the main page render loop */
         static RenderLoopReady: boolean;
         /** Pauses the main page render loop */
@@ -298,7 +309,7 @@ declare namespace TOOLKIT {
         static ShowSplashScreen(): void;
         /**
          * Hide the splash screen with optional delay and fade effect. Before the fade, the PREWARM stage
-         * (SceneShaderWarmup.PrepareGameAsync) always runs: it waits for the scene loads still in flight and compiles whatever the
+         * (SceneShaderWarmup.PrepareGameAsync) runs unless PrecompileShaders is false: it waits for the scene loads still in flight and compiles whatever the
          * scene load's warm-up did not cover — game-mode content, objects spawned since — behind the splash (shown as OPTIMIZING
          * GRAPHICS by SplashNarrator), so the first frames after the reveal do not compile. This covers a splash hidden
          * automatically (SceneController) or by your own call (autoHideSplashScreen = false). Right before the fade the splash shows
@@ -358,7 +369,9 @@ declare namespace TOOLKIT {
         /** How often WhenSceneRevealed checks whether a page hid its splash screen its own way, in milliseconds. */
         private static readonly SPLASH_POLL_INTERVAL_MS;
         /**
-         * True while the page's splash screen (`#xbabylonjsSplashScreen`) is up: shown and not yet fading out.
+         * True while the page's splash screen is up: shown and not yet fading out (both kinds fade by setting an inline opacity of 0).
+         * The React splash is `#xbabylonjsSplashScreen` (its inner `#xbabylonjsLoadingDiv` never fades itself, so only the outer one
+         * counts); the exported engine.html loader is `#xbabylonjsLoadingDiv` alone.
          * @returns False when there is no document or no splash element.
          */
         static IsSplashScreenShowing(): boolean;
@@ -401,6 +414,37 @@ declare namespace TOOLKIT {
         static EnableSceneParsing(enabled: boolean): void;
         /** Is scene loader parsing plugin enabled */
         static IsSceneParsingEnabled(): boolean;
+        /** Scenes whose exported script components are switched off (SetScriptComponentsEnabled), with the class names still created. */
+        private static readonly ScriptComponentsDisabledScenes;
+        /**
+         * Switches the creation of exported script components off (or back on) for one scene: the parser then skips the script
+         * components of every node loaded into it - except the classes `keptClasses` names - so none of their awake, start or ready
+         * runs (lights, cameras and renderers are still set up). A per-scene switch, so a hidden scene can load beside a playing one
+         * (SceneShaderWarmup.PrimeSceneAsync keeps only the toolkit's rendering components).
+         * @param scene - The scene.
+         * @param enabled - False to skip the scene's script components; true (default for every scene) to create them all.
+         * @param keptClasses - With `enabled` false: class names still created ("TOOLKIT.PostProcessor" or "PostProcessor").
+         */
+        static SetScriptComponentsEnabled(scene: BABYLON.Scene, enabled: boolean, keptClasses?: string[]): void;
+        /**
+         * Whether the parser creates every exported script component of nodes loaded into a scene (SetScriptComponentsEnabled).
+         * @param scene - The scene.
+         * @returns False when the scene's script components are switched off (some classes may still be kept).
+         */
+        static AreScriptComponentsEnabled(scene: BABYLON.Scene): boolean;
+        /**
+         * Whether the parser creates an exported script component of a class in a scene: always, unless the scene's script
+         * components are switched off and the class is not one it keeps (SetScriptComponentsEnabled).
+         * @param scene - The scene.
+         * @param className - The exported class name, with or without its namespace ("TOOLKIT.PostProcessor").
+         * @returns True when the component is created.
+         */
+        static IsScriptComponentCreated(scene: BABYLON.Scene, className: string): boolean;
+        /**
+         * @param className - A class name, with or without its namespace.
+         * @returns The name without its namespace ("TOOLKIT.PostProcessor" → "PostProcessor").
+         */
+        private static ScriptClassName;
         /** The light probe switch (light-probe-network-toggle): true while every TOOLKIT.LightProbeNetwork lights its meshes from the baked probes. */
         private static LightProbeNetworkEnabled;
         /**
@@ -648,6 +692,8 @@ declare namespace TOOLKIT {
         static GetSceneFile(scene: BABYLON.Scene): string;
         /** Sets the file name the last scene properties was loaded from */
         static SetSceneFile(scene: BABYLON.Scene, fileName: string): void;
+        /** Get the first file loaded into the scene: its level, whatever containers loaded after it (GetSceneFile names the last load) */
+        static GetLevelFile(scene: BABYLON.Scene): string;
         /** Add a shadow castor mesh to a shadow light. */
         static AddShadowCaster(light: BABYLON.ShadowLight, transform: BABYLON.TransformNode, children?: boolean): void;
         /** Add multiple shadow castor meshes to a shadow light. */
@@ -2246,6 +2292,8 @@ declare namespace TOOLKIT {
         private _scriptRevealed;
         /** True when the scene was revealed before this component started (its node was disabled): reveal() runs right after its first start(). */
         private _revealAfterStart;
+        /** True when a loader's ready list owns this component's ready() (MetadataParser): it runs then, not on the first frames. */
+        private _readyListed;
         private _registeredClassname;
         private _registerComponentAlias;
         private _lateUpdateObserver;
@@ -2375,9 +2423,9 @@ declare namespace TOOLKIT {
          * builds the game, and the splash's PREWARM pass runs last. reveal() waits for the splash to start fading
          * (SceneManager.WhenSceneRevealed): the place to start music, intro timers and anything the player should see or hear
          * from the start. A late instance (an instantiated prefab, a component created in code) gets it right after its
-         * ready(). A component whose node is disabled at the reveal and that has not started yet waits (D7, Unity's
-         * lifecycle): it gets reveal() right after its first start(), once the node is enabled. Never runs for a component
-         * destroyed first, nor for a scene disposed before its reveal.
+         * ready(). A component that has not started yet at the reveal (its node is disabled, or the scene is not playing)
+         * waits (D7, Unity's lifecycle): it gets reveal() right after its first start(), so reveal() never comes before
+         * start(). Never runs for a component destroyed first, nor for a scene disposed before its reveal.
          * @param instance The component instance.
          */
         private static ScheduleRevealInstance;
@@ -3222,14 +3270,304 @@ declare namespace TOOLKIT {
      * @class ImageContainer - All rights reserved (c) 2024 Mackey Kinard
      */
 }
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Auto Cascade Bias (auto-cascade-bias): gives every cascade of a cascaded directional light the depth bias Unity gives it.
+     *
+     * Unity counts a directional light's depth bias in shadow-map texels of each cascade (URP ShadowUtils.GetShadowBias), so its
+     * bias in metres follows each cascade's size. Babylon's CascadedShadowGenerator applies one `bias` to every cascade as a
+     * fraction of that cascade's light-space depth range, which `depthClamp` refits to the casters every render - so one value
+     * was a different distance in each cascade and changed as the camera moved, and casters near their receivers (karts on a
+     * road, characters on a floor) lost their shadows. Installed at light intake, this converts the light's Unity texel bias
+     * into each cascade's own `bias` just before that cascade draws (the shadow map announces the cascade layer), and restores
+     * the generator's base bias after the last cascade, so nothing outside the cascade passes sees a cascade's value.
+     * No shader, define, draw or pass changes; a few arithmetic operations per cascade and no allocation per frame.
+     * @class AutoCascadeBias - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class AutoCascadeBias {
+        /** URP's soft-shadow kernel radius at its default (Medium) soft-shadow quality, texels (older URP exports, D11). */
+        static readonly URP_DEFAULT_SOFT_KERNEL_RADIUS: number;
+        /** The kernel radius of a hard shadow, texels: Unity does not widen its bias. */
+        static readonly HARD_SHADOW_KERNEL_RADIUS: number;
+        /** Unity Built-in depth-bias units per cascade texel: Built-in's default 0.05 lands on URP's default 1 texel (D10). */
+        static readonly BUILT_IN_BIAS_TEXELS_PER_UNIT: number;
+        /** Babylon's PCF kernel radius at High filtering quality (5x5 taps), texels. */
+        static readonly PCF_HIGH_KERNEL_RADIUS: number;
+        /** Babylon's PCF kernel radius at Medium filtering quality (3x3 taps), texels. */
+        static readonly PCF_MEDIUM_KERNEL_RADIUS: number;
+        /** Babylon's PCF kernel radius at Low filtering quality (one hardware-filtered tap), texels. */
+        static readonly PCF_LOW_KERNEL_RADIUS: number;
+        /**
+         * How much of `bias` a depth-texture shadow map (PCF, PCSS) writes, in depth-range units: half in clip space
+         * (shadowMapVertexMetric, SM_DEPTHTEXTURE) plus the whole bias per fragment (shadowMapFragment, SM_DEPTHCLAMP), on WebGL
+         * and WebGPU alike. A map without a depth texture writes it once.
+         */
+        static readonly DEPTH_TEXTURE_WRITE_SCALE: number;
+        /** A cascade depth range below this, metres, is degenerate: that cascade keeps the base bias. */
+        static readonly MIN_DEPTH_RANGE_METRES: number;
+        /** The largest normalized bias a cascade is given: its whole depth range. */
+        static readonly MAX_NORMALIZED_BIAS: number;
+        /** The most cascades a CascadedShadowGenerator has (Babylon's MAX_CASCADES_COUNT). */
+        static readonly MAX_CASCADES: number;
+        /**
+         * The smallest normal bias a cascade is given, metres (D6). A converted normal bias never reaches 0, so Babylon's
+         * SM_NORMALBIAS define never flips mid-game and no shadow effect compiles late.
+         */
+        static readonly NORMAL_BIAS_FLOOR_METRES: number;
+        /** The one result object the per-cascade pass reuses, so a render allocates nothing. */
+        private static readonly _cascadeResult;
+        /**
+         * Resolves the light's settings and installs the per-cascade conversion on its cascaded generator. Called once per light
+         * by MetadataParser, after the generator's cascade count and hooks are set.
+         * @param generator The light's cascaded shadow generator.
+         * @param component The exported light component (the light's `metadata.toolkit.components` entry).
+         * @returns The installed state, or null when the switch is off or the export carries no usable bias (today's single bias).
+         */
+        static ApplyFromExport(generator: BABYLON.CascadedShadowGenerator, component: any): TOOLKIT.IAutoCascadeBiasState;
+        /**
+         * Reads the Auto Cascade Bias settings of an exported light component (D9, D10, D11). Pure.
+         * @param component The exported light component.
+         * @returns The settings, or null when `autocascadebias` is false or no Unity bias can be read (the light keeps one bias).
+         */
+        static ResolveSettings(component: any): TOOLKIT.IAutoCascadeBiasSettings;
+        /**
+         * One cascade's bias (D6, D7). Pure; writes into `result` and allocates nothing.
+         * @param settings The light's settings (Unity texels and the metre clamps).
+         * @param pcfKernelRadiusTexels Babylon's PCF kernel radius in texels.
+         * @param cascadeWidthMetres The larger side of the cascade's light-space box, metres.
+         * @param mapSize The shadow map's size, texels per side.
+         * @param depthRangeMetres The cascade's light-space depth range this render, metres.
+         * @param writeScale How much of `bias` the map writes (DEPTH_TEXTURE_WRITE_SCALE or 1).
+         * @param result Receives the bias in metres and normalized.
+         * @returns False when an input is degenerate or not finite (the caller keeps the base bias); `result` is then untouched.
+         */
+        static ComputeCascadeBias(settings: TOOLKIT.IAutoCascadeBiasSettings, pcfKernelRadiusTexels: number, cascadeWidthMetres: number, mapSize: number, depthRangeMetres: number, writeScale: number, result: TOOLKIT.ICascadeBiasResult): boolean;
+        /**
+         * One cascade's normal bias in metres (shadow-warmup-host-compiles D6): Unity's normal bias in that cascade's texels,
+         * never below NORMAL_BIAS_FLOOR_METRES. Babylon offsets each caster along its normal by this many metres times
+         * sin(N, L), through `biasAndScaleSM.y`, which is set per draw - so a value per cascade needs no new shader variant. Pure.
+         * @param unityNormalBiasTexels Unity's normal bias in cascade texels; must be above 0.
+         * @param cascadeWidthMetres The larger side of the cascade's light-space box, metres.
+         * @param mapSize The shadow map's size, texels per side.
+         * @returns The normal bias in metres, or 0 when an input is degenerate or not finite (the caller keeps the base value).
+         */
+        static ComputeCascadeNormalBias(unityNormalBiasTexels: number, cascadeWidthMetres: number, mapSize: number): number;
+        /**
+         * Installs the per-cascade conversion on a cascaded generator (D2, D13). Installing again with the same shadow map only
+         * replaces the settings; with a recreated map the old observers are removed and the new map is hooked.
+         * @param generator The cascaded shadow generator; its cascade count must already be final.
+         * @param settings The resolved settings.
+         * @returns The state, or null when the generator or its shadow map is missing.
+         */
+        static Install(generator: BABYLON.CascadedShadowGenerator, settings: TOOLKIT.IAutoCascadeBiasSettings): TOOLKIT.IAutoCascadeBiasState;
+        /**
+         * The Auto Cascade Bias state of a generator (FR11).
+         * @param generator A shadow generator.
+         * @returns The state, or null when none is installed.
+         */
+        static GetState(generator: BABYLON.ShadowGenerator): TOOLKIT.IAutoCascadeBiasState;
+        /**
+         * Pauses or resumes the conversion on one generator (D15). Paused, every cascade draws with the base depth and normal bias.
+         * @param generator A cascaded shadow generator with Auto Cascade Bias installed.
+         * @param enabled True to convert, false to keep the base bias.
+         * @returns False when the generator has no Auto Cascade Bias.
+         */
+        static SetEnabled(generator: BABYLON.ShadowGenerator, enabled: boolean): boolean;
+        /**
+         * Babylon's PCF kernel radius of a generator, texels (D6): High 2, Medium 1, Low 0; a generator without PCF has none.
+         * @param generator A shadow generator.
+         * @returns The radius in texels.
+         */
+        static PcfKernelRadiusTexels(generator: BABYLON.ShadowGenerator): number;
+        /**
+         * The PCF kernel radius of an exported `shadowfilterquality` name, texels ("High" 2, "Low" 0, anything else 1, the
+         * runtime's default Medium) - the rule HdrpLightMath.PcfKernelRadiusTexels exported HDRP biases with.
+         * @param quality The exported filter quality name.
+         * @returns The radius in texels.
+         */
+        static PcfKernelRadiusForQuality(quality: unknown): number;
+        /**
+         * How much of `bias` a generator's shadow map writes (D7).
+         * @param generator A shadow generator.
+         * @returns DEPTH_TEXTURE_WRITE_SCALE for PCF and PCSS, else 1.
+         */
+        static WriteScale(generator: BABYLON.ShadowGenerator): number;
+        /**
+         * Start of one shadow-map render (after the generator refit its cascades): captures the base depth and normal bias and
+         * this render's filter values. Not re-captured while a restore is pending, so a cascade value never becomes the base.
+         * @param generator The cascaded shadow generator.
+         * @param state Its state.
+         */
+        private static BeginShadowMapRender;
+        /**
+         * Just before one cascade draws: writes that cascade's depth and normal bias into the generator and records them.
+         * @param generator The cascaded shadow generator.
+         * @param state Its state.
+         * @param layer The cascade index the shadow map is about to draw.
+         */
+        private static WriteCascadeBias;
+        /**
+         * Writes one cascade's normal bias (D6), only when the render's base normal bias is above 0 and the export carries
+         * Unity's normal bias: a zero normal bias stays zero, so SM_NORMALBIAS never flips and no shadow effect compiles late.
+         * @param generator The cascaded shadow generator.
+         * @param state Its state; `isWritingCascades` is already true.
+         * @param layer The cascade index the shadow map is about to draw.
+         * @param cascadeWidthMetres The larger side of the cascade's light-space box, metres.
+         */
+        private static WriteCascadeNormalBias;
+        /**
+         * End of one shadow-map render: restores the base depth and normal bias (FR4, D6).
+         * @param generator The cascaded shadow generator.
+         * @param state Its state.
+         */
+        private static EndShadowMapRender;
+        /**
+         * Whether this light's normal bias is converted per cascade: an export without `cascadenormalbiastexels` keeps today's
+         * single normal bias, and nothing writes the generator's `normalBias` (D6).
+         * @param state The light's state.
+         * @returns True when the export carries Unity's normal bias above 0.
+         */
+        private static ConvertsNormalBias;
+        /**
+         * Creates the state of one install (observers are attached by Install).
+         * @param generator The cascaded shadow generator.
+         * @param shadowMap Its shadow map.
+         * @param settings The resolved settings.
+         * @returns The new state.
+         */
+        private static CreateState;
+        /**
+         * Removes a state's observers from the shadow map they were added to.
+         * @param state The state.
+         */
+        private static RemoveObservers;
+        /**
+         * Unity texels from an export made before `cascadebiastexels` (D11), by the pipeline the light's own keys identify.
+         * @param component The exported light component.
+         * @returns The texels and pipeline, or null when the export carries none of the pipeline keys or no `shadowmapbias`.
+         */
+        private static ReadLegacyBiasTexels;
+        /**
+         * Builds a settings record.
+         * @param unityBiasTexels Unity's depth-bias texels (negative reads as 0).
+         * @param unityNormalBiasTexels Unity's normal-bias texels (0 = keep the single normal bias).
+         * @param minimumBiasMetres The lower clamp, metres (0 = none).
+         * @param maximumBiasMetres The upper clamp, metres (0 = none).
+         * @param source "export", "urp", "birp" or "hdrp".
+         * @returns The settings.
+         */
+        private static CreateSettings;
+        /**
+         * A positive finite number as it is, anything else as 0.
+         * @param value An exported value.
+         * @returns The value or 0.
+         */
+        private static PositiveOrZero;
+        /**
+         * True for a finite number above 0 (NaN and infinities are false).
+         * @param value The number.
+         * @returns Whether it is positive and finite.
+         */
+        private static IsPositiveFinite;
+    }
+    /** The Auto Cascade Bias settings of one cascaded directional light, resolved at light intake (AutoCascadeBias.ResolveSettings). */
+    interface IAutoCascadeBiasSettings {
+        /** Unity's depth bias in cascade texels, already widened the way the light's pipeline widens it (D10). */
+        unityBiasTexels: number;
+        /**
+         * Unity's normal bias in cascade texels (`cascadenormalbiastexels`, shadow-warmup-host-compiles D6); 0 when the export
+         * has none, and the light then keeps its single normal bias.
+         */
+        unityNormalBiasTexels: number;
+        /** The smallest bias a cascade may use, metres; 0 means no lower clamp. */
+        minimumBiasMetres: number;
+        /** The largest bias a cascade may use, metres; 0 means no upper clamp. Applied after the minimum, so it wins. */
+        maximumBiasMetres: number;
+        /** "export" (the `cascadebiastexels` key), or the pipeline an older export was read as: "urp", "birp" or "hdrp". */
+        source: string;
+    }
+    /** One cascade's bias, written by AutoCascadeBias.ComputeCascadeBias into a reused object. */
+    interface ICascadeBiasResult {
+        /** The bias in world metres along the light direction. */
+        biasMetres: number;
+        /** The same bias as Babylon's `bias` for that cascade: a fraction of its depth range, divided by the write scale. */
+        normalizedBias: number;
+    }
+    /** Unity texels read from an older export, and the pipeline its keys identify (AutoCascadeBias.ReadLegacyBiasTexels). */
+    interface ILegacyCascadeBias {
+        /** Unity's depth bias in cascade texels. */
+        texels: number;
+        /** "urp", "birp" or "hdrp". */
+        pipeline: string;
+    }
+    /** The JSON-safe readout on `light.metadata.toolkit.autoCascadeBias` (FR11): no Babylon objects, so metadata stays serialisable. */
+    interface IAutoCascadeBiasReadout {
+        /** Where the Unity texels came from (IAutoCascadeBiasSettings.source). */
+        source: string;
+        /** Unity's depth bias in cascade texels. */
+        unityBiasTexels: number;
+        /** Unity's normal bias in cascade texels; 0 when the light keeps its single normal bias. */
+        unityNormalBiasTexels: number;
+        /** False while SetEnabled paused the conversion. */
+        enabled: boolean;
+        /** Each cascade's bias in metres from the last render; 0 where the cascade kept the base bias. */
+        lastBiasMetres: Float64Array;
+        /** Each cascade's normalized bias from the last render; the base bias where the cascade kept it. */
+        lastBiasNormalized: Float64Array;
+        /** Each cascade's normal bias in metres from the last render; the base normal bias where the cascade kept it. */
+        lastNormalBiasMetres: Float64Array;
+    }
+    /** What Auto Cascade Bias keeps for one cascaded shadow generator (on the generator, `_tkAutoCascadeBias`). */
+    interface IAutoCascadeBiasState {
+        /** The light's settings. */
+        settings: IAutoCascadeBiasSettings;
+        /** The readout also placed on the light's toolkit metadata. */
+        readout: IAutoCascadeBiasReadout;
+        /** False pauses the conversion (SetEnabled); every cascade then draws with the base bias. */
+        enabled: boolean;
+        /** The shadow map whose observers are installed (a recreated map needs a new install). */
+        shadowMap: BABYLON.RenderTargetTexture;
+        /** The shadow map's size, texels per side. */
+        mapSize: number;
+        /** The generator's own `bias`, captured at the start of each shadow-map render and restored after its last cascade. */
+        baseBias: number;
+        /** The generator's own `normalBias`, captured and restored like `baseBias`; 0 is never converted (D6). */
+        baseNormalBias: number;
+        /** True from the first cascade written in a render until the restore after its last one. */
+        isWritingCascades: boolean;
+        /** True for the current render when the conversion applies (enabled, and not PCSS). */
+        isActiveThisRender: boolean;
+        /** Babylon's PCF kernel radius for the current render, texels. */
+        pcfKernelRadiusTexels: number;
+        /** How much of `bias` the map writes in the current render (DEPTH_TEXTURE_WRITE_SCALE or 1). */
+        writeScale: number;
+        /** The shadow map's onBeforeBindObservable observer. */
+        beforeBindObserver: BABYLON.Observer<BABYLON.RenderTargetTexture>;
+        /** The shadow map's onBeforeRenderObservable observer (one call per cascade layer). */
+        beforeRenderObserver: BABYLON.Observer<number>;
+        /** The shadow map's onAfterUnbindObservable observer. */
+        afterUnbindObserver: BABYLON.Observer<BABYLON.RenderTargetTexture>;
+    }
+    /** The expando a cascaded generator carries its Auto Cascade Bias state in. */
+    interface IAutoCascadeBiasHost {
+        /** Set by AutoCascadeBias.Install. */
+        _tkAutoCascadeBias?: IAutoCascadeBiasState;
+    }
+}
 declare namespace TOOLKIT {
     /**
      * Unity's `_CameraDepthTexture` for transpiled Shader Graph materials of every pipeline, made like URP's CopyDepth pass: the
      * camera's own depth (the PrePassRenderer's linear view-Z attachment) is copied once per frame and camera, right before the
      * first rendering group whose queues draw a sampling material renders its transparents - no second scene pass.
      *  - Encoding: linear view-space depth in metres, R32F, NEAREST; empty pixels hold the camera's far plane, as Unity's
-     *    cleared depth does (the generated Scene Depth bodies rely on it).
+     *    cleared depth does (the generated Scene Depth bodies rely on it). The prepass depth it copies is kept R32F too
+     *    (SyncDepthPrecision) - Babylon stores it half float, which bands depth fades in long views.
      *  - Opaque samplers read the previous frame's copy (URP's texture is not produced yet when opaques draw).
+     *  - Non-material samplers (soft particles, full-screen graph passes) ask through AcquireForSampler: a particle system's
+     *    rendering group copies right before its particles, any other sampler's copy runs before the transparents of the last
+     *    rendering group drawn, for every frame the sampler binds. That keeps one depth source for the whole frame - no
+     *    DepthRenderer re-draws the opaques for them.
      *  - Acquire returns null - the caller keeps its own depth source - when the scene has no prepass (WebGL1) or `Enabled` is
      *    false. Per-scene state is released on scene dispose.
      * @class CameraDepthCopy - All rights reserved (c) 2024 Mackey Kinard
@@ -3241,6 +3579,12 @@ declare namespace TOOLKIT {
         private static readonly ConfigurationName;
         private static readonly ShaderName;
         /**
+         * Frames a full-screen sampler's request stays due after its last bind. A pass binds after the scene has drawn, so the
+         * copy it needs runs in the next frame's rendering groups (one frame on); a second frame of slack covers a pass skipped
+         * for a frame without dropping the copy it samples.
+         */
+        private static readonly PassRequestFrames;
+        /**
          * The camera depth copy for `camera`, created on first use and shared by every material that asks. Creating it from a
          * material bind is safe: OpaqueSceneColor.GetTexture creates its target from the same generated call sites.
          * @param scene The scene.
@@ -3249,21 +3593,110 @@ declare namespace TOOLKIT {
          * @returns The R32F target, or null when the copy is unavailable (the caller keeps its own source).
          */
         static Acquire(scene: BABYLON.Scene, camera: BABYLON.Camera, material: BABYLON.Material): BABYLON.RenderTargetTexture;
+        /**
+         * The copy for a sampler that is not a material: a particle system's soft fade or a full-screen graph pass reading Unity's
+         * Scene Depth. Requests the prepass depth like Acquire and marks the camera's copy as needed every frame `owner` binds,
+         * whatever the material queues hold: a particle system (one of scene.particleSystems) makes each main rendering group
+         * that draws it copy right before its particles; any other owner makes the last rendering group drawn copy before its
+         * transparents (GroupNeedsCopy through PassCopyDue). Call it on every bind.
+         * @param scene The scene.
+         * @param camera The camera whose depth is copied (normally scene.activeCamera).
+         * @param owner The sampler: the particle system, or the pass object, binding the copy this frame.
+         * @returns The R32F target (linear view depth in metres, the far plane where nothing was drawn), or null when the copy
+         * is unavailable - the caller then keeps its own DepthRenderer (EnableFallbackDepthRenderer).
+         */
+        static AcquireForSampler(scene: BABYLON.Scene, camera: BABYLON.Camera, owner: object): BABYLON.RenderTargetTexture;
+        /**
+         * The camera-space-Z DepthRenderer a depth consumer falls back to when the copy is unavailable. A renderer this call
+         * creates draws only while its camera is the active one (`useOnlyInActiveCamera`), so one left from a warm-up camera
+         * swap or an earlier camera never re-draws the opaques for a camera nobody looks through; a renderer that already
+         * existed (SSAO, SSR, a project script) is returned as it was found.
+         * @param scene The scene.
+         * @param camera The camera whose depth the renderer draws.
+         * @param force32bitsFloat True to force a 32-bit float map (Babylon's enableDepthRenderer argument).
+         * @returns The camera's depth renderer, or null when Babylon could not create one.
+         */
+        static EnableFallbackDepthRenderer(scene: BABYLON.Scene, camera: BABYLON.Camera, force32bitsFloat: boolean): BABYLON.DepthRenderer;
+        /**
+         * The soft-particle fade both particle shaders compute (VisualEffectRenderEffect VFXSOFT, ShurikenParticles PRTSOFT):
+         * `mix(saturate(inverseFadeRange × ((sceneDepth − nearFade) − fragmentDepth)), 1, step(sceneDepth, 0))`. A scene depth
+         * of 0 is "nothing drawn" for a camera-space-Z DepthRenderer (it clears to 0) and fades nothing; the copy holds the far
+         * plane there instead, which fades nothing as well for every particle more than nearFade + 1 / inverseFadeRange in
+         * front of the far plane, and fades the rest as Unity's far-plane `_CameraDepthTexture` does. Pure.
+         * @param sceneDepth The sampled scene depth, metres (0 or the far plane where nothing was drawn).
+         * @param fragmentDepth The particle fragment's linear view depth, metres.
+         * @param nearFade The fade's near distance, metres (Unity's softParticlesNearFadeDistance; 0 for a VFX output).
+         * @param inverseFadeRange 1 / (far fade − near fade), per metre.
+         * @returns The alpha factor, 0 to 1.
+         */
+        static SoftFade(sceneDepth: number, fragmentDepth: number, nearFade: number, inverseFadeRange: number): number;
         /** GLSL fragment of the copy: abs(view depth), or the far plane where the prepass wrote nothing. Pure. */
         static FragmentSource(): string;
         /**
-         * Whether a rendering group must copy before its transparents: any of its opaque, alpha-test or transparent queues draws
-         * a sampling material. Pure.
+         * Whether a rendering group must copy before its transparents: a non-material sampler asked for it this frame
+         * (`samplerRequested`, from PassCopyDue), or any of its opaque, alpha-test or transparent queues draws a sampling
+         * material. Pure.
          * @param group A rendering group (reads _opaqueSubMeshes, _alphaTestSubMeshes, _transparentSubMeshes), or null.
          * @param samplers The registered sampling materials.
+         * @param samplerRequested True when a non-material sampler needs the copy in this group (default false).
          * @returns True when the copy is needed.
          */
-        static GroupNeedsCopy(group: BABYLON.RenderingGroup, samplers: Set<BABYLON.Material>): boolean;
+        static GroupNeedsCopy(group: BABYLON.RenderingGroup, samplers: Set<BABYLON.Material>, samplerRequested?: boolean): boolean;
+        /**
+         * Whether a full-screen sampler (AcquireForSampler with an owner that is not a particle system) needs the copy before
+         * `group`'s transparents: one bound within the last PassRequestFrames frames, and `group` is the last main rendering
+         * group that draws this frame, so the copy holds every opaque the camera drew. Requests older than that are dropped.
+         * @param scene The scene.
+         * @param group The rendering group about to draw its transparents.
+         * @returns True when the copy is due in this group.
+         */
+        static PassCopyDue(scene: BABYLON.Scene, group: BABYLON.RenderingGroup): boolean;
+        /**
+         * Whether a rendering group draws a particle system that samples the copy this frame. Pure.
+         * @param group A rendering group (reads its _particleSystems), or null.
+         * @param particleOwners The particle systems registered by AcquireForSampler.
+         * @returns True when the group must copy before its particles.
+         */
+        static GroupDrawsParticleSampler(group: BABYLON.RenderingGroup, particleOwners: WeakSet<object>): boolean;
+        /**
+         * Makes a camera's post-process chain carry the depth request. Babylon's PrePassRenderer._update disables every effect
+         * configuration on each prepass rebuild (a camera switch is enough) and re-enables only those a material or a post
+         * process of the camera carries, so a request that is only registered stops producing depth at the first rebuild. The
+         * request rides on the first post process that carries none; when every one already carries a configuration, the
+         * depth type is added to the first one's request (the pattern RayTracedFrame.requestPrePass uses). Pure: the caller
+         * marks the prepass dirty when it returns true.
+         * @param configuration The depth request (the store's configuration).
+         * @param camera The camera whose chain should carry it.
+         * @returns True when the chain changed; false when the depth is already carried or the camera has no post process.
+         */
+        static CarryRequest(configuration: BABYLON.PrePassEffectConfiguration, camera: BABYLON.Camera): boolean;
         /**
          * Releases a scene's targets, copy shader and hooks (runs on scene.onDisposeObservable; safe to call twice).
          * @param scene The scene whose depth-copy state is released.
          */
         static Dispose(scene: BABYLON.Scene): void;
+        /**
+         * The scene's depth-copy store, or null before anything asked for the copy.
+         * @param scene The scene.
+         * @returns The store, or null.
+         */
+        private static StoreOf;
+        /**
+         * The copy target of `camera`, created on first use and shared by every sampler of that camera.
+         * @param scene The scene.
+         * @param store The scene's store; receives a new target.
+         * @param camera The camera.
+         * @returns The target, or null when it could not be created.
+         */
+        private static TargetFor;
+        /**
+         * Whether `group` is the last group of the scene's main rendering manager that draws this frame (RenderingManager.render
+         * skips a group nothing was dispatched to).
+         * @param scene The scene.
+         * @param group A rendering group of the main rendering manager.
+         * @returns True for the last drawn group.
+         */
+        private static IsLastDrawnGroup;
         /**
          * The scene's depth-copy store, created on first use; creating it also schedules Dispose on scene dispose.
          * @param scene The scene.
@@ -3278,6 +3711,39 @@ declare namespace TOOLKIT {
          * @returns True when the prepass now produces depth.
          */
         private static RequestPrePassDepth;
+        /**
+         * The texture type the prepass depth attachment should have. Babylon's PrePassRenderer constructor stores its FLOAT
+         * attachments as HALF_FLOAT on every engine that cannot resolve multisampled float textures (all of WebGL2), even
+         * when the prepass is single-sampled and nothing is resolved. Half float holds linear view depth to 0.5 m beyond
+         * 512 m and 1 m beyond 1024 m, so a depth fade (Unity's Scene Depth minus the fragment's depth) bands across a lake
+         * seen from 1 km and the bands crawl as the camera moves; Unity's camera depth is 24 / 32 bit. Pure.
+         * @param caps The engine capabilities (reads textureFloatRender and blendFloat).
+         * @param samples The prepass sample count.
+         * @param babylonType The type Babylon chose for the attachment.
+         * @returns TEXTURETYPE_FLOAT when the prepass is single-sampled and the engine renders and blends float; otherwise
+         * babylonType (a multisampled float attachment could not be resolved).
+         */
+        static DepthTextureType(caps: BABYLON.EngineCapabilities, samples: number, babylonType: number): number;
+        /**
+         * Keeps the scene's prepass depth attachment at DepthTextureType: sets the type the next prepass layout allocates and,
+         * when `recreateAllocated` is true, re-creates an attachment already allocated with another type. Runs when the depth
+         * is requested (type only: that happens inside a bind) and before every frame with re-creation (the prepass sample
+         * count can change with the camera's MSAA). Re-creation never runs mid-frame: it replaces the textures the frame
+         * renders into.
+         * @param scene The scene.
+         * @param store The scene's store; remembers the type Babylon chose.
+         * @param recreateAllocated True only between frames (the onBeforeRender hook): re-create a mistyped allocated attachment.
+         */
+        private static SyncDepthPrecision;
+        /**
+         * Re-creates a prepass target's attachments when the one at `index` has another type than `wanted`, keeping every
+         * other attachment's type, format and name.
+         * @param target A prepass render target.
+         * @param index The attachment's index in the prepass layout.
+         * @param wanted The texture type the attachment should have.
+         * @returns True when the target was re-created.
+         */
+        private static RetypeAttachment;
         /**
          * Creates a camera's copy target: R32F, NEAREST, the render size (kept equal to it on every engine resize, like the
          * prepass target it copies), no depth buffer, nothing to render on its own (it is filled by CopyNow, never through
@@ -3295,18 +3761,29 @@ declare namespace TOOLKIT {
         private static RenderSize;
         /**
          * Hooks every rendering group of the scene's main rendering manager (re-checked each frame: groups are created on
-         * demand) so that, right before a group draws its transparents, the prepass depth is copied when that group draws a
-         * sampling material. Installed once per scene; mirrors OpaqueSceneColor.InstallCopy.
+         * demand) so that the prepass depth is copied right before a group draws its particles when one of them samples the
+         * copy, and right before it draws its transparents when GroupNeedsCopy says so - unless its particle stage has just
+         * copied (only particles drew since, and they write no depth). Installed once per scene; mirrors
+         * OpaqueSceneColor.InstallCopy.
          * @param scene The scene.
          * @param store The scene's store.
          */
         private static InstallHooks;
         /**
-         * Copies the prepass depth of the active camera into its target, between draws: ends the pass, draws the copy shader
-         * (or clears to the far plane while the shader compiles), then resumes the pass. Mirrors OpaqueSceneColor.CopyNow.
+         * Keeps the active camera's chain carrying the depth request, once the copy has a target for that camera (CarryRequest
+         * explains why the registered request alone is not enough). A changed chain marks the prepass dirty and applies the new
+         * layout before this frame's materials are made ready.
          * @param scene The scene.
          * @param store The scene's store.
-         * @param group The rendering group about to draw its transparents.
+         */
+        private static KeepRequestCarried;
+        /**
+         * Copies the prepass depth of the active camera into its target, between draws: ends the pass, draws the copy shader
+         * (or clears to the far plane while the shader compiles or the prepass has no depth this frame), then resumes the
+         * pass. The caller decides that the copy is needed. Mirrors OpaqueSceneColor.CopyNow.
+         * @param scene The scene.
+         * @param store The scene's store.
+         * @returns True when the target was written (copied or cleared to the far plane).
          */
         private static CopyNow;
         /**
@@ -3362,6 +3839,14 @@ declare namespace TOOLKIT {
          * themselves are still created in glTF order. Default true; false builds every primitive at once (diagnostics).
          */
         static SliceSceneParse: boolean;
+        /**
+         * faster-scene-loading T6: the minimum pre-warm wait (seconds) of an asset container load. `prewarmup` is a level setting
+         * (the exporter writes it for levels only, and a container load never reads level properties), so a container load kept the
+         * loader's default of 1 s: every racer, item and effect container reached its ready point at least 1 s after its preloader
+         * even when its shader stage took a few milliseconds, and PREWARM waited for the last of them (BtMarioKartWeb Toad Harbor:
+         * three waves of container loads, each padded to 1 s). 0 (default): a container load is ready when its shaders are.
+         */
+        static ContainerPreWarmTime: number;
         /**
          * Fetches each external image file once per toolkit scene load: glTF image entries that name the same uri share one
          * download (scenes exported before the exporter de-duplicated its images list a file once per material using it).
@@ -3523,6 +4008,12 @@ declare namespace TOOLKIT {
         private _buildPosted;
         private _buildTimer;
         private _babylonScene;
+        /**
+         * True while this load fills a hidden priming scene (SceneShaderWarmup.PrimeSceneAsync): it then never touches page-wide
+         * state - the loading state, the main render loop flag, the splash, host callbacks, scene-change entries, user input,
+         * physics, render scale and navigation - so a scene playing on the same page is unchanged.
+         */
+        private _primingLoad;
         private _metadataParser;
         private _loaderScene;
         private _assetsManager;
@@ -3607,6 +4098,12 @@ declare namespace TOOLKIT {
          * @param shadersTotal - Shaders the load counts (the "shaders" stage).
          */
         private reportSplashStage;
+        /**
+         * Sets the page-wide loading state (TOOLKIT.Utilities.GetLoadingState) for this load's stage; a hidden priming scene's load
+         * leaves it alone, so the state of a load or scene on screen is unchanged.
+         * @param state - 0 load content, 1 parse node transforms, 2 parse scene metadata, 3 start the asset preloader, 4 prepare the view.
+         */
+        private setLoadingState;
         /** Calls `action` once the page painted a frame (requestAnimationFrame, then a task), or after 100 ms when no frame comes (hidden tab). */
         private static AfterNextPaint;
         /** How often (ms) the scene-build stage is posted while the glTF builds (BUILDING SCENE NN%). */
@@ -3929,6 +4426,23 @@ declare namespace TOOLKIT {
         /** Texture property sampled as a tangent-space normal (linear). */
         normal?: string;
     }
+    /** One shader stage's binding budget: how many textures and samplers it may declare. */
+    interface IGraphStageBudget {
+        /** Sampled textures the stage may bind. */
+        textures: number;
+        /** Samplers the stage may bind (WebGPU counts them apart from textures; WebGL ties them to the texture units). */
+        samplers: number;
+    }
+    /** The engine members a stage budget reads beyond EngineCapabilities: WebGPU's per-stage device limits. */
+    interface IGraphStageBudgetEngine {
+        /** True on a WebGPU engine (absent or false on WebGL). */
+        isWebGPU?: boolean;
+        /** The WebGPU device's limits (absent on WebGL). */
+        _deviceLimits?: {
+            maxSampledTexturesPerShaderStage?: number;
+            maxSamplersPerShaderStage?: number;
+        };
+    }
     /**
       * GLTF Custom Shader Material (BABYLON.PBRMaterial)
       * @class CustomShaderMaterial - All rights reserved (c) 2024 Mackey Kinard
@@ -4003,8 +4517,25 @@ declare namespace TOOLKIT {
         private webgpuCompileState;
         /** T32.1 fix loop: drops a failed effect from the engine's compiled-effect cache (Scene.isReady waits on every cached effect). */
         static ReleaseFailedEffect(engine: BABYLON.AbstractEngine, effect: BABYLON.Effect): void;
-        /** T32.1 fix loop: the per-variant trim and budget fit, for this material's effects (null when the graph is disabled). */
+        /** T32.1 fix loop: the per-variant trim and budget fit, for this material's effects (null when the graph is disabled). Tagged for TOOLKIT.ShaderCodeCache. */
         getGraphFinalCodeProcessor(): (shaderType: string, code: string) => string;
+        /**
+         * The shader code cache key of processGraphFinalCode: everything outside its input code that changes its output while
+         * the stage fits its budget - the material's shader language and sampler list and the engine's per-stage texture /
+         * sampler budgets. Past the budget the output also depends on texture readiness, so such a build is marked not storable
+         * instead (processGraphFinalCode). Reads only; creates nothing.
+         * @returns The key.
+         */
+        getGraphFinalCodeCacheKey(): string;
+        /**
+         * The texture and sampler budget of one shader stage that processGraphFinalCode fits a graph's code to: the engine's
+         * texture units (vertex or fragment), and on WebGPU the device's per-stage sampled-texture and sampler limits where it
+         * reports them. getGraphFinalCodeCacheKey keys on the same values.
+         * @param engine The engine the shader compiles for.
+         * @param fragment True for the fragment stage, false for the vertex stage.
+         * @returns The stage's budget (0 textures when the engine reports none: the stage is not fitted).
+         */
+        static GraphStageBudget(engine: BABYLON.AbstractEngine, fragment: boolean): TOOLKIT.IGraphStageBudget;
         /**
          * T32.1 fix loop - a graph's shader after Babylon's preprocessor (compile keywords resolved), before the shader processor
          * binds samplers. (1) Dead code: the generator writes every node of the graph, and a compile keyword only selects which
@@ -4518,6 +5049,8 @@ declare namespace TOOLKIT {
       * @class CustomShaderMaterialPlugin - All rights reserved (c) 2024 Mackey Kinard
       */
     class CustomShaderMaterialPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         private _isEnabled;
         getClassName(): string;
         /**
@@ -4813,6 +5346,8 @@ declare namespace TOOLKIT {
       * @class DirectionalLightmapPlugin - All rights reserved (c) 2024 Mackey Kinard
       */
     class DirectionalLightmapPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PluginName: string;
         static readonly SamplerName: string;
         /** The include-expanded GLSL / WGSL statements the decode is appended to (whitespace tolerant). */
@@ -4859,6 +5394,8 @@ declare namespace TOOLKIT {
       * @class LodCrossFadePlugin - All rights reserved (c) 2024 Mackey Kinard
       */
     class LodCrossFadePlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PluginName: string;
         /** Unity LODFadeCrossFade 4x4 Bayer matrix, used as (v + 0.5) / 16 (TerrainFoliagePlugin.BAYER). */
         static readonly BAYER: number[];
@@ -4875,6 +5412,18 @@ declare namespace TOOLKIT {
          * `mesh` (optional) pre-compiles the clone's effect so the first fade does not hitch.
          */
         static AcquireClone(material: BABYLON.Material, level: number, mesh?: BABYLON.AbstractMesh): BABYLON.Material;
+        /**
+         * Makes one fade clone (CloneSharingTextures, its own metadata copy, the LodCrossFadePlugin) with the scene's material
+         * dirty mechanism held (Utilities.CreateMaterialsHeld). Every property the clone sets, and the plugin's define marking,
+         * otherwise walks every sub-mesh of the scene for users of a material that is on no mesh yet: about 7 walks per clone,
+         * thousands of clones on a large scene's LOD groups. The toolkit's scene load holds the mechanism until its shader stage
+         * ends; deferred fade-clone slices that run after it (a fast shader stage - the shader code cache) paid those walks in
+         * full and kept the splash frames from settling. Falls back to the direct path when Utilities is not loaded.
+         * @param material The source material (not a MultiMaterial).
+         * @param name The clone's name.
+         * @returns The clone with its plugin, or null when the material could not be cloned.
+         */
+        private static MakeFadeCloneHeld;
         /**
          * material.clone() with the source's own texture objects: Babylon's clone makes a new Texture per texture slot (a large
          * scene's thousands of fade clones made ~20,000 texture objects). A fade clone must draw exactly like its source, so it
@@ -5119,6 +5668,8 @@ declare namespace TOOLKIT {
      * @class HdrpLitPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class HdrpLitPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PluginName: string;
         static readonly Priority: number;
         static readonly DetailSampler: string;
@@ -5692,6 +6243,8 @@ declare namespace TOOLKIT {
      * `HdrpRendering.StandardReflectionLevel` correct in every mode. Attach it before the material's first compile.
      */
     class HdrpBakedSkyPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** The plugin's registered name. */
         static readonly PluginName: string;
         /** Runs after every built-in StandardMaterial plugin. */
@@ -5992,6 +6545,8 @@ declare namespace TOOLKIT {
          * culling above already empties those passes, but Babylon still bound and cleared every face: Moo Moo Meadows' 23
          * cow lamps cost 138 cube-face passes a frame of which 120 were empty, ~6 ms of a 33 ms frame. The map simply keeps its
          * last content while skipped - nothing it shadows is in view - and renders again the frame the light comes into view.
+         * While `_tkPrewarmDrawAll` is set (PREWARM's WebGPU pipeline stage) the skip is bypassed, so the caster pipelines of a
+         * light out of view at the reveal are built behind the splash instead of the first time the light comes into view.
          * @param generator The light's shadow generator.
          * @param light The point or spot light.
          * @param map The generator's shadow map.
@@ -6020,6 +6575,8 @@ declare namespace TOOLKIT {
         /**
          * The view matrix's depth row (view-space z = dot(row.xyz, world) + row.w) of the scene's current view, written into the
          * material's `tkViewZ` uniform for the GLSL cascade selection (FragmentCascadeBeforeLights). Correct in either handedness.
+         * Under `scene.floatingOriginMode` the shaders' `vPositionW` is camera-relative (world − `floatingOriginOffset`), so the
+         * row's constant is moved by that offset; without floating origin the offset is zero and the row is the view's own.
          * @param material The material carrying a `tkViewZ` vec4 uniform.
          * @param scene The scene whose current view matrix is used.
          */
@@ -6277,6 +6834,11 @@ declare namespace TOOLKIT {
         _shouldRender: () => boolean;
         /** Set once the invisible-light skip is installed, so it is never wrapped twice. */
         _tkSkipInvisible?: boolean;
+        /**
+         * True while PREWARM's WebGPU pipeline stage draws this map with all its casters (SceneShaderWarmup.DrawPunctualShadowMapsFully):
+         * the invisible-light skip is bypassed, so a light out of view at the reveal still builds its caster pipelines.
+         */
+        _tkPrewarmDrawAll?: boolean;
     }
     /** The active camera's frustum planes, rebuilt once per scene frame for punctual shadow visibility (PunctualShadowInvisible). */
     interface ICameraFrustumCache {
@@ -6556,6 +7118,23 @@ declare namespace TOOLKIT {
          * @param material The material.
          */
         static Install(material: BABYLON.Material): void;
+        /**
+         * The shader code cache key of a budget processor: everything outside its input code that changes its output - the
+         * device's fragment texture / sampler budget (or BudgetOverride) and whether the scene's shadow maps and cookies each
+         * sample alike (ShareLightSamplers and Fit share samplers only then) - chained to the previous processor's key.
+         * @param label Which budget processor ("samplerBudget:engine" or "samplerBudget:material").
+         * @param engine The engine the shader compiles for.
+         * @param scene The scene whose light textures decide sharing (null: none).
+         * @param previousFinalCode The processor this one runs after, or undefined.
+         * @returns The key, or null when the previous processor cannot be keyed.
+         */
+        static ChainCacheKey(label: string, engine: BABYLON.AbstractEngine, scene: BABYLON.Scene, previousFinalCode: unknown): string | null;
+        /**
+         * The scene the engine-wide budget reads (Fit's owner when it has no scene): the engine's last scene.
+         * @param engine The engine.
+         * @returns The scene, or null.
+         */
+        private static LastScene;
         /**
          * Fits one fragment shader: shares light samplers (WebGPU), then drops cookies, then spot / point shadows, highest light
          * slot first, until it fits; reports what was dropped, or that it still does not fit.
@@ -7909,13 +8488,34 @@ declare namespace TOOLKIT {
          * null for a scene load; "pipelines" in stage 2).
          * @param options - The reveal-time pass's options (hidden meshes, render passes, prefab copies, the cameras it warms, its own
          * whole-scene pipeline stage); a scene load passes none.
-         * @returns The final counts ({ ready: 0, total: 0, timedOut: false } at once when the scene has no units).
+         * @returns The final counts ({ ready: 0, total: 0, timedOut: false } at once when the scene has no units, or while
+         * SceneManager.PrecompileShaders is false).
          */
         static RunAsync(scene: BABYLON.Scene, onProgress?: (ready: number, total: number, fraction?: number, step?: TOOLKIT.IPrewarmStepProgress) => void, options?: TOOLKIT.ISceneWarmupOptions): Promise<TOOLKIT.ISceneShaderWarmupResult>;
         /** Most rounds of one pass: a round runs again when a toolkit scene load finished during it, to warm what that load added. */
         static PREWARM_MAX_ROUNDS: number;
         /** Pause (ms) between two checks of a pass waiting for the scene loads in flight ("loading" step). */
         static PREWARM_LOAD_POLL_MS: number;
+        /**
+         * Slice budget (ms) of the deferred load work (Shuriken / VisualEffect prewarms, LOD cross-fade clones) while a reveal round
+         * waits for it to finish (DrainDeferredLoadWorkAsync); their own 8 ms budgets give that work about a tenth of the main thread
+         * between heavy splash frames.
+         */
+        static DEFERRED_DRAIN_SLICE_MS: number;
+        /**
+         * faster-scene-loading T6: true (default) starts the deferred load work's drain (DrainWhileHoldingAsync) with a held load's
+         * effect stage instead of after it on WebGL, so the slices run while the stage waits for the driver to compile; the draw hold
+         * still lifts only after both. Measured one browser at a time, GardenScene (1,200 LOD cross-fade groups), 3 runs per arm: WebGL2
+         * 1.9 s (cold) and 2.1 s (warm) sooner. False drains after the effect stage on every engine.
+         */
+        static DrainDuringEffectStage: boolean;
+        /**
+         * The same on WebGPU, false (default): its effect stage keeps the page thread busy (WGSL translation), and slices run beside it
+         * slowed the stage down (GardenScene, WebGPU: reveal 0.8 s cold and 0.95 s warm later), so WebGPU drains after the stage.
+         */
+        static DrainDuringEffectStageOnWebGPU: boolean;
+        /** Longest a reveal round waits for the deferred load work, in milliseconds. */
+        static DEFERRED_DRAIN_TIMEOUT_MS: number;
         /**
          * False leaves disabled and invisible meshes out of the reveal-time pass. True (default) compiles them, never enabled, in every pass
          * they draw in once shown: main pass, the shadow-caster pass of every shadow generator that casts them, the effect layers that will
@@ -7999,7 +8599,9 @@ declare namespace TOOLKIT {
          * another round for what it added (at most PREWARM_MAX_ROUNDS). Each step is reported to the splash (SplashNarrator), which shows
          * PREWARM as OPTIMIZING GRAPHICS with a plain subtitle; units an earlier warm-up readied pass in a few milliseconds. The reveal path
          * posts the "ready" step (PostPrewarmStatus) right before the fade, and the splash shows READY. One pass runs at a
-         * time per scene: a second call while one runs returns the running pass. Never rejects.
+         * time per scene: a second call while one runs returns the running pass. Never rejects. Skipped only when
+         * SceneManager.PrecompileShaders is false: the scene is then marked as showing PREWARM (so the reveal path's "ready" step
+         * still shows READY) and the call resolves at once with no units.
          * @param scene - The scene about to be revealed.
          * @returns The pass's counts over every unit of every round (see RunAsync).
          */
@@ -8008,6 +8610,7 @@ declare namespace TOOLKIT {
          * Reports one PREWARM step to the splash (SplashNarrator), which shows it as OPTIMIZING GRAPHICS with a plain subtitle. Reports
          * only while the scene's PREWARM is showing (from the start of its pass until its "ready" step), so a second reveal path's steps
          * after the first one's "ready" do nothing. The "ready" step ends PREWARM: the splash shows READY right before the fade.
+         * A hidden scene PrimeSceneAsync prepares never reaches the splash: its fraction goes to the priming's own progress.
          * @param scene - The scene being prewarmed.
          * @param step - The step running now.
          * @param fraction - PREWARM's overall fraction, 0 to 1 (null keeps the last one).
@@ -8015,7 +8618,7 @@ declare namespace TOOLKIT {
         static PostPrewarmStatus(scene: BABYLON.Scene, step: TOOLKIT.PrewarmStep, fraction?: number): void;
         /**
          * Starts showing the scene's PREWARM (kept when a pass before it has not posted "ready" yet); it ends at the "ready" step or when
-         * the scene is disposed.
+         * the scene is disposed. A priming scene (PrimeSceneAsync) is never shown.
          * @param scene - The scene being prewarmed.
          */
         private static BeginPrewarmShowing;
@@ -8043,6 +8646,37 @@ declare namespace TOOLKIT {
          * @returns Its stand-in object.
          */
         private static HiddenUnitOf;
+        /**
+         * The deferred load work of the scene still queued in slices: Shuriken play() prewarms, VisualEffect CPU prewarms and LOD
+         * cross-fade clones (each runs PrewarmSliceMs / FadeCloneSliceMs of work per task while a toolkit load holds the splash, and
+         * SceneManager.WaitForSmoothFrames counts no frame as smooth until they are done).
+         * @param scene - The scene being prewarmed.
+         * @returns The number of pending prewarms and fade-clone groups (0 when none).
+         */
+        private static PendingDeferredLoadWork;
+        /**
+         * While a toolkit load holds the scene's draws, finishes its deferred load work before the hold lifts. Under the hold a
+         * splash frame draws no mesh, so the slices get most of the main thread; once the hold lifts every frame draws the whole
+         * scene behind the splash and they get a tenth of it. A long shader stage used to cover the slices; the shader code cache
+         * shortens that stage, and the hold lifted with the work still queued (GardenScene: 1,260 LOD cross-fade groups, 7 s
+         * left). Resolves at once without a hold or without pending work.
+         * @param scene - The scene being loaded.
+         * @returns Resolves once the work is done, at DEFERRED_DRAIN_TIMEOUT_MS or on disposal.
+         */
+        private static DrainWhileHoldingAsync;
+        /**
+         * Finishes the scene's deferred load work (before the draw hold lifts, DrainWhileHoldingAsync, and again before each reveal
+         * round for work queued later). The slices run a few milliseconds per task between the splash frames: hidden behind a long
+         * shader stage they are long done by PREWARM, but when the stage is short (the shader code cache restores it) they were still
+         * queued when the settling waits began, every frame counted as not smooth, both waits ran into
+         * SCENE_SMOOTH_MAX_MS, and the reveal came while LOD cross-fade clones were still being made - their pre-compiled effects then
+         * landed after the reveal (late compiles). While work is pending the slice budgets are raised to DEFERRED_DRAIN_SLICE_MS (the
+         * splash still gets a frame between slices), and restored afterwards unless something else changed them meanwhile. Resolves at
+         * once when nothing is pending; bounded by DEFERRED_DRAIN_TIMEOUT_MS; never rejects.
+         * @param scene - The scene being prewarmed.
+         * @returns Resolves once no deferred work is pending, at the timeout or on disposal.
+         */
+        private static DrainDeferredLoadWorkAsync;
         /**
          * Waits while a toolkit scene load is in flight for the scene (SceneManager.IsSceneLoadComplete), reporting the "loading" step every
          * PREWARM_LOAD_POLL_MS (the loads report their own progress to the splash).
@@ -8082,6 +8716,40 @@ declare namespace TOOLKIT {
          * @returns Resolves once the frames are smooth, at SceneManager.SCENE_SMOOTH_MAX_MS or at once.
          */
         private static WaitForSmoothRevealAsync;
+        /**
+         * faster-scene-loading T6: true (default) lets the reveal's smooth-frame waits (WaitForSettledFrames) also accept steady frames:
+         * a scene that renders at a steady rate slower than SCENE_SMOOTH_FRAME_MS behind the splash never got three frames under it, so
+         * every wait ran to SCENE_SMOOTH_MAX_MS (GardenScene on engine.html, WebGPU: frames every 100-110 ms, the wait after PREWARM
+         * 0.6-8.2 s by chance) although nothing was compiling and its frames would not get any smoother. False: only frames under
+         * SCENE_SMOOTH_FRAME_MS count, as SceneManager.WaitForSmoothFrames.
+         */
+        static SettleOnSteadyFrames: boolean;
+        /** How far (a fraction of the recent median) a steady frame's interval may be from the median of the frames before it. */
+        static SETTLED_FRAME_BAND: number;
+        /** How many recent frame intervals the steady-frame median is taken over. */
+        static SETTLED_FRAME_HISTORY: number;
+        /**
+         * SceneManager.WaitForSmoothFrames for the reveal: shows the render canvas under the splash, then calls done once the scene has
+         * rendered `frames` consecutive settled frames, after maxMs, or at once when the scene is disposed. A frame is settled when
+         * nothing is still compiling or running in slices (asynchronous GPU pipelines, Shuriken and VisualEffect prewarms, LOD
+         * cross-fade clones) and it follows the previous frame within SCENE_SMOOTH_FRAME_MS - or (SettleOnSteadyFrames) within
+         * SETTLED_FRAME_BAND of the median of the SETTLED_FRAME_HISTORY intervals before it, once there are `frames` of them: a steady
+         * frame rate is as smooth as the scene will render.
+         * @param scene - The scene about to be revealed.
+         * @param frames - The consecutive settled frames to wait for.
+         * @param maxMs - The longest wait (0 or less: SceneManager.SCENE_SMOOTH_MAX_MS).
+         * @param done - Called once.
+         */
+        static WaitForSettledFrames(scene: BABYLON.Scene, frames: number, maxMs: number, done: () => void): void;
+        /**
+         * True when a frame interval is steady: within SETTLED_FRAME_BAND of the median of the intervals before it, once there are at
+         * least `minimum` of them. Pure.
+         * @param interval - The frame's interval (ms).
+         * @param previous - The recent intervals before it (ms).
+         * @param minimum - How many previous intervals a median needs.
+         * @returns Whether the frame is steady.
+         */
+        static IsSteadyFrame(interval: number, previous: number[], minimum: number): boolean;
         /**
          * The step the effect stage is on: groups (a unit's target, or the prefab copy its mesh belongs to - finished when every unit in it
          * is ready) are counted per step, and the first step not finished in the order materials, render passes, prefabs is returned
@@ -8181,7 +8849,15 @@ declare namespace TOOLKIT {
          * @returns True for a development build.
          */
         static IsDevelopmentBuild(): boolean;
-        /** True when a reveal starts the late-compile detector (LateCompileReporting, else IsDevelopmentBuild). */
+        /**
+         * The global switch: false while SceneManager.PrecompileShaders is false. True when SceneManager is not loaded, so only an
+         * explicit false turns the warm-up off.
+         */
+        private static IsSwitchedOn;
+        /**
+         * True when a reveal starts the late-compile detector (LateCompileReporting, else IsDevelopmentBuild). Always false while
+         * SceneManager.PrecompileShaders is false: nothing was precompiled, so every first draw would be reported as late.
+         */
         static IsLateCompileReportingEnabled(): boolean;
         /**
          * Every shader effect, WebGPU pipeline or WebGL program created for the scene since its reveal, with its cause (oldest first).
@@ -8204,6 +8880,30 @@ declare namespace TOOLKIT {
          * @param scene - The scene being revealed.
          */
         static MarkSceneRevealed(scene: BABYLON.Scene): void;
+        /**
+         * Remembers how long one GPU pipeline took to build for the load running on an engine (CheckGpuCache reads it at the reveal).
+         * Priming engines are left out: they build on purpose what the browser does not have yet.
+         * @param engine - The engine.
+         * @param milliseconds - The pipeline's time from request to ready.
+         */
+        private static NotePipelineTime;
+        /**
+         * Finds out whether the browser lost its compiled shaders. A page cannot ask the browser, but a pipeline it still has builds
+         * quickly, so a load whose typical pipeline takes COLD_PIPELINE_RATIO times the scene's own best means they are gone. Each
+         * scene is compared with itself only: a scene's first load is slow by nature, and says nothing about the others.
+         * @param scene - The scene being revealed.
+         */
+        private static CheckGpuCache;
+        /**
+         * Compares a load's typical pipeline time with the scene's best and keeps the better one.
+         * @param sceneKey - The engine type and scene file.
+         * @param typicalMs - The load's typical pipeline time.
+         * @returns True when the load counts as having lost the browser's compiled shaders.
+         * @throws When this page has no localStorage.
+         */
+        private static RecordPipelineTime;
+        /** Leaves the news for the content installer, which marks prepared graphics stale so the host can offer Prepare graphics again. */
+        private static ReportGpuCacheLost;
         /**
          * True once MarkSceneRevealed ran for the scene.
          * @param scene - The scene.
@@ -8297,11 +8997,81 @@ declare namespace TOOLKIT {
         static WarmPrefab(container: BABYLON.AssetContainer, prefabName?: string): void;
         /** Makes the hidden copies of every registration not drawn yet (each registration is tried once). */
         private static CreatePrefabWarmCopies;
-        /** One hidden copy: cloned without script components, every node enabled, lights and cameras removed. */
+        /**
+         * One hidden copy: cloned without script components, every node enabled, lights and cameras removed, and the renderer flags that
+         * change its draws applied as the MetadataParser applies them to a live clone (ApplyWarmCopyRendererFlags), so it compiles the
+         * shaders a live instance draws with.
+         */
         private static CreatePrefabWarmCopy;
+        /**
+         * Completes a copy: applies its renderer flags (ApplyWarmCopyRendererFlags) and keeps its casters in every shadow map that casts
+         * them even where a caster culling list would leave them out. The copy rests where the prefab was authored (often the origin),
+         * outside every cascade the camera sees, so the sun's culling list dropped it and its shadow-pass pipeline (cull state included)
+         * was first built when a live instance cast during play.
+         * @param scene - The scene the copy is drawn in.
+         * @param root - The cloned prefab root (CloneAssetContainerItem path), or null.
+         * @param entries - The instantiated container (whole-container path), or null.
+         * @param roots - The copy's root nodes.
+         * @returns The copy.
+         */
+        private static FinishWarmCopy;
         /** Enables every node of a copy and disposes any light or camera in it (a copy must not change the scene's light count). */
         private static PrepareWarmCopyNodes;
-        /** Disposes the pass's copies (materials and textures are shared, never disposed) and makes every render target render again. */
+        /**
+         * Gives a copy the renderer flags (`metadata.toolkit.renderer`) that change what a live clone draws, the way
+         * MetadataParser.DoParseSceneComponents sets them on the same meshes: receive shadows (the shadow defines of every pass), vertex
+         * colours, and cast shadows (the clone joins the caster list of every auto-render light, which DoProcessPendingShadows does). Only
+         * these: the rest of the parse would start scripts, physics, lights and cameras. Without them the copy compiled a shader no live
+         * instance uses and the live one compiled after the reveal.
+         * @param scene - The scene the copy is drawn in.
+         * @param roots - The copy's root nodes.
+         * @returns The caster registrations made, removed again when the copy is disposed (RemoveWarmCopyCasters).
+         */
+        private static ApplyWarmCopyRendererFlags;
+        /**
+         * A node's exported renderer settings.
+         * @param node - The node.
+         * @returns Its `metadata.toolkit.renderer`, or null when it has none.
+         */
+        private static RendererMetadataOf;
+        /**
+         * The meshes a node's renderer settings apply to, picked as the MetadataParser picks them: the node itself when it is a mesh, else
+         * its skinned mesh, else each of its primitive meshes (or a primitive's skinned mesh).
+         * @param node - The node with renderer settings.
+         * @returns The meshes.
+         */
+        private static RendererMeshesOf;
+        /**
+         * Sets the renderer flags that change a mesh's shader: receive shadows (never on an instanced mesh, which draws with its source's
+         * flag) and vertex colours (off unless the renderer asks for them), as the MetadataParser does.
+         * @param mesh - The copy's mesh.
+         * @param renderer - Its renderer settings.
+         */
+        private static ApplyRendererDrawFlags;
+        /**
+         * Adds a copy's casting meshes to the shadow generator of every auto-render light (`metadata.toolkit.autorender`), honouring a
+         * light's included-only list, as MetadataParser.DoProcessPendingShadows does for a live clone.
+         * @param scene - The scene.
+         * @param meshes - The copy's meshes whose renderer casts shadows.
+         * @returns Each generator and mesh added.
+         */
+        private static AddWarmCopyCasters;
+        /**
+         * Takes a copy's meshes back out of the caster lists AddWarmCopyCasters put them in.
+         * @param casters - The copy's caster registrations.
+         */
+        private static RemoveWarmCopyCasters;
+        /**
+         * Keeps every effect a copy's meshes compiled: disposing a mesh releases its draw wrappers' effects, and an effect only the copy held
+         * left Babylon's cache, so the live instance compiled the very same shader again after the reveal. One reference per effect, given
+         * back when the scene is disposed (PinEffect).
+         * @param copy - The copy about to be disposed.
+         */
+        private static PinWarmCopyEffects;
+        /**
+         * Disposes the pass's copies (materials and textures are shared, never disposed; the effects they compiled stay pinned to the scene),
+         * takes them out of the caster lists, and makes every render target render again.
+         */
         private static DisposePrefabWarmCopies;
         /**
          * Disposes a CloneAssetContainerItem copy: its nodes (materials and textures kept), then the skeletons it cloned (CloneAssetContainerItem
@@ -8321,10 +9091,45 @@ declare namespace TOOLKIT {
         /** The scene's mesh units: enabled, visible meshes with sub-meshes and a material. */
         private static CollectMeshes;
         /**
-         * The scene's post-process units: every post process of every camera of the pass, each once (the reveal-time pass's warmCameras,
-         * else the active cameras: activeCameras, else activeCamera).
+         * The cameras whose post processes a warm-up compiles: the reveal-time pass's warmCameras, else the active cameras (activeCameras,
+         * else activeCamera).
          * @param scene - The scene being warmed.
          * @param options - The warm-up's options (null for a scene load).
+         * @returns The cameras.
+         */
+        private static PostProcessCameras;
+        /**
+         * A required post-process unit. It is ready once its effect is, or once no camera it was collected from draws it any more: a post
+         * process taken off the chain - disposed when its owner rebuilds the chain, its effect gone, so it never reports ready again - or
+         * detached, is drawn by none of these cameras and is not waited for (its replacement joins through AddAttachedPostProcessUnits).
+         * @param postProcess - The post process.
+         * @param cameras - The cameras it was collected from.
+         * @returns The unit.
+         */
+        private static CreatePostProcessUnit;
+        /**
+         * True when the post process is on the post-process chain of one of the cameras (a disposed camera draws nothing).
+         * @param postProcess - The post process.
+         * @param cameras - The cameras.
+         * @returns True when one of the cameras draws it.
+         */
+        private static IsPostProcessOnCameras;
+        /**
+         * Adds a required unit for each post process now on the warm-up's cameras that it has no unit for: a chain rebuilt during the warm-up
+         * (PostProcessor re-applying its volumes, a rendering pipeline rebuilding its passes) replaces the passes the warm-up collected, and the
+         * camera's first frame draws the new ones.
+         * @param scene - The scene being warmed.
+         * @param options - The warm-up's options (null for a scene load).
+         * @param knownTargets - The targets of the warm-up's units; each added post process joins it.
+         * @param units - The warm-up's units; new units are appended.
+         * @param unitReady - Which units are ready, by index; a new unit starts not ready.
+         * @param unitChecked - Which units a poll has checked, by index; a new unit starts unchecked.
+         * @returns How many units were added.
+         */
+        private static AddAttachedPostProcessUnits;
+        /**
+         * Every post process of the cameras, each once.
+         * @param cameras - The cameras (PostProcessCameras).
          * @returns The post processes.
          */
         private static CollectPostProcesses;
@@ -8393,15 +9198,35 @@ declare namespace TOOLKIT {
         private static NowMs;
         /** Share of the warm-up fraction the effect stage fills when a pipeline stage follows (RunAsync). */
         static EFFECT_STAGE_SHARE: number;
-        /** Consecutive frames without a new pipeline request (and none pending) that end the pipeline stage of a warm-up. */
+        /**
+         * Consecutive frames without a new pipeline request (and none pending) that end the pipeline stage of a warm-up (WebGPU).
+         * faster-scene-loading T6: 1 (was 2). Measured one browser at a time, 3 runs per arm, Toad Harbor and GardenScene on WebGPU:
+         * PREWARM's pipeline step 0.46-0.57 s shorter in every case, reveal 0.7-1.0 s sooner, 0 late compiles in 12 loads.
+         */
         static PIPELINE_SETTLE_FRAMES: number;
         /** Consecutive quiet frames after the scene load completed that end the asynchronous pipeline mode. */
         static PIPELINE_QUIET_FRAMES: number;
+        /** How many times slower than a scene's own best a load's typical GPU pipeline must be before the GPU's cache counts as lost. */
+        static COLD_PIPELINE_RATIO: number;
+        /** A load's typical GPU pipeline time (ms) below this never counts as lost: a cached pipeline can vary this much by itself. */
+        static COLD_PIPELINE_MIN_MS: number;
+        /** Fewer pipelines than this in a load say nothing about the GPU's cache. */
+        static COLD_PIPELINE_MIN_SAMPLES: number;
+        /** The last checked load's typical GPU pipeline time (ms); 0 until a load was checked. */
+        static LastTypicalPipelineMs: number;
+        /** Where each scene's best typical pipeline time is kept (localStorage), per engine type and scene file. */
+        static readonly PIPELINE_TIMES_STORAGE_KEY: string;
+        /** The time the browser's compiled shaders were found gone (localStorage): the content installer reads it, on any page. */
+        static readonly GPU_CACHE_LOST_STORAGE_KEY: string;
+        /** Sent on the window when the browser's compiled shaders were found gone, for an installer already running on the page. */
+        static readonly GPU_CACHE_LOST_EVENT: string;
         /** Upper bound (ms) of the draw hold and the asynchronous pipeline mode of one scene load. */
         static LOAD_MODE_TIMEOUT_MS: number;
         private static readonly SkipDraw;
         private static LoadStates;
         private static PipelineStates;
+        /** GPU pipeline build times (ms) of the load running on each engine, since the last reveal. */
+        private static readonly PipelineTimes;
         /** The draw-method hooks of the asynchronous pipeline mode (InstallDrawHooks), null while no engine uses the mode. */
         private static DrawHooks;
         /** Default of the no-freeze safety net after a reveal (WebGPU): true skips a draw whose pipeline is not built yet instead of building it synchronously. */
@@ -8426,6 +9251,7 @@ declare namespace TOOLKIT {
          *   draws such as the GPU decode of a loading .env texture or mipmap generation. Behind the splash a skipped draw is
          *   invisible; the mode ends once the load completed and the scene rendered PIPELINE_QUIET_FRAMES frames without a new request.
          * Both end at the latest after LOAD_MODE_TIMEOUT_MS or when the scene load completes without a shader stage (load error).
+         * Neither starts while SceneManager.PrecompileShaders is false.
          * @param scene - The scene being loaded.
          */
         static BeginSceneLoad(scene: BABYLON.Scene): void;
@@ -8451,6 +9277,7 @@ declare namespace TOOLKIT {
         static SetSafetyNetEnabled(engine: BABYLON.AbstractEngine, enabled: boolean): void;
         /**
          * True when the engine's revealed scenes use the safety net (its SetSafetyNetEnabled choice, else SafetyNetEnabled).
+         * Always false while SceneManager.PrecompileShaders is false: draws then build their pipelines the way plain Babylon does.
          * @param engine - The engine.
          * @returns True for the safety net.
          */
@@ -8577,6 +9404,22 @@ declare namespace TOOLKIT {
          * @param wraps - What KeepHiddenCastersInShadowMaps wrapped.
          */
         private static RestoreShadowCasterLists;
+        /**
+         * Makes every point and spot shadow map gated by LightingConversions.SkipInvisiblePunctualShadowMap draw all its casters during
+         * the pipeline stage. The gate skips a map whose light is out of view, so on WebGPU a light the camera cannot see at the reveal
+         * built no caster pipelines and they compiled the first time it came into view (a late compile mid-race). Each gated map gets
+         * `_tkPrewarmDrawAll` (the gate then asks Babylon only), its caster culling list is set aside (Babylon draws the whole
+         * renderList), and it renders again on the next frame. Directional maps are left alone. RestorePunctualShadowMaps undoes it.
+         * @param scene - The scene being prewarmed.
+         * @returns What was changed, for RestorePunctualShadowMaps.
+         */
+        private static DrawPunctualShadowMapsFully;
+        /**
+         * Puts back what DrawPunctualShadowMapsFully changed: the draw-all flag is cleared and each map gets its caster culling list
+         * back, unless something else installed a list meanwhile.
+         * @param draws - What DrawPunctualShadowMapsFully changed.
+         */
+        private static RestorePunctualShadowMaps;
         /** Frames each material of a material variant is drawn for in a row by the pipeline stage (AlternateMaterialVariants). */
         private static readonly MATERIAL_VARIANT_FRAMES;
         /** Per scene: meshes that also draw with another material during play (WarmMaterialVariant). */
@@ -8603,6 +9446,17 @@ declare namespace TOOLKIT {
          * @returns True when ready.
          */
         private static IsMaterialVariantReady;
+        /**
+         * Gives a mesh another material during the warm-up. A material change resets the mesh's draw cache, which releases an effect no
+         * other mesh holds, so the mesh's effects are pinned first (PinMeshEffects). The cache is then released at once: Babylon's own
+         * reset defers each draw wrapper's release to the end of the frame with one observer per wrapper, and a mesh holds a wrapper in
+         * every render pass it was drawn in (each camera, each shadow cascade) - the variant checks of a race start queued about 325,000
+         * of them behind the loading screen, every one removed by a linear search of the end-of-frame observer list (seconds of load).
+         * Releasing a pinned effect at once frees nothing; the setter then finds an empty cache.
+         * @param mesh - The mesh.
+         * @param material - The material it draws with from now on.
+         */
+        private static SwapMaterial;
         /**
          * IsHiddenMeshReady for the mesh's scaling state now and, for a mesh whose scale changes during play (a WarmScaleVariants mesh),
          * for its other NONUNIFORMSCALING state too: a material variant is drawn in either.
@@ -8839,6 +9693,430 @@ declare namespace TOOLKIT {
         private static InstallDrawHooks;
         /** Restores the draw methods once no engine uses the asynchronous pipeline mode (each one left alone when replaced meanwhile). */
         private static RemoveDrawHooks;
+        /** Backing width and height (px) of a priming engine's offscreen canvas and of a shared engine's priming target; shader code does not depend on it. */
+        static PRIMING_CANVAS_SIZE: number;
+        /**
+         * Loads a scene file into a priming scene; null (default) uses the toolkit's glTF loader the hosts load levels with
+         * (SceneLoader.ImportMeshAsync, every mesh). A host with its own loader, or a test, can replace it.
+         */
+        static PrimeLoader: TOOLKIT.ScenePrimeLoader;
+        /**
+         * The exported script components a priming scene still creates: the toolkit's rendering components, whose materials, post
+         * processes, prepass, decals, particles, probe lighting and terrain decide which shaders the scene compiles (measured on
+         * GardenScene: without them 11 of 383 effects of a real load matched what was primed). Every other component - game
+         * code, physics, audio, input, cameras' controllers, user interfaces, timelines, networking - is never created. A project
+         * with rendering components of its own can add their class names.
+         */
+        static PrimingComponentClasses: string[];
+        /**
+         * Longest one priming may take (ms), load and PREWARM together: past it the scene is disposed and the priming fails, so a
+         * scene that never finishes (a wait whose frames never come) can never hold up a Prepare graphics step. Only time with the
+         * page visible counts (StartVisibleTimer): a hidden tab draws no frames, so a priming waits there without failing.
+         */
+        static PRIMING_TIMEOUT_MS: number;
+        /**
+         * Calls `onExpire` once `milliseconds` of visible page time have passed: the count pauses while `document.hidden` is true (a
+         * hidden tab draws no frames, so no frame-counting wait can finish there) and resumes when the page is visible again. With
+         * no document (a worker, a test) it is a plain timeout.
+         * @param milliseconds - The visible time to wait.
+         * @param onExpire - Called once when that time has passed.
+         * @returns A stop function: it cancels the timer and removes its visibility listener (safe to call more than once).
+         */
+        static StartVisibleTimer(milliseconds: number, onExpire: () => void): () => void;
+        /**
+         * True when the game loads more glTF files into a level after it (karts, items, effects as asset containers): Babylon's
+         * glTF loader raises every material of the scene to the scene's light count at the end of each load
+         * (`maxSimultaneousLights = max(own, scene.lights.length)`), and the toolkit creates a level's lights after its own
+         * load's pass, so in such a game every level material compiles with the raised limit from the first later load on
+         * (BtMarioKartWeb, Toad Harbor: 25 lights, MAXLIGHTCOUNT 4 → 8 on 146 of 194 effects primed without it). A primed level then
+         * gets the same raise before PREWARM. False (default) primes a level as a page that loads it alone sees it.
+         */
+        static PrimingMatchesLaterLoads: boolean;
+        /**
+         * faster-scene-loading T6: PrimingMatchesLaterLoads for the game's own level loads. True when the page loads more glTF
+         * files into the level after it: the level's materials get the light limit of the next load (RaiseLightLimitsAsLaterLoads)
+         * right before the load's shader stage, so they compile once, with the limit they are drawn with. Without it the shader
+         * stage compiles them with their own limit and the first later load raises it (BtMarioKartWeb Toad Harbor, WebGPU: 45 PBR
+         * effects with MAXLIGHTCOUNT 4 compiled again with 8 once the karts loaded). The look is the same either way once the
+         * later load has run; the level is not shown before that. False (default): a page that loads one scene keeps its limits.
+         */
+        static LoadsMatchLaterLoads: boolean;
+        /** True once a priming warned that the shader code cache evicted entries (one warning per page). */
+        private static PrimingEvictionWarned;
+        /** Share of a priming's progress the scene load fills; PREWARM fills the rest. */
+        private static readonly PRIME_LOAD_SHARE;
+        /** Name of the stand-in camera a priming scene renders through until the loaded scene brings its own. */
+        private static readonly PRIME_CAMERA_NAME;
+        /** Name of the render target a priming scene on a shared engine draws into instead of the visible canvas. */
+        private static readonly PRIME_TARGET_NAME;
+        /** Hidden scenes PrimeSceneAsync is preparing, with the callback their PREWARM fraction (0 to 1) goes to. */
+        private static readonly PrimingScenes;
+        /** Engines CreatePrimingEngineAsync made: their canvas is never shown, so a priming scene on them draws straight to it. */
+        private static readonly PrimingEngines;
+        /**
+         * True for a hidden scene PrimeSceneAsync is preparing. The toolkit scene loader and the parser read it: such a scene creates
+         * no script component but the toolkit's rendering ones (PrimingComponentClasses) and no physics, input, navigation or audio
+         * work, never posts to the splash, never pauses the page's render loop and is never revealed.
+         * @param scene - The scene.
+         * @returns True while the scene is being primed.
+         */
+        static IsPrimingScene(scene: BABYLON.Scene): boolean;
+        /**
+         * The engine key a preparer records with its prepared scenes: the engine type, which decides the shader language and the
+         * code Babylon builds ("webgpu", "webgl2" or "webgl1").
+         * @param engine - The engine.
+         * @returns The key ("none" without an engine).
+         */
+        static EngineKeyOf(engine: BABYLON.AbstractEngine): string;
+        /**
+         * Compiles every shader a scene needs without showing or playing it (Prepare graphics), so the shader code cache
+         * (ShaderCodeCache, per origin) and the browser's own shader cache hold them before the player first loads the scene.
+         * A hidden scene on `engine` loads the scene file through the toolkit loader (PrimeLoader; an asset container file loads
+         * into it the same way) with no game script component - only the toolkit's rendering components (PrimingComponentClasses) -
+         * and no physics, input, navigation or audio; the load's own shader stage and the PREWARM pass (PrepareGameAsync, the same
+         * switches as a real reveal) run on it; then the scene is disposed with every mesh, material, texture and buffer it made,
+         * and the shader code cache is flushed. Nothing is posted to the splash and the scene is never revealed. On an engine
+         * CreatePrimingEngineAsync made, the scene draws to that engine's hidden canvas; on a host's own engine every camera of
+         * the scene draws into an offscreen render target, so the visible canvas and the host's scenes are untouched. Never rejects.
+         * While SceneManager.PrecompileShaders is false there is nothing to prime (no shader code cache): it succeeds at once,
+         * loading and storing nothing.
+         * @param engine - The engine to prime with (a priming engine, or the host's own engine).
+         * @param sceneUrl - The scene file URL (a level or an asset container file).
+         * @param options - Cancel check and progress callback.
+         * @returns What happened; `succeeded` is false when the scene could not be loaded or the engine is gone.
+         * @example const result = await TOOLKIT.SceneShaderWarmup.PrimeSceneAsync(engine, "scenes/ToadHarbor.gltf");
+         */
+        static PrimeSceneAsync(engine: BABYLON.AbstractEngine, sceneUrl: string, options?: TOOLKIT.IScenePrimeOptions): Promise<TOOLKIT.IScenePrimeResult>;
+        /**
+         * Makes a hidden priming engine of the type the page would play with: WebGPU when `navigator.gpu` gives an adapter (and
+         * the options prefer it), else WebGL2 (Babylon falls back to WebGL1 on its own). Its canvas is offscreen - never added to
+         * the document, never visible. The caller disposes the engine when done.
+         * @param options - The engine options the host plays with (antialias, device ratio, WebGPU init paths, extra options).
+         * @returns The engine, or null when no engine can be made here.
+         */
+        static CreatePrimingEngineAsync(options?: TOOLKIT.IPrimingEngineOptions): Promise<BABYLON.AbstractEngine | null>;
+        /**
+         * The engine key a priming engine made with these options would have, without making one ("webgpu" when WebGPU is usable
+         * and preferred, else "webgl2").
+         * @param options - The priming engine options.
+         * @returns The key, or null when this page can make no engine (no canvas at all).
+         */
+        static ResolvePrimingEngineKeyAsync(options?: TOOLKIT.IPrimingEngineOptions): Promise<string | null>;
+        /**
+         * A graphics preparer for the content installer (Prepare graphics) that primes on an engine the host already has (engine.html,
+         * a race page). It primes into an offscreen target, never onto the host's canvas; the host keeps and disposes its engine.
+         * @param engine - The host's engine (its toolkit runtime initialized).
+         * @returns The preparer.
+         * @example contentInstaller.SetGraphicsPreparer(TOOLKIT.SceneShaderWarmup.CreateGraphicsPreparer(engine));
+         */
+        static CreateGraphicsPreparer(engine: BABYLON.AbstractEngine): TOOLKIT.ISceneGraphicsPreparer;
+        /**
+         * A graphics preparer for a page with no engine (a menu): it makes one hidden priming engine (CreatePrimingEngineAsync) on
+         * its first scene, primes every scene on it, and disposes it in release() (the content installer calls it when a Prepare
+         * graphics step ends).
+         * @param options - The engine options the host plays with.
+         * @returns The preparer, or null when no engine can be made on this page.
+         * @example contentInstaller.SetGraphicsPreparer(await TOOLKIT.SceneShaderWarmup.CreatePrimingGraphicsPreparerAsync({ antialias: true }));
+         */
+        static CreatePrimingGraphicsPreparerAsync(options?: TOOLKIT.IPrimingEngineOptions): Promise<TOOLKIT.ISceneGraphicsPreparer | null>;
+        /**
+         * The body of PrimeSceneAsync between its checks and the cache flush: opens the hidden scene, loads and prepares it, and
+         * always closes it. Fills `result`.
+         * @param engine - The engine to prime with.
+         * @param sceneUrl - The scene file URL.
+         * @param options - Cancel check and progress callback.
+         * @param result - The result to fill.
+         */
+        private static RunPrimingAsync;
+        /**
+         * Loads the priming scene and runs PREWARM on it, filling `result` (PrimeSceneAsync's watchdog bounds it).
+         * @param session - The priming session.
+         * @param sceneUrl - The scene file URL.
+         * @param isCancelled - The cancel check.
+         * @param onLoadProgress - The load's progress, 0 to 1.
+         * @param result - The result to fill.
+         * @throws What the loader threw, or the error a frame recorded.
+         */
+        private static LoadAndPrepareAsync;
+        /**
+         * Called by the toolkit scene loader right before a level load's shader stage: gives the level's materials the light
+         * limit the next glTF load would give them, when the page asked for it (LoadsMatchLaterLoads for the game's own loads,
+         * PrimingMatchesLaterLoads for a priming).
+         * @param scene - The scene being loaded, its lights created.
+         * @param primingLoad - True for a priming load.
+         * @returns True when the limits were raised.
+         */
+        static PrepareLightLimitsForLoad(scene: BABYLON.Scene, primingLoad: boolean): boolean;
+        /**
+         * Gives every material of a scene the light limit the next glTF load into it would give: Babylon's glTF loader sets
+         * `maxSimultaneousLights = max(own, scene.lights.length)` at the end of each load (PrimingMatchesLaterLoads, LoadsMatchLaterLoads).
+         * @param scene - The scene, its lights created.
+         */
+        static RaiseLightLimitsAsLaterLoads(scene: BABYLON.Scene): void;
+        /**
+         * A progress reporter that never goes back and never throws into the priming.
+         * @param options - The priming options (their onProgress, if any).
+         * @returns The reporter: (fraction 0 to 1) => void.
+         */
+        private static CreatePrimingReporter;
+        /**
+         * Creates the hidden scene of one priming: marked as priming (no script components, no splash), a stand-in camera that hands
+         * over to the scene's first own camera (as the hosts' viewers do), an offscreen render target on a shared engine, and its own
+         * render loop (the load and PREWARM wait on rendered frames). The page's last created scene is kept, so host code that defaults
+         * to it still reaches its own scene.
+         * @param engine - The engine to prime with.
+         * @param onPrewarmProgress - Where the scene's PREWARM fraction goes.
+         * @returns The open session.
+         */
+        private static OpenPrimingScene;
+        /**
+         * Hands the priming scene over from its stand-in camera to a camera the loaded scene adds (as the hosts' viewers do); the
+         * stand-in is disposed then. EnsurePrimingCamera brings a stand-in back whenever that camera goes again (BtMarioKartWeb:
+         * a camera a container load added and removed left its priming scene with none, and it never rendered another frame).
+         * @param session - The priming session.
+         */
+        private static WatchCameraHandOver;
+        /**
+         * Makes sure the priming scene renders through a live camera: the active one when it is live, else another camera of the
+         * scene, else a stand-in (made again when needed). A scene file with no camera of its own (an asset container), or one
+         * whose camera came and went during the load, then still renders, and the waits on rendered frames end.
+         * @param session - The priming session.
+         */
+        private static EnsurePrimingCamera;
+        /**
+         * @param session - The priming session.
+         * @param camera - A camera of the priming scene (or null).
+         * @returns True for a camera that is not disposed and draws as a screen camera (to the canvas, or to the priming target).
+         */
+        private static IsLivePrimingCamera;
+        /**
+         * On a shared engine (the host's own), makes every camera of the priming scene - now and later - draw into one offscreen
+         * render target instead of the visible canvas. A camera that already draws into a target of its own keeps it.
+         * @param session - The priming session.
+         */
+        private static RouteCamerasOffscreen;
+        /**
+         * One frame of a priming scene. A failing frame is recorded and stops the priming instead of breaking the engine's render
+         * loop (which would also stop the host's scenes on a shared engine).
+         * @param session - The priming session.
+         */
+        private static RenderPrimingFrame;
+        /**
+         * Rethrows the error a priming frame recorded, so the priming ends as failed.
+         * @param session - The priming session.
+         * @throws The recorded render error.
+         */
+        private static ThrowRenderError;
+        /**
+         * Ends a priming session: stops its render loop, disposes the scene (every mesh, material, texture, render target and
+         * effect it holds), and gives the page back its last created scene.
+         * @param session - The priming session.
+         */
+        private static ClosePrimingScene;
+        /**
+         * The default PrimeLoader: the toolkit glTF loader, as the hosts load a level (every mesh into the scene). The page's toolkit
+         * runtime is initialized first when nothing did (a menu page that never loaded a scene).
+         * @param scene - The priming scene.
+         * @param sceneUrl - The scene file URL.
+         * @param onProgress - Download progress, 0 to 1.
+         */
+        private static DefaultPrimeLoadAsync;
+        /**
+         * Initializes the toolkit runtime (the toolkit glTF extensions, the shader code cache) on the priming engine when the page
+         * has not: no loading screen, no user input, no device-ratio watch.
+         * @param engine - The priming engine.
+         */
+        private static EnsurePrimingRuntimeAsync;
+        /**
+         * @param count - Which of the shader code cache's counts.
+         * @returns The count (0 without the cache).
+         */
+        private static ShaderCodeCacheCount;
+        /**
+         * Warns once per page that priming made the shader code cache evict entries: scenes prepared before may compile again.
+         * @param sceneUrl - The scene being primed.
+         * @param evicted - Entries evicted while priming it.
+         */
+        private static WarnPrimingEvictions;
+        /** Writes the shader code cache's queued entries to storage (nothing without the cache); never rejects. */
+        private static FlushShaderCodeCacheAsync;
+        /**
+         * @param error - What a priming threw.
+         * @returns A one-line description.
+         */
+        private static DescribePrimingError;
+        /** @returns True when this page can make a canvas (a document, or OffscreenCanvas in a worker). */
+        private static CanCreateCanvas;
+        /**
+         * A canvas no one sees: a detached canvas element (never added to the document), or an OffscreenCanvas.
+         * @returns The canvas, or null when the page can make none.
+         */
+        private static CreatePrimingCanvas;
+        /** @returns True when the browser has WebGPU and gives an adapter. */
+        private static IsWebGPUUsableAsync;
+        /**
+         * A WebGPU priming engine with the switches the hosts play with (maximum limits and every feature, as engine.html and the
+         * React viewer create theirs), initialized with the host's glslang / twgsl paths.
+         * @param settings - The priming engine options.
+         * @returns The engine, or null when it cannot be made or initialized.
+         */
+        private static TryCreateWebGPUEngineAsync;
+        /**
+         * A WebGL priming engine (WebGL2, or WebGL1 where Babylon falls back) with the host's antialias, device ratio and options.
+         * @param settings - The priming engine options.
+         * @returns The engine, or null when it cannot be made.
+         */
+        private static TryCreateWebGLEngine;
+        /**
+         * Remembers an engine as a priming engine (its canvas is hidden, so priming scenes draw straight to it).
+         * @param engine - The engine CreatePrimingEngineAsync made.
+         * @returns The engine.
+         */
+        private static MarkPrimingEngine;
+    }
+    /**
+     * A graphics preparer (the content installer's Prepare graphics) built on SceneShaderWarmup.PrimeSceneAsync. Made by
+     * SceneShaderWarmup.CreateGraphicsPreparer (on a host's engine) or CreatePrimingGraphicsPreparerAsync (its own hidden engine,
+     * made on the first scene and disposed by release()).
+     * @class SceneGraphicsPreparer - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class SceneGraphicsPreparer implements TOOLKIT.ISceneGraphicsPreparer {
+        /** The toolkit runtime version the prepared code belongs to (TOOLKIT.SceneManager.Version). */
+        readonly runtimeVersion: string;
+        /** The Babylon version the prepared code belongs to (BABYLON.Engine.Version). */
+        readonly babylonVersion: string;
+        /** The engine scenes are primed on; null until a preparer that owns its engine makes it. */
+        private engine;
+        /** The options of the hidden engine this preparer makes and owns; null when it primes on the host's engine. */
+        private readonly ownEngineOptions;
+        /** The engine key expected before the engine exists. */
+        private readonly expectedEngineKey;
+        /**
+         * @param engine - The host's engine to prime on, or null to make and own a hidden one.
+         * @param ownEngineOptions - The hidden engine's options (used when `engine` is null).
+         * @param expectedEngineKey - The engine key before the engine exists.
+         */
+        constructor(engine: BABYLON.AbstractEngine | null, ownEngineOptions: TOOLKIT.IPrimingEngineOptions | null, expectedEngineKey: string);
+        /** The engine type the prepared code belongs to ("webgpu", "webgl2", "webgl1"): the engine's own once it exists (a WebGPU fallback changes it). */
+        get engineKey(): string;
+        /**
+         * Primes one scene (SceneShaderWarmup.PrimeSceneAsync). While SceneManager.PrecompileShaders is false it returns at once,
+         * before any hidden engine is made: there is no shader code cache to fill.
+         * @param sceneUrl - The scene file URL.
+         * @param isCancelled - True once the step was cancelled: the priming stops at its next check and resolves.
+         * @param onProgress - The scene's progress, 0 to 1.
+         * @throws When the scene could not be prepared; an error with `graphicsUnavailable: true` when no engine can be made.
+         */
+        prepareSceneAsync(sceneUrl: string, isCancelled: () => boolean, onProgress?: (fraction: number) => void): Promise<void>;
+        /** Disposes the hidden engine this preparer made (a host's engine is left alone); the next scene makes a new one. */
+        release(): void;
+        /**
+         * @returns The engine to prime on (the hidden one is made on first use).
+         * @throws An error with `graphicsUnavailable: true` when no engine can be made or the host's engine is gone.
+         */
+        private acquireEngineAsync;
+    }
+    /**
+     * What the content installer's Prepare graphics needs from a host (the installer's own preparer interface has the same shape; the
+     * installer names no other toolkit class).
+     */
+    interface ISceneGraphicsPreparer {
+        /** The engine type the prepared code belongs to ("webgpu", "webgl2"); read after each prepared scene. */
+        readonly engineKey: string;
+        /** TOOLKIT.SceneManager.Version of the runtime that prepares. */
+        readonly runtimeVersion: string;
+        /** BABYLON.Engine.Version of the Babylon that prepares. */
+        readonly babylonVersion: string;
+        /**
+         * Compiles every shader a scene needs into the shader caches.
+         * @param sceneUrl - The scene file URL.
+         * @param isCancelled - True once the step was cancelled.
+         * @param onProgress - The scene's progress, 0 to 1.
+         */
+        prepareSceneAsync(sceneUrl: string, isCancelled: () => boolean, onProgress?: (fraction: number) => void): Promise<void>;
+        /** Frees what the preparer made (a hidden priming engine); called when a Prepare graphics step ends. */
+        release(): void;
+    }
+    /** An error a graphics preparer throws when it cannot make an engine: the installer reports Prepare graphics unavailable. */
+    interface IGraphicsUnavailableError extends Error {
+        /** Always true. */
+        graphicsUnavailable: boolean;
+    }
+    /** Loads a scene file into a priming scene (SceneShaderWarmup.PrimeLoader): (scene, scene URL, progress 0 to 1) => done. */
+    type ScenePrimeLoader = (scene: BABYLON.Scene, sceneUrl: string, onProgress: (fraction: number) => void) => Promise<void>;
+    /** WebGL engine options of a priming engine (BABYLON.Engine's own options). */
+    type PrimingWebGLEngineOptions = ConstructorParameters<typeof BABYLON.Engine>[2];
+    /** WebGPU engine options of a priming engine (BABYLON.WebGPUEngine's own options). */
+    type PrimingWebGPUEngineOptions = ConstructorParameters<typeof BABYLON.WebGPUEngine>[1];
+    /** glslang script paths of a WebGPU priming engine (BABYLON.WebGPUEngine.initAsync's first argument). */
+    type PrimingGlslangOptions = Parameters<BABYLON.WebGPUEngine["initAsync"]>[0];
+    /** twgsl script paths of a WebGPU priming engine (BABYLON.WebGPUEngine.initAsync's second argument). */
+    type PrimingTwgslOptions = Parameters<BABYLON.WebGPUEngine["initAsync"]>[1];
+    /** Options of a hidden priming engine (SceneShaderWarmup.CreatePrimingEngineAsync): the switches the host plays with. */
+    interface IPrimingEngineOptions {
+        /** False makes a WebGL engine even where WebGPU is usable (default true: WebGPU when usable, the hosts' choice). */
+        preferWebGPU?: boolean;
+        /** Antialiasing (default true). */
+        antialias?: boolean;
+        /** Adapt to the device ratio (default false). */
+        adaptToDeviceRatio?: boolean;
+        /** Extra WebGL engine options (e.g. useLargeWorldRendering, stencil). */
+        engineOptions?: TOOLKIT.PrimingWebGLEngineOptions;
+        /** Extra WebGPU engine options (maximum limits and every feature are on unless set here). */
+        webGPUOptions?: TOOLKIT.PrimingWebGPUEngineOptions;
+        /** glslang script paths of WebGPU initAsync (default: Babylon's CDN). */
+        glslangOptions?: TOOLKIT.PrimingGlslangOptions;
+        /** twgsl script paths of WebGPU initAsync (default: Babylon's CDN). */
+        twgslOptions?: TOOLKIT.PrimingTwgslOptions;
+    }
+    /** Options of SceneShaderWarmup.PrimeSceneAsync. */
+    interface IScenePrimeOptions {
+        /** Checked after the load and after PREWARM: true disposes the scene and resolves with `cancelled`. */
+        isCancelled?: () => boolean;
+        /** Progress, 0 to 1 (the load fills the first half, PREWARM the second); never goes back. */
+        onProgress?: (fraction: number) => void;
+    }
+    /** What SceneShaderWarmup.PrimeSceneAsync did. */
+    interface IScenePrimeResult {
+        /** The scene file URL primed. */
+        sceneUrl: string;
+        /** True when the scene loaded and PREWARM ran on it. */
+        succeeded: boolean;
+        /** True when the priming stopped at a cancel check. */
+        cancelled: boolean;
+        /** Why it failed; null otherwise. */
+        error: string | null;
+        /** PREWARM's ready units. */
+        ready: number;
+        /** PREWARM's counted units. */
+        total: number;
+        /** True when PREWARM stopped at its timeout. */
+        timedOut: boolean;
+        /** Shader code cache entries stored while priming (0 without the cache). */
+        storedEffects: number;
+        /** Shader code cache entries evicted while priming (MaxBytes reached): earlier scenes' entries may be gone. */
+        evictedEffects: number;
+    }
+    /** @hidden One running PrimeSceneAsync. */
+    interface IPrimingSession {
+        /** The engine primed on. */
+        engine: BABYLON.AbstractEngine;
+        /** The hidden scene. */
+        scene: BABYLON.Scene;
+        /** The page's last created scene before the hidden one, given back at the end. */
+        previousLastScene: BABYLON.Scene;
+        /** The scene's render-loop function. */
+        renderFrame: () => void;
+        /** Routes later cameras offscreen (shared engine only); null otherwise. */
+        cameraObserver: BABYLON.Observer<BABYLON.Camera>;
+        /** The error a frame threw; null while frames render. */
+        renderError: unknown;
+        /** The stand-in camera while the scene has no live camera of its own; null otherwise. */
+        standIn: BABYLON.FreeCamera | null;
+        /** The offscreen target every camera draws into (shared engine only); null otherwise. */
+        target: BABYLON.RenderTargetTexture | null;
+        /** Hands over from the stand-in to a camera the scene adds. */
+        handOverObserver: BABYLON.Observer<BABYLON.Camera>;
     }
     /** @hidden Per-scene state of SceneShaderWarmup's non-blocking load mode. */
     interface ISceneLoadShaderState extends TOOLKIT.IFrustumClippingState {
@@ -9183,12 +10461,39 @@ declare namespace TOOLKIT {
         /** The wrapper that keeps the shown hidden casters. */
         keptList: TOOLKIT.CustomRenderListFunction;
     }
+    /** @hidden A point or spot shadow map the reveal-time pipeline stage draws with all its casters (DrawPunctualShadowMapsFully). */
+    interface IPunctualShadowMapDraw {
+        /** The shadow map. */
+        shadowMap: BABYLON.RenderTargetTexture;
+        /** Its caster culling list, set aside during the stage. */
+        customList: TOOLKIT.CustomRenderListFunction;
+    }
     /** @hidden A hidden copy one reveal-time pass draws. */
     interface IPrefabWarmCopy {
         /** The cloned prefab root (CloneAssetContainerItem path; null otherwise). */
         root: BABYLON.TransformNode;
         /** The instantiated container (whole-container path; null otherwise). */
         entries: BABYLON.InstantiatedEntries;
+        /** The shadow generators the copy's casting meshes were added to, removed again when it is disposed. */
+        casters: TOOLKIT.IPrefabWarmCaster[];
+        /** The shadow maps whose caster culling list was wrapped to keep the copy's casters, given back when it is disposed. */
+        shadowListWraps: TOOLKIT.IShadowCasterListWrap[];
+    }
+    /** @hidden One mesh of a prefab warm copy in one shadow generator's caster list. */
+    interface IPrefabWarmCaster {
+        /** The auto-render light's shadow generator. */
+        generator: BABYLON.ShadowGenerator;
+        /** The copy's casting mesh. */
+        mesh: BABYLON.AbstractMesh;
+    }
+    /** @hidden The exported renderer settings a prefab warm copy applies (`metadata.toolkit.renderer`, as the MetadataParser reads them). */
+    interface IWarmCopyRendererMetadata {
+        /** Unity's Cast Shadows: the mesh joins every auto-render light's caster list. */
+        castshadows?: boolean;
+        /** Unity's Receive Shadows. */
+        receiveshadows?: boolean;
+        /** Whether the mesh draws its vertex colours (off when absent). */
+        usevertexcolors?: boolean;
     }
     /** @hidden One unit of a warm-up. */
     interface IWarmupUnit {
@@ -9222,6 +10527,1099 @@ declare namespace TOOLKIT {
         step: TOOLKIT.PrewarmStep;
         /** True while every unit of the group is ready. */
         finished: boolean;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /**
+     * Returns a string that captures everything outside a shader code processor's input code that can change its output
+     * (budgets, material or scene state, the previous processor's key), or null when the output cannot be keyed.
+     */
+    type ShaderCodeCacheKeyFunction = () => string | null;
+    /**
+     * A shader code processor (`processCodeAfterIncludes` or `processFinalCode`) that the toolkit tagged for the shader code
+     * cache. An effect is cached only when every processor it carries is tagged and every tag returns a key.
+     */
+    interface IShaderCodeCacheKeyedProcessor {
+        /** The processor's cache key, read once per effect build, right before Babylon would run the processor. */
+        shaderCodeCacheKey?: TOOLKIT.ShaderCodeCacheKeyFunction;
+    }
+    /** One cached effect: the built code as text digests, and the WebGPU processing context fields (null off WebGPU). */
+    interface IShaderCodeCacheEntry {
+        /** The FNV-1a 64 key of every input of the effect's build (hex). */
+        key: string;
+        /** A readable effect name, for reports. */
+        name: string;
+        /** Digest of the vertex code after includes and plugin injection, before the preprocessor (`_vertexSourceCodeBeforeMigration`). */
+        vertexBeforeMigration: string;
+        /** Digest of the fragment code after includes and plugin injection, before the preprocessor. */
+        fragmentBeforeMigration: string;
+        /** Digest of the final vertex code Babylon hands to the pipeline (`_vertexSourceCode`). */
+        vertex: string;
+        /** Digest of the final fragment code Babylon hands to the pipeline. */
+        fragment: string;
+        /** Every own enumerable field of the processing context after Babylon finalized it, or null when the engine has none. */
+        context: {
+            [field: string]: unknown;
+        } | null;
+        /** The bytes the entry itself counts against the cap (its texts are counted once each, apart). */
+        bytes: number;
+        /** When the entry was built (ms since the epoch). */
+        created: number;
+    }
+    /** One code text, shared by every entry that references its digest. */
+    interface IShaderCodeCacheText {
+        /** The text's FNV-1a 64 digest (hex). */
+        digest: string;
+        /** The code text when it is stored plain (no CompressionStream on the page, or a text UTF-8 cannot round-trip), else null. */
+        text: string | null;
+        /** The text as gzip-compressed UTF-8, or null when it is stored plain. */
+        compressed: ArrayBuffer | null;
+        /** The bytes the record counts against MaxBytes: the compressed size, or the text length × 2 when plain. */
+        bytes: number;
+    }
+    /** When an entry was last used (the LRU order), kept apart so a hit writes a few bytes, not the entry. */
+    interface IShaderCodeCacheUsage {
+        /** The entry key. */
+        key: string;
+        /** The last hit or build (ms since the epoch). */
+        lastUsed: number;
+    }
+    /** Everything a storage holds, as read at page start. */
+    interface IShaderCodeCacheSnapshot {
+        /** The effect entries. */
+        entries: TOOLKIT.IShaderCodeCacheEntry[];
+        /** The code texts. */
+        texts: TOOLKIT.IShaderCodeCacheText[];
+        /** The last-use records. */
+        usage: TOOLKIT.IShaderCodeCacheUsage[];
+    }
+    /** One batched write: records to put and keys to delete, applied together. */
+    interface IShaderCodeCacheWriteBatch {
+        /** Entries to put. */
+        entries: TOOLKIT.IShaderCodeCacheEntry[];
+        /** Texts to put. */
+        texts: TOOLKIT.IShaderCodeCacheText[];
+        /** Last-use records to put. */
+        usage: TOOLKIT.IShaderCodeCacheUsage[];
+        /** Entry keys to delete (their usage records go too). */
+        deletedEntries: string[];
+        /** Text digests to delete. */
+        deletedTexts: string[];
+    }
+    /** Where the cache keeps its entries between page loads (IndexedDB in a browser, memory in tests). */
+    interface IShaderCodeCacheStorage {
+        /**
+         * Reads everything the storage holds.
+         * @returns The stored records; rejects when the storage is blocked, missing or unreadable.
+         */
+        readAllAsync(): Promise<TOOLKIT.IShaderCodeCacheSnapshot>;
+        /**
+         * Optional: starts applying one batch in this task (the page is being hidden or unloaded, so a write that waits for a
+         * later task may never run).
+         * @param batch The records to put and the keys to delete.
+         * @returns True when the write was started; false when it cannot start now (the caller falls back to writeAsync).
+         */
+        writeNow?(batch: TOOLKIT.IShaderCodeCacheWriteBatch): boolean;
+        /**
+         * Applies one batch.
+         * @param batch The records to put and the keys to delete.
+         * @returns Resolves once the batch is durable; rejects when the write failed.
+         */
+        writeAsync(batch: TOOLKIT.IShaderCodeCacheWriteBatch): Promise<void>;
+    }
+    /** The cache's counts since the page started (or the last ResetStatistics). */
+    interface IShaderCodeCacheStatistics {
+        /** Effects whose code came from the cache (in verify mode: built and found identical). */
+        hits: number;
+        /** Effects built by Babylon and stored. */
+        misses: number;
+        /** Effects built by Babylon and not stored (see bypassReasons). */
+        bypassed: number;
+        /** Entries added this page. */
+        stored: number;
+        /** Verify mode: entries whose stored code differed from a fresh build (deleted). */
+        mismatches: number;
+        /** Entries evicted (least recently used) to keep the bytes within MaxBytes. */
+        evicted: number;
+        /** Per bypass reason, how many effects took it. */
+        bypassReasons: {
+            [reason: string]: number;
+        };
+        /** Per bypass reason, the first few effect names (for reports). */
+        bypassSamples: {
+            [reason: string]: string[];
+        };
+        /** Entries in memory now. */
+        entries: number;
+        /** Bytes the entries and their texts count against MaxBytes now. */
+        bytes: number;
+        /** "idle" before LoadAsync, "loading", "ready", or "unavailable" (blocked, missing or failed storage). */
+        state: string;
+    }
+    /** The signature of Babylon's `Effect._processShaderCodeAsync`. */
+    type ProcessShaderCodeMethod = (this: BABYLON.Effect, shaderProcessor?: unknown, keepExistingPipelineContext?: boolean, shaderProcessingContext?: unknown, extraInitializationsAsync?: () => Promise<void>) => Promise<void>;
+    /** The method ShaderCodeCache installs, carrying the Babylon original it wraps. */
+    interface IInstalledProcessShaderCode extends TOOLKIT.ProcessShaderCodeMethod {
+        /** Babylon's own `_processShaderCodeAsync`, kept so a second Install wraps it again instead of wrapping the override. */
+        babylonProcessShaderCodeAsync: TOOLKIT.ProcessShaderCodeMethod;
+    }
+    /** The Effect prototype slot the cache replaces. */
+    interface IShaderCodeCacheEffectPrototype {
+        /** Babylon's method, or the installed override with the original on `babylonProcessShaderCodeAsync`. */
+        _processShaderCodeAsync: TOOLKIT.ProcessShaderCodeMethod & {
+            babylonProcessShaderCodeAsync?: TOOLKIT.ProcessShaderCodeMethod;
+        };
+    }
+    /** The shader processor members that change what Babylon builds (scratch state the processor resets per build is left out). */
+    interface IShaderCodeCacheProcessorState {
+        /** The language the processor writes. */
+        shaderLanguage?: number;
+        /** WGSL: no internals UBO and no vertex/fragment wrappers. */
+        pureMode?: boolean;
+        /** No precision line is written. */
+        noPrecision?: boolean;
+        /** GLSL ES 3 sources are parsed too. */
+        parseGLES3?: boolean;
+    }
+    /** The engine members Babylon's shader processing reads (internal in Babylon's typings). */
+    interface IShaderCodeCacheEngineState {
+        /** "WEBGL1", "WEBGL2" or "WEBGPU" (a preprocessor define). */
+        shaderPlatformName: string;
+        /** The WebGL version (`__VERSION__` = version × 100). */
+        version: number;
+        /** Highp or mediump precision. */
+        _shouldUseHighPrecisionShader: boolean;
+        /** Picks the Ubo declaration includes. */
+        supportsUniformBuffers: boolean;
+        /** A global define. */
+        isNDCHalfZRange: boolean;
+        /** A global define. */
+        useReverseDepthBuffer: boolean;
+        /** A global define. */
+        useExactSrgbConversions: boolean;
+        /** `needShaderCodeInlining` runs the inliner. */
+        _features: {
+            needShaderCodeInlining?: boolean;
+        };
+        /** `drawBuffersExtension` reaches the post processor. */
+        getCaps(): {
+            drawBuffersExtension?: unknown;
+        };
+        /** The engine's processor for a language (null on engines without one). */
+        _getShaderProcessor(shaderLanguage: BABYLON.ShaderLanguage): TOOLKIT.IShaderCodeCacheProcessorState | null;
+        /** A fresh processing context (null off WebGPU). */
+        _getShaderProcessingContext(shaderLanguage: BABYLON.ShaderLanguage, pureMode: boolean): {
+            [field: string]: unknown;
+        } | null;
+    }
+    /** Babylon's page-wide plugin define table (internal in its typings): plugin class name to MATERIALPLUGIN_<n>. */
+    interface IMaterialPluginDefineTable {
+        /** The define of each plugin class, numbered by which class registered first on this page. */
+        _MaterialPluginClassToMainDefine: {
+            [className: string]: string;
+        };
+    }
+    /** The Effect members the cache reads and restores (internal in Babylon's typings). */
+    interface IShaderCodeCacheEffectState {
+        /** The base name: a ShadersStore name, or an object with vertex / fragment names, elements or sources. */
+        name: unknown;
+        /** The defines, one per line. */
+        defines: string;
+        /** The include index parameters (`maxSimultaneousLights`, ...). */
+        _indexParameters: unknown;
+        /** GLSL or WGSL. */
+        _shaderLanguage: BABYLON.ShaderLanguage;
+        /** The engine the effect builds for. */
+        _engine: TOOLKIT.IShaderCodeCacheEngineState;
+        /** Runs after include expansion (material plugins' injector). */
+        _processCodeAfterIncludes: unknown;
+        /** Runs after the preprocessor, per stage. */
+        _processFinalCode: unknown;
+        /** Set by `_rebuildProgram`: the effect compiles these instead. */
+        _vertexSourceCodeOverride: string;
+        /** Set by `_rebuildProgram`. */
+        _fragmentSourceCodeOverride: string;
+        /** The resolved vertex source, as loaded. */
+        _rawVertexSourceCode: string;
+        /** The resolved fragment source, as loaded. */
+        _rawFragmentSourceCode: string;
+        /** The vertex code after includes and plugin injection. */
+        _vertexSourceCodeBeforeMigration: string;
+        /** The fragment code after includes and plugin injection. */
+        _fragmentSourceCodeBeforeMigration: string;
+        /** The final vertex code. */
+        _vertexSourceCode: string;
+        /** The final fragment code. */
+        _fragmentSourceCode: string;
+        /** The WebGPU processing context the pipeline is created from (null off WebGPU). */
+        _processingContext: {
+            [field: string]: unknown;
+        } | null;
+        /** Creates the pipeline from the code fields. */
+        _prepareEffect(keepExistingPipelineContext?: boolean): void;
+    }
+    /** The resolved sources and key of one effect build, or why it cannot be keyed. */
+    interface IShaderCodeCacheKeyResult {
+        /** The key, or null when the effect is bypassed. */
+        key: string | null;
+        /** The bypass reason when key is null. */
+        bypassReason: string | null;
+        /** The vertex source text Babylon will load. */
+        vertexSource: string;
+        /** The fragment source text Babylon will load. */
+        fragmentSource: string;
+    }
+    /** The code fields of one effect, captured the moment Babylon hands them to `_prepareEffect`. */
+    interface IShaderCodeCacheCapture {
+        /** `_rawVertexSourceCode`. */
+        rawVertex: string;
+        /** `_rawFragmentSourceCode`. */
+        rawFragment: string;
+        /** `_vertexSourceCodeBeforeMigration`. */
+        vertexBeforeMigration: string;
+        /** `_fragmentSourceCodeBeforeMigration`. */
+        fragmentBeforeMigration: string;
+        /** `_vertexSourceCode`. */
+        vertex: string;
+        /** `_fragmentSourceCode`. */
+        fragment: string;
+        /** A deep copy of the processing context's fields; null off WebGPU; undefined when a field is not plain data. */
+        context: {
+            [field: string]: unknown;
+        } | null | undefined;
+    }
+    /** The effect build Babylon is running right now (processors may mark it as not storable). */
+    interface IShaderCodeCacheBuild {
+        /** Set when a toolkit processor reported something (a warning or a deviation) a cache hit would not repeat. */
+        uncacheableReason: string | null;
+    }
+    /** One include directive, as Babylon's include regex matches it. */
+    interface IShaderIncludeDirective {
+        /** The whole directive text (`match[0]`). */
+        text: string;
+        /** The include name before `__decl__` resolution (`match[1]`). */
+        name: string;
+        /** The `(a,b,...)` replacement list, or undefined (`match[3]` when `match[2]` matched). */
+        replacements: string | undefined;
+        /** The `[..]` index expression, or undefined (`match[5]` when `match[4]` matched). */
+        indexExpression: string | undefined;
+    }
+    /**
+     * FNV-1a 64-bit hashing over UTF-16 code units, in four 16-bit limbs (exact in doubles). Parts are length-prefixed so
+     * two part lists only hash alike when they are equal.
+     * @class ShaderCodeCacheHash - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderCodeCacheHash {
+        /** The low 16-bit limb (FNV offset basis 0xcbf29ce484222325). */
+        private limb0;
+        /** The second 16-bit limb. */
+        private limb1;
+        /** The third 16-bit limb. */
+        private limb2;
+        /** The high 16-bit limb. */
+        private limb3;
+        /**
+         * Hashes one text in one call.
+         * @param text The text.
+         * @returns The 16-hex-digit digest.
+         */
+        static Of(text: string): string;
+        /**
+         * Feeds every code unit of a text (FNV-1a: xor, then multiply by the 64-bit prime 2^40 + 0x1b3).
+         * @param text The text.
+         * @returns This hash, for chaining.
+         */
+        update(text: string): ShaderCodeCacheHash;
+        /**
+         * Feeds one key part, prefixed with its length.
+         * @param part The part (a number or boolean is written as text; null and undefined as their names).
+         * @returns This hash, for chaining.
+         */
+        part(part: string | number | boolean | null | undefined): ShaderCodeCacheHash;
+        /** @returns The digest as 16 hex digits. */
+        digest(): string;
+        /**
+         * @param limb A 16-bit value.
+         * @returns Four hex digits.
+         */
+        private static Hex;
+    }
+    /**
+     * The cache's storage in memory: what the Node tests use, and a stand-in that survives "page loads" inside one process.
+     * Records are copied in and out, as IndexedDB's structured clone would.
+     * @class ShaderCodeCacheMemoryStorage - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderCodeCacheMemoryStorage implements TOOLKIT.IShaderCodeCacheStorage {
+        /** The entries by key. */
+        readonly entries: Map<string, TOOLKIT.IShaderCodeCacheEntry>;
+        /** The texts by digest. */
+        readonly texts: Map<string, TOOLKIT.IShaderCodeCacheText>;
+        /** The last-use records by key. */
+        readonly usage: Map<string, TOOLKIT.IShaderCodeCacheUsage>;
+        /** How many reads and writes reached the storage (tests check that a disabled cache touches nothing). */
+        accessCount: number;
+        /**
+         * @returns Copies of every record.
+         */
+        readAllAsync(): Promise<TOOLKIT.IShaderCodeCacheSnapshot>;
+        /**
+         * @param batch The records to put and the keys to delete.
+         * @returns Resolves at once.
+         */
+        writeAsync(batch: TOOLKIT.IShaderCodeCacheWriteBatch): Promise<void>;
+    }
+    /**
+     * The cache's storage in the browser: IndexedDB database `bt-shader-code-v1` with the stores `effects` (entries),
+     * `texts` (code texts shared by digest) and `usage` (last-use times).
+     * @class ShaderCodeCacheIndexedDbStorage - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderCodeCacheIndexedDbStorage implements TOOLKIT.IShaderCodeCacheStorage {
+        /** The database name (the suffix changes when the record layout changes). */
+        static readonly DATABASE_NAME: string;
+        /** The schema version. */
+        private static readonly DATABASE_VERSION;
+        /** The entry store (key path `key`). */
+        private static readonly EFFECTS_STORE;
+        /** The text store (key path `digest`). */
+        private static readonly TEXTS_STORE;
+        /** The last-use store (key path `key`). */
+        private static readonly USAGE_STORE;
+        /** The open database, once opened. */
+        private databasePromise;
+        /** The database once it is open (writeNow needs it without waiting), else null. */
+        private openDatabase;
+        /**
+         * @returns True when the page has an IndexedDB factory.
+         */
+        static IsSupported(): boolean;
+        /**
+         * @returns Every record of the three stores, read in one transaction.
+         */
+        readAllAsync(): Promise<TOOLKIT.IShaderCodeCacheSnapshot>;
+        /**
+         * @param batch The records to put and the keys to delete, applied in one transaction.
+         * @returns Resolves when the transaction completes.
+         */
+        writeAsync(batch: TOOLKIT.IShaderCodeCacheWriteBatch): Promise<void>;
+        /**
+         * Starts the batch's transaction in this task and commits it at once (IDBTransaction.commit where the browser has it),
+         * so a page being hidden or unloaded does not wait for a later task that may never run.
+         * @param batch The records to put and the keys to delete.
+         * @returns False when the database is not open yet (or the transaction could not start).
+         */
+        writeNow(batch: TOOLKIT.IShaderCodeCacheWriteBatch): boolean;
+        /**
+         * Puts and deletes one batch in a single readwrite transaction.
+         * @param database The open database.
+         * @param batch The records to put and the keys to delete.
+         * @param commitNow True to commit the transaction right after the requests (page hide).
+         * @returns Resolves when the transaction completes.
+         */
+        private writeTo;
+        /**
+         * Opens (and on first use creates) the database once.
+         * @returns The database; rejects when IndexedDB is missing, blocked or fails to open.
+         */
+        private openAsync;
+        /**
+         * @param request An IndexedDB request.
+         * @returns Its result; rejects with its error.
+         */
+        private static RequestAsync;
+    }
+    /**
+     * Keeps Babylon's built shader code across page loads. Babylon builds every effect's final shader text on the page thread
+     * (`Effect._processShaderCodeAsync`: include expansion, material plugin injection, the preprocessor, `processFinalCode`,
+     * and on WebGPU the WGSL processing that fills the processing context) and redoes it from zero on every page load. Install
+     * wraps that method once: an effect whose every build input is known (its sources, the includes they reach, its defines,
+     * the engine's shader state, the Babylon and toolkit versions, and the keys of the toolkit's tagged processors) is looked
+     * up by an FNV-1a 64 key; a hit restores the stored code and processing context and goes straight to `_prepareEffect`,
+     * a miss runs Babylon's own path and stores what it built. Anything that cannot be keyed runs Babylon's path untouched
+     * and is counted under a named bypass reason. Entries live in IndexedDB (`bt-shader-code-v1`); their code texts are
+     * shared by digest and stored gzip-compressed (CompressionStream; plain where the page has none). Everything is read
+     * into memory at Install, written in batches at idle and capped at MaxBytes of stored bytes (least recently used
+     * evicted). Enabled = false is exactly Babylon's behaviour, and so is SceneManager.PrecompileShaders = false (the global
+     * switch: Install then does nothing, and the wrapper passes straight to Babylon while it is off); blocked or corrupt storage
+     * falls back to it with one warning.
+     * @class ShaderCodeCache - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderCodeCache {
+        /**
+         * The default cap on stored bytes (compressed text sizes, or string lengths × 2 for plain texts): 256 MB. Prepare graphics
+         * stores every scene of a game at once (eight URP_Samples scenes: 52 MB, past the earlier 50 MB cap, which evicted the
+         * scenes prepared first), so the cap leaves room for a whole game's scenes on both engines.
+         */
+        static readonly MAX_BYTES: number;
+        /** The kill switch: false runs exactly Babylon's path, and nothing is read or written. Set it before InitializeRuntime. */
+        static Enabled: boolean;
+        /**
+         * Builds every hit the normal way too and compares code and context byte for byte; a mismatch is logged (naming the
+         * effect), its entry deleted, and the fresh build used. Development builds turn it on with `?shaderCacheVerify=1`.
+         */
+        static VerifyMode: boolean;
+        /** The cap on stored bytes (entries plus the texts they share); tests lower it. */
+        static MaxBytes: number;
+        /** The start of every material plugin define, in Babylon's numbered form and in the class-named form the cache stores. */
+        private static readonly PLUGIN_DEFINE_PREFIX;
+        /** A plugin define as Babylon writes it: its number depends on which plugin class registered first on the page. */
+        private static readonly PAGE_PLUGIN_DEFINE;
+        /** A plugin define as the cache stores it, named after the plugin class, the same on every page. */
+        private static readonly STORED_PLUGIN_DEFINE;
+        /** A plugin class name that can stand in a define. */
+        private static readonly DEFINE_SAFE_CLASS_NAME;
+        /** Writes are batched at most this often (ms). */
+        private static readonly FLUSH_INTERVAL_MS;
+        /**
+         * An idle callback waits at most this long before it runs anyway (ms). A game page is rarely idle, and the entries a
+         * flush has not written yet were lost when the page closed; the page-hide flush (WritePendingOnPageHide) covers the close,
+         * this keeps the window short for a tab that is killed instead.
+         */
+        private static readonly IDLE_TIMEOUT_MS;
+        /** A text shorter than this is hashed directly instead of through the digest memo. */
+        private static readonly DIGEST_MEMO_MIN_LENGTH;
+        /** The digest memo holds at most this many texts before it is cleared. */
+        private static readonly DIGEST_MEMO_MAX_ENTRIES;
+        /** The digest memo holds at most this many characters before it is cleared. */
+        private static readonly DIGEST_MEMO_MAX_CHARACTERS;
+        /** Nested includes deeper than this are not followed (Babylon would loop forever on a recursive include). */
+        private static readonly MAX_INCLUDE_DEPTH;
+        /** Effect names kept per bypass reason in the statistics. */
+        private static readonly BYPASS_SAMPLE_COUNT;
+        /** Fixed bytes an entry counts besides its context and name. */
+        private static readonly ENTRY_OVERHEAD_BYTES;
+        /** Babylon's include directive (`shaderProcessor.js` RegexShaderInclude), matched the same way. */
+        private static readonly INCLUDE_DIRECTIVE;
+        /** Babylon's `light{X}.member` pattern (RegexLightX). */
+        private static readonly LIGHT_INDEX_PATTERN;
+        /** Babylon's `{X}` pattern (RegexX). */
+        private static readonly INDEX_PATTERN;
+        /** Babylon's `__decl__` marker (RegexShaderDecl). */
+        private static readonly DECLARATION_MARKER;
+        /** A UTF-16 surrogate: a text holding one is stored plain, so a lone surrogate never meets a UTF-8 round trip. */
+        private static readonly SURROGATE_PATTERN;
+        /** The storage, chosen at LoadAsync (IndexedDB) unless SetStorage gave one. */
+        private static _storage;
+        /** "idle", "loading", "ready" or "unavailable". */
+        private static _state;
+        /** The load in flight or done. */
+        private static _loadPromise;
+        /** The method this class installed last, or null before Install. */
+        private static _installedMethod;
+        /** The entries by key. */
+        private static _entries;
+        /** The texts by digest. */
+        private static _texts;
+        /** How many entries reference each text. */
+        private static _textReferences;
+        /** The last use of each entry (ms since the epoch); the LRU order. */
+        private static _lastUsed;
+        /** Bytes counted against MaxBytes: stored sizes, and length × 2 for a text not written yet. */
+        private static _bytes;
+        /** The bytes each text counts (its stored size once written). */
+        private static _textBytes;
+        /** The flush in flight (flushes run one after another). */
+        private static _flushPromise;
+        /** Records waiting for the next flush. */
+        private static _pendingEntries;
+        /** Texts waiting for the next flush. */
+        private static _pendingTexts;
+        /** Last-use times waiting for the next flush. */
+        private static _pendingUsage;
+        /** Entry keys to delete at the next flush. */
+        private static _pendingEntryDeletes;
+        /** Text digests to delete at the next flush. */
+        private static _pendingTextDeletes;
+        /** True while a flush is scheduled. */
+        private static _flushScheduled;
+        /** When the last flush started (ms since the epoch). */
+        private static _lastFlushTime;
+        /** True once the storage warning was written (one per page). */
+        private static _warnedStorage;
+        /** True once the page-hide listeners are installed (one set per page). */
+        private static _pageHideInstalled;
+        /** The effect build Babylon is running right now, or null. */
+        private static _currentBuild;
+        /** Digests of long texts, by text (V8 hashes a string once, so a repeated text costs one native lookup). */
+        private static _digestMemo;
+        /** Stored texts rewritten with this page's plugin defines, by digest (shared variants restore the same text many times). */
+        private static _pageTexts;
+        /** Characters held by the digest memo. */
+        private static _digestMemoCharacters;
+        /** The include directives of each include text, by text. */
+        private static _directiveMemo;
+        /** The counts since the last ResetStatistics. */
+        private static _statistics;
+        /**
+         * Installs the cache: wraps `BABYLON.Effect.prototype._processShaderCodeAsync` once (a second call wraps Babylon's
+         * original, never the override), reads verify mode from the page in development builds, listens for the page being
+         * hidden or unloaded (queued records are then written at once, WritePendingOnPageHide), and starts LoadAsync without
+         * waiting for it. Does nothing while SceneManager.PrecompileShaders is false.
+         * @returns True when the wrapper is in place; false when Babylon has no `_processShaderCodeAsync` or precompiling is off.
+         */
+        static Install(): boolean;
+        /**
+         * The global switch: false while SceneManager.PrecompileShaders is false. True when SceneManager is not loaded (the cache's
+         * own tests), so only an explicit false turns the cache off.
+         */
+        private static IsSwitchedOn;
+        /** @returns True once Install has replaced Babylon's method (and nothing has replaced the override since). */
+        static IsInstalled(): boolean;
+        /**
+         * Uses a storage other than IndexedDB (the tests' in-memory one). Call it before Install / LoadAsync.
+         * @param storage The storage.
+         */
+        static SetStorage(storage: TOOLKIT.IShaderCodeCacheStorage): void;
+        /**
+         * Reads every stored entry into memory. Effects built before it finishes run Babylon's path (bypass reason
+         * "not-loaded"). Blocked, missing or unreadable storage leaves the cache "unavailable" with one warning. Idempotent.
+         * @returns Resolves when the entries are in memory (never rejects).
+         */
+        static LoadAsync(): Promise<void>;
+        /**
+         * Writes every queued record now (the cache otherwise writes at idle, at most every FLUSH_INTERVAL_MS): compresses
+         * the new texts, evicts least recently used entries past MaxBytes (now that the stored sizes are known), and writes
+         * one batch. Flushes run one after another.
+         * @returns Resolves when the write is done or failed (a failure warns once and stops further writes).
+         */
+        static FlushAsync(): Promise<void>;
+        /** @returns A copy of the counts since the last ResetStatistics, plus the cache's size and state now. */
+        static GetStatistics(): TOOLKIT.IShaderCodeCacheStatistics;
+        /** Zeroes the counts (the stored entries stay). */
+        static ResetStatistics(): void;
+        /**
+         * A tagged processor's key, for chaining: "none" when there is no processor, null when it is untagged, not a
+         * function, or its tag returns null or throws.
+         * @param processor A `processCodeAfterIncludes` or `processFinalCode` value.
+         * @returns The key, "none", or null.
+         */
+        static ProcessorKey(processor: unknown): string | null;
+        /**
+         * The digest of a text; a long text's digest is memoized by the text itself, so a key part repeated across effects
+         * (a ShadersStore source, an include, a plugin's code) costs one native map lookup after its first use.
+         * @param text The text.
+         * @returns The 16-hex-digit FNV-1a 64 digest.
+         */
+        static Digest(text: string): string;
+        /**
+         * Called by a toolkit processor that reports something while it runs (a dropped texture, a deviation): the effect
+         * being built is then not stored, so its report repeats on every page load, as it does without the cache.
+         * @param reason The bypass reason to count.
+         */
+        static MarkCurrentBuildUncacheable(reason: string): void;
+        /**
+         * Writes every queued record now, starting the IndexedDB transaction in the same task and committing it at once
+         * (storage.writeNow): the page is being hidden or unloaded, so there is no time for the compression an idle flush
+         * does first - texts are stored plain (a format every load reads; a later eviction or rewrite keeps them as they
+         * are). A flush already compressing skips what this one took (TakePendingBatch). A write that fails here is left
+         * alone (the page is going away). Called by the page-hide listeners (InstallPageHideFlush).
+         */
+        static WritePendingOnPageHide(): void;
+        /**
+         * Builds the override around Babylon's method. A rebuild with an explicit processor and a disabled cache call Babylon
+         * synchronously, exactly as before; otherwise the initializer is awaited as Babylon does, then the effect is keyed and
+         * restored or built. A WebGPU vertex type rebuild (checkNonFloatVertexBuffers: bone indices stored as bytes, say) is
+         * cached too, keyed by its vertex types: Babylon runs it for every such variant on every load.
+         * @param babylonMethod Babylon's own `_processShaderCodeAsync`.
+         * @returns The method to install, carrying the original on `babylonProcessShaderCodeAsync`.
+         */
+        private static CreateInstalledMethod;
+        /**
+         * Awaits the effect's initializer (the lazy shader-chunk loader that fills the ShadersStore), as Babylon does, then
+         * processes the effect. An initializer that throws ends the call with its error exactly as Babylon's own method does
+         * (the effect reports a compilation error); it is run once, never handed to Babylon to run again.
+         * @param effect The effect.
+         * @param babylonMethod Babylon's own method.
+         * @param keepExistingPipelineContext Passed through to `_prepareEffect`.
+         * @param extraInitializationsAsync The initializer.
+         * @returns Resolves when the code is handed to `_prepareEffect`; rejects with the initializer's error.
+         * @throws The initializer's error (as a rejection).
+         */
+        private static ProcessAfterInitializerAsync;
+        /**
+         * Keys the effect, then restores a hit or runs Babylon's path (storing a miss). Runs synchronously, as Babylon's
+         * processing does once its initializer is done.
+         * @param effect The effect.
+         * @param babylonMethod Babylon's own method.
+         * @param keepExistingPipelineContext Passed through to `_prepareEffect`.
+         * @param rebuildContext The processing context of a vertex type rebuild, null for a normal build.
+         * @returns Babylon's promise, or a settled one after a hit.
+         */
+        private static ProcessEffect;
+        /**
+         * Runs Babylon's path with a one-shot `_prepareEffect` interceptor that captures the code fields the moment Babylon
+         * hands them over, then stores them (a miss) or compares them with the entry (verify mode).
+         * @param effect The effect.
+         * @param babylonMethod Babylon's own method.
+         * @param keepExistingPipelineContext Passed through.
+         * @param keyResult The effect's key and resolved sources.
+         * @param verifiedEntry The entry to compare with (verify mode), or null for a miss.
+         * @param rebuildContext The processing context of a vertex type rebuild, null for a normal build.
+         * @returns Babylon's promise.
+         */
+        private static BuildAndCapture;
+        /**
+         * Stores a miss's capture, or counts why it cannot be stored.
+         * @param state The effect.
+         * @param keyResult The effect's key and resolved sources.
+         * @param capture The captured fields, or null when Babylon did not reach `_prepareEffect` synchronously.
+         * @param build The build record (a processor may have marked it).
+         */
+        private static StoreCapture;
+        /**
+         * Verify mode: compares a fresh build with its entry. Equal counts a hit; different logs the effect, deletes the
+         * entry and counts a mismatch (the fresh build is what the effect uses either way).
+         * @param state The effect.
+         * @param entry The stored entry.
+         * @param capture The fresh build's fields.
+         */
+        private static VerifyCapture;
+        /**
+         * Restores a hit onto the effect, in Babylon's order: processing context, raw sources, code before migration, final code.
+         * @param state The effect.
+         * @param entry The entry.
+         * @param keyResult The resolved sources (identical to what Babylon would load: they are part of the key).
+         * @returns False when a text is missing or the context cannot be rebuilt (nothing usable was restored).
+         */
+        private static RestoreEntry;
+        /**
+         * @param state The effect, at the moment Babylon calls `_prepareEffect`.
+         * @returns Its code fields and a deep copy of its processing context.
+         */
+        private static CaptureEffect;
+        /**
+         * @param context The processing context, or null.
+         * @returns A deep copy of every own enumerable field; null for null; undefined when a field is not plain data.
+         */
+        private static SnapshotContext;
+        /** @returns Babylon's plugin define table (empty when this Babylon has none). */
+        private static PluginDefineTable;
+        /**
+         * Replaces Babylon's numbered plugin defines with class-named ones. Babylon numbers plugin classes by which registered
+         * first on the page, so the same material can read MATERIALPLUGIN_16 on one page and MATERIALPLUGIN_18 on another. Keys
+         * and stored texts use the class name, so an entry serves every page. A define of an unknown class keeps its number.
+         * @param text The defines, a processor key or shader code.
+         * @returns The text in the form the cache keys and stores.
+         */
+        private static WithStoredPluginDefines;
+        /**
+         * A stored text with this page's plugin defines put back.
+         * @param digest The text's digest.
+         * @returns The text; undefined when it is missing or names a plugin class this page has not registered.
+         */
+        private static TextForThisPage;
+        /**
+         * The vertex types a WebGPU rebuild's processing context asks for, in a fixed order.
+         * @param context The processing context handed to the rebuild, or null.
+         * @returns The types as text, "" when the context names none (a normal build).
+         */
+        private static VertexTypesKey;
+        /**
+         * Computes the effect's key from every input Babylon's processing reads. The order and content are fixed, so the
+         * same inputs on another page load give the same key.
+         * @param state The effect, after its initializer.
+         * @param vertexTypes The vertex types of a rebuild (VertexTypesKey), "" for a normal build.
+         * @returns The key and resolved sources, or a bypass reason.
+         */
+        private static ComputeKey;
+        /**
+         * Feeds the engine and processor state Babylon's processing reads (`processorOptions` scalars, the global defines,
+         * the post processor's caps, the inliner, the processor's own settings, WebGPU's known-binding mode).
+         * @param hash The key hash.
+         * @param engine The effect's engine.
+         * @param language The effect's language.
+         */
+        private static HashEngineState;
+        /**
+         * WebGPU's `WebGPUShaderProcessingContext._SimplifiedKnownBindings` (it moves binding numbers), read through a probe
+         * context's class so the type is never named; "none" off WebGPU.
+         * @param engine The engine.
+         * @param language The effect's language.
+         * @returns The flag as text.
+         */
+        private static SimplifiedKnownBindings;
+        /**
+         * Feeds every include a source reaches, in the order Babylon expands them: name and text digest, then the includes
+         * that text reaches. A parameterized include whose text holds directives is substituted as Babylon does first, so the
+         * nested names are the ones Babylon will look up.
+         * @param hash The key hash.
+         * @param source The text to scan.
+         * @param includes The language's IncludesShadersStore.
+         * @param supportsUniformBuffers Picks `__decl__` includes' Ubo variants.
+         * @param indexParameters The effect's index parameters (for `[0..name]` ranges).
+         * @param visited Include names already fed (each once per effect).
+         * @param depth The nesting depth.
+         * @param substitutedText True when `source` is a substituted include text (not memoized).
+         * @returns False when an include is not in the store (Babylon would fetch it) or nesting is too deep.
+         */
+        private static HashIncludes;
+        /**
+         * @param text A shader text.
+         * @param memoize True to keep the result for the next scan of the same text (sources and store includes).
+         * @returns Its include directives, as Babylon's regex matches them.
+         */
+        private static IncludeDirectives;
+        /**
+         * Babylon's `__decl__` rule: the marker is removed, Vertex / Fragment become Ubo when uniform buffers are supported,
+         * and "Declaration" is appended.
+         * @param name The directive's include name.
+         * @param supportsUniformBuffers The engine's uniform buffer support.
+         * @returns The IncludesShadersStore name Babylon looks up.
+         */
+        private static ResolveIncludeName;
+        /**
+         * Babylon's include substitution (ProcessIncludes), statement for statement: the `(from,to,...)` replacements, then
+         * the `[a..b]` repetition or `[n]` index.
+         * @param content The include text.
+         * @param directive The directive.
+         * @param supportsUniformBuffers The engine's uniform buffer support.
+         * @param indexParameters The effect's index parameters.
+         * @returns The substituted text.
+         */
+        private static SubstituteInclude;
+        /**
+         * Babylon's source resolution (`_ProcessShaderCode` + `LoadShader`) for one stage, without loading anything.
+         * @param baseName The effect's base name.
+         * @param stage "vertex" or "fragment".
+         * @param language The effect's language (picks the ShadersStore).
+         * @returns The source text Babylon will load, or null for a DOM element, base64 or URL source.
+         */
+        private static ResolveSource;
+        /**
+         * @param baseName The effect's base name.
+         * @returns The bypass reason for a source ResolveSource could not read.
+         */
+        private static DescribeUnreadableSource;
+        /**
+         * The name Babylon writes into `#define SHADER_NAME` (UseFinalCode), as text.
+         * @param baseName The effect's base name.
+         * @param stage "vertex" or "fragment".
+         * @returns The name.
+         */
+        private static FinalCodeName;
+        /**
+         * @param processor A processor value.
+         * @returns True when it is a function carrying a tag (its key may still be null).
+         */
+        private static IsTagged;
+        /**
+         * Adds an entry and its texts and queues the writes. A new text counts its length × 2 until the flush compresses
+         * it; eviction past MaxBytes runs at the flush, once the stored sizes are known (an entry larger than MaxBytes on
+         * its own is evicted there).
+         * @param key The entry key.
+         * @param name The effect name.
+         * @param capture The captured fields.
+         */
+        private static AddEntry;
+        /** Evicts least recently used entries until the bytes are within MaxBytes. */
+        private static EvictToCap;
+        /**
+         * Removes an entry from memory (texts no other entry references go too) and queues the deletes.
+         * @param key The entry key.
+         */
+        private static DropEntry;
+        /**
+         * Records a hit's use for the LRU order (written with the next flush).
+         * @param key The entry key.
+         */
+        private static TouchEntry;
+        /**
+         * Schedules one flush, at least FLUSH_INTERVAL_MS after the last, run at idle (a timeout where there is no
+         * requestIdleCallback), never inside a frame.
+         */
+        private static ScheduleFlush;
+        /**
+         * Listens for the page being hidden or unloaded (`pagehide`, `visibilitychange` to hidden) and then writes every queued
+         * record at once (WritePendingOnPageHide). Once per page; nothing where the page has no window or document.
+         */
+        private static InstallPageHideFlush;
+        /**
+         * One flush: compresses the texts queued now, evicts to MaxBytes, writes the batch. Records queued while it
+         * compresses wait for the next flush.
+         * @returns Resolves when the write is done or failed.
+         */
+        private static RunFlushAsync;
+        /**
+         * Compresses queued texts into their stored records and counts their stored sizes.
+         * @param texts The queued [digest, text] pairs.
+         * @returns The records by digest (a text dropped meanwhile is left out).
+         */
+        private static PrepareTextRecordsAsync;
+        /**
+         * @param digest The text's digest.
+         * @param text The text.
+         * @returns Its stored record: gzip-compressed UTF-8 when the page has CompressionStream and the text holds no
+         * surrogate, else plain.
+         */
+        private static CreateTextRecordAsync;
+        /**
+         * @param record A stored text record.
+         * @returns Its text (decompressed when it was stored compressed); rejects when the bytes are not valid gzip.
+         */
+        private static ReadTextRecordAsync;
+        /**
+         * Runs bytes through a compression or decompression stream.
+         * @param input The bytes.
+         * @param transform A CompressionStream or DecompressionStream.
+         * @returns The output bytes.
+         */
+        private static TransformBytesAsync;
+        /**
+         * Takes the queued writes as one batch: the entries and texts that were queued when the flush started (and are
+         * still queued), every queued last-use record and every delete.
+         * @param entryKeys The entry keys queued when the flush started.
+         * @param textRecords The prepared text records by digest.
+         * @returns The batch, or null when nothing is queued.
+         */
+        private static TakePendingBatch;
+        /**
+         * The load itself: reads the storage, keeps every well-formed entry whose texts are all present, drops the rest
+         * (a malformed record warns once), and evicts down to MaxBytes.
+         * @returns Resolves when the cache is "ready" or "unavailable".
+         */
+        private static ReadStorageAsync;
+        /**
+         * Takes the stored records into memory (compressed texts are decompressed here, off the shader-building path).
+         * @param snapshot What the storage holds.
+         * @returns Resolves when the records are in memory.
+         */
+        private static AdoptSnapshotAsync;
+        /**
+         * @param record A stored text record.
+         * @returns True when it has a digest, a size, and either a text or compressed bytes.
+         */
+        private static IsWellFormedText;
+        /**
+         * @param entry A stored record.
+         * @returns True when every field has its type (the context, when present, is plain data).
+         */
+        private static IsWellFormedEntry;
+        /**
+         * @param value A value.
+         * @returns True for primitives, undefined, arrays and plain objects made only of those.
+         */
+        private static IsPlainData;
+        /**
+         * @param value Plain data.
+         * @returns A deep copy (never shares an object with the input).
+         */
+        private static ClonePlainData;
+        /**
+         * @param left Plain data.
+         * @param right Plain data.
+         * @returns True when both hold the same values and the same own keys (a key holding undefined is not a missing key).
+         */
+        private static DeepEqual;
+        /**
+         * Counts one bypassed effect under its reason, keeping the first few names.
+         * @param reason The reason.
+         * @param state The effect.
+         */
+        private static CountBypass;
+        /**
+         * @param state The effect.
+         * @returns A readable name: the base name, its vertex / fragment names, or "custom source".
+         */
+        private static EffectName;
+        /** Development builds turn VerifyMode on with `?shaderCacheVerify=1` in the page URL. */
+        private static ReadVerifyModeFromPage;
+        /**
+         * Writes the storage warning once per page.
+         * @param problem What went wrong.
+         */
+        private static WarnStorageOnce;
+        /**
+         * @param error A thrown value.
+         * @returns Its message.
+         */
+        private static Describe;
+        /** @returns Zeroed counts. */
+        private static CreateStatistics;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** Counts kept for the tests and the profile: how each injection point was applied since the last reset. */
+    interface IShaderInjectionStatistics {
+        /** `!` points applied in one pass over the source. */
+        singlePassPoints: number;
+        /** `!` points applied by Babylon's own per-match loop. */
+        babylonLoopPoints: number;
+        /** `getCustomCode` calls made on marked toolkit plugins. */
+        toolkitCustomCodeRequests: number;
+    }
+    /** One shader stage's code processor, as Babylon's effects store it (`processCodeAfterIncludes`): stage name and code in, code out. */
+    type ShaderStageCodeProcessor = (shaderType: string, code: string) => string;
+    /**
+     * The signature of `MaterialPluginManager._injectCustomCode`: builds the stage processor an effect keeps.
+     * `eventData` is Babylon's PrepareEffect event, passed through untouched.
+     */
+    type InjectCustomCodeMethod = (this: BABYLON.MaterialPluginManager, eventData: unknown, existingCallback?: TOOLKIT.ShaderStageCodeProcessor) => TOOLKIT.ShaderStageCodeProcessor;
+    /** The method ShaderCodeInjection installs, carrying the Babylon original it wraps. */
+    interface IInstalledInjectCustomCode extends TOOLKIT.InjectCustomCodeMethod {
+        /** Babylon's own `_injectCustomCode`, kept so a second Install wraps it again instead of wrapping the override. */
+        babylonInjectCustomCode: TOOLKIT.InjectCustomCodeMethod;
+    }
+    /** The members of Babylon's MaterialPluginManager the injector reads (protected in Babylon's typings). */
+    interface IMaterialPluginManagerState {
+        /** The enabled plugins, sorted by priority (Babylon re-reads them on every stage call). */
+        _activePlugins: BABYLON.MaterialPluginBase[];
+        /** Per shader type, every point name any plugin returned when it was added (the frozen key set). */
+        _codeInjectionPoints: {
+            [shaderType: string]: {
+                [pointName: string]: boolean;
+            };
+        };
+        /** The plugins' uniform-buffer declarations, written at `#define ADDITIONAL_UBO_DECLARATION`. */
+        _uboDeclaration: string;
+        /** The plugins' vertex declarations, written at `#define ADDITIONAL_VERTEX_DECLARATION`. */
+        _vertexDeclaration: string;
+        /** The plugins' fragment declarations, written at `#define ADDITIONAL_FRAGMENT_DECLARATION`. */
+        _fragmentDeclaration: string;
+        /** The material the manager serves (its shader language picks the plugins' code). */
+        _material: BABYLON.Material;
+    }
+    /** The MaterialPluginManager prototype slot the injector replaces. */
+    interface IMaterialPluginManagerPrototype {
+        /** Babylon's method, or the installed override with the original on `babylonInjectCustomCode`. */
+        _injectCustomCode: TOOLKIT.InjectCustomCodeMethod & {
+            babylonInjectCustomCode?: TOOLKIT.InjectCustomCodeMethod;
+        };
+    }
+    /** A plugin class that may declare the opt-in marker. */
+    interface IStableCustomCodeClass {
+        /** True when the class's getCustomCode is a pure function of the material's state during one stage injection. */
+        HasStableCustomCode?: boolean;
+    }
+    /**
+     * Makes Babylon's material-plugin code injection cheap for the toolkit's own plugins, with byte-identical output.
+     * Overrides MaterialPluginManager._injectCustomCode once (Install). A material whose active plugins include a
+     * plugin class marked `HasStableCustomCode` asks each marked plugin for its custom code once per shader stage, and
+     * applies a regex (`!`) point fed only by marked plugins in one pass over the original source instead of
+     * rebuilding the whole shader after every match. Everything else runs Babylon's own code.
+     * @class ShaderCodeInjection - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class ShaderCodeInjection {
+        /** Babylon's `RxOption`: a flags prefix on a regex point name (`gim!pattern`). */
+        private static readonly RegexOptionPattern;
+        /** The regex flags whose meaning a one-pass scan reproduces exactly. Any other flag runs Babylon's loop. */
+        private static readonly SinglePassFlags;
+        /** The counts since the last ResetStatistics. */
+        private static _statistics;
+        /** The method this class installed last, or null before Install. */
+        private static _installedMethod;
+        /** True once the missing-method warning was written. */
+        private static _warnedMissingMethod;
+        /**
+         * Installs the override; safe to call again (a second call wraps Babylon's original, never the override).
+         * @returns True when the override is in place; false (and one warning) when Babylon has no _injectCustomCode.
+         */
+        static Install(): boolean;
+        /** @returns True once Install has replaced Babylon's method (and nothing has replaced the override since). */
+        static IsInstalled(): boolean;
+        /** @returns A copy of the counts since the last ResetStatistics. */
+        static GetStatistics(): TOOLKIT.IShaderInjectionStatistics;
+        /** Zeroes the counts. */
+        static ResetStatistics(): void;
+        /**
+         * @param plugin A material plugin, or null.
+         * @returns True when the plugin's class (or a base) declares `HasStableCustomCode = true`.
+         */
+        static IsToolkitPlugin(plugin: BABYLON.MaterialPluginBase): boolean;
+        /**
+         * True when a regex point can run in one pass: its pattern never looks behind its own start (no lookbehind, no
+         * `\b` or `\B`, no `^` under the m flag) and it uses only the flags g, i, m, s and u. Lookaheads and `$` only
+         * read forward, into text a replacement never changes, so they are allowed.
+         * @param pattern The regex source (the point name without its `!`, `!!` or flags prefix).
+         * @param flags The regex flags.
+         * @returns True when a scan of the original source finds exactly the matches Babylon's rebuild-and-rescan loop finds.
+         */
+        static IsSinglePassSafe(pattern: string, flags: string): boolean;
+        /**
+         * Applies one regex point in a single pass: exec on the unchanged source, the substituted code inserted in
+         * place of each match, one join.
+         * @param code The shader source.
+         * @param pattern The point's regex (a copy with the g flag is used when it has none).
+         * @param injectedCode The plugins' code for the point; `$n` is replaced by the match's group n.
+         * @returns The new source (the same string when nothing matches), or null when a match is empty, so the caller runs Babylon's loop.
+         */
+        static ReplaceInOnePass(code: string, pattern: RegExp, injectedCode: string): string | null;
+        /**
+         * Builds the override around Babylon's method. The effect keeps the returned processor, which holds the manager
+         * (as Babylon's does) and decides at call time which injection runs, from the plugins active then. The processor is
+         * tagged with its shader code cache key (GetInjectionCacheKey), so TOOLKIT.ShaderCodeCache can cache its effects.
+         * @param babylonInjectCustomCode Babylon's own `_injectCustomCode`.
+         * @returns The method to install, carrying the original on `babylonInjectCustomCode`.
+         */
+        private static CreateInstalledMethod;
+        /**
+         * The shader code cache key of the injector an effect keeps: a fingerprint of everything outside the stage code that
+         * the injection reads, whichever branch (toolkit or Babylon) runs - the material's own processor's key, the material's
+         * shader language, the plugin declarations, the injection points, and every active plugin's custom code for both
+         * stages, in plugin order. Both branches give byte-identical output from these inputs.
+         * @param manager The material's plugin manager.
+         * @param existingCallback The material's own processor, run first, or undefined.
+         * @returns The key, or null when the material's own processor is untagged or a plugin resolves includes (its code
+         * then reaches the IncludesShadersStore, which this key does not cover).
+         */
+        private static GetInjectionCacheKey;
+        /**
+         * @param manager The material's plugin manager.
+         * @returns True when an active plugin is marked and none resolves includes (include expansion stays Babylon's).
+         */
+        private static UsesToolkitInjection;
+        /**
+         * Babylon's stage closure (materialPluginManager.pure.js `_injectCustomCode`), statement for statement, with two
+         * changes: a marked plugin's custom code is asked once per call, and a `!` point fed only by marked plugins runs
+         * in one pass when its pattern allows. No plugin resolves includes here (UsesToolkitInjection), so Babylon's
+         * include branch is not needed.
+         * @param manager The material's plugin manager.
+         * @param shaderType "vertex" or "fragment".
+         * @param code The stage source after include expansion.
+         * @param existingCallback The material's own processor, run first, as Babylon does.
+         * @returns The stage source with every plugin's code injected.
+         */
+        private static InjectStage;
+        /**
+         * One plugin's code for one point. A marked plugin is asked once per stage call and its map reused; any other
+         * plugin is asked again for every point, as Babylon does.
+         * @param plugin The active plugin.
+         * @param pointName The injection point (a `#define CUSTOM_*` name or a `!` regex).
+         * @param shaderType "vertex" or "fragment".
+         * @param shaderLanguage The material's shader language.
+         * @param stageCustomCode The marked plugins' maps for this stage call (filled here).
+         * @returns The plugin's code for the point, or a falsy value when it has none.
+         */
+        private static GetPointCode;
+        /**
+         * Applies a `!` point: Babylon's flag parsing (`!!` = no flags, a `gimus!` prefix, the g flag forced), then one
+         * pass when the code comes only from marked plugins and the pattern allows it, else Babylon's loop.
+         * @param code The shader source.
+         * @param pointName The point name, starting with `!`.
+         * @param injectedCode The plugins' code for the point, each piece followed by a newline.
+         * @param onlyToolkitCode True when every piece came from a marked plugin.
+         * @returns The new source.
+         */
+        private static InjectAtRegexPoint;
+        /**
+         * Babylon's per-match loop, unchanged: the source is rebuilt after every match and the scan resumes after the
+         * inserted code.
+         * @param code The shader source.
+         * @param expression The point's regex, with the g flag.
+         * @param injectedCode The plugins' code for the point.
+         * @returns The new source.
+         */
+        private static ReplaceWithBabylonLoop;
+        /**
+         * Babylon's ReplaceRegExpSubstitutions, copied exactly: `$n` only; an index past the match gives "", an
+         * unmatched group gives what the match array holds for it.
+         * @param value The replacement code.
+         * @param match The regex match.
+         * @returns The code with each `$n` replaced by `match[n]`.
+         */
+        private static ReplaceSubstitutions;
+        /** Writes the missing-method warning once. */
+        private static WarnMissingMethod;
     }
 }
 declare namespace TOOLKIT {
@@ -9395,8 +11793,25 @@ declare namespace TOOLKIT {
         /** A 1x1 white neutral of a sampler kind ("2d" | "3d" | "cube" | "2darray"): WebGPU needs the view dimension to match. */
         private static NeutralOf;
         private static Neutral;
-        /** The camera-space-z depth map (Babylon's own renderer when it stores camera-space z, else one the toolkit owns). */
-        static SceneDepth(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.RenderTargetTexture;
+        /**
+         * Unity's Scene Depth for a pass: linear view depth in metres with the far plane where nothing was drawn. First the
+         * prepass depth copy (CameraDepthCopy.AcquireForSampler - the frame's one depth source, copied before the last rendering
+         * group's transparents), else Babylon's own renderer when it stores camera-space z (one the toolkit creates draws only
+         * while its camera is active), else a renderer the toolkit owns, replaced - and the old one disposed - when the camera
+         * changes, so a renderer for an earlier camera never keeps drawing.
+         * @param scene The scene.
+         * @param camera The camera whose depth the pass reads.
+         * @param owner The pass binding the depth this frame (keeps the copy due); defaults to the scene.
+         * @returns The depth map, or null without a scene or camera.
+         */
+        static SceneDepth(scene: BABYLON.Scene, camera: BABYLON.Camera, owner?: object): BABYLON.RenderTargetTexture;
+        /**
+         * Removes a pass-owned depth renderer from the scene's custom render targets and disposes it (custom render targets
+         * draw every frame whatever the active camera, so a renderer left for an earlier camera would re-draw the opaques).
+         * @param scene The scene.
+         * @param depth The renderer SceneDepth created.
+         */
+        private static ReleaseOwnedDepth;
         /** World-space view rays (depth 1 along the camera forward) at vUV (0,0), and the steps to (1,0) and (0,1). */
         static ViewRays(scene: BABYLON.Scene, camera: BABYLON.Camera): BABYLON.Vector4[];
         /** The Unity-unit main light (the generated material's sgUpdateMainLight rule): direction and colour. */
@@ -9751,6 +12166,8 @@ declare namespace TOOLKIT {
      * depth map is a single target).
      */
     class SgDepthOutputPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         constructor(material: BABYLON.Material);
         getClassName(): string;
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
@@ -9928,6 +12345,8 @@ declare namespace TOOLKIT {
      * @class SkyFarDepthPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class SkyFarDepthPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** The plugin name (`material.pluginManager.getPlugin`). */
         static readonly PluginName: string;
         /** The plugin priority: after every plugin that writes the vertex position. */
@@ -9977,6 +12396,8 @@ declare namespace TOOLKIT {
      * @class SkyTintPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class SkyTintPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** The plugin name (`material.pluginManager.getPlugin`). */
         static readonly PluginName: string;
         /** The plugin priority: after HdrpBakedSkyPlugin (200), whose re-linearization it accounts for. */
@@ -10072,6 +12493,116 @@ declare namespace TOOLKIT {
 }
 /** Babylon Toolkit Namespace */
 declare namespace TOOLKIT {
+    /**
+     * Draws only some of the frames of a scene the loading splash still covers, for every host page.
+     *
+     * Behind the splash the scene is drawn for nobody, yet each full frame (a whole race track: ~900 draws, 30-70 ms; a large exported
+     * scene on the exported engine page: 20-31 s of render CPU before the reveal on WebGPU) takes the page thread from the work the player waits on: the
+     * content still loading and the shader warm-up, which polls between frames. The toolkit scene loader attaches the thinner to the scene
+     * it loads into (Attach), which wraps that scene's render(): whatever render loop the host runs, only one call in
+     * SPLASH_FRAME_INTERVAL draws while the scene is covered.
+     *
+     * A frame is thinned only while all of these hold, and never otherwise:
+     * - the thinner is Enabled and SPLASH_FRAME_INTERVAL is above 1 (and SceneManager.PrecompileShaders is not false: Attach then
+     *   wraps nothing);
+     * - the scene has not been revealed (SceneShaderWarmup.IsSceneRevealed; once revealed, every frame draws for good);
+     * - the page's splash screen is showing (SceneManager.IsSplashScreenShowing, re-read every SPLASH_CHECK_INTERVAL_MS): a page that
+     *   hides its splash its own way draws at full rate from then on;
+     * - PREWARM is not on one of FULL_RATE_STEPS: its drawing steps (GPU pipelines, particle systems) and the steps that time the frames
+     *   (the smooth-frame waits measure the frame rate the player gets at the reveal) see every frame;
+     * - the scene is not a hidden priming scene (SceneShaderWarmup.IsPrimingScene), whose frames are the priming's own work.
+     *
+     * The warm-up counts frames with the scene's render observables (PIPELINE_SETTLE_FRAMES, PIPELINE_QUIET_FRAMES and the smooth-frame
+     * counts), which only a drawn frame notifies: a skipped frame counts for nothing, so every count is of drawn frames.
+     *
+     * @example TOOLKIT.SplashFrameThinner.Enabled = false; // draw every frame behind the splash
+     * @example TOOLKIT.SplashFrameThinner.SPLASH_FRAME_INTERVAL = 2; // draw one frame in two behind the splash
+     */
+    class SplashFrameThinner {
+        /** True thins the frames of a covered scene (on by default); false draws every frame. Read on every frame. */
+        static Enabled: boolean;
+        /**
+         * While the splash covers an unrevealed scene, one render() call in this many draws (1 or less: every call draws).
+         * faster-scene-loading T6: 8 (was 4). Measured one browser at a time, 5 runs per arm, Toad Harbor and GardenScene on both
+         * engines: render time before the reveal lower in every case, load → reveal 0.2-2.3 s sooner in 6 of 8 (GardenScene WebGL2
+         * cold 19.4 → 17.1 s) and within noise in the other two, 0 late compiles.
+         */
+        static SPLASH_FRAME_INTERVAL: number;
+        /** How often the splash screen's visibility is read again, in milliseconds (the read computes the element's style). */
+        static SPLASH_CHECK_INTERVAL_MS: number;
+        /**
+         * PREWARM steps whose frames are the warm-up's own work, during which every frame draws: the drawing steps (pipelines, particles:
+         * their waits count drawn frames but are bounded in time, and a particle system only emits as frames are drawn) and the steps
+         * that time the frames (settling, exposure: the smooth-frame waits measure the frame rate the player gets at the reveal).
+         */
+        static FULL_RATE_STEPS: TOOLKIT.PrewarmStep[];
+        /** The thinning state of each scene attached. */
+        private static readonly States;
+        /** The PREWARM step the splash narrator last received ("" before any). */
+        private static prewarmStep;
+        /** The splash narrator observer that follows the PREWARM steps (added with the first Attach). */
+        private static reportObserver;
+        /**
+         * Thins the scene's frames from now on while the splash covers it: its render() draws only when ShouldRenderFrame says so. Called
+         * by the toolkit scene loader for the scene it loads into; a host may call it for a scene it covers with the splash itself. Once
+         * per scene (a second call does nothing). Does nothing while SceneManager.PrecompileShaders is false: with no shader warm-up
+         * behind the splash, every frame draws as plain Babylon does.
+         * @param scene - The scene to thin.
+         */
+        static Attach(scene: BABYLON.Scene): void;
+        /**
+         * Whether this render() call of the scene draws. Counts the call: of the calls made while the scene is covered (IsThinning), the
+         * first and then every SPLASH_FRAME_INTERVAL-th draws. A scene never attached always draws.
+         * @param scene - The scene.
+         * @returns False for a call skipped while the splash covers the unrevealed scene; true otherwise.
+         */
+        static ShouldRenderFrame(scene: BABYLON.Scene): boolean;
+        /**
+         * True while the scene's frames are being thinned now (every condition in the class summary holds).
+         * @param scene - The scene.
+         * @returns Whether a render() call of the scene may be skipped now.
+         */
+        static IsThinning(scene: BABYLON.Scene): boolean;
+        /**
+         * The frames of the scene drawn and skipped while it was covered (for profiling and tests).
+         * @param scene - The scene.
+         * @returns The counts (both 0 for a scene never attached).
+         */
+        static GetFrameCounts(scene: BABYLON.Scene): {
+            drawn: number;
+            skipped: number;
+        };
+        /**
+         * True while the splash covers the unrevealed scene and nothing asks for every frame. The reveal is checked on every call until it
+         * happened (a cheap lookup); the splash visibility at most every SPLASH_CHECK_INTERVAL_MS.
+         * @param scene - The scene.
+         * @param state - Its thinning state.
+         * @returns Whether its frames are thinned now.
+         */
+        private static IsCovered;
+        /** Follows the PREWARM steps the splash narrator receives (once): FULL_RATE_STEPS are read from it. */
+        private static FollowPrewarmSteps;
+        /** The clock, in milliseconds. */
+        private static NowMs;
+    }
+    /** @hidden The thinning state of one scene (SplashFrameThinner). */
+    interface ISplashFrameThinnerState {
+        /** True once the scene was revealed: from then on every frame draws. */
+        revealed: boolean;
+        /** The splash visibility from the last read. */
+        splashShowing: boolean;
+        /** When the splash visibility was last read (NowMs), or -Infinity before the first read. */
+        splashCheckedAt: number;
+        /** render() calls made while the scene was covered, so every SPLASH_FRAME_INTERVAL-th one draws. */
+        coveredCalls: number;
+        /** Covered calls skipped. */
+        skippedFrames: number;
+        /** Covered calls drawn. */
+        drawnFrames: number;
+    }
+}
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
     /** The splash headline: each phase is shown once, in this order, and never goes back. */
     type SplashPhase = "loading" | "shaders" | "optimizing" | "ready";
     /** Where one toolkit scene load is, least advanced first (SplashNarrator.ReportSceneLoad). */
@@ -10158,7 +12689,8 @@ declare namespace TOOLKIT {
      *   (the shader count refreshes at most every COUNT_REFRESH_MS);
      * - one bar for the whole load, each phase in its own band - Loading Scene 0-19 %, Compiling Shaders 20-79 %, Optimizing Graphics
      *   80-99 %, Ready 100 % (LOADING_SHARE, SHADERS_SHARE) - that only moves forward, glides toward the real progress and creeps slowly
-     *   while work is pending, so it never sits still or jumps.
+     *   while work is pending, so it never sits still or jumps. While SceneManager.PrecompileShaders is false Loading Scene is the only
+     *   headline before Ready, so its band is the whole bar and the loads' own stages fill it (LOADED_SHARE_WITHOUT_PRECOMPILE).
      * Both page splash screens show it: engine.html and the React splash read SceneManager.OnLoaderStatusObservable.
      */
     class SplashNarrator {
@@ -10176,6 +12708,8 @@ declare namespace TOOLKIT {
         static LOADING_SHARE: number;
         /** Share of the bar the shader phase fills, after LOADING_SHARE: Compiling Shaders 20-79 %; Optimizing Graphics fills 80-99 %. */
         static SHADERS_SHARE: number;
+        /** Share of the bar a finished load fills while SceneManager.PrecompileShaders is false (no shader phase follows); the loader's last waits creep through the rest. */
+        static LOADED_SHARE_WITHOUT_PRECOMPILE: number;
         /** Gap kept below the end of each phase's band, so a phase's percentage stops one short of the next phase's (19, 79, 99). */
         private static readonly BAND_TOP_GAP;
         /** Shortest time (ms) a subtitle stays before another kind of subtitle replaces it (a new headline replaces it at once). */
@@ -10184,7 +12718,7 @@ declare namespace TOOLKIT {
         static COUNT_REFRESH_MS: number;
         /** Time (ms) between two ticks of the bar's glide and creep. */
         static TICK_MS: number;
-        /** Largest step of the bar per tick toward the real progress, so a jump plays as a short glide. */
+        /** Largest step of the bar per tick toward the real progress, so a jump plays as a short glide (GlideStep). */
         static GLIDE_MAX_STEP: number;
         /** Fraction of the distance to the phase's end the bar creeps per tick while work is pending and the real progress is behind it. */
         static CREEP_RATE: number;
@@ -10252,7 +12786,8 @@ declare namespace TOOLKIT {
         private static GetOrStartSession;
         /**
          * The headline the work calls for now: LOADING while any load is still loading, COMPILING SHADERS while any compiles (or every
-         * load is done and PREWARM has not started), OPTIMIZING GRAPHICS once PREWARM runs a step of its own.
+         * load is done and PREWARM has not started), OPTIMIZING GRAPHICS once PREWARM runs a step of its own. While
+         * SceneManager.PrecompileShaders is false nothing is compiled or optimized behind the splash, so it is LOADING until READY.
          * @param session - The session.
          * @returns The phase (Update keeps it from going back).
          */
@@ -10279,21 +12814,40 @@ declare namespace TOOLKIT {
         private static PrewarmSubtitle;
         /**
          * The bar's next value: the real progress of the session kept inside the phase's band (from its start to one short of its end),
-         * reached by a glide of at most GLIDE_MAX_STEP per call, crept toward the band's end while the real progress is behind, and never
+         * reached by a glide of at most GlideStep per call, crept toward the band's end while the real progress is behind, and never
          * lower than before (Update calls it at most once per TICK_MS).
          * @param session - The session.
          * @param phase - The headline shown.
+         * @param elapsedMs - Time since the bar last moved (ms).
          * @returns 0-1.
          */
         private static NextProgress;
         /**
+         * How far one move of the bar may glide. The scene build blocks the main thread for a second at a time, delaying the ticks. With
+         * shaders precompiling the later phases give the bar time to catch up, so each move is one GLIDE_MAX_STEP. While
+         * SceneManager.PrecompileShaders is false Ready follows the load closely, so the glide keeps its rate through those delays;
+         * otherwise the bar is still far behind the work when Ready fills it.
+         * @param elapsedMs - Time since the bar last moved (ms).
+         * @returns The largest step, 0-1.
+         */
+        private static GlideStep;
+        /**
          * The real progress of the session: the average over its loads (each fills LOADING_SHARE while loading and SHADERS_SHARE while
-         * compiling), then OPTIMIZING GRAPHICS fills the rest with PREWARM's fraction.
+         * compiling), then OPTIMIZING GRAPHICS fills the rest with PREWARM's fraction. While SceneManager.PrecompileShaders is false the
+         * loads fill LOADED_SHARE_WITHOUT_PRECOMPILE of the bar instead (LoadProgressWithoutPrecompile).
          * @param session - The session.
          * @param phase - The headline shown.
          * @returns 0-1.
          */
         private static TargetProgress;
+        /**
+         * One load's share of the bar while SceneManager.PrecompileShaders is false: its loading stages, in the proportions LoadProgress
+         * gives them, stretched across LOADED_SHARE_WITHOUT_PRECOMPILE. A load in its "shaders" stage or done has loaded, so it counts in full.
+         * @param session - The session (its jobs).
+         * @param record - The load.
+         * @returns 0 to LOADED_SHARE_WITHOUT_PRECOMPILE.
+         */
+        private static LoadProgressWithoutPrecompile;
         /**
          * One load's share of the bar: LOADING_SHARE across download and build (60 % of it), setup (65 % of it) and the asset preloader
          * (the rest, its jobs' progress when it has some), then SHADERS_SHARE across its shader compile.
@@ -10369,11 +12923,14 @@ declare namespace TOOLKIT {
          */
         private static PhaseStart;
         /**
-         * Where a headline's part of the bar ends.
+         * Where a headline's part of the bar ends. While SceneManager.PrecompileShaders is false LOADING is the only headline before
+         * READY, so its part is the whole bar.
          * @param phase - The headline.
          * @returns 0-1.
          */
         private static PhaseEnd;
+        /** False while SceneManager.PrecompileShaders is false (true when SceneManager is not loaded). */
+        private static IsPrecompilingShaders;
         /** A number clamped to 0-1 (anything not finite is 0). */
         private static Clamp;
     }
@@ -10487,6 +13044,8 @@ declare namespace TOOLKIT {
       * @class StandardShaderMaterialPlugin - All rights reserved (c) 2024 Mackey Kinard
       */
     class StandardShaderMaterialPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         private _isEnabled;
         getClassName(): string;
         /**
@@ -11086,11 +13645,24 @@ declare namespace TOOLKIT {
         private static _done;
         /**
          * Rebuilds the mip chain of a loaded RGBA8 power-of-two texture with coverage-preserving alpha. Resolves false when the
-         * texture cannot take it (compressed, float, non power-of-two, no mips, already done).
+         * texture cannot take it (GPU block-compressed such as a KTX2 texture, float, non power-of-two, no mips, already done).
          */
         static ApplyCoverageMips(texture: BABYLON.BaseTexture, cutoff: number): Promise<boolean>;
-        /** True for a loaded mipmapped RGBA8 power-of-two 2D texture not yet rebuilt, on an engine with per-level uploads. */
+        /**
+         * True for a loaded mipmapped RGBA8 power-of-two 2D texture not yet rebuilt, on an engine with per-level uploads.
+         * A GPU block-compressed texture never takes it: its levels hold ASTC / BC / ETC blocks, so RGBA8 levels written over
+         * them decode as the format's error colour (magenta on ASTC) and the smallest levels fail WebGPU's writeTexture size check.
+         */
         static CanTakeCoverage(internal: any, engine: any): boolean;
+        /** Every GPU block-compressed texture format Babylon names (Constants.TEXTUREFORMAT_COMPRESSED_*), built on first use. */
+        private static _blockCompressedFormats;
+        /**
+         * True when `format` is a GPU block-compressed format. KTX2 / Basis textures are transcoded to one of these (ASTC, BC7,
+         * ETC2, S3TC...) and, unlike raw compressed uploads, carry no `_compression` marker - the format is the only sign.
+         * @param format An internal texture's `format` (a TEXTUREFORMAT_* constant; undefined or -1 when unknown).
+         * @returns True for a compressed format, false for RGBA8 and every other uncompressed or unknown format.
+         */
+        static IsBlockCompressedFormat(format: number): boolean;
         /** Builds (CoverageMipChain) and uploads levels 1..n of `internal` from its straight level-0 bytes. */
         static UploadCoverageChain(internal: any, engine: any, base: Uint8Array, cutoff: number, srgb: boolean): boolean;
         /**
@@ -12363,6 +14935,12 @@ declare namespace TOOLKIT {
          * `if (!subMesh.materialDefines)`, nothing (VAT textures, samplers, Light0/Light1) is bound into the
          * depth draw context, and WebGPU throws in createBindGroup — killing the render loop.
          * Heal the entry from the material's defines, or report not-ready so that submesh skips one shadow frame.
+         *
+         * The depth effect also inherits the main pass's PREPASS / SCENE_MRT_COUNT defines whenever the scene has a prepass
+         * renderer. Its fragment stage then writes the prepass targets (fragData0, fragData1) and no `color` output, so the
+         * shadow map's `fragmentOutputs.color` write fails to compile in WGSL and the invalid shadow pipeline voids every
+         * frame's command buffer (Mario Circuit's VAT Toad crowd: a blank 3D view). The shadow map is one target, so those
+         * defines are dropped, as SgShadowDepth does for graph materials.
          */
         static GuardShadowDepthDefines(wrapper: BABYLON.ShadowDepthWrapper): BABYLON.ShadowDepthWrapper;
         /**
@@ -26211,6 +28789,21 @@ declare namespace TOOLKIT {
     const BRAKE_REVERSE_SPEED_DIVISOR: number;
     /** `Player.cs:1388` — `rotate_strength` while braking with the kart actually rolling backwards (three-point turns). */
     const BRAKE_REVERSE_ROTATE_STRENGTH: number;
+    /** The Drift Brake's floor as a fraction of `max_speed`: the brake never takes a drifting kart below it. */
+    const KART_DRIFT_BRAKE_FLOOR_FRACTION: number;
+    /** Rate the Drift Brake pulls `currentspeed` toward its floor, per second. 0 restores Unity's full brake. */
+    const KART_DRIFT_BRAKE_RATE: number;
+    /**
+     * One step of the Drift Brake: `currentSpeed` approaches `floorFraction × maxSpeed` at `ratePerSecond`, and a speed
+     * already at or below the floor is left as it is (the Drift Brake slows, it never speeds a kart up or reverses it).
+     * @param currentSpeed The kart's speed before the step.
+     * @param maxSpeed The kart's current speed cap.
+     * @param floorFraction The floor as a fraction of `maxSpeed` (0 to 1).
+     * @param ratePerSecond How fast the speed approaches the floor, per second.
+     * @param dt The step length, seconds.
+     * @returns The speed after the step.
+     */
+    function driftBrakeSpeed(currentSpeed: number, maxSpeed: number, floorFraction: number, ratePerSecond: number, dt: number): number;
     /**
      * Rate `currentspeed` approaches the cap **while a boost is running**, per second.
      *
@@ -26929,6 +29522,15 @@ declare namespace TOOLKIT {
          * `MarioKartRaceMode` does exactly that. See that constant for the measurements.
          */
         boostAccelRate: number;
+        /**
+         * Rate the Drift Brake (accelerate + brake held while drifting) pulls `currentspeed` toward its floor, per second.
+         *
+         * **DEFAULTS TO THE NEW FEEL**, unlike `boostAccelRate`: Unity's full brake in a drift stops the kart mid-corner,
+         * which no game wants. Assign 0 to restore the source's behaviour. See `KART_DRIFT_BRAKE_RATE`.
+         */
+        driftBrakeRate: number;
+        /** The Drift Brake's floor as a fraction of `max_speed` (0 to 1). See `KART_DRIFT_BRAKE_FLOOR_FRACTION`. */
+        driftBrakeFloorFraction: number;
         /**
          * Charge boundaries for the three payout tiers, seconds — ascending.
          *
@@ -30138,6 +32740,12 @@ declare namespace TOOLKIT {
          * @returns True while the brake input is held.
          */
         private isBrakeInputHeld;
+        /**
+         * Is the brake a Drift Brake this step: the kart is drifting to a side, accelerate is held with the brake, and
+         * `driftBrakeRate` is above 0. A hop (the drift's entry frame) and a paused drift (stick centred) do not count.
+         * @returns True when the gentle Drift Brake replaces the full brake.
+         */
+        protected isDriftBrakeActive(): boolean;
         /** The steering input last passed to `drive()` (or set by the auto-drive): -1 full left to +1 full right. */
         get steerInput(): number;
         /** Nose-local `z` of the ACTUAL body velocity, units/second (`Player.cs:1319`). */
@@ -41005,6 +43613,8 @@ declare namespace TOOLKIT {
     class BeautifyPass {
         /** The shader store key of the fragment shader. */
         static readonly ShaderName: string;
+        /** The name of the pass's prepass depth request. */
+        static readonly DepthConfigurationName: string;
         /** Beautify adds this to the depth threshold (`BeautifyRendererFeature`) so a zero threshold never divides by zero. */
         private static readonly DEPTH_THRESHOLD_EPSILON;
         /** Gamma Beautify divides the contrast offset by in a linear project (`1 + (contrast - 1) / 2.2`). */
@@ -41059,6 +43669,11 @@ declare namespace TOOLKIT {
          * @returns The scene's prepass renderer, or null when the scene has none (the sharpen then ignores depth).
          */
         private static RequestPrePassDepth;
+        /**
+         * The pass's prepass request for the linear view-Z attachment. Pure.
+         * @returns A new configuration named `toolkitBeautifyDepth`.
+         */
+        static DepthConfiguration(): BABYLON.PrePassEffectConfiguration;
         /**
          * Binds the prepass depth attachment as `depthSampler`, or the stand-in when there is none this frame.
          * @param effect The pass effect.
@@ -52438,6 +55053,1374 @@ declare namespace TOOLKIT {
         private static reuploadOnContextRestore;
     }
 }
+/** Babylon Toolkit Namespace */
+declare namespace TOOLKIT {
+    /** What the installer stores: every group, each group the first time it loads, or nothing. */
+    type ContentInstallPolicy = "everything" | "as-you-play" | "off";
+    /** How content updates are taken: announced for the player to accept, downloaded and applied automatically, or only on request. */
+    type ContentUpdatePolicy = "prompt" | "automatic" | "manual";
+    /** Whether the installer can run here: not yet known, running, impossible in this browser or page, or turned off. */
+    type ContentInstallerAvailability = "unknown" | "available" | "unavailable" | "disabled";
+    /**
+     * A content group's prepared graphics against the versions in use now: never prepared, prepared, prepared for another manifest,
+     * runtime or Babylon version or another engine type (stale), or its last Prepare graphics failed.
+     */
+    type ContentGraphicsStatus = "none" | "prepared" | "stale" | "failed";
+    /** Which part of an install a progress report is about: the file downloads, or the Prepare graphics step after them. */
+    type ContentInstallPhase = "download" | "graphics";
+    /** Kinds of installer problem, each reported once with a one-line console message. */
+    type ContentInstallerErrorKind = "cors" | "quota" | "mismatch" | "network" | "manifest" | "evicted" | "server-mismatch";
+    /** One content root: a manifest and the folder its paths resolve against. */
+    interface IContentRootOptions {
+        /** Manifest URL; relative URLs resolve against document.baseURI. */
+        manifestUrl: string;
+        /** Folder the manifest's paths resolve against; defaults to the manifest's folder. */
+        baseUrl?: string;
+        /** True for the app shell root (D23): always updated automatically, announced by the shell toast. */
+        isAppShell?: boolean;
+    }
+    /** Options for ContentInstaller.Initialize. */
+    interface IContentInstallerOptions {
+        /** The content roots (scene content, and optionally the app shell) this page uses. */
+        roots: IContentRootOptions[];
+        /** Worker script URL, e.g. "./bt-content-worker.js". */
+        workerUrl: string;
+        /** Registration scope; defaults to the worker URL's folder. */
+        workerScope?: string;
+        /** What to store (default "as-you-play"). */
+        installPolicy?: ContentInstallPolicy;
+        /** How content updates are taken (default "prompt"; the app shell root is always automatic). */
+        updatePolicy?: ContentUpdatePolicy;
+        /** True to run on localhost and private network hosts too (default false: a dev session behaves as before). */
+        enableOnLocalHost?: boolean;
+        /**
+         * What compiles a scene's shaders for Prepare graphics (PrepareGraphicsAsync), e.g.
+         * the scene warm-up's `CreatePrimingGraphicsPreparerAsync()`; omitted = no Prepare graphics step
+         * (SetGraphicsPreparer can set one later).
+         */
+        graphicsPreparer?: TOOLKIT.IContentGraphicsPreparer | null;
+    }
+    /**
+     * What Prepare graphics needs from the host: something that compiles every shader of one scene into the browser's shader caches
+     * (the scene warm-up's CreateGraphicsPreparer / CreatePrimingGraphicsPreparerAsync make one). The installer names no other
+     * toolkit class; it records the versions and the engine type a preparer reports with every prepared group.
+     */
+    interface IContentGraphicsPreparer {
+        /** The engine type the prepared code belongs to ("webgpu", "webgl2"); read after each prepared scene. */
+        readonly engineKey: string;
+        /** The toolkit runtime version that prepares (the scene manager's version string). */
+        readonly runtimeVersion: string;
+        /** The Babylon version that prepares (the Babylon engine's version string). */
+        readonly babylonVersion: string;
+        /**
+         * Compiles every shader the scene needs; rejects when the scene cannot be prepared. An error with
+         * `graphicsUnavailable: true` means no engine can be made here: the step then stops and reports Prepare graphics unavailable.
+         * @param sceneUrl - The group's scene file URL.
+         * @param isCancelled - True once the step was cancelled; the preparer stops at its next check and resolves.
+         * @param onProgress - The scene's progress, 0 to 1.
+         */
+        prepareSceneAsync(sceneUrl: string, isCancelled: () => boolean, onProgress?: (fraction: number) => void): Promise<void>;
+        /** Optional: frees what the preparer made (a hidden priming engine); called when a Prepare graphics step ends. */
+        release?(): void;
+    }
+    /** Options of PrepareGraphicsAsync. */
+    interface IContentPrepareGraphicsOptions {
+        /** True for an idle, low-priority step: it waits while the game is busy (SetBusy(true)). */
+        background?: boolean;
+        /** True prepares groups whose graphics are already prepared too (default false: those are skipped). */
+        force?: boolean;
+    }
+    /** One group's install status for the active version. */
+    interface IContentGroupStatus {
+        /** Absolute manifest URL of the group's root. */
+        rootKey: string;
+        /** The group id (the scene file name without its glTF extension). */
+        groupId: string;
+        /** True when every file of the group is stored. */
+        installed: boolean;
+        /** Wire bytes of the group's files. */
+        totalBytes: number;
+        /** Wire bytes of the group's stored files. */
+        storedBytes: number;
+        /** Number of files the group lists. */
+        fileCount: number;
+        /** Number of the group's files that are stored. */
+        storedFileCount: number;
+        /** The group's prepared graphics against the versions in use now ("none" for a group without a scene file). */
+        graphics: TOOLKIT.ContentGraphicsStatus;
+        /** True when graphics is "prepared". */
+        graphicsPrepared: boolean;
+        /** True when graphics is "stale": prepared for another manifest, runtime or Babylon version or engine type. */
+        graphicsStale: boolean;
+    }
+    /** A content update found by CheckForUpdates. */
+    interface IContentUpdateInfo {
+        /** Absolute manifest URL of the updated root. */
+        rootKey: string;
+        /** The version this root runs now. */
+        fromVersion: string;
+        /** The new version on the server. */
+        toVersion: string;
+        /** Wire bytes of the files the store lacks for the groups installed now. */
+        downloadBytes: number;
+        /** Number of files the store lacks for the groups installed now. */
+        fileCount: number;
+    }
+    /** A reported problem. */
+    interface IContentInstallerError {
+        /** What kind of problem it is. */
+        kind: ContentInstallerErrorKind;
+        /** The one-line message also written to the console. */
+        message: string;
+        /** Manifest paths involved (failed files, evicted files); empty when none. */
+        paths: string[];
+    }
+    /** Discrete installer state: changes on events only (React state material). */
+    interface IContentInstallerState {
+        /** Whether the installer runs on this page. */
+        availability: ContentInstallerAvailability;
+        /** Why it is unavailable or disabled; null otherwise. */
+        reason: string | null;
+        /** The active install policy. */
+        installPolicy: ContentInstallPolicy;
+        /** The active update policy for content roots. */
+        updatePolicy: ContentUpdatePolicy;
+        /** True when this tab is the one that downloads (D21). */
+        isLeader: boolean;
+        /** True while an install or update download runs. */
+        installing: boolean;
+        /** True while downloads are paused. */
+        paused: boolean;
+        /** Result of the last persistent-storage request; null before one was made. */
+        persisted: boolean | null;
+        /** Total wire bytes of every group of every root, the app shell's group included (D23). */
+        totalBytes: number;
+        /** Wire bytes of installed groups. */
+        installedBytes: number;
+        /** True when every group of every root (the app shell's included, D23) is installed. */
+        everythingInstalled: boolean;
+        /** The content update waiting to be downloaded or applied; null when none. */
+        updateAvailable: IContentUpdateInfo | null;
+        /** True when a downloaded update waits to be applied. */
+        updateReady: boolean;
+        /** True when the player accepted the update; it applies at the next scene load or page start. */
+        applyOnNextLoad: boolean;
+        /** True when a new app shell or worker waits for a reload. */
+        shellUpdateReady: boolean;
+        /** The most recent problem; null before the first one. */
+        lastError: IContentInstallerError | null;
+        /** True once a mismatch showed this page loaded files of two versions; hosts offer a reload. */
+        contentChangedOnServer: boolean;
+        /** True when the leader tab has a graphics preparer that can run, so a host can offer Prepare graphics. */
+        graphicsAvailable: boolean;
+        /** True while a Prepare graphics step runs. */
+        graphicsPreparing: boolean;
+        /** True when an installed content group with a scene has graphics that are not prepared (none, stale or failed). */
+        graphicsNeeded: boolean;
+        /** Installed content groups with a scene whose graphics are prepared. */
+        graphicsPreparedCount: number;
+        /** Installed content groups with a scene. */
+        graphicsGroupCount: number;
+    }
+    /** Download progress (telemetry: subscribers write it through refs, never React state). */
+    interface IContentInstallProgress {
+        /** Wire bytes of every file this install session covers. */
+        totalBytes: number;
+        /** Wire bytes stored so far, in-flight files counted by their decoded share. */
+        completedBytes: number;
+        /** completedBytes / totalBytes, 0..1, never above 1; exactly 1 when done. */
+        fraction: number;
+        /** Number of files this install session covers. */
+        fileCount: number;
+        /** Number of those files that are stored. */
+        completedFileCount: number;
+        /** Smoothed download speed, wire bytes per second. */
+        bytesPerSecond: number;
+        /** Null until a speed is known. */
+        secondsRemaining: number | null;
+        /** The group of the first file downloading now; null when none is. */
+        currentGroupId: string | null;
+        /** Per-group wire bytes of the groups in this install (spec FR-2), keyed by group id. */
+        groupProgress: Record<string, TOOLKIT.IContentGroupProgress>;
+        /**
+         * "download" for file downloads; "graphics" for the Prepare graphics step, whose reports carry `fraction` over its groups,
+         * the group preparing in `currentGroupId`, no bytes or files (0), no speed (0, null) and an empty `groupProgress`.
+         */
+        phase?: TOOLKIT.ContentInstallPhase;
+        /** Graphics phase: the 1-based number of the group preparing now ("n of N"); graphicsTotal at the end. */
+        graphicsCurrent?: number;
+        /** Graphics phase: groups finished (prepared or failed). */
+        graphicsCompleted?: number;
+        /** Graphics phase: groups the step prepares. */
+        graphicsTotal?: number;
+    }
+    /** One group's share of an install's progress. */
+    interface IContentGroupProgress {
+        /** Wire bytes of the group's files in this install. */
+        totalBytes: number;
+        /** Wire bytes of them stored so far (in-flight files by their decoded share). */
+        completedBytes: number;
+    }
+    /** Free space versus what an install needs. */
+    interface IContentStorageEstimate {
+        /** Decoded bytes the store lacks for the requested groups. */
+        neededBytes: number;
+        /** Quota minus usage; null when the browser gives no estimate. */
+        freeBytes: number | null;
+        /** The origin's storage quota in bytes; null when the browser gives no estimate. */
+        quotaBytes: number | null;
+        /** The origin's storage usage in bytes; null when the browser gives no estimate. */
+        usageBytes: number | null;
+        /** True when freeBytes is null or freeBytes >= neededBytes × 1.1. */
+        fits: boolean;
+    }
+    /** Options of Install. */
+    interface IContentInstallOptions {
+        /** True for idle, low-priority installs: they wait while the game is busy and never ask for persistent storage. */
+        background?: boolean;
+        /**
+         * True runs Prepare graphics (PrepareGraphicsAsync) for the installed groups once the download ends; Install then resolves
+         * after it, with the download's result (the graphics step never changes it).
+         */
+        prepareGraphics?: boolean;
+    }
+    /**
+     * The content installer (pwa-content-installer): downloads exported scene content into browser storage, keeps it
+     * current, and lets the service worker serve scene requests from it. Framework-free; hosts call Initialize once
+     * and PrepareSceneLoad before each scene load (D22).
+     */
+    class ContentInstaller {
+        /** Discrete state changes (never progress): availability, installing, paused, totals, updates, errors. */
+        static readonly OnStateChangedObservable: BABYLON.Observable<TOOLKIT.IContentInstallerState>;
+        /** Install progress, at most every 250 ms plus a final emit per session. */
+        static readonly OnProgressObservable: BABYLON.Observable<TOOLKIT.IContentInstallProgress>;
+        /** Every reported problem, once per kind and path set. */
+        static readonly OnErrorObservable: BABYLON.Observable<TOOLKIT.IContentInstallerError>;
+        /** Time source in milliseconds; tests replace it. */
+        static Clock: () => number;
+        /** Cache holding stored files by hash. */
+        private static readonly CONTENT_FILES_CACHE;
+        /** Cache holding manifests, root states, the roots index and client pins. */
+        private static readonly CONTENT_STATE_CACHE;
+        /** Path prefix of every synthetic store key on this origin. */
+        private static readonly STORE_KEY_PREFIX;
+        /** Query parameter marking an installer download; its value is the manifest version to resolve against. */
+        private static readonly INSTALL_MARKER_PARAMETER;
+        /** Query parameter carrying the installer's attempt number (0 first); above 0 the worker bypasses the HTTP cache. */
+        private static readonly ATTEMPT_PARAMETER;
+        /** Broadcast channel shared by the worker and every page. */
+        private static readonly BROADCAST_CHANNEL_NAME;
+        /** Concurrent downloads while the game is idle. */
+        private static readonly IDLE_CONCURRENCY;
+        /** Concurrent downloads while the game is busy loading or playing (SetBusy(true)). */
+        private static readonly BUSY_CONCURRENCY;
+        /** Download attempts per file before it is reported as failed. */
+        private static readonly MAX_ATTEMPTS;
+        /** Back-off before each retry in milliseconds: entry n is waited after failed attempt n (only MAX_ATTEMPTS − 1 are used). */
+        private static readonly RETRY_DELAYS_MS;
+        /** Minimum time between two progress emits, in milliseconds (a session's final emit is always sent). */
+        private static readonly PROGRESS_INTERVAL_MS;
+        /** Time constant of the speed's exponential moving average, in seconds. */
+        private static readonly SPEED_TIME_CONSTANT_SECONDS;
+        /** How long Initialize waits for the worker to control the page, in milliseconds. */
+        private static readonly CONTROLLER_WAIT_MS;
+        /** An install fits when free space is at least this many times the bytes it needs. */
+        private static readonly QUOTA_SAFETY_FACTOR;
+        /** How long a download waits for the worker's file-stored / file-failed before checking the store itself, in milliseconds. */
+        private static readonly STORE_CONFIRM_TIMEOUT_MS;
+        /** Web Locks name the leader tab holds (D21). */
+        private static readonly LOCK_NAME;
+        /** File name of the content worker, used to find and unregister it when the installer is disabled. */
+        private static readonly WORKER_SCRIPT_NAME;
+        /** The only manifest schema this installer reads. */
+        private static readonly SUPPORTED_MANIFEST_FORMAT;
+        /** Scene file endings stripped by GroupIdFromSceneFile, longest first. */
+        private static readonly SCENE_FILE_SUFFIXES;
+        /** Host names that count as a local host (D19). */
+        private static readonly LOCAL_HOST_NAMES;
+        /** Host name ending that counts as a local host (mDNS names, D19). */
+        private static readonly LOCAL_DOMAIN_SUFFIX;
+        /** Private IPv4 ranges 10.*, 172.16–31.* and 192.168.* (D19). */
+        private static readonly PRIVATE_IPV4_PATTERN;
+        /** Bytes per megabyte in console messages. */
+        private static readonly BYTES_PER_MEGABYTE;
+        /** Milliseconds per second, for the speed formula. */
+        private static readonly MILLISECONDS_PER_SECOND;
+        /** Leading characters of a manifest version shown in console messages. */
+        private static readonly VERSION_DISPLAY_LENGTH;
+        /** The options Initialize was given, with defaults filled in; null before Initialize. */
+        private static options;
+        /** The running or finished Initialize, so a second call returns the same result. */
+        private static initializePromise;
+        /** The current discrete state (replaced, never mutated, on each change). */
+        private static state;
+        /** Loaded content roots by root key. */
+        private static roots;
+        /** Every hash in the files cache, as this page last saw it. */
+        private static storedHashes;
+        /** Groups listing each hash in the active manifests (D32). */
+        private static groupsByHash;
+        /** Downloads waiting to start, in run order: player jobs first, then background jobs. */
+        private static queue;
+        /** Downloads running now, by hash. */
+        private static inFlight;
+        /** Jobs waiting out a retry back-off, by hash. */
+        private static retryWaits;
+        /** Hashes that failed every attempt in the current session. */
+        private static failedHashes;
+        /** Pages waiting for the worker's verdict, by hash. */
+        private static storeWaiters;
+        /** Install calls not yet settled. */
+        private static installCalls;
+        /** The running install session's progress; null between sessions. */
+        private static progress;
+        /** True while the game is loading or playing (SetBusy). */
+        private static busy;
+        /** True when the worker has an update waiting (updatefound / waiting registration). */
+        private static workerUpdateWaiting;
+        /** The running update download, so DownloadUpdate never runs twice at once. */
+        private static updateDownload;
+        /** This tab's broadcast channel; null before Initialize opened it. */
+        private static channel;
+        /** Requests this follower forwarded to the leader, by request id. */
+        private static forwardedRequests;
+        /** Error keys (kind + paths) already reported. */
+        private static reportedErrors;
+        /**
+         * The mismatch re-check of each root this page started (P7: at most once per root per page), by root key. Each
+         * resolves true when the re-check reported the mismatch, false when its manifest fetch failed.
+         */
+        private static mismatchRecheckedRoots;
+        /** The content worker's registration; null before registration. */
+        private static registration;
+        /** Wall-clock start time of this tab, part of every request id. */
+        private static tabStartTime;
+        /** What compiles a scene's shaders for Prepare graphics; null = no Prepare graphics step on this tab. */
+        private static graphicsPreparer;
+        /** True once the preparer said no engine can be made here; SetGraphicsPreparer clears it. */
+        private static graphicsUnavailable;
+        /** The running Prepare graphics step, so a second call shares it; null when none runs. */
+        private static graphicsRun;
+        /** True once Cancel stopped the running Prepare graphics step. */
+        private static graphicsCancelled;
+        /** Where the scene warm-up leaves the news that the browser's compiled shaders are gone (SceneShaderWarmup's key of the same name). */
+        private static readonly GPU_CACHE_LOST_STORAGE_KEY;
+        /** The window event that tells a running installer so (SceneShaderWarmup's event of the same name). */
+        private static readonly GPU_CACHE_LOST_EVENT;
+        /** True once this page listens for GPU_CACHE_LOST_EVENT. */
+        private static listensForGpuCacheReports;
+        /** Counts Cancel calls, so an Install with prepareGraphics whose download was cancelled skips the graphics step after it. */
+        private static cancelCount;
+        /** The running Prepare graphics step's progress; null when none runs. */
+        private static graphicsSession;
+        /** A waiting Prepare graphics step's wake-ups (state changes, SetBusy, Cancel), run once each. */
+        private static graphicsWaiters;
+        /**
+         * Starts the installer for this page: checks availability, registers the worker, elects the leader tab, reads every
+         * root's manifest and state, applies an accepted ready update, pins this page, and (leader) resumes requested installs.
+         * Call once at page start, before the first scene load; a second call returns the first call's result.
+         * @param options - Roots, worker URL and policies.
+         * @returns The state after start; `availability` says whether the installer runs.
+         */
+        static Initialize(options: TOOLKIT.IContentInstallerOptions): Promise<TOOLKIT.IContentInstallerState>;
+        /**
+         * Returns the current discrete state.
+         * @returns A copy of the state.
+         */
+        static GetState(): TOOLKIT.IContentInstallerState;
+        /**
+         * Returns the install status of groups of the active versions.
+         * @param groupIds - Group ids to report; omitted or empty = every group of every root.
+         * @returns One status per group and root.
+         */
+        static GetGroupStatus(groupIds?: string[]): TOOLKIT.IContentGroupStatus[];
+        /**
+         * Returns every content group id of the active versions (the app shell's group is not listed; Install(null) still includes it).
+         * @returns Group ids in manifest order, without duplicates.
+         */
+        static GetGroupIds(): string[];
+        /**
+         * Compares the decoded bytes the store lacks for some groups with the free storage space.
+         * @param groupIds - Groups to estimate; omitted or empty = every group.
+         * @returns The estimate; `fits` is true when there is room (or the browser gives no estimate).
+         */
+        static EstimateInstall(groupIds?: string[]): Promise<TOOLKIT.IContentStorageEstimate>;
+        /**
+         * Installs the groups (null or empty = every content group and the app shell) of the active version. Downloads only
+         * hashes the store lacks, through the worker; a follower tab forwards the request to the leader (D21).
+         * With `prepareGraphics: true` the installed groups then get Prepare graphics (PrepareGraphicsAsync) before it resolves.
+         * @param groupIds - Group ids to install; null, omitted or empty = everything.
+         * @param options - `background: true` for idle low-priority installs; `prepareGraphics: true` to prepare graphics after.
+         * @returns True when all of the groups are installed; false when a file failed, space ran short or the install was cancelled.
+         */
+        static Install(groupIds?: string[] | null, options?: TOOLKIT.IContentInstallOptions): Promise<boolean>;
+        /**
+         * Prepare graphics: compiles every shader of each group's scene with the graphics preparer (one group after another, in
+         * manifest order), so the first load of each scene takes its shaders from the browser's shader caches. Each group's outcome
+         * is recorded with the manifest, runtime and Babylon versions and the engine type, and persisted; a change to any of them
+         * makes the group stale. Progress goes through OnProgressObservable with `phase: "graphics"`. Pause waits between groups,
+         * Resume goes on, Cancel stops between groups (the running group stops at its next check and is not recorded). A group
+         * that fails is recorded failed and the step goes on. Only the leader tab prepares: a follower forwards the request.
+         * Optional, never a gate: without a preparer (or when no engine can be made) it resolves false and changes nothing.
+         * @param groupIds - Groups to prepare; null, omitted or empty = every installed content group with a scene.
+         * @param options - `background: true` waits while the game is busy; `force: true` prepares prepared groups again.
+         * @returns True when every group of the step is prepared (true at once when nothing needs preparing).
+         * @example await TOOLKIT.ContentInstaller.PrepareGraphicsAsync(null);
+         */
+        static PrepareGraphicsAsync(groupIds?: string[] | null, options?: TOOLKIT.IContentPrepareGraphicsOptions): Promise<boolean>;
+        /**
+         * Marks every prepared group stale, because the browser's compiled shaders are gone. Nothing else can tell: a prepared record
+         * only says the step once ran. The groups then report `graphics: "stale"` and the state `graphicsNeeded`, so a host can offer
+         * Prepare graphics again, and PrepareGraphicsAsync prepares them without downloading anything. The toolkit's scene warm-up
+         * calls for this itself when a scene's GPU pipelines come back far slower than that scene's own best.
+         * @returns Resolves once the records are saved. Only the leader tab saves them; a follower does nothing.
+         */
+        static MarkGraphicsStale(): Promise<void>;
+        /** Takes the news the scene warm-up leaves when the browser's compiled shaders are gone: the warm-up may run on another page. */
+        private static applyGpuCacheReport;
+        /** Hears the scene warm-up's news while this page runs, once. */
+        private static listenForGpuCacheReports;
+        /**
+         * Sets (or replaces, or clears with null) the graphics preparer of Prepare graphics; Initialize's `graphicsPreparer` does the
+         * same. A step already running keeps the preparer it started with.
+         * @param preparer - The preparer, or null for no Prepare graphics step.
+         */
+        static SetGraphicsPreparer(preparer: TOOLKIT.IContentGraphicsPreparer | null): void;
+        /** Pauses downloading: running downloads stop and wait at the front of the queue until Resume. */
+        static Pause(): void;
+        /** Resumes paused downloading. */
+        static Resume(): void;
+        /**
+         * Stops every queued and running download; every pending Install resolves false. Stored files are kept and the
+         * player's requested groups stay requested, so the next page start resumes them. A running Prepare graphics step stops
+         * between groups.
+         */
+        static Cancel(): void;
+        /**
+         * Removes groups from storage: deletes their hashes except those another installed group still needs, then asks the
+         * worker to collect garbage (D16). A page pinned to an older version gets removed files from the network.
+         * @param groupIds - Groups to remove; null, omitted or empty = every content group (the app shell stays).
+         */
+        static Remove(groupIds?: string[] | null): Promise<void>;
+        /**
+         * Reads every root's manifest again; a new version becomes the root's pending version (a root with no installed groups
+         * switches at once). Under the automatic policy (and always for the app shell) the update downloads and is accepted.
+         * Runs whenever the browser comes back online; Initialize does the same with the manifest it reads at page start.
+         * @returns One entry per root with a pending update.
+         */
+        static CheckForUpdates(): Promise<TOOLKIT.IContentUpdateInfo[]>;
+        /**
+         * Downloads the pending version's delta for the installed groups in the background; resolves true when updateReady.
+         * A follower tab does not download; it returns the leader's mirrored `updateReady`.
+         * @returns True when every pending update is completely stored.
+         */
+        static DownloadUpdate(): Promise<boolean>;
+        /** Marks the ready update to apply at the next scene load or page start (never immediately). */
+        static AcceptUpdate(): void;
+        /** Marks the shell update, tells the waiting worker to activate and reloads on controllerchange. */
+        static ApplyShellUpdate(): void;
+        /**
+         * Prepares a scene load: applies an accepted ready update, pins this page to every root's active version, moves the
+         * scene's group to the front of the queue and marks the game busy. Call before every scene load (D22).
+         * @param sceneUrl - The scene file URL about to load.
+         * @returns True when the scene's group is installed (the splash can say it loads from this device).
+         */
+        static PrepareSceneLoad(sceneUrl: string): Promise<boolean>;
+        /**
+         * Tells the installer whether the game is loading or playing. While busy, downloads run one at a time and background
+         * installs (and background Prepare graphics steps) wait.
+         * @param busy - True while busy; false lets background installs run again.
+         */
+        static SetBusy(busy: boolean): void;
+        /**
+         * Returns whether a scene's group is installed for the active version (D32: stored by Install or by playing).
+         * @param sceneUrl - The scene file URL.
+         * @returns True when every file of the scene's group is stored.
+         */
+        static IsSceneInstalled(sceneUrl: string): boolean;
+        /**
+         * Asks the browser to keep this origin's storage under storage pressure.
+         * @returns True when storage is persistent.
+         */
+        static RequestPersistentStorage(): Promise<boolean>;
+        /**
+         * Returns the group id of a scene file: its last path segment without query or hash, lower-cased, without its glTF
+         * ending (`.gz.gltf`, `.gz.glb`, `.gltf` or `.glb`). The exporter's C# GroupIdFromSceneFile is the same function.
+         * @param fileName - A scene file name, path or URL.
+         * @returns The group id.
+         * @example ContentInstaller.GroupIdFromSceneFile("https://x/scenes/Racermario.gz.gltf?v=1") // "racermario"
+         */
+        static GroupIdFromSceneFile(fileName: string): string;
+        /**
+         * The body of Initialize (Control flow 1).
+         * @param options - The host's options.
+         * @returns The state after start.
+         */
+        private static runInitialize;
+        /**
+         * Fills in the option defaults.
+         * @param options - The host's options.
+         * @returns A copy with every policy set.
+         */
+        private static normalizeOptions;
+        /**
+         * Decides whether the installer can run on this page (Error policy rows 1–2).
+         * @param options - The normalized options.
+         * @returns The blocking availability and reason, or null when the installer can run.
+         */
+        private static checkAvailability;
+        /**
+         * Ends Initialize without running: a disabled installer unregisters any content worker so the page behaves as before.
+         * @param availability - "unavailable" or "disabled".
+         * @param reason - Why.
+         * @returns The state.
+         */
+        private static stopWith;
+        /** Unregisters every registration whose worker script is the content worker. */
+        private static unregisterWorkers;
+        /**
+         * Registers the content worker and watches it for a waiting update (D17).
+         * @param options - The normalized options.
+         * @returns True when registered.
+         */
+        private static registerWorker;
+        /**
+         * Sets shellUpdateReady when a new worker is waiting, now or later.
+         * @param registration - The content worker's registration.
+         */
+        private static watchWorkerUpdates;
+        /** Records that a new worker waits for a reload. */
+        private static markWorkerUpdateWaiting;
+        /**
+         * Waits until the worker controls the page (a first visit gets control through clients.claim()).
+         * @returns True when controlled within CONTROLLER_WAIT_MS.
+         */
+        private static waitForController;
+        /** Opens this tab's broadcast channel (worker messages and the other tabs). */
+        private static openChannel;
+        /**
+         * Elects the leader tab (D21): an immediate `ifAvailable` attempt decides this start; a tab that lost queues a normal
+         * request, whose callback runs when the leader closes. The winner keeps the lock until its tab closes. Without Web
+         * Locks every tab leads (the worker still downloads each hash once).
+         */
+        private static electLeader;
+        /**
+         * The lock callback's promise: it never resolves, so the lock is held until the tab closes.
+         * @returns A promise that never settles.
+         */
+        private static holdLeadership;
+        /**
+         * Takes over as leader after the previous leader's tab closed: re-reads the persisted root states, then resumes the
+         * requested groups and every request this tab had forwarded.
+         */
+        private static onLeadershipGranted;
+        /** Runs every request this tab forwarded to a leader that closed before answering. */
+        private static replayForwardedRequests;
+        /**
+         * Leader start-up work: resume requested groups, install everything under that policy, run update policies. The
+         * start-up installs skip roots with a pending version: the server no longer sends the active version's changed files,
+         * so they would only fail; those groups install once the update is applied.
+         */
+        private static startLeaderWork;
+        /** Queues every requested group that is not installed (never an evicted one: eviction un-requests it), skipping roots with a pending version. */
+        private static resumeRequestedGroups;
+        /** Checks for updates whenever the browser comes back online. */
+        private static watchConnectivity;
+        /**
+         * Loads every root, recomputes installed groups (reporting evictions), applies start-up updates, persists (leader)
+         * and pins this page.
+         * @param rootOptions - The configured roots.
+         */
+        private static loadRoots;
+        /**
+         * Loads one root: its manifest from the server and its persisted state (or a first-run state).
+         * @param options - The root's options.
+         * @returns The root, or null when its manifest is missing or invalid (reported once; the game loads from the network).
+         */
+        private static loadRoot;
+        /**
+         * Sets a loaded root's active and pending manifests from its persisted versions and the server's manifest.
+         * @param root - The root.
+         * @param serverManifest - The manifest the server sends now.
+         */
+        private static restoreManifests;
+        /**
+         * Finds the manifest of a root's persisted active version: the server's when the versions match, else the stored copy.
+         * @param root - The root (its persisted state).
+         * @param serverManifest - The manifest the server sends now.
+         * @returns The active manifest, or null on a first run or when the stored copy is gone.
+         */
+        private static findActiveManifest;
+        /**
+         * Applies a manifest just read from the server to a root: a version other than the active one becomes the pending
+         * version (a root with no installed groups switches at once while nothing installs). A version other than the one a
+         * network-only root was set for ends network-only (P7).
+         * @param root - The root.
+         * @param serverManifest - The server's manifest.
+         */
+        private static takeServerManifest;
+        /**
+         * At page start, activates a pending version that is ready and accepted (or automatic), or any pending version of a
+         * root with no installed groups.
+         * @param root - The root.
+         * @returns True when the root switched versions.
+         */
+        private static applyStartupUpdate;
+        /**
+         * Makes a manifest a root's active version with no pending version. Taking the server version an "update-pending"
+         * root waited for ends its network-only state (P7).
+         * @param root - The root.
+         * @param manifest - The manifest to activate.
+         */
+        private static makeActive;
+        /**
+         * Switches a root to its pending version (D4): queued jobs of the old version move to the new one when the new
+         * manifest has the same file, and are dropped otherwise.
+         * @param root - The root with a pending manifest.
+         */
+        private static activatePending;
+        /**
+         * Moves a root's queued jobs from an old version to its new active version.
+         * @param root - The root that switched.
+         * @param previousVersion - The version it left.
+         */
+        private static retargetQueuedJobs;
+        /**
+         * Fetches and validates a manifest.
+         * @param url - The absolute manifest URL.
+         * @returns The manifest, or null when it is missing, not JSON or not `format: 1`.
+         */
+        private static fetchManifest;
+        /**
+         * Checks a parsed manifest's shape.
+         * @param manifest - The parsed JSON.
+         * @returns True for a `format: 1` manifest with a version, files and groups.
+         */
+        private static isValidManifest;
+        /**
+         * Returns a root's effective update policy (the app shell is always automatic, D19).
+         * @param root - The root.
+         * @returns The policy.
+         */
+        private static effectiveUpdatePolicy;
+        /**
+         * Builds a synthetic store key on this origin, exactly as the worker does.
+         * @param path - The key path after the prefix.
+         * @returns The absolute key URL.
+         */
+        private static storeKey;
+        /**
+         * Returns the files-cache key of a hash.
+         * @param hash - The file hash.
+         * @returns The key.
+         */
+        private static fileKey;
+        /**
+         * Returns the state-cache key of a root's state.
+         * @param rootKey - The root key.
+         * @returns The key.
+         */
+        private static rootStateKey;
+        /**
+         * Returns the state-cache key of a stored manifest.
+         * @param rootKey - The root key.
+         * @param version - The manifest version.
+         * @returns The key.
+         */
+        private static manifestKey;
+        /**
+         * Reads a JSON value from the state cache.
+         * @param key - The key URL.
+         * @returns The value, or null when missing or unreadable.
+         */
+        private static readStateJson;
+        /**
+         * Writes a JSON value to the state cache.
+         * @param key - The key URL.
+         * @param value - The value.
+         */
+        private static writeStateJson;
+        /**
+         * Reads a root's persisted state.
+         * @param rootKey - The root key.
+         * @returns The state, or null on a first run.
+         */
+        private static readRootState;
+        /**
+         * Persists a root's state (leader only).
+         * @param root - The root.
+         */
+        private static writeRootState;
+        /**
+         * Reads a stored manifest version.
+         * @param rootKey - The root key.
+         * @param version - The version.
+         * @returns The manifest, or null when not stored.
+         */
+        private static readStoredManifest;
+        /**
+         * Stores a manifest under its version so the worker can resolve requests against it (leader only).
+         * @param rootKey - The root key.
+         * @param manifest - The manifest.
+         */
+        private static storeManifest;
+        /**
+         * Persists every root state and the roots index, then tells the worker (leader only).
+         * @param collectGarbage - True after an activation: the worker drops versions no page uses (D16).
+         */
+        private static persistRoots;
+        /** Re-reads which hashes the files cache holds. */
+        private static refreshStoredHashes;
+        /**
+         * Checks the files cache directly for one hash.
+         * @param hash - The hash.
+         * @returns True when stored.
+         */
+        private static isHashStored;
+        /** Rebuilds the hash → groups index over every active manifest. */
+        private static rebuildGroupIndex;
+        /**
+         * Returns whether every file of a group is stored.
+         * @param manifest - The manifest holding the group.
+         * @param groupId - The group id.
+         * @returns True when complete (a group the manifest lacks is never complete).
+         */
+        private static isGroupStored;
+        /**
+         * Recomputes a root's installed groups from the stored hashes. At start-up a group the persisted state listed as
+         * installed that is now incomplete was evicted: it is un-requested (never re-downloaded without the player) and
+         * reported once.
+         * @param root - The root.
+         * @param reportEviction - True at Initialize.
+         */
+        private static recomputeInstalledGroups;
+        /**
+         * Records a stored hash (from the worker or a finished download) and marks the groups it completes as installed.
+         * @param hash - The stored hash.
+         */
+        private static onFileStored;
+        /**
+         * Normalizes Install / Remove group ids: null, undefined and empty all mean "every group".
+         * @param groupIds - The caller's ids.
+         * @returns A copy of the ids, or null for every group.
+         */
+        private static normalizeGroupIds;
+        /**
+         * Finds groups by id in every root's active manifest.
+         * @param groupIds - Ids to find; null, undefined or empty = every group.
+         * @param includeShell - True to include the app shell root's groups when every group is asked for.
+         * @returns The groups found, in the requested order.
+         */
+        private static resolveGroups;
+        /**
+         * Lists every file of some groups in their active manifests (a file shared by two groups is listed for each).
+         * @param groupRefs - The groups.
+         * @returns One reference per group and file.
+         */
+        private static groupFiles;
+        /**
+         * Appends one group's files of one manifest version.
+         * @param files - The list to append to.
+         * @param rootKey - The root key.
+         * @param manifest - The manifest version.
+         * @param groupId - The group id.
+         */
+        private static appendGroupFiles;
+        /**
+         * Keeps the first reference of each hash the store lacks.
+         * @param files - File references.
+         * @returns The missing files, one per hash.
+         */
+        private static missingFiles;
+        /**
+         * Builds one group's status.
+         * @param groupRef - The group.
+         * @returns The status.
+         */
+        private static groupStatus;
+        /**
+         * Sums wire sizes, each hash once.
+         * @param files - File references.
+         * @returns Bytes.
+         */
+        private static sumSizes;
+        /**
+         * Finds the group of a scene URL: the root whose base URL is the longest prefix, then the group whose scene is the
+         * URL's path (or whose id is GroupIdFromSceneFile of it).
+         * @param sceneUrl - The scene file URL.
+         * @returns The group, or null when no root lists it.
+         */
+        private static findSceneGroup;
+        /**
+         * Installs groups on the leader (Control flow 3). Groups of a network-only root (P7: the server no longer sends the
+         * active version's files) are skipped, and so are groups of a root with a pending version when asked: the result
+         * covers the other groups, and is false when every group was skipped. Update downloads do not come through here.
+         * @param groupIds - Ids, or null for every group and the app shell.
+         * @param background - True for low-priority work.
+         * @param requestId - The follower request this answers, or null.
+         * @param skipPendingRoots - True for start-up installs, which also skip roots with a pending version.
+         * @returns True when every group that was not skipped is installed.
+         */
+        private static installAsLeader;
+        /**
+         * Adds groups to their roots' requested groups and persists them (so the next start resumes them).
+         * @param groupRefs - The groups.
+         */
+        private static markRequested;
+        /**
+         * Resolves an install that ends before downloading, answering the follower that asked for it.
+         * @param requestId - The follower request, or null.
+         * @param success - The result.
+         * @returns The result.
+         */
+        private static answerRequest;
+        /**
+         * Queues a call's missing files and waits until every one of its files is settled.
+         * @param files - Every file of the call (stored ones count as complete in progress).
+         * @param missing - The files to download, one per hash.
+         * @param background - True for low-priority work.
+         * @param requestId - The follower request this answers, or null.
+         * @returns True when every file of the call is stored.
+         */
+        private static submitCall;
+        /**
+         * Builds a download job.
+         * @param file - The file.
+         * @param background - True for low-priority work.
+         * @returns The job (attempt 0).
+         */
+        private static createJob;
+        /**
+         * Merges jobs into the one queue (D20): new jobs go after the queued player jobs and ahead of every earlier background
+         * job, in the order given; a queued background job requested by the player is promoted; a background job requested
+         * again moves up with the newest selection; running and already-queued player jobs are not duplicated.
+         * @param jobs - The jobs, one per hash.
+         * @param background - True for low-priority work.
+         */
+        private static enqueue;
+        /**
+         * Returns where the background part of the queue starts.
+         * @returns The index of the first background job, or the queue length.
+         */
+        private static firstBackgroundIndex;
+        /**
+         * Puts a job back at the front of its part of the queue (player jobs at the very front).
+         * @param job - The job.
+         */
+        private static requeueFront;
+        /**
+         * Moves a scene's group to the very front of the queue (PrepareSceneLoad); its jobs become player jobs so a busy
+         * game still downloads them.
+         * @param groupRef - The scene's group.
+         */
+        private static prioritiseGroup;
+        /**
+         * Drops a queued or back-off-waiting job (its file was stored by another request).
+         * @param hash - The hash.
+         */
+        private static removeQueuedJob;
+        /**
+         * Starts queued downloads up to the concurrency limit (4 idle, 1 busy); while busy only player jobs start.
+         */
+        private static pumpQueue;
+        /**
+         * Starts one download and handles its end.
+         * @param job - The job.
+         */
+        private static startDownload;
+        /**
+         * Downloads one file through the worker (D14): a page fetch marked with the install version and attempt, its body read
+         * for in-file progress, then the worker's verdict (file-stored / file-failed, or the store itself after 30 s).
+         * @param download - The running download.
+         * @returns The verdict.
+         */
+        private static downloadFile;
+        /**
+         * Builds an installer download URL: the file URL plus the install marker (the version) and the attempt number.
+         * @param job - The job.
+         * @returns The absolute URL.
+         */
+        private static downloadUrl;
+        /**
+         * Reads a response body to its end, recording the decoded bytes for progress.
+         * @param response - The page's response.
+         * @param download - The running download.
+         */
+        private static readBody;
+        /**
+         * Waits for the worker's verdict on a hash; after STORE_CONFIRM_TIMEOUT_MS the store is checked directly.
+         * @param hash - The hash.
+         * @returns The verdict.
+         */
+        private static awaitStoreResult;
+        /**
+         * Settles a timed-out wait from the store itself.
+         * @param hash - The hash.
+         */
+        private static confirmFromStore;
+        /**
+         * Resolves every wait for a hash.
+         * @param hash - The hash.
+         * @param result - The verdict.
+         */
+        private static settleStoreWaiters;
+        /**
+         * Builds a verdict.
+         * @param outcome - Stored, failed or aborted.
+         * @param reason - The failure reason, or null.
+         * @param status - The HTTP status of a status failure, or null.
+         * @param detail - Extra detail, or null.
+         * @returns The verdict.
+         */
+        private static storeResult;
+        /**
+         * Handles the end of one download attempt, then starts the next downloads.
+         * @param download - The finished download.
+         * @param result - Its verdict.
+         */
+        private static finishDownload;
+        /**
+         * Handles a failed attempt (Error policy): CORS stops the install; a full store pauses it; other failures retry with
+         * back-off and are reported after the last attempt (a mismatch through the root's one re-check, P7; others by path).
+         * @param job - The failed job.
+         * @param result - The worker's verdict.
+         */
+        private static handleDownloadFailure;
+        /**
+         * Reports an install download whose bytes never matched the manifest: through the root's one re-check (P7), so the
+         * page logs a single line however many files mismatch and whichever of the worker's message and this verdict comes
+         * first. Only when no re-check reported it (the installer or root is gone, or the re-check's manifest fetch failed)
+         * does the file get its own line.
+         * @param job - The job that failed every attempt.
+         */
+        private static reportInstallMismatch;
+        /**
+         * Describes a failed verdict for a console message.
+         * @param result - The verdict.
+         * @returns The HTTP status, the worker's detail, or the failure reason.
+         */
+        private static describeFailure;
+        /**
+         * Retries a job after its back-off (1 s, then 4 s).
+         * @param job - The job whose attempt failed.
+         */
+        private static scheduleRetry;
+        /** Stops every back-off timer and forgets the waiting jobs. */
+        private static clearRetryWaits;
+        /**
+         * Stops the whole install after a CORS failure (every file of that host would fail), reporting it once.
+         * @param job - The job that failed.
+         */
+        private static stopForCors;
+        /**
+         * Aborts every running download.
+         * @param reason - "pause" requeues them; "cancel" drops them.
+         */
+        private static abortInFlight;
+        /** Resolves every call whose files are all stored or failed. */
+        private static settleFinishedCalls;
+        /**
+         * Completes settled (or cancelled) calls: recomputes installed groups, persists, then resolves each call and answers
+         * the followers that asked.
+         * @param calls - The calls.
+         * @param cancelled - True when the calls were cancelled (they resolve false).
+         */
+        private static completeCalls;
+        /**
+         * Adds a call's files to the running progress session (starting one when none runs).
+         * @param files - Every file of the call.
+         */
+        private static addToSession;
+        /**
+         * Records an in-flight file's best wire-byte estimate: min(1, decoded read / contentSize) × size (0 when contentSize
+         * is 0). The best value of every attempt is kept so progress never goes back.
+         * @param download - The running download.
+         */
+        private static recordPartial;
+        /**
+         * Wire bytes of one session file counted as done.
+         * @param session - The session.
+         * @param hash - The file hash.
+         * @returns Its size when stored, else its in-flight estimate.
+         */
+        private static completedBytesOf;
+        /**
+         * Builds the progress report of the running session (Algorithms › Progress).
+         * @param session - The session.
+         * @returns The report.
+         */
+        private static buildProgress;
+        /**
+         * Updates the session's speed: an exponential moving average with a 3 s time constant over the bytes completed
+         * since the last sample.
+         * @param session - The session.
+         * @param completedBytes - Bytes completed now.
+         */
+        private static sampleSpeed;
+        /**
+         * Emits progress to subscribers and follower tabs, at most every PROGRESS_INTERVAL_MS unless forced.
+         * @param force - True for a session's final emit.
+         */
+        private static emitProgress;
+        /** Ends the session when nothing is queued, waiting for a retry or running: final progress, installing false. */
+        private static finishSessionIfDrained;
+        /** Sends the final progress emit and closes the session. */
+        private static endSession;
+        /**
+         * Installs groups on the leader, then (when asked) prepares the graphics of the requested groups that are installed, and
+         * answers the follower that asked once both are done. A Cancel during the download cancels the graphics step too: it never
+         * starts. Follower requests (forwarded or replayed) take this same path.
+         * @param groupIds - Ids, or null for every group and the app shell.
+         * @param background - True for low-priority work.
+         * @param prepareGraphics - True to run Prepare graphics after the download.
+         * @param requestId - The follower request this answers, or null.
+         * @returns The download's result (Prepare graphics never changes it).
+         */
+        private static installThenPrepareAsLeader;
+        /**
+         * Runs Prepare graphics on the leader and answers the follower that asked.
+         * @param groupIds - Ids, or null for every installed content group with a scene.
+         * @param background - True waits while the game is busy.
+         * @param force - True prepares prepared groups again.
+         * @param requestId - The follower request this answers, or null.
+         * @returns True when every group of the step is prepared.
+         */
+        private static prepareGraphicsAsLeader;
+        /**
+         * Starts a Prepare graphics step, or joins the one running (one step at a time): a joined step keeps the group ids of the
+         * call that started it, so the joining call's ids are not prepared by it.
+         * @param groupIds - Ids, or null for every installed content group with a scene.
+         * @param background - True waits while the game is busy.
+         * @param force - True prepares prepared groups again.
+         * @returns True when every group of the step is prepared; false without a preparer, for unknown ids, or when a group
+         * failed, the step was cancelled or no engine could be made.
+         */
+        private static startGraphicsStep;
+        /**
+         * The body of a Prepare graphics step: each group in turn (after any pause, download or busy wait), until every group ran,
+         * the step was cancelled or no engine can be made.
+         * @param preparer - The preparer the step started with.
+         * @param groupRefs - The groups, in manifest order.
+         * @param background - True waits while the game is busy.
+         * @returns True when every group was prepared.
+         */
+        private static runGraphicsStep;
+        /**
+         * Prepares one group's scene and records the outcome (a cancelled or unavailable run records nothing).
+         * @param preparer - The step's preparer.
+         * @param groupRef - The group.
+         * @returns How it ended.
+         */
+        private static prepareGroupGraphics;
+        /**
+         * Waits until a Prepare graphics step may run its next group: not paused, no download running, and (background steps)
+         * the game not busy. A cancel ends the wait at once.
+         * @param background - True waits while the game is busy too.
+         */
+        private static waitForGraphicsTurn;
+        /** Lets every waiting Prepare graphics step check again whether it may go on. */
+        private static wakeGraphicsWaiters;
+        /**
+         * Ends a Prepare graphics step: the final progress emit, the preparer's release, the state.
+         * @param preparer - The step's preparer.
+         */
+        private static finishGraphicsStep;
+        /**
+         * Records a group's Prepare graphics outcome with the versions and engine type in use, persists it (leader) and tells the
+         * follower tabs.
+         * @param preparer - The step's preparer.
+         * @param groupRef - The group.
+         * @param outcome - Prepared or failed.
+         * @param error - Why it failed, or null.
+         */
+        private static recordGraphics;
+        /**
+         * Follower: takes a graphics record the leader made into this tab's copy of the root.
+         * @param message - The graphics-recorded message.
+         */
+        private static takeGraphicsRecord;
+        /**
+         * Emits the Prepare graphics step's progress (phase "graphics") to subscribers and follower tabs, at most every
+         * PROGRESS_INTERVAL_MS unless forced.
+         * @param force - True for a group's start and the step's final emit.
+         */
+        private static emitGraphicsProgress;
+        /**
+         * Recomputes the graphics fields of the state. The leader owns them (its preparer decides staleness); a follower mirrors
+         * the leader's.
+         */
+        private static updateGraphicsState;
+        /**
+         * A group's prepared graphics against the versions in use now.
+         * @param groupRef - The group.
+         * @returns "none" without a record (or without a scene file), "stale" when a version or the engine type changed, else
+         * "prepared" or "failed".
+         */
+        private static graphicsStatusOf;
+        /**
+         * Whether a graphics record was made with the versions in use now: the root's active manifest version and (with a
+         * preparer) the preparer's runtime and Babylon versions and engine type.
+         * @param root - The group's root.
+         * @param record - The record.
+         * @returns True when nothing changed since it was made.
+         */
+        private static isGraphicsRecordCurrent;
+        /**
+         * Content groups (never the app shell's) whose scene is a glTF scene file.
+         * @param groupIds - Ids, or null for every content group.
+         * @returns The groups, in manifest order (or the requested order).
+         */
+        private static sceneGroupRefs;
+        /**
+         * Whether a group has a scene Prepare graphics can load (a group without one, such as an app shell's, is never prepared).
+         * @param groupRef - A group.
+         * @returns True when its manifest scene is a glTF scene file (`.gltf`, `.glb`, `.gz.gltf`, `.gz.glb`).
+         */
+        private static hasSceneFile;
+        /**
+         * Whether every file of a group is stored for its root's active version (the groups Prepare graphics counts and prepares by default).
+         * @param groupRef - A group.
+         * @returns True when the group is installed for its root's active version.
+         */
+        private static isGroupInstalled;
+        /**
+         * The absolute URL of a group's scene file (what a scene load of the group requests).
+         * @param groupRef - A group with a scene file.
+         * @returns The URL.
+         */
+        private static groupSceneUrl;
+        /**
+         * Tells the preparer's "no engine can be made here" error (it stops the step) from a scene that failed (recorded failed).
+         * @param error - What a preparer threw.
+         * @returns True for the preparer's "no engine can be made here" error.
+         */
+        private static isGraphicsUnavailableError;
+        /**
+         * Records that Prepare graphics cannot run on this page (no engine can be made), once, until SetGraphicsPreparer.
+         * @param error - The preparer's error.
+         */
+        private static markGraphicsUnavailable;
+        /**
+         * Estimates whether files fit in the free storage (Algorithms › Quota).
+         * @param missingFiles - Files the store lacks, one per hash.
+         * @returns The estimate.
+         */
+        private static estimateFor;
+        /**
+         * Reports a quota shortfall with the needed and free megabytes.
+         * @param estimate - The failed estimate.
+         */
+        private static reportQuotaShortfall;
+        /**
+         * Returns the roots with a pending version.
+         * @returns The roots.
+         */
+        private static rootsWithPending;
+        /**
+         * Lists the pending version's files of the groups installed now that the store lacks (the update's delta).
+         * @param root - A root with a pending manifest.
+         * @returns The missing files, one per hash.
+         */
+        private static updateFiles;
+        /**
+         * Returns whether a pending version is completely stored for the groups installed now.
+         * @param root - The root.
+         * @returns True when ready (or nothing is installed).
+         */
+        private static isPendingReady;
+        /**
+         * Describes a root's pending update.
+         * @param root - A root with a pending manifest.
+         * @returns The update info.
+         */
+        private static updateInfo;
+        /**
+         * Downloads the delta of some roots' pending versions (background priority) once at a time.
+         * @param pendingRoots - Roots with a pending version.
+         * @returns True when every one of them is ready.
+         */
+        private static downloadUpdateFor;
+        /**
+         * Leader: downloads and accepts the updates of automatic roots (the app shell always; content roots under the
+         * automatic policy). Prompt and manual roots wait for the host.
+         */
+        private static runUpdatePolicies;
+        /**
+         * Re-checks a root's server manifest after the worker reported a file whose bytes do not match the manifest this page
+         * uses (P7), at most once per root per page. A newer server version starts the normal update flow ("update-pending");
+         * the same version means the server's files do not match its own manifest ("stale-server"), so the root's installs
+         * are skipped. Either way the root's page requests go to the network only (the leader persists that and tells the
+         * worker), hosts are told to offer a reload, and the problem is reported once; a root that was already network-only
+         * when this page started only has its state brought up to date (the page loaded nothing stale). A failed fetch
+         * changes nothing.
+         * Every later call for the root gets the first call's result.
+         * @param rootKey - The root the mismatched file belongs to.
+         * @returns Resolves true when the mismatch was reported; false when no re-check could run or its fetch failed.
+         */
+        private static recheckAfterMismatch;
+        /**
+         * The body of a root's one mismatch re-check (see recheckAfterMismatch).
+         * @param root - The root.
+         * @returns Resolves true when the mismatch was reported; false when the manifest fetch failed.
+         */
+        private static runMismatchRecheck;
+        /**
+         * Builds the one console line of a re-checked mismatch (P7).
+         * @param root - The root.
+         * @param reason - What the re-check found.
+         * @param activeVersion - The version this page runs.
+         * @param serverVersion - The version the server's manifest has now.
+         * @returns The message.
+         */
+        private static serverMismatchMessage;
+        /**
+         * Shortens a manifest version for a console message.
+         * @param version - The version, or null before the first manifest.
+         * @returns Its first VERSION_DISPLAY_LENGTH characters, or "none".
+         */
+        private static shortVersion;
+        /**
+         * Returns whether a root's groups may be installed from its active version: never while the root is network-only
+         * (P7, either reason: the server no longer sends the active version's files), and not with a pending version when
+         * the caller skips those.
+         * @param root - The root.
+         * @param skipPendingRoots - True to refuse a root with a pending version too.
+         * @returns True when installs of the root may run.
+         */
+        private static installsFromActiveVersion;
+        /**
+         * The state before Initialize.
+         * @returns A fresh state.
+         */
+        private static createInitialState;
+        /**
+         * A first-run root state.
+         * @param rootKey - The root key.
+         * @returns The state (base URL, shell flag and policy are set by loadRoot).
+         */
+        private static createRootState;
+        /** Recomputes the totals and update fields of the state from the roots. */
+        private static updateTotalsState;
+        /**
+         * Changes state fields; notifies subscribers (and, from the leader, the follower tabs) only when a field changed, and lets a
+         * waiting Prepare graphics step check again (pause, resume, the end of a download).
+         * @param changes - The fields to set.
+         */
+        private static setState;
+        /**
+         * Shallow equality: identical values, or plain objects whose own fields are identical.
+         * @param first - A value.
+         * @param second - Another value.
+         * @returns True when equal.
+         */
+        private static valuesEqual;
+        /**
+         * Reports a problem once per kind and path set: one console warning, lastError, OnErrorObservable.
+         * @param kind - The kind.
+         * @param message - The one-line message.
+         * @param paths - Manifest paths involved.
+         */
+        private static reportError;
+        /**
+         * Publishes a problem without the once-per-key check: one console warning, lastError, OnErrorObservable.
+         * @param kind - The kind.
+         * @param message - The one-line message.
+         * @param paths - Manifest paths involved.
+         */
+        private static publishError;
+        /**
+         * Handles a broadcast-channel message from the worker or another tab (worker protocol).
+         * @param message - The message.
+         */
+        private static handleChannelMessage;
+        /**
+         * Leader: runs a request a follower forwarded.
+         * @param message - install-request, prepare-graphics-request, remove-request, pause, resume or cancel.
+         */
+        private static handleFollowerRequest;
+        /**
+         * Follower: takes the leader's shared state, keeping this tab's own availability, leadership and persistence result.
+         * contentChangedOnServer stays true once this tab set it (its own re-check may finish before the leader's).
+         * @param leaderState - The leader's state.
+         */
+        private static mirrorLeaderState;
+        /**
+         * Follower: forwards an install, Prepare graphics or remove to the leader and waits for its install-finished answer.
+         * @param kind - The request type.
+         * @param groupIds - Group ids, or null for all.
+         * @param background - The install's (or Prepare graphics') background option.
+         * @param prepareGraphics - install-request: Prepare graphics after the download.
+         * @param force - prepare-graphics-request: prepare groups already prepared too.
+         * @returns The leader's result.
+         */
+        private static forwardToLeader;
+        /**
+         * Resolves a forwarded request from the leader's answer (answers for other tabs are ignored).
+         * @param requestId - The request id.
+         * @param success - The result.
+         */
+        private static answerForwardedRequest;
+        /**
+         * Posts on the broadcast channel.
+         * @param message - The message.
+         */
+        private static postToChannel;
+        /**
+         * Posts to the worker controlling this page.
+         * @param message - pin, roots-changed or collect-garbage.
+         */
+        private static postToWorker;
+        /** Pins this page to every root's active version (D16). */
+        private static pinRoots;
+        /**
+         * Removes groups on the leader (Control flow 5).
+         * @param groupIds - Ids, or null for every content group.
+         */
+        private static removeAsLeader;
+        /**
+         * Deletes stored files and drops their queued downloads (the calls waiting for them settle as not installed).
+         * @param hashes - The hashes to delete.
+         */
+        private static deleteHashes;
+        /**
+         * Resolves a URL against the document's base URL.
+         * @param url - A relative or absolute URL.
+         * @returns The absolute URL.
+         */
+        private static absoluteUrl;
+        /**
+         * Removes the query string and fragment.
+         * @param url - A URL or path.
+         * @returns The URL up to the first `?` or `#`.
+         */
+        private static stripQueryAndHash;
+        /**
+         * Returns a URL's folder.
+         * @param url - An absolute URL.
+         * @returns The URL up to and including its last `/`.
+         */
+        private static folderOf;
+        /**
+         * Appends a `/` when missing.
+         * @param url - A folder URL.
+         * @returns The URL ending with `/`.
+         */
+        private static ensureTrailingSlash;
+        /**
+         * Returns whether a host is a local or private-network host (D19).
+         * @param hostname - location.hostname.
+         * @returns True for localhost, 127.0.0.1, ::1, *.local and private IPv4 addresses.
+         */
+        private static isLocalHost;
+        /**
+         * Union of two string lists, first list's order first.
+         * @param first - A list.
+         * @param second - Another list.
+         * @returns The union without duplicates.
+         */
+        private static union;
+    }
+}
 declare namespace TOOLKIT {
     /** The capsule exported from Unity's CharacterController (DR-12.2 `capsule`), in metres and degrees. */
     interface IFirstPersonCapsule {
@@ -54364,6 +58347,8 @@ declare namespace TOOLKIT {
      * c(1-o) + fog * a, additive c(1-o) (HDRP `EvaluateAtmosphericScattering` on transparents).
      */
     class HdrpFogPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PluginName: string;
         fog: any;
         constructor(material: BABYLON.Material);
@@ -55640,6 +59625,8 @@ declare namespace TOOLKIT {
      * @class HdrpTubeLightPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class HdrpTubeLightPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PluginName: string;
         static readonly Priority: number;
         static readonly LutSampler: string;
@@ -60195,7 +64182,7 @@ declare namespace TOOLKIT {
      *
      * | Unity module | status | notes |
      * |---|---|---|
-     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); useUnscaledTime no-op (the toolkit has no time scale) |
+     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); the scene time scale (`scene.animationTimeScale`) and useUnscaledTime |
      * | Emission | implemented | rate over time / distance, bursts with cycles / interval / probability |
      * | Shape | implemented | every shape type incl. mesh / mesh renderer / skinned (current pose at SkinnedShapeRefreshHz); shape texture (tint / clip; planar UV approximated on primitives); mesh colours, material index; sprite types → the sprite's rectangle + warning |
      * | Velocity / Limit Velocity / Inherit Velocity / Force / Lifetime by Emitter Speed | implemented | unchanged |
@@ -60230,7 +64217,7 @@ declare namespace TOOLKIT {
          * (never warned, D22). `renderer.materials` (the old list) is mode-only, never consumed.
          * T18 fields audit (the three classes are disjoint): a key an applier reads in SOME mode is consumed, not mode-only
          * (`main.ringBufferLoopRange`, `shape.arcSpread / radiusSpread / meshSpawnSpread / meshSpawnSpeed`); a key whose only
-         * handling is a warning is ShurikenParticles.WarnedFields (`main.useUnscaledTime`); descriptive duplicates
+         * handling is a warning is ShurikenParticles.WarnedFields (none today); descriptive duplicates
          * (`emission.burstCount`, `subEmitters.subEmittersCount`), `main.emitterVelocityMode` (every mode is measured the same
          * way, D33), `collision.mode` (2D) and the billboards' size Z are mode-only.
          */
@@ -61124,6 +65111,8 @@ declare namespace TOOLKIT {
      * @class ParticleGraphPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class ParticleGraphPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PRIORITY: number;
         /** x = the UV stream's first packed component, y = UV2's (-8 = absent). */
         uvAt: BABYLON.Vector4;
@@ -62098,6 +66087,8 @@ declare namespace TOOLKIT {
      * @class ParticleEmissionPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class ParticleEmissionPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** After the toolkit's other StandardMaterial plugins: the emission is the last term before the fragment output. */
         static readonly PRIORITY: number;
         /** The emission colour (Unity units, linear, HDR - never clamped). Black = no emission (the define turns off). */
@@ -62400,8 +66391,10 @@ declare namespace TOOLKIT {
          * clip already bound this director before its first enabled tick. Adds the unscaled-time observer.
          */
         protected awake(): void;
-        /** Plays when playOnAwake is set and no parent director controls this one. */
+        /** Poses the first frame behind the splash (camera, activations, animation; silent, no signals) so PREWARM compiles what the reveal shows. */
         protected ready(): void;
+        /** Plays when playOnAwake is set and no parent director controls this one: the cutscene starts when the player sees the scene. */
+        protected reveal(): void;
         /** Advances a Game Time (or DSP Clock) director by this frame's delta time. */
         protected update(): void;
         /** Re-applies the camera pose after every other update, so gameplay camera scripts cannot move it mid-cutscene. */
@@ -63775,6 +67768,8 @@ declare namespace TOOLKIT {
         private orchestrator;
         private applied;
         private readyCalled;
+        /** The scene's cameras when the stacks were last applied (applyVolumes' `onlyNewCameras` skips them). */
+        private appliedCameras;
         private registered;
         private cameraOwner;
         private stacks;
@@ -63917,6 +67912,28 @@ declare namespace TOOLKIT {
          * @param scene - The scene being loaded.
          */
         private static PreloadApply;
+        /** Name of the scene-depth sampler of the exporter's generated Shader Graph materials (Unity's Scene Depth node). */
+        static SceneDepthSamplerName: string;
+        /**
+         * True when `material` samples the scene depth (a generated Shader Graph material with a Scene Depth node, whose sampler
+         * is SceneDepthSamplerName) and draws on at least one mesh.
+         * @param material - A scene material.
+         * @returns Whether its draws will bind the camera depth copy.
+         */
+        static MaterialSamplesSceneDepth(material: BABYLON.Material): boolean;
+        /**
+         * faster-scene-loading T6: asks for the camera depth copy of every post-processing camera of the scene, from the
+         * preloader, when a material of the scene samples the scene depth. A generated Shader Graph material asks for the copy
+         * in its first bind (the camera is not known before), and the copy turns the scene's prepass on: every material
+         * compiled before that bind (the load's whole shader stage) was built without the prepass outputs and compiled again
+         * with them. Measured on BtMarioKartWeb Toad Harbor, WebGPU: the prepass appeared at the water's first bind, 9.2 s into
+         * the load, and 80 PBR effects compiled without PREPASS before it were never drawn after the reveal. Asked for here,
+         * every camera's chain carries the depth request from its first frame (CameraDepthCopy's per-frame hook), so the
+         * load's shader stage and PREWARM compile each material once, with the prepass the game draws it with.
+         * @param scene - The scene being loaded, its post stack applied.
+         * @returns The number of cameras the copy was asked for (0 when no material samples the scene depth).
+         */
+        static RequestSceneDepthBeforeCompile(scene: BABYLON.Scene): number;
         /**
          * scene-loading-progress T8 (D10): waits for the scene's ray-tracing setup (gather, BVH builds, backend kernels) and reports
          * it to the loading splash as the "Ray tracing" job. PreloadApply creates the system when the export asks for ray tracing;
@@ -63927,6 +67944,12 @@ declare namespace TOOLKIT {
         private static WhenRayTracingSettled;
         /** Identifies what a stack was applied for: the scene's registered volumes and its cameras. */
         private static ApplyKey;
+        /**
+         * @param before - An ApplyKey.
+         * @param after - A later ApplyKey of the same scene.
+         * @returns True when the volumes are the same and every camera of `before` is still there, with more besides.
+         */
+        private static OnlyAddsCameras;
         protected ready(): void;
         /**
          * The toolkit may run `ready` before `awake` (edit mode / ScenePlaying false), so orchestration starts from
@@ -63953,8 +67976,9 @@ declare namespace TOOLKIT {
          * Blends the registered volumes and applies them to every targeted camera. Re-entrant (review-fixes FR-9): calling it
          * again releases the stacks this instance currently owns and rebuilds them from the FULL registry, so a volume that
          * arrived after the first apply contributes to the blend. Pipelines this instance did not create are left as found.
+         * @param onlyNewCameras - True keeps the stacks already applied and applies only cameras the last apply did not see.
          */
-        applyVolumes(): void;
+        applyVolumes(onlyNewCameras?: boolean): void;
         /**
          * Whether a `blendStack` ignore reason is the camera's volume layer mask (the volume may still reach another camera).
          * @param reason - The reason `PostProcessingContract.blendStack` recorded.
@@ -72527,6 +76551,8 @@ declare namespace TOOLKIT {
      * @class RayTracedLightingPlugin - All rights reserved (c) 2024 Mackey Kinard
      */
     class RayTracedLightingPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** The plugin name (MaterialPluginManager key). */
         static readonly PluginName: string;
         /** D-L8: after Babylon's own plugins and the toolkit's lighting plugins that shape the light loop. */
@@ -75796,7 +79822,7 @@ declare namespace TOOLKIT {
      *
      * | Unity module | status | notes |
      * |---|---|---|
-     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); useUnscaledTime no-op (the toolkit has no time scale) |
+     * | Main | implemented | duration, loop, prewarm, startDelay, start families, flipRotation, gravity, simulation space Local/World, scalingMode, simulationSpeed, playOnAwake, emitterVelocity, maxParticles, stopAction, cullingMode, ringBufferMode, Custom simulation space (follows the referenced node), emitterVelocityMode Transform / Rigidbody / Custom, sub-frame emission pre-age, long prewarm (coarse steps for the excess); the scene time scale (`scene.animationTimeScale`) and useUnscaledTime |
      * | Emission | implemented | rate over time / distance, bursts with cycles / interval / probability |
      * | Shape | implemented | every shape type incl. mesh / mesh renderer / skinned (current pose at SkinnedShapeRefreshHz); shape texture (tint / clip; planar UV approximated on primitives); mesh colours, material index; sprite types → the sprite's rectangle + warning |
      * | Velocity / Limit Velocity / Inherit Velocity / Force / Lifetime by Emitter Speed | implemented | unchanged |
@@ -75817,7 +79843,7 @@ declare namespace TOOLKIT {
      * particle shadows, light probes, specular and normal maps on lit particles; wind turbulence and vector fields;
      * collider-force keys; `gravitySource` 2D; spot particle lights drawn as points; distortion refraction; the
      * subtractive blend equation; alpha-blended trail ordering; a trigger crossed inside one step; the no-roll offset
-     * carried by an event's angle; `freeformStretching` / `rotateWithStretchDirection`; `useUnscaledTime`.
+     * carried by an event's angle; `freeformStretching` / `rotateWithStretchDirection`.
      *
      * COLOUR SPACE. A particle colour is used AS AUTHORED except where the exporter declares that Unity's own upload was not converted
      * either: `renderer.applyActiveColorSpace: false` (a Linear project with Unity's "Apply Active Color Space" box off — the Color32 is
@@ -76782,8 +80808,9 @@ declare namespace TOOLKIT {
          */
         static readonly NoBlend: number;
         /**
-         * D15 - soft-particle depth has ONE owner and is ON by default: when a scene carries no camera-space-Z depth source, the
-         * first soft-particle system creates one (`scene.enableDepthRenderer(camera, false, false, undefined, true)`), the systems
+         * D15 - soft-particle depth has ONE owner and is ON by default: soft systems read the prepass depth copy
+         * (CameraDepthCopy.AcquireForSampler) whenever the scene has a prepass. Without it, when a scene carries no camera-space-Z
+         * depth source, the first soft-particle system creates one (CameraDepthCopy.EnableFallbackDepthRenderer), the systems
          * that bind it are counted on `scene._prtDepthOwners`, and the last one to be destroyed disables it again - but only when
          * the toolkit is the one that created it. A depth renderer another feature (SSAO / SSR / a project script) already owns is
          * sampled for free and never disposed here. Set to `false` before the first soft system awakes to opt a project out: the
@@ -76827,13 +80854,19 @@ declare namespace TOOLKIT {
          */
         static SceneLighting(scene: BABYLON.Scene): TOOLKIT.IParticleLighting;
         /**
-         * The scene's CAMERA-SPACE-Z depth texture for the soft-particle fade, resolved once per scene per frame, or null.
-         * Only a source that already exists is used (a depth renderer another feature created): a soft fade is never worth
-         * adding an opaque pass for, and the prepass attachment cannot be sampled at all (ResolveDepthTexture, T8).
-         * `SoftParticleDepth = true` opts a project in explicitly.
+         * The scene depth for the soft-particle fade, or null. First the prepass depth copy (CameraDepthCopy.AcquireForSampler:
+         * one depth source for the frame, copied right before `owner`'s rendering group draws its particles - a separate
+         * render target, so WebGPU never samples an attachment of the pass it draws in, see ResolveDepthTexture). Without the
+         * copy, the scene's CAMERA-SPACE-Z depth texture, resolved once per scene per frame: an existing depth renderer, or
+         * one the toolkit creates when `SoftParticleDepth` is true (drawn only while its camera is active).
          * A depth renderer that stores the normalised metric (Babylon's default) or packs the depth is NOT usable here and reads null.
+         * Both sources hold linear view depth in metres; the copy holds the far plane where nothing was drawn and the
+         * renderer 0, and the PRTSOFT fade reads both alike (CameraDepthCopy.SoftFade).
+         * @param scene The scene.
+         * @param owner The particle system binding the depth this frame (registers it with the copy); null skips the copy.
+         * @returns The depth texture, or null.
          */
-        static SoftDepthTexture(scene: BABYLON.Scene): BABYLON.BaseTexture;
+        static SoftDepthTexture(scene: BABYLON.Scene, owner?: BABYLON.IParticleSystem): BABYLON.BaseTexture;
         /**
          * SoftDepthTexture's uncached body: an existing camera-space-Z depth renderer, then the opt-in.
          *
@@ -76846,6 +80879,15 @@ declare namespace TOOLKIT {
          * safe, which is why it stays. T10 owns the final depth ownership (D15) and must not re-add the prepass source.
          */
         private static ResolveDepthTexture;
+        /**
+         * Creates the camera-space-Z fallback DepthRenderer of `camera`, drawn only while that camera is active (through
+         * CameraDepthCopy.EnableFallbackDepthRenderer; the particle runtime also runs without the core depth copy, as in its
+         * standalone tests, and then sets the flag itself). Called only when the camera has no depth renderer yet.
+         * @param scene The scene.
+         * @param camera The camera.
+         * @returns The new renderer, or null.
+         */
+        private static CreateFallbackDepthRenderer;
         /**
          * The name the particle FRAGMENT shader is registered under (`<name>PixelShader` in the language's ShaderStore). It carried
          * only the material emission at T34 (hence the name); T43 added the lit / soft / camera-fade / flipbook features to the SAME
@@ -77026,6 +81068,23 @@ declare namespace TOOLKIT {
         getMeshRenderer(): TOOLKIT.ParticleMeshRenderer;
         /** T17 / Error policy: renderer.meshes carries at least one drawable geometry (an old export or a null mesh has none). */
         static HasMeshGeometry(renderer: TOOLKIT.IParticleRendererModule): boolean;
+        /**
+         * The time scale a system's clock runs at this frame: the scene's `animationTimeScale` - the toolkit's Unity
+         * `Time.timeScale`, which Babylon animations and `TOOLKIT.Animator` follow too - or 1 when the system uses unscaled
+         * time (Unity `main.useUnscaledTime`). Set `scene.animationTimeScale` to slow down or speed up every particle system.
+         * @param scene The system's scene.
+         * @param main The system's exported main module.
+         * @returns The multiplier for this frame's seconds, 0 (frozen) or more.
+         */
+        static TimeScaleOf(scene: BABYLON.Scene, main: TOOLKIT.IParticleMainModule): number;
+        /**
+         * True when a Mesh render mode renderer has no mesh assigned in Unity, which Unity draws as nothing at all. The exporter
+         * says so with an explicit EMPTY `meshes` list; an older export without the key is not this case and keeps the
+         * billboard fallback.
+         * @param renderer The exported renderer module.
+         * @returns Whether the system's particles must stay invisible (they still simulate and fire sub-emitters).
+         */
+        static HasNoMeshAssigned(renderer: TOOLKIT.IParticleRendererModule): boolean;
         /** FR-39: the pooled point lights of this system (null when the lights module is off). */
         getLightPool(): TOOLKIT.ParticleLightPool;
         private buildState;
@@ -77629,9 +81688,31 @@ declare namespace TOOLKIT {
      *   ST_WindLeaf<n>Tumble    = (time, tumbleFlip(s), tumbleTwist(s), tumbleDirectionAdherence(s))
      *   ST_WindLeaf<n>Twitch    = (twitchThrow(s), twitchSharpness * 10 / twitchFrequency(s), time, 0)
      *   ST_WindFrondRipple      = (time9, frondRippleDistance(s), frondRippleTile, frondRippleLightingScalar)
+     *   ST_WindAnimation        = (wind time, 0, 0, 0)  the global time Turbulence() reads (Get_WindAnimation().x): seconds of
+     *                             wind since the tree registered, advanced by the same clamped frame step as the clocks
+     *
+     * terrain-demo-depth-wind-bake T8 (F7 wind vertex contract): the per-vertex wind data Unity keeps in the .zw of uv0..uv3 rides
+     * in two plain glTF accessors outside Draco, `_ST_WIND_A` = (uv0.z, uv0.w, uv1.z, uv1.w) and `_ST_WIND_B` = (uv2.z, uv2.w,
+     * uv3.z, uv3.w), which LoadVertexAttributesAsync turns into the vertex kinds `stWindA` / `stWindB`.
      */
     class SpeedTreeWind {
         static readonly UNIFORMS: string[];
+        /** The ten oscillation clocks of a tree (times[0..9]), each advanced at its own strength curve's rate. */
+        static readonly OSCILLATION_CLOCKS: number;
+        /** The index in a tree's clock array of the unscaled wind time ST_WindAnimation.x carries. */
+        static readonly ANIMATION_CLOCK: number;
+        /** The length of a tree's clock array: the oscillation clocks plus the wind time. */
+        static readonly CLOCK_COUNT: number;
+        /** The glTF primitive attribute that carries (uv0.z, uv0.w, uv1.z, uv1.w) of a SpeedTree mesh. */
+        static readonly WIND_A_ATTRIBUTE: string;
+        /** The glTF primitive attribute that carries (uv2.z, uv2.w, uv3.z, uv3.w) of a SpeedTree mesh. */
+        static readonly WIND_B_ATTRIBUTE: string;
+        /** The Babylon vertex kind loaded from `_ST_WIND_A` (object-space data: never transformed by a bake). */
+        static readonly WIND_A_KIND: string;
+        /** The Babylon vertex kind loaded from `_ST_WIND_B` (object-space data: never transformed by a bake). */
+        static readonly WIND_B_KIND: string;
+        /** Floats per vertex of each wind vertex kind (a VEC4 accessor). */
+        static readonly WIND_VERTEX_SIZE: number;
         /** The longest frame step the clocks take (a stalled frame must not jump the wind). */
         static MaxStep: number;
         private static _scenes;
@@ -77644,13 +81725,61 @@ declare namespace TOOLKIT {
         };
         /** A 10-point strength curve read linearly (strength clamped to 0..1). */
         static Evaluate(curve: number[], strength: number): number;
-        /** Advances the 10 oscillation clocks by one step. */
+        /**
+         * Advances a tree's clocks by one frame: each of the 10 oscillation clocks at its strength curve's rate and, when the array
+         * has room for it (CLOCK_COUNT), the wind time ST_WindAnimation.x by the plain step.
+         * @param info The tree's exported wind block.
+         * @param times The tree's clocks (OSCILLATION_CLOCKS or CLOCK_COUNT long), advanced in place.
+         * @param strength The wind strength (the zone's windMain, 0..1).
+         * @param seconds The frame time in seconds, clamped to 0..MaxStep.
+         */
         static Advance(info: TOOLKIT.ISpeedTreeWindInfo, times: Float64Array, strength: number, seconds: number): void;
-        /** The 15 uniform values (60 floats, UNIFORMS order) for a tree, a wind and its clocks. */
+        /**
+         * The 16 uniform values (64 floats, UNIFORMS order) for a tree, a wind and its clocks.
+         * @param info The tree's exported wind block.
+         * @param wind The scene wind (Zone()).
+         * @param times The tree's clocks; a 10-clock array has no wind time, so ST_WindAnimation stays 0.
+         * @returns The uniform values, four per UNIFORMS entry.
+         */
         static Values(info: TOOLKIT.ISpeedTreeWindInfo, wind: {
             direction: number[];
             strength: number;
         }, times: Float64Array): number[];
+        /**
+         * True when a glTF primitive carries SpeedTree wind vertex data (`_ST_WIND_A` or `_ST_WIND_B`). Exports made before the
+         * F7 wind vertex contract carry neither, and load exactly as before.
+         * @param primitive The glTF primitive.
+         * @returns True when at least one wind attribute is present.
+         */
+        static HasVertexAttributes(primitive: {
+            attributes?: {
+                [name: string]: number;
+            };
+        }): boolean;
+        /**
+         * Loads a primitive's SpeedTree wind accessors into its geometry as the `stWindA` / `stWindB` vertex kinds. The glTF loader
+         * reads only the standard attributes, and the Draco extension decodes only its own, so the toolkit loader calls this after
+         * either built the geometry. The accessors are plain FLOAT VEC4 data outside Draco, in the original vertex order.
+         * @param loader The Babylon glTF loader (its `_gltf.accessors` and `_loadFloatAccessorAsync`).
+         * @param context The primitive's glTF context path, for error messages.
+         * @param primitive The glTF primitive.
+         * @param geometry The geometry the loader built for it.
+         * @returns The same geometry, with the wind kinds when the primitive has them.
+         * @throws Error (as a rejection) when an attribute names an accessor the glTF does not have.
+         */
+        static LoadVertexAttributesAsync(loader: any, context: string, primitive: any, geometry: BABYLON.Geometry): Promise<BABYLON.Geometry>;
+        /**
+         * Adds wind vertex kinds to a geometry as views of ONE interleaved buffer, so a mesh drawn with both binds one more vertex
+         * buffer, not two (WebGPU allows 8). Each view owns a reference to the buffer, which is released with the last view.
+         * A stream whose length does not match the geometry's vertex count is skipped with a warning: data out of step with the
+         * vertices would bend the tree at random, while no data keeps the shader's zero padding (no leaf or branch wind).
+         * @param geometry The geometry to add the kinds to.
+         * @param kinds The vertex kinds, one per stream.
+         * @param streams The per-vertex VEC4 data, WIND_VERTEX_SIZE floats per vertex.
+         * @param context A name for the warning (the glTF context path).
+         * @returns The number of kinds added.
+         */
+        static SetVertexAttributes(geometry: BABYLON.Geometry, kinds: string[], streams: ArrayLike<number>[], context: string): number;
         /** Writes the values into the material's uniforms (and their History copies). */
         static Apply(material: BABYLON.Material, values: number[]): void;
         /** One frame: every tree's clocks advance and its materials get the new uniforms. */
@@ -79490,6 +83619,8 @@ declare namespace TOOLKIT {
         private _trees;
         private _details;
         private _treeBillboardDistance;
+        /** Unity Terrain.drawTreesAndFoliage (see the property). */
+        private _drawTreesAndFoliage;
         private _shadowGenerators;
         private _shadowScanFrame;
         /** Terrain-owned casters: the per-pass caster lists (D44) cull these and pass every other caster through. */
@@ -79554,6 +83685,12 @@ declare namespace TOOLKIT {
         /** Unity Terrain.treeBillboardDistance: stored only (D17, the SpeedTree LOD group picks the billboard). */
         get treeBillboardDistance(): number;
         set treeBillboardDistance(v: number);
+        /**
+         * Unity Terrain.drawTreesAndFoliage: false hides every tree and detail, their shadows with them, and pauses their
+         * updates until it is true again; the tree colliders stay, as in Unity. Applies at once, or when the parts are built.
+         */
+        get drawTreesAndFoliage(): boolean;
+        set drawTreesAndFoliage(draw: boolean);
         /** Unity Terrain.heightmapPixelError: the surface quadtree's screen-space error threshold (re-selects nodes next update). */
         get heightmapPixelError(): number;
         set heightmapPixelError(v: number);
@@ -79597,6 +83734,8 @@ declare namespace TOOLKIT {
         protected destroy(): void;
         private disposeParts;
         private buildAsync;
+        /** Shows or hides the built trees and details as drawTreesAndFoliage says (on a change, and once the parts are built). */
+        private applyTreesAndFoliageVisibility;
         /**
          * Every current shadow caster: surface nodes follow the terrain's shadowCastingMode, tree hosts and detail hosts
          * follow their own renderers (D28, D44: castshadows LOD renderers, never billboards, detail chunks in reach).
@@ -80064,6 +84203,13 @@ declare namespace TOOLKIT {
         set density(v: number);
         /** Chunk grid [patchWorldSize, k, chunksPerAxis]. */
         get chunking(): number[];
+        /**
+         * Shows or hides every built detail host (TerrainBuilder.drawTreesAndFoliage): each layer's main-pass host and the
+         * shadow hosts of the shown chunks. Hosts stay parented to the terrain node; the caller stops calling update() while
+         * hidden, so no chunk is built or shown meanwhile. Shown again, the main hosts re-compact on the next update.
+         * @param visible True to draw the details.
+         */
+        setVisible(visible: boolean): void;
         /** Unity terrain grass wind (details.wind), forwarded to the grass-wave materials. */
         setWind(strength: number, amount: number, speed: number, tint: number[]): void;
         prepare(): Promise<void>;
@@ -80195,6 +84341,8 @@ declare namespace TOOLKIT {
      * otherwise overwrite them. The dither discards stay at CUSTOM_FRAGMENT_UPDATE_ALBEDO (a discard is order-free).
      */
     class TerrainFoliagePlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly MODE_TREE: number;
         static readonly MODE_BILLBOARD: number;
         static readonly MODE_SWAY: number;
@@ -80342,6 +84490,8 @@ declare namespace TOOLKIT {
      * level, lighting intensity, albedo, AO) is kept, so the result is the rider's probe lighting.
      */
     class TerrainProbePlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         static readonly PRIORITY: number;
         static readonly ATTRIBUTES: string[];
         /** Floats per instance in the probe buffer. */
@@ -81098,6 +85248,12 @@ declare namespace TOOLKIT {
         set distance(v: number);
         get distance(): number;
         /**
+         * Shows or hides every tree host and caster slot through the trees' root node (TerrainBuilder.drawTreesAndFoliage);
+         * the tree colliders live on their own node and stay. Shown again, the instances are re-selected on the next update.
+         * @param visible True to draw the trees.
+         */
+        setVisible(visible: boolean): void;
+        /**
          * Every mesh the trees own: each camera host, followed by every caster slot mesh (terrain-performance D8).
          * @returns A new array of the host meshes and then the slot meshes.
          */
@@ -81203,7 +85359,31 @@ declare namespace TOOLKIT {
          * @param capacity Instances each slot can hold (the prototype's instance count).
          */
         private createCasterSlots;
-        /** D41: one clone per (prototype, source material), named "<material>.<prototype>", with the foliage plugin attached. */
+        /**
+         * True when a mesh carries SpeedTree 8 wind vertex data (the stWindA / stWindB kinds of the F7 wind vertex contract, T8).
+         * @param mesh The tree host or renderer mesh.
+         * @returns True when both wind kinds are present.
+         */
+        static HasSpeedTreeWindVertexData(mesh: BABYLON.AbstractMesh): boolean;
+        /**
+         * True when a tree host material moves by its own SpeedTree 8 wind: the material carries the exported speedTreeWindInfo
+         * (registered with TOOLKIT.SpeedTreeWind) and the host has the wind vertex data its wind function reads. Such a material
+         * gets no MODE_TREE bend, because in Unity a SpeedTree 8 tree moves only by its own wind; without the vertex data
+         * (older exports, non-SpeedTree trees) the bend stays their only sway.
+         * @param material The source (sub-)material of the host.
+         * @param hostHasWindVertexData True when the host carries stWindA / stWindB (HasSpeedTreeWindVertexData).
+         * @returns True when the toolkit bend must be left out.
+         */
+        static UsesOwnSpeedTreeWind(material: BABYLON.Material, hostHasWindVertexData: boolean): boolean;
+        /**
+         * D41: one clone per (prototype, source material), named "<material>.<prototype>", with the foliage plugin attached.
+         * T8: a SpeedTree 8 material on a host with wind vertex data gets its own clone without the MODE_TREE bend.
+         * @param p The exported tree prototype.
+         * @param lod The LOD level of the host.
+         * @param source The renderer's material (a MultiMaterial is cloned per sub-material).
+         * @param hostHasWindVertexData True when the host carries stWindA / stWindB.
+         * @returns The host material.
+         */
         private hostMaterial;
         /**
          * Shared per-scene material-clone cache (D41), used by the tree and mesh-detail hosts: returns the clone stored under
@@ -88232,6 +92412,8 @@ declare namespace TOOLKIT {
      * 1 × 1 sheet) to keep Unity's UV orientation.
      */
     class VisualEffectQuadPlugin extends BABYLON.MaterialPluginBase {
+        /** True: getCustomCode is a pure function of the material's state during one shader-stage injection, so ShaderCodeInjection asks it once per stage. */
+        static readonly HasStableCustomCode: boolean;
         /** Flipbook columns and rows. */
         private columns;
         private rows;
@@ -88554,8 +92736,11 @@ declare namespace TOOLKIT {
          */
         private bindSoftParticles;
         /**
-         * The active camera's camera-space-Z depth map (DR-12.3: created once per camera, never disabled here), or the
-         * scene's zero texture when the camera's depth renderer stores another metric.
+         * The active camera's scene depth for the soft fade: the prepass depth copy (CameraDepthCopy.AcquireForSampler - one
+         * depth source for the frame, no second opaque pass), else the camera's camera-space-Z DepthRenderer (DR-12.3: created
+         * once per camera, drawn only while that camera is active, never disabled here), or the scene's zero texture when that
+         * renderer stores another metric. Both maps hold linear view depth in metres; the copy holds the far plane where nothing
+         * was drawn, the renderer 0, and the VFXSOFT fade reads both alike (CameraDepthCopy.SoftFade).
          * @returns The texture to bind.
          */
         private depthTexture;
@@ -88986,6 +93171,8 @@ declare namespace TOOLKIT {
         private videoPreloaderUrl;
         private videoBlobUrl;
         private videoPreload;
+        private videoSourceUrl;
+        private videoSettingsRead;
         private _initializedReadyInstance;
         getVideoMaterial(): BABYLON.StandardMaterial;
         getVideoTexture(): BABYLON.VideoTexture;
@@ -89000,8 +93187,14 @@ declare namespace TOOLKIT {
         protected m_diffuseIntensity: number;
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
+        protected reveal(): void;
         protected destroy(): void;
+        /** Builds the video material and texture behind the splash, so they compile before the reveal (a preloaded video builds when its task finishes). */
         protected awakeWebVideoPlayer(): void;
+        /** Play on awake starts when the scene is shown to the player: now when the video has loaded, else when it finishes loading. */
+        protected revealWebVideoPlayer(): void;
+        /** Reads the property bag once: awake or the asset preloader, whichever runs first. */
+        private readVideoSettings;
         protected destroyWebVideoPlayer(): void;
         /**
          * Gets the video ready status
