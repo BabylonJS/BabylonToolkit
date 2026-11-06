@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.32.0 - R1) */
+        /** Gets the toolkit framework version string (9.34.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -55195,7 +55195,7 @@ declare namespace TOOLKIT {
         persisted: boolean | null;
         /** Total wire bytes of every group of every root, the app shell's group included (D23). */
         totalBytes: number;
-        /** Wire bytes of installed groups. */
+        /** Wire bytes of every stored file of the active versions, each hash once (a partly stored group counts too). */
         installedBytes: number;
         /** True when every group of every root (the app shell's included, D23) is installed. */
         everythingInstalled: boolean;
@@ -55358,6 +55358,10 @@ declare namespace TOOLKIT {
         private static roots;
         /** Every hash in the files cache, as this page last saw it. */
         private static storedHashes;
+        /** The pending totals update of files stored outside a finished group, or null. */
+        private static totalsUpdateTimer;
+        /** The shortest time between totals updates of files stored one by one, in milliseconds. */
+        private static readonly TOTALS_UPDATE_INTERVAL_MS;
         /** Groups listing each hash in the active manifests (D32). */
         private static groupsByHash;
         /** Downloads waiting to start, in run order: player jobs first, then background jobs. */
@@ -56299,6 +56303,8 @@ declare namespace TOOLKIT {
          * @returns The state (base URL, shell flag and policy are set by loadRoot).
          */
         private static createRootState;
+        /** Updates the totals soon, at most once per TOTALS_UPDATE_INTERVAL_MS: files a race stores arrive one by one, often while the game is busy. */
+        private static scheduleTotalsUpdate;
         /** Recomputes the totals and update fields of the state from the roots. */
         private static updateTotalsState;
         /**
