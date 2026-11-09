@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.34.10 - R1) */
+        /** Gets the toolkit framework version string (9.34.100 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -4318,7 +4318,8 @@ declare namespace TOOLKIT {
          *    and `distances[N-1]` doubles as the cull threshold. Unchanged HYBRID strategy: every level one mesh =>
          *    native `master.addLODLevel(distances[i-1], mesh)` plus a final `addLODLevel(cull, null)` band (an
          *    InstancedMesh master keeps the legacy dispose of its unused detail levels); any level with >1 mesh =>
-         *    the scene's shared switcher (`_setupLevelOfDetailSwitcher`).
+         *    the scene's shared switcher (`_setupLevelOfDetailSwitcher`), as has a level authored away from LOD0, because
+         *    Babylon draws a native level with its master's matrix (`UnityLodGroups.RequiresSwitcher`).
          *  - `coverages` only (every headless export - there is no scene-view camera to turn heights into
          *    distances, F-M.57): Unity's own rule, `UnityLodAndLights.SelectCoverageLevel` on the screen-relative
          *    height `worldSize * lodBias / (2 * tan(vfov / 2) * distance)` of the group, through the same switcher.
@@ -6236,7 +6237,12 @@ declare namespace TOOLKIT {
         static RegisterShaders(): void;
         /** The head-of-chain pass that writes min(c, MaxRadiance) and replaces NaN with 0 (WGSL on WebGPU). */
         static CreateSanitizePass(scene: BABYLON.Scene, camera: BABYLON.Camera, textureType: number): BABYLON.PostProcess;
-        private static SceneMetadata;
+        /**
+         * The scene's exported toolkit metadata.
+         * @param scene The scene.
+         * @returns The metadata, or null.
+         */
+        static SceneMetadata(scene: BABYLON.Scene): any;
         private static State;
         private static ApplyBinding;
     }
@@ -6454,6 +6460,14 @@ declare namespace TOOLKIT {
          * @param light A Babylon light (reads `diffuse` and `metadata.toolkit.colorTemperature`), or null.
          */
         static UnityLinearLightColor(light: any): BABYLON.Color3;
+        /**
+         * Gives a toolkit light the colour Unity lights with in a Linear project (`UnityLinearLightColor`) and marks it, so every later
+         * conversion returns it unchanged. An HDRP parity export and a Gamma project keep the exported colour.
+         * @param light A Babylon light built from an export, with `metadata.toolkit`.
+         * @param scene The scene, whose toolkit metadata names the colour space.
+         * @returns True when the colour was converted.
+         */
+        static LinearizeLightColor(light: BABYLON.Light, scene: BABYLON.Scene): boolean;
         /** Keys already warned about, so a per-parse or per-frame code path reports each problem once. */
         private static Warned;
         /**
@@ -6734,6 +6748,17 @@ declare namespace TOOLKIT {
          */
         static SpecularEnvironmentLevel(reflection: number, units: string, levelMax: number): number;
         /**
+         * The scale for Unity's ambient probe on a scene environment. A physical environment's level is its sky's normalisation (the sky's
+         * mean luminance), and PBR multiplies the locked SH by that level too, so the probe must carry its inverse or the ambient drops by
+         * the sky's mean. A parity scene does this while it binds the SH, and a relative environment keeps its level. Pure.
+         * @param ambientIntensity The scene's ambient intensity.
+         * @param environmentLevel The environment texture's level, or null when the export has no environment file.
+         * @param units The normalised `environment.units`.
+         * @param isParity True on an HDRP parity scene.
+         * @returns The scale for `generateSphericalHarmonics`.
+         */
+        static EnvironmentAmbientScale(ambientIntensity: number, environmentLevel: number, units: string, isParity: boolean): number;
+        /**
          * Warns once when an export marks its sky as baked but carries no environment block (hdrp-sky D19) - the
          * silent failure this feature closed. Returns true when it warned. The skybox fallback still runs.
          */
@@ -6842,7 +6867,7 @@ declare namespace TOOLKIT {
         /** Set once the invisible-light skip is installed, so it is never wrapped twice. */
         _tkSkipInvisible?: boolean;
         /**
-         * True while PREWARM's WebGPU pipeline stage draws this map with all its casters (SceneShaderWarmup.DrawPunctualShadowMapsFully):
+         * True while PREWARM's WebGPU pipeline stage draws this map with all its casters (SceneShaderWarmup.DrawShadowMapsFully):
          * the invisible-light skip is bypassed, so a light out of view at the reveal still builds its caster pipelines.
          */
         _tkPrewarmDrawAll?: boolean;
@@ -7635,6 +7660,21 @@ declare namespace TOOLKIT {
         static ShadowMapsRendered(scene: BABYLON.Scene, camera: BABYLON.Camera): boolean;
         /** T12.5: fill the targets by copying the main pass's colour target before its transparents (URP's CopyColorPass). False = re-render the opaque scene (the T12.4 path). */
         static UseCopy: boolean;
+        /** `BABYLON.ConversionMode.None`. */
+        private static readonly COPY_PLAIN;
+        /** `BABYLON.ConversionMode.ToLinearSpace`. */
+        private static readonly COPY_TO_LINEAR;
+        /**
+         * The conversion the copy needs so the target stays linear, as Unity's opaque texture is. A camera without HDR leaves image
+         * processing to the materials (Babylon's LDR chain), so the colour target the copy reads holds display-encoded colour; a graph
+         * that took that for linear reads Scene Color about three times too bright in the shadows. Pure.
+         * @param imageProcessing The scene's image processing configuration, or null.
+         * @returns The conversion mode to pass to `CopyTextureToTexture.copy`.
+         */
+        static CopyConversionFor(imageProcessing: {
+            isEnabled: boolean;
+            applyByPostProcess: boolean;
+        }): number;
         /** Whether a rendering group's transparent queue holds a sub-mesh drawn with one of `materials` (the copy's trigger). Pure. */
         static QueueSamples(subMeshes: any, materials: any): boolean;
         /**
@@ -7646,6 +7686,41 @@ declare namespace TOOLKIT {
          */
         static InstallCopy(scene: BABYLON.Scene, store: any): void;
         private static CopyNow;
+    }
+}
+declare namespace TOOLKIT {
+    /** The `metadata.urp` scene block (DR-4.6). Its sky and fog keep the `hdrp` block shapes, which the sky code reads untyped. */
+    interface IUrpSceneBlock {
+        version: number;
+        sky?: any;
+        fog?: any;
+        clouds?: any;
+    }
+    /**
+     * One place that answers "which physical sky block does this export carry", so the sky and fog code stays free of pipeline
+     * checks. An HDRP parity export reads `metadata.hdrp`, and a URP export reads `metadata.urp`.
+     */
+    class PhysicalSkyBlock {
+        /** Lowest `urp` block version this runtime reads. */
+        static readonly UrpBlockVersion: number;
+        /**
+         * The scene's `urp` block.
+         * @param metadata - Scene metadata, which is untyped across the toolkit.
+         * @returns The block, or null when the export has none.
+         */
+        static UrpBlock(metadata: any): TOOLKIT.IUrpSceneBlock;
+        /**
+         * The physical sky block of an export.
+         * @param metadata - Scene metadata.
+         * @returns `hdrp.sky` on an HDRP parity export, `urp.sky` on a URP export, otherwise null.
+         */
+        static SkyOf(metadata: any): any;
+        /**
+         * The fog block read by the physical sky's fog pass.
+         * @param metadata - Scene metadata.
+         * @returns `hdrp.fog` on an HDRP parity export, `urp.fog` on a URP export, otherwise null.
+         */
+        static FogOf(metadata: any): any;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -8689,6 +8764,13 @@ declare namespace TOOLKIT {
          */
         static WarmScaleVariantsOnReveal: boolean;
         /**
+         * False leaves the levels of a native LOD group (Babylon `addLODLevel`) to the camera's distance during the WebGPU pipeline stage: a
+         * level no warm camera selected at the reveal (a stump's LOD1 on a hillside the opening view sees only at LOD0 or culled) then built
+         * its GPU pipeline the first time the game's camera came into its band. True (default) has every frame of the stage select the next
+         * level of every native LOD group in turn (CycleNativeLodLevels), in the main pass and in every shadow map.
+         */
+        static WarmNativeLodLevelsOnReveal: boolean;
+        /**
          * Optional units (hidden meshes, render passes) are given up this long (ms) after every required unit is ready and no unit
          * has become ready since, once each was checked: the grace restarts whenever a unit becomes ready, so a queue still finishing
          * (WebGL2 compiles a long one in order) is waited for and a stalled unit is not. Measured against the older fixed grace (from the
@@ -9544,21 +9626,33 @@ declare namespace TOOLKIT {
          */
         private static RestoreShadowCasterLists;
         /**
-         * Makes every point and spot shadow map gated by LightingConversions.SkipInvisiblePunctualShadowMap draw all its casters during
-         * the pipeline stage. The gate skips a map whose light is out of view, so on WebGPU a light the camera cannot see at the reveal
-         * built no caster pipelines and they compiled the first time it came into view (a late compile mid-race). Each gated map gets
-         * `_tkPrewarmDrawAll` (the gate then asks Babylon only), its caster culling list is set aside (Babylon draws the whole
-         * renderList), and it renders again on the next frame. Directional maps are left alone. RestorePunctualShadowMaps undoes it.
+         * Makes every shadow map that culls its casters, or whose render is skipped, draw all its casters during the pipeline stage:
+         *  - a point or spot map gated by LightingConversions.SkipInvisiblePunctualShadowMap is skipped while its light is out of view, so
+         *    on WebGPU a light the camera cannot see at the reveal built no caster pipelines and they compiled the first time it came into
+         *    view (a late compile mid-race); it gets `_tkPrewarmDrawAll` (the gate then asks Babylon only);
+         *  - a map with one of the toolkit's caster culling lists (HasCasterCullingList: the Unity culling, or the terrain's) drops every
+         *    caster outside its pass, so a directional cascade drew only the casters near the opening view and a prop the camera reached
+         *    later built its shadow pipeline then (a late pipeline after a camera cut).
+         * Each such map has its caster culling list set aside (Babylon draws the whole renderList) and renders again on the next frame.
+         * RestoreFullShadowMaps undoes it.
          * @param scene - The scene being prewarmed.
-         * @returns What was changed, for RestorePunctualShadowMaps.
+         * @returns What was changed, for RestoreFullShadowMaps.
          */
-        private static DrawPunctualShadowMapsFully;
+        private static DrawShadowMapsFully;
         /**
-         * Puts back what DrawPunctualShadowMapsFully changed: the draw-all flag is cleared and each map gets its caster culling list
-         * back, unless something else installed a list meanwhile.
-         * @param draws - What DrawPunctualShadowMapsFully changed.
+         * True when the shadow map's custom render list is one of the toolkit's caster cullings: LightingConversions.ApplyUnityCasterCulling
+         * marks its function `tkCasterCulling`, and TerrainBuilder.InstallCasterCulling, which wraps it on a scene with terrain, marks
+         * its own `tkTerrainCulling`.
+         * @param shadowMap - The shadow map.
+         * @returns True for a caster-culled map.
          */
-        private static RestorePunctualShadowMaps;
+        static HasCasterCullingList(shadowMap: BABYLON.RenderTargetTexture): boolean;
+        /**
+         * Puts back what DrawShadowMapsFully changed: the draw-all flag is cleared and each map gets its caster culling list back, unless
+         * something else installed a list meanwhile.
+         * @param draws - What DrawShadowMapsFully changed.
+         */
+        private static RestoreFullShadowMaps;
         /** Frames each material of a material variant is drawn for in a row by the pipeline stage (AlternateMaterialVariants). */
         private static readonly MATERIAL_VARIANT_FRAMES;
         /** Per scene: meshes that also draw with another material during play (WarmMaterialVariant). */
@@ -9703,6 +9797,28 @@ declare namespace TOOLKIT {
          */
         private static RestoreScaleVariants;
         /**
+         * The meshes a native LOD master can draw (Babylon `addLODLevel`): the master itself, then each level's mesh in order. The cull
+         * band's null level and a mesh listed twice are left out.
+         * @param mesh - Any mesh.
+         * @returns The sequence, or an empty array when the mesh has no LOD levels.
+         */
+        static NativeLodSequence(mesh: BABYLON.AbstractMesh): BABYLON.AbstractMesh[];
+        /**
+         * Makes the frames of the reveal-time pipeline stage select every native LOD level in turn: frame n draws level n modulo the
+         * group's level count for every native LOD master, through `scene.customLODSelector`, which Babylon asks for the main pass and for
+         * every render target (shadow maps included). Without it a level drew only where a warm camera's distance selected it, so a LOD1
+         * the opening view never reached built its GPU pipeline after the reveal. Meshes without levels keep the scene's own selection.
+         * @param scene - The scene being prewarmed.
+         * @returns What to undo (RestoreNativeLodLevels), or null when the scene has no native LOD group or WarmNativeLodLevelsOnReveal is false.
+         */
+        static CycleNativeLodLevels(scene: BABYLON.Scene): TOOLKIT.INativeLodCycle;
+        /**
+         * Ends CycleNativeLodLevels: the scene's own LOD selector is given back, unless something else replaced the cycle's meanwhile.
+         * @param scene - The scene being prewarmed.
+         * @param cycle - What CycleNativeLodLevels changed (null: nothing).
+         */
+        static RestoreNativeLodLevels(scene: BABYLON.Scene, cycle: TOOLKIT.INativeLodCycle): void;
+        /**
          * Forces (or stops forcing) each mesh's other scaling state. While forced, the mesh's own `_updateNonUniformScalingState` property
          * keeps the other state through the frame's world-matrix updates (and the state is set at once for a mesh whose matrix is not
          * recomputed); unforced, the property is removed and the mesh computes its real state again.
@@ -9796,6 +9912,7 @@ declare namespace TOOLKIT {
          * @param deadline - SceneShaderWarmup.NowMs() after which the stage stops waiting.
          * @param phases - The camera phases, in order; null draws the game's own camera(s).
          * @param onProgress - Called after each frame with the compiled and requested pipeline counts.
+         * @param settleFrames - Consecutive quiet frames that end a phase (a LOD cycle needs one full cycle; default PIPELINE_SETTLE_FRAMES).
          * @returns Resolves true when the deadline passed before every phase was quiet.
          */
         private static WaitForPipelinesPerCamera;
@@ -9812,8 +9929,9 @@ declare namespace TOOLKIT {
          */
         private static RunCameraPhasesAsync;
         /**
-         * Renders frames (the render loop keeps running) until the scene's draws request no new pipeline for PIPELINE_SETTLE_FRAMES
-         * frames and none is still compiling, or the deadline passes. Reports `onProgress(compiled, requested)` after each frame.
+         * Renders frames (the render loop keeps running) until the scene's draws request no new pipeline for `settleFrames` consecutive
+         * frames (default PIPELINE_SETTLE_FRAMES) and none is still compiling, or the deadline passes. Reports `onProgress(compiled,
+         * requested)` after each frame.
          */
         private static WaitForPipelines;
         /**
@@ -10531,6 +10649,21 @@ declare namespace TOOLKIT {
         /** The frame observer that switches the variant. */
         frameObserver: BABYLON.Observer<BABYLON.Scene>;
     }
+    /** @hidden The native LOD selection the reveal-time pipeline stage forces in turn (CycleNativeLodLevels). */
+    interface INativeLodCycle {
+        /** Each native LOD master and the meshes it can draw, master first (NativeLodSequence). */
+        sequences: Map<BABYLON.AbstractMesh, BABYLON.AbstractMesh[]>;
+        /** The longest sequence: the frames one full cycle takes. */
+        length: number;
+        /** Frames drawn since the cycle began; frame n selects level n modulo a sequence's length. */
+        frameIndex: number;
+        /** The scene's own LOD selector, given back by RestoreNativeLodLevels (null when it had none). */
+        previousSelector: (mesh: BABYLON.AbstractMesh, camera: BABYLON.Camera) => BABYLON.Nullable<BABYLON.AbstractMesh>;
+        /** The selector the cycle installed. */
+        selector: (mesh: BABYLON.AbstractMesh, camera: BABYLON.Camera) => BABYLON.Nullable<BABYLON.AbstractMesh>;
+        /** The frame observer that advances frameIndex. */
+        frameObserver: BABYLON.Observer<BABYLON.Scene>;
+    }
     /** @hidden A hidden particle emitter the particle stage lets draw (ShowHiddenEmittersForDraws). */
     interface IHiddenEmitterDraw {
         /** The emitter node. */
@@ -10591,6 +10724,13 @@ declare namespace TOOLKIT {
     }
     /** @hidden A render target's custom render list (RenderTargetTexture.getCustomRenderList). */
     type CustomRenderListFunction = (layerOrFace: number, renderList: readonly BABYLON.AbstractMesh[], renderListLength: number) => BABYLON.AbstractMesh[];
+    /** @hidden The marks the toolkit's caster culling lists carry on their function (SceneShaderWarmup.HasCasterCullingList). */
+    interface ICasterCullingListMarks {
+        /** Set by LightingConversions.ApplyUnityCasterCulling. */
+        tkCasterCulling?: boolean;
+        /** Set by TerrainBuilder.InstallCasterCulling. */
+        tkTerrainCulling?: boolean;
+    }
     /** @hidden A shadow map whose custom render list the reveal-time pipeline stage wrapped (KeepHiddenCastersInShadowMaps). */
     interface IShadowCasterListWrap {
         /** The shadow map. */
@@ -10600,8 +10740,8 @@ declare namespace TOOLKIT {
         /** The wrapper that keeps the shown hidden casters. */
         keptList: TOOLKIT.CustomRenderListFunction;
     }
-    /** @hidden A point or spot shadow map the reveal-time pipeline stage draws with all its casters (DrawPunctualShadowMapsFully). */
-    interface IPunctualShadowMapDraw {
+    /** @hidden A gated or caster-culled shadow map the reveal-time pipeline stage draws with all its casters (DrawShadowMapsFully). */
+    interface IShadowMapFullDraw {
         /** The shadow map. */
         shadowMap: BABYLON.RenderTargetTexture;
         /** Its caster culling list, set aside during the stage. */
@@ -11769,6 +11909,17 @@ declare namespace TOOLKIT {
         smoothDeltaTime: number;
         frame: number;
     }
+    /** One shader global component advanced every frame by scene time, for values Unity's scripts drive at runtime. */
+    interface IShaderGlobalDriver {
+        /** The global's Unity reference name. */
+        name: string;
+        /** The vector component advanced: 0 x, 1 y, 2 z, 3 w. */
+        component: number;
+        /** Units per second. */
+        rate: number;
+        /** The value is wrapped by subtracting this when it passes it. Zero means no wrap. */
+        wrap: number;
+    }
     /**
      * Unity's shader globals for transpiled Shader Graph classes (shadergraph-transpiler-complete-coverage D16, D18).
      *
@@ -11787,6 +11938,8 @@ declare namespace TOOLKIT {
      * generated material of a scene animates in lockstep.
      */
     class ShaderGlobals {
+        /** The Vector4 member each `IShaderGlobalDriver.component` index names. */
+        private static readonly DriverComponentNames;
         private static _version;
         private static _floats;
         private static _vectors;
@@ -11820,6 +11973,19 @@ declare namespace TOOLKIT {
          * scene's first frame.
          */
         static LoadSceneGlobals(scene: BABYLON.Scene, block: any): void;
+        /**
+         * Advances exported shader globals every frame, so a value Unity's scripts drive at runtime keeps moving in the browser.
+         * Adds one observer per scene, and only when the export lists a driver.
+         * @param scene - The scene whose clock drives the values.
+         * @param drivers - The exported drivers, or null.
+         */
+        static LoadSceneDrivers(scene: BABYLON.Scene, drivers: TOOLKIT.IShaderGlobalDriver[]): void;
+        /**
+         * Advances one driver in place. The stored Vector4 is mutated, so a frame allocates nothing. Bumps the version.
+         * @param driver - The driver to advance.
+         * @param deltaSeconds - Seconds since the last frame.
+         */
+        private static AdvanceDriver;
         /** The scene clock (registered on first use, removed when the scene is disposed). */
         static GetClock(scene: BABYLON.Scene): TOOLKIT.IShaderClock;
     }
@@ -12167,6 +12333,15 @@ declare namespace TOOLKIT {
         static ApplyInstanceBlock(instance: BABYLON.InstancedMesh, block: any, sub?: number): boolean;
         /** The clone of one material with a property block applied (null when the material is not a toolkit custom material). */
         static CloneWithBlock(material: BABYLON.Material, block: any, meshId: number, loadTexture?: (info: any, done: (texture: BABYLON.BaseTexture) => void) => void): BABYLON.Material;
+        /**
+         * Keeps the exporter's "not carried" list for the scene summary. Schedules the summary itself,
+         * so a scene with no graph material still prints it.
+         * @param scene - The scene the export belongs to.
+         * @param entries - The `exportreport` metadata list; absent or empty when the export lost nothing.
+         */
+        static RecordExportReport(scene: BABYLON.Scene, entries: TOOLKIT.IExportReportEntry[]): void;
+        /** Prints the exporter's list as one collapsed group, then forgets it so a later flush does not repeat it. */
+        private static PrintExportReport;
         /** One warning for the missing classes, then one console.groupCollapsed per scene; clears the record. */
         static FlushSceneSummary(scene: BABYLON.Scene): void;
     }
@@ -12190,6 +12365,19 @@ declare namespace TOOLKIT {
         /** T32.1: the pending quiet-period timer and its latest flush time. */
         timer?: any;
         deadline?: number;
+        /** The exporter's "not carried" list, until the summary prints it. */
+        exportReport?: IExportReportEntry[];
+    }
+    /** One line of `metadata.exportreport`: something the export could not carry to the browser. */
+    interface IExportReportEntry {
+        /** The report group, such as `Renderer features`. */
+        feature: string;
+        /** Why the items do not reach the browser. */
+        reason: string;
+        /** Every distinct item name. */
+        items: string[];
+        /** How many times the exporter met this, which can exceed `items.length`. */
+        count: number;
     }
     /**
      * shadergraph-transpiler-complete-coverage X2: the ShadowDepthWrapper of a graph class that casts through its own shader
@@ -14124,10 +14312,18 @@ declare namespace TOOLKIT {
         static readonly FADE_SPEEDTREE: number;
         /** Unity's LODGroup.crossFadeAnimationDuration default (the terrain trees use the same, TerrainTrees.FADE_SECONDS). */
         static FADE_SECONDS: number;
+        /** Largest offset, in meters, at which a level still draws correctly with its master's world matrix. */
+        static readonly NATIVE_TRANSFORM_TOLERANCE_METERS: number;
+        /** Largest difference in one rotation or scale matrix element between a level and its master. */
+        static readonly NATIVE_BASIS_TOLERANCE: number;
+        /** The indices of a matrix's rotation and scale elements. */
+        private static readonly BASIS_ELEMENTS;
         /**
          * H-a: the group's world size and local reference point from the exported `lodsize` (LODGroup.size, local) and
-         * `lodcenter` (LODGroup.localReferencePoint in the node's glTF local space). Unity's world size is the size times
-         * the largest absolute lossy scale. Null when the export has neither (older exports: the mesh boxes are used).
+         * `lodcenter` (LODGroup.localReferencePoint with its x negated). The node's world matrix takes Unity's local axes, so
+         * x is negated back here: the world point then equals Unity's `transform.TransformPoint(localReferencePoint)`.
+         * Unity's world size is the size times the largest absolute lossy scale. Null when the export has neither (older
+         * exports: the mesh boxes are used).
          */
         static ExportedSize(root: BABYLON.TransformNode, metadata: any): {
             worldSize: number;
@@ -14138,6 +14334,32 @@ declare namespace TOOLKIT {
             useDistances: boolean;
             thresholds: number[];
         };
+        /**
+         * Whether every level can be drawn by Babylon's native LOD, which draws a detail level with its master's world
+         * matrix and ignores the detail's own. Levels authored with different pivots must use the shared switcher, or they
+         * appear displaced by the difference. Reads each node's own matrix, so a mesh that is already a detail level is
+         * judged by its own transform too.
+         * @param master The LOD0 mesh.
+         * @param details The lower levels' meshes.
+         * @returns True when each detail's world transform matches the master's within the tolerances.
+         */
+        static LevelsShareTransform(master: BABYLON.AbstractMesh, details: BABYLON.AbstractMesh[]): boolean;
+        /**
+         * Whether two world matrices place a mesh at the same spot within the native tolerances.
+         * @param first One world matrix.
+         * @param second The other world matrix.
+         * @returns True when their translations and their rotation and scale elements match.
+         */
+        private static MatricesShareTransform;
+        /**
+         * Whether a group must run on the shared switcher instead of Babylon's native LOD, on either native entry point
+         * (coverages or the legacy distances): it cross-fades, a level has several renderers, or a level sits away from
+         * LOD0's world transform. Instanced masters answer like any other: their legacy handling stays with the caller.
+         * @param meshLevels The resolved meshes of each level, LOD0 first.
+         * @param fadeMode The group's FADE_* mode.
+         * @returns True when only the switcher can draw the group as authored.
+         */
+        static RequiresSwitcher(meshLevels: BABYLON.AbstractMesh[][], fadeMode: number): boolean;
         /** Exported fade mode name => FADE_*. */
         static ParseFadeMode(mode: string): number;
         /** Scene-wide QualitySettings.lodBias (the exported `lodbias`, 1 when absent). */
@@ -14198,7 +14420,10 @@ declare namespace TOOLKIT {
          * group culls below the last coverage, and an orthographic camera (whose Babylon LOD distance is minZ) gets
          * 0 / 1e30 thresholds that pick Unity's distance-independent level. They are recomputed only when the camera,
          * its fov / fov mode / aspect / projection / ortho size, or the LOD bias change.
-         * `details[k - 1]` is level k's mesh. Returns false (nothing registered) when the levels cannot be native.
+         * `details[k - 1]` is level k's mesh. Returns false (nothing registered) when the levels cannot be native: a level
+         * authored away from LOD0 (LevelsShareTransform), or a master with instances. An InstancedMesh follows its source's
+         * LOD levels while the switcher toggles that same instance, so such a master joins its instances on the switcher and
+         * every level has one owner.
          */
         addNativeGroup(master: BABYLON.Mesh, details: BABYLON.Mesh[], coverages: number[], worldSize: number): boolean;
         get nativeGroupCount(): number;
@@ -34737,129 +34962,6 @@ declare namespace PROJECT {
 }
 declare namespace PROJECT {
     /**
-     * Babylon toolkit default camera system class
-     * @class DefaultCameraSystem - All rights reserved (c) 2020 Mackey Kinard
-     * @deprecated This class is considered legacy and may be removed in future versions.
-     */
-    class DefaultCameraSystem extends TOOLKIT.ScriptComponent {
-        protected static PlayerOneCamera: BABYLON.FreeCamera;
-        protected static PlayerTwoCamera: BABYLON.FreeCamera;
-        protected static PlayerThreeCamera: BABYLON.FreeCamera;
-        protected static PlayerFourCamera: BABYLON.FreeCamera;
-        protected static XRExperienceHelper: BABYLON.WebXRDefaultExperience;
-        private static multiPlayerView;
-        private static multiPlayerCount;
-        private static multiPlayerCameras;
-        private static stereoCameras;
-        private static startupMode;
-        private static cameraReady;
-        private static cameraInstance;
-        static IsCameraSystemReady(): boolean;
-        /** Register handler that is triggered when the webxr experience helper has been created */
-        static OnXRExperienceHelperObservable: BABYLON.Observable<BABYLON.WebXRDefaultExperience>;
-        /** Default Follow Speed */
-        static FOLLOW_SPEED: number;
-        private mainCamera;
-        private cameraType;
-        private cameraInertia;
-        private cameraController;
-        private immersiveOptions;
-        private arcRotateConfig;
-        private multiPlayerSetup;
-        private fullScreenToggle;
-        private setPointerLock;
-        private setCameraTarget;
-        private setSpatialAudio;
-        protected m_cameraRig: BABYLON.TargetCamera;
-        isMainCamera(): boolean;
-        getCameraType(): number;
-        getTargetTransform(): BABYLON.TransformNode;
-        setTargetTransform(target: BABYLON.TransformNode): void;
-        enableSpatialAudio(value: boolean): void;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected start(): void;
-        protected update(): void;
-        protected destroy(): void;
-        protected awakeCameraSystemState(): void;
-        protected startCameraSystemState(): Promise<void>;
-        protected updateCameraSystemState(): void;
-        protected cleanCameraSystemState(): void;
-        protected destroyCameraSystemState(): void;
-        /*********************************************/
-        /** Follow Target Camera Controller Helpers  */
-        /*********************************************/
-        targetCameraOffset: BABYLON.Vector3;
-        getCameraPivotPosition(): BABYLON.Vector3;
-        getCameraPivotRotation(): BABYLON.Quaternion;
-        getCameraBoomNode(): BABYLON.TransformNode;
-        getCameraTransform(): BABYLON.TransformNode;
-        private cameraNode;
-        private cameraPivot;
-        private cameraDistance;
-        private cameraPivotOffset;
-        private cameraBoomPosition;
-        private dollyDirection;
-        private rotationEulers;
-        private scaledCamDirection;
-        private scaledMaxDirection;
-        private parentNodePosition;
-        private maximumCameraPos;
-        private cameraRaycastShape;
-        private targetRotationVector;
-        private resetCameraRotation;
-        private updateCameraController;
-        getBoomArmMaxDistance(): number;
-        setBoomArmMaxDistance(distance: number): void;
-        setSmoothBoomArmLength(length: number, speed: number, updateMaxDistance?: boolean): void;
-        private smoothBoomArmLength;
-        private smoothBoomArmSpeed;
-        private updateSmoothBoomArmLength;
-        static EnableTracking(value: boolean): void;
-        static IsTrackingEnabled(): boolean;
-        static SetAutoUpdate(value: boolean): void;
-        static IsAutoUpdateEnabled(): boolean;
-        static GetFollowTarget(): BABYLON.TransformNode;
-        static SetFollowTarget(target: BABYLON.TransformNode): void;
-        static ResetFollowTarget(): void;
-        static UpdateFollowTarget(): void;
-        /** Get the WebXR default experience helper */
-        static GetWebXR(): BABYLON.WebXRDefaultExperience;
-        /** Is universal camera system in WebXR mode */
-        static IsInWebXR(): boolean;
-        /** Setup navigation mesh for WebXR */
-        private static SetupNavigationWebXR;
-        /** Get main camera rig for the scene */
-        static GetMainCamera(scene: BABYLON.Scene, detach?: boolean): BABYLON.FreeCamera;
-        /** Get universal camera rig for desired player */
-        static GetPlayerCamera(scene: BABYLON.Scene, player?: TOOLKIT.PlayerNumber, detach?: boolean): BABYLON.FreeCamera;
-        /** Get camera transform node for desired player */
-        static GetCameraTransform(scene: BABYLON.Scene, player?: TOOLKIT.PlayerNumber): BABYLON.TransformNode;
-        /** Are stereo side side camera services available. */
-        static IsStereoCameras(): boolean;
-        /** Are local multi player view services available. */
-        static IsMultiPlayerView(): boolean;
-        /** Get the current local multi player count */
-        static GetMultiPlayerCount(): number;
-        /** Activates current local multi player cameras. */
-        static ActivateMultiPlayerCameras(scene: BABYLON.Scene): boolean;
-        /** Disposes current local multiplayer cameras */
-        static DisposeMultiPlayerCameras(): void;
-        /** Sets the multi player camera view layout */
-        static SetMultiPlayerViewLayout(scene: BABYLON.Scene, totalNumPlayers: number): boolean;
-    }
-    /*********************************************/
-    /** Camera Editor Properties Support Classes */
-    /*********************************************/
-    interface IEditorArcRtotate {
-        alpha: number;
-        beta: number;
-        radius: number;
-        target: TOOLKIT.IUnityVector3;
-    }
-}
-declare namespace PROJECT {
-    /**
      * Babylon Script Component
      * @class DebugInformation
      */
@@ -35059,811 +35161,6 @@ declare namespace PROJECT {
         constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
         protected awake(): void;
         protected destroy(): void;
-    }
-}
-declare namespace PROJECT {
-    /**
-    * Babylon Script Component (LEGACY)
-    * @class RemotePlayerController
-    * @deprecated This class is considered legacy and may be removed in future versions.
-    */
-    class RemotePlayerController extends TOOLKIT.ScriptComponent {
-        updateStateParams: boolean;
-        smoothMotionTime: number;
-        smoothInputVectors: boolean;
-        private animator;
-        private animationStateParams;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected update(): void;
-        protected destroy(): void;
-        /** Finds the remote player's `TOOLKIT.Animator`, on this node or on the first child that carries one. */
-        private attachAnimationController;
-        private validateAnimationStateParams;
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon toolkit standard player controller class (LEGACY)
-     * @class StandardPlayerController - All rights reserved (c) 2020 Mackey Kinard
-     * @deprecated This class is considered legacy and may be removed in future versions.
-    */
-    class StandardPlayerController extends TOOLKIT.ScriptComponent {
-        static MIN_VERTICAL_VELOCITY: number;
-        static MIN_GROUND_DISTANCE: number;
-        static MIN_MOVE_EPSILON: number;
-        static MIN_TIMER_OFFSET: number;
-        static MIN_SLOPE_LIMIT: number;
-        static PLAYER_HEIGHT: string;
-        enableInput: boolean;
-        attachCamera: boolean;
-        rotateCamera: boolean;
-        mouseWheel: boolean;
-        toggleView: boolean;
-        freeLooking: boolean;
-        requireSprintButton: boolean;
-        gravitationalForce: number;
-        minFallVelocity: number;
-        verticalStepSpeed: number;
-        minStepUpHeight: number;
-        rigidBodyMass: number;
-        airbornTimeout: number;
-        maxAngle: number;
-        speedFactor: number;
-        rootMotion: boolean;
-        moveSpeed: number;
-        walkSpeed: number;
-        lookSpeed: number;
-        jumpSpeed: number;
-        jumpDelay: number;
-        eyesHeight: number;
-        pivotHeight: number;
-        maxDistance: number;
-        scrollSpeed: number;
-        topLookLimit: number;
-        downLookLimit: number;
-        lowTurnSpeed: number;
-        highTurnSpeed: number;
-        smoothDampTime: number;
-        smoothInputVectors: boolean;
-        smoothAcceleration: boolean;
-        accelerationSpeed: number;
-        decelerationSpeed: number;
-        avatarSkinTag: string;
-        climbVolumeTag: string;
-        vaultVolumeTag: string;
-        maxHeightRanges: any;
-        useClimbSystem: boolean;
-        distanceFactor: number;
-        cameraSmoothing: number;
-        cameraCollisions: boolean;
-        inputMagnitude: number;
-        /** Unity StarterAssetsInputs.analogMovement: true drives the MotionSpeed parameter with the input magnitude (gamepad sticks), false keeps it at 1 (keyboard). */
-        analogMovement: boolean;
-        landingEpsilon: number;
-        minimumDistance: number;
-        movementAllowed: boolean;
-        playerInputX: number;
-        playerInputZ: number;
-        playerMouseX: number;
-        playerMouseY: number;
-        runKeyRequired: boolean;
-        buttonRun: number;
-        keyboardRun: number;
-        buttonJump: number;
-        keyboardJump: number;
-        buttonCamera: number;
-        keyboardCamera: number;
-        postNetworkAttributes: boolean;
-        playerNumber: TOOLKIT.PlayerNumber;
-        boomPosition: BABYLON.Vector3;
-        airbornVelocity: BABYLON.Vector3;
-        movementVelocity: BABYLON.Vector3;
-        targetCameraOffset: BABYLON.Vector3;
-        isAnimationEnabled(): boolean;
-        isRunButtonPressed(): boolean;
-        isJumpButtonPressed(): boolean;
-        getPlayerJumped(): boolean;
-        getPlayerJumping(): boolean;
-        getPlayerFalling(): boolean;
-        getPlayerSliding(): boolean;
-        getPlayerGrounded(): boolean;
-        getFallTriggered(): boolean;
-        getMovementSpeed(): number;
-        getCameraBoomNode(): BABYLON.TransformNode;
-        getCameraTransform(): BABYLON.TransformNode;
-        getAnimator(): TOOLKIT.Animator;
-        getVerticalVelocity(): number;
-        getCharacterController(): TOOLKIT.CharacterController;
-        getPlayerLookRotation(): BABYLON.Vector3;
-        getPlayerMoveDirection(): PROJECT.PlayerMoveDirection;
-        getInputMovementVector(): BABYLON.Vector3;
-        getInputMagnitudeValue(): number;
-        getCameraPivotPosition(): BABYLON.Vector3;
-        getCameraPivotRotation(): BABYLON.Quaternion;
-        rayClimbOffset: number;
-        rayClimbLength: number;
-        getClimbContact(): boolean;
-        getClimbContactNode(): BABYLON.TransformNode;
-        getClimbContactPoint(): BABYLON.Vector3;
-        getClimbContactAngle(): number;
-        getClimbContactNormal(): BABYLON.Vector3;
-        getClimbContactDistance(): number;
-        canClimbObstaclePredicate: (action: number) => boolean;
-        rayHeightOffset: number;
-        rayHeightLength: number;
-        getHeightContact(): boolean;
-        getHeightContactNode(): BABYLON.TransformNode;
-        getHeightContactPoint(): BABYLON.Vector3;
-        getHeightContactAngle(): number;
-        getHeightContactNormal(): BABYLON.Vector3;
-        getHeightContactDistance(): number;
-        private abstractMesh;
-        private cameraDistance;
-        private forwardCamera;
-        private avatarRadius;
-        private groundingObject;
-        private groundingCallback;
-        private dollyDirection;
-        private cameraEulers;
-        private rotationEulers;
-        private cameraPivotOffset;
-        private cameraForwardVector;
-        private cameraRightVector;
-        private desiredForwardVector;
-        private desiredRightVector;
-        private lastRotationQuaternion;
-        private scaledCamDirection;
-        private scaledMaxDirection;
-        private parentNodePosition;
-        private maximumCameraPos;
-        private tempWorldPosition;
-        private cameraRaycastShape;
-        private defaultRaycastGroup;
-        private defaultRaycastMask;
-        private cameraRaycastMask;
-        private avatarSkins;
-        private cameraNode;
-        private cameraPivot;
-        private navigationAgent;
-        private characterController;
-        private verticalVelocity;
-        private smoothMotionSpeed;
-        private movementSpeed;
-        private isRunPressed;
-        private isJumpPressed;
-        private isCharacterSliding;
-        private isCharacterFalling;
-        private isCharacterGrounded;
-        private isCharacterFallTriggered;
-        private isCharacterJumpFrame;
-        private isCharacterJumping;
-        private isCharacterLanding;
-        private isCharacterRising;
-        private isCharacterNavigating;
-        private navigationAngularSpeed;
-        private updateStateParams;
-        private animationStateParams;
-        private sphereCollisionShape;
-        private hasGroundedContact;
-        private showDebugColliders;
-        private colliderVisibility;
-        private colliderRenderGroup;
-        private groundCheckDistance;
-        private deltaTime;
-        private minJumpTimer;
-        private delayJumpTimer;
-        private playerControl;
-        private canPlayerJump;
-        private animator;
-        private lastJumpVelocity;
-        private inputMovementVector;
-        private playerLookRotation;
-        private playerRotationVector;
-        private playerMovementVelocity;
-        private playerRotationQuaternion;
-        private playerMoveDirection;
-        private forwardDirection;
-        private downDirection;
-        private climbContact;
-        private climbContactNode;
-        private climbContactAngle;
-        private climbContactPoint;
-        private climbContactNormal;
-        private climbContactDistance;
-        private climbSensorLine;
-        private offsetClimbRaycastPosition;
-        private startClimbRaycastPosition;
-        private endClimbRaycastPosition;
-        private heightContact;
-        private heightContactNode;
-        private heightContactAngle;
-        private heightContactPoint;
-        private heightContactNormal;
-        private heightContactDistance;
-        private heightSensorLine;
-        private offsetHeightRaycastPosition;
-        private startHeightRaycastPosition;
-        private endHeightRaycastPosition;
-        protected m_velocityOffset: BABYLON.Vector3;
-        protected m_actualVelocity: BABYLON.Vector3;
-        protected m_linearVelocity: BABYLON.Vector3;
-        protected m_lastPosition: BABYLON.Vector3;
-        protected m_positionCenter: BABYLON.Vector3;
-        protected m_scaledVelocity: number;
-        protected playerDrawVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected start(): void;
-        protected after(): void;
-        protected update(): void;
-        protected destroy(): void;
-        /** Register handler that is triggered before the controller has been updated */
-        onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered before the controller movement has been applied */
-        onBeforeMoveObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after the controller has been updated */
-        onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after player input has been updated */
-        onPlayerInputObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when player position should be updated */
-        onPlayerPositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after performing action has been updated */
-        onUpdateActionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observer on the Animator's `onAnimatorMoveObservable` while this controller takes root motion (D19, D20); null otherwise. */
-        private animatorMoveObserver;
-        /** The Animator's exported `applyRootMotion`, restored when this controller stops taking root motion. */
-        private exportedApplyRootMotion;
-        /** The last Animator tick's horizontal root-motion velocity (world, metres per second), moved by the character controller when `rootMotion` is on. */
-        private readonly rootMotionVelocity;
-        /**
-         * Registers the `onAnimatorMoveObservable` taker while root motion drives the player (`rootMotion` locomotion or a
-         * root-motion action) and removes it otherwise. The Animator may sit on a child model node, so the taker moves this
-         * player node rather than letting the built-in path move the model (D19, D20, D29).
-         */
-        private syncAnimatorMoveTaker;
-        /**
-         * The `onAnimatorMove` taker: a root-motion action moves and turns the player node; otherwise the horizontal root
-         * velocity is kept for the character controller's next move.
-         * @param animator The Animator that ticked.
-         */
-        private onAnimatorMove;
-        private isPerformingAction;
-        private isRootMotionAction;
-        private isActionInterruptable;
-        private afterActionHandler;
-        private performActionTimer;
-        private performActionNumber;
-        private playerRotationSpeed;
-        private rotatePlayerTowards;
-        private matchStartTime;
-        private matchTargetTime;
-        private matchTargetOffset;
-        private matchTargetHeight;
-        private lockTargetHeight;
-        private lastStartHeight;
-        private lastTargetHeight;
-        private lastTargetNormal;
-        private lastTargetRotation;
-        private lastDeltaPosition;
-        private lastDeltaRotation;
-        /** The eased player height of the height match (world metres). */
-        private smoothedPlayerHeight;
-        /** The SmoothDamp velocity of the height match (`x` holds it). */
-        private readonly playerHeightVelocity;
-        /** Full path hash of the base-layer state the running action entered; valid while `actionStateEntered`. */
-        private actionStateHash;
-        /** True once the running action's state was entered, so its exit ends the action. */
-        private actionStateEntered;
-        getIsPerformingAction(): boolean;
-        getIsRootMotionAction(): boolean;
-        getIsActionInterruptable(): boolean;
-        playActionAnimation(action: number, interruptableAction?: boolean, enableRootMotion?: boolean, afterActionComplete?: () => void): void;
-        resetActionAnimationState(): void;
-        /** Advances the action timer that drives the height match (the root motion itself is applied by the move taker). */
-        private updateAnimationActionState;
-        /**
-         * Applies a root-motion action's world root delta to the player node: the height match replaces the vertical delta
-         * between the match start and target times, and the player either turns toward the climb surface or by the root
-         * rotation delta. Called from the `onAnimatorMove` taker.
-         * @param animator The Animator that ticked.
-         */
-        private applyActionRootMotion;
-        /**
-         * The height match: from `matchStartTime` the vertical delta eases the player toward the target height
-         * (`lastTargetHeight + matchTargetOffset`, Unity SmoothDamp over the match window); once `matchTargetTime` passes it
-         * snaps to the target height once.
-         * @param deltaTime The frame delta in seconds.
-         */
-        private applyHeightMatch;
-        /**
-         * Turns the player toward the climb surface (facing into its normal) at `playerRotationSpeed`, while touching it.
-         * @param deltaTime The frame delta in seconds.
-         */
-        private rotateTowardsClimbSurface;
-        /** Set the player world position */
-        setWorldPosition(x: number, y: number, z: number): void;
-        /** TODO */
-        setPlayerControl(mode: PROJECT.PlayerInputControl): void;
-        /** TODO */
-        togglePlayerControl(): void;
-        private showAvatarSkins;
-        /** TODO */
-        attachPlayerCamera(player: TOOLKIT.PlayerNumber): void;
-        private ikLeftFootTarget;
-        private ikLeftPoleTarget;
-        private ikRightFootTarget;
-        private ikRightPoleTarget;
-        private abstractSkinMesh;
-        private rootBoneTransform;
-        private leftFootTransform;
-        private leftFootPoleOffset;
-        private leftFootMaxAngle;
-        private rightFootTransform;
-        private rightFootPoleOffset;
-        private rightFootMaxAngle;
-        private ikLeftController;
-        private ikRightController;
-        onAnimatorIK: () => void;
-        getPlayerMesh(): BABYLON.AbstractMesh;
-        getRootHipBone(): BABYLON.Bone;
-        getLeftFootBone(): BABYLON.Bone;
-        getRightFootBone(): BABYLON.Bone;
-        getLeftFootTarget(): BABYLON.Mesh;
-        getRightFootTarget(): BABYLON.Mesh;
-        getLeftFootPoleTarget(): BABYLON.Mesh;
-        getRightFootPoleTarget(): BABYLON.Mesh;
-        getRootBoneTransform(): BABYLON.TransformNode;
-        getLeftFootTransform(): BABYLON.TransformNode;
-        getRightFootTransform(): BABYLON.TransformNode;
-        getLeftFootController(): BABYLON.BoneIKController;
-        getRightFootController(): BABYLON.BoneIKController;
-        isGroundedFootIKActive(): boolean;
-        setupBoneControllers(): void;
-        /**
-         * Finds the player's `TOOLKIT.Animator` (on this node or a child model), ends a running action when its action state
-         * exits, runs `onAnimatorIK` or the foot IK controllers in the Animator's IK pass, and takes root motion when
-         * `rootMotion` is on.
-         */
-        private attachAnimationController;
-        /**
-         * Records the base-layer state a running action enters, so that state's exit can end the action.
-         * @param change The entered state.
-         */
-        private onAnimatorStateEnter;
-        /**
-         * Ends a running action when its action state exits.
-         * @param change The exited state.
-         */
-        private onAnimatorStateExit;
-        /** The Animator's IK pass: the script's `onAnimatorIK` when set, else the foot IK controllers. */
-        private onAnimatorIKPass;
-        private updateAnimatorTargetMeshes;
-        /** TODO */
-        enableCharacterController(state: boolean): void;
-        /** TODO */
-        resetPlayerRotation(): void;
-        /** TODO */
-        resetPlayerJumpingState(): void;
-        private awakePlayerController;
-        private startPlayerController;
-        private updatePlayerPosition;
-        private updatePlayerController;
-        private afterPlayerController;
-        private updateCharacterController;
-        private updateCameraController;
-        getBoomArmMaxDistance(): number;
-        setBoomArmMaxDistance(distance: number): void;
-        setSmoothBoomArmLength(length: number, speed: number, updateMaxDistance?: boolean): void;
-        private smoothBoomArmLength;
-        private smoothBoomArmSpeed;
-        private updateSmoothBoomArmLength;
-        private castPhysicsClimbingVolumeRay;
-        private castPhysicsHeightCheckVolumeRay;
-        private getCheckedVerticalVelocity;
-        private destroyPlayerController;
-        private validateAnimationStateParams;
-        /** Fills a missing params object with the defaults, and merges keys added since a params object was exported (motionSpeed). */
-        static ApplyAnimationStateParamDefaults(params: PROJECT.AnimationStateParams): PROJECT.AnimationStateParams;
-    }
-    /**
-    * Babylon Interface Definition
-    * @interface AnimationStateParams
-    */
-    interface AnimationStateParams {
-        moveDirection: string;
-        inputMagnitude: string;
-        horizontalInput: string;
-        verticalInput: string;
-        mouseXInput: string;
-        mouseYInput: string;
-        heightInput: string;
-        speedInput: string;
-        /** Speed multiplier parameter of the Starter Assets controller (Unity sets MotionSpeed every frame). */
-        motionSpeed?: string;
-        jumpFrame: string;
-        jumpState: string;
-        actionState: string;
-        fallingState: string;
-        slidingState: string;
-        groundedState: string;
-    }
-    /**
-    * Babylon Enum Definition
-    * @interface PlayerInputControl
-    */
-    enum PlayerInputControl {
-        FirstPersonStrafing = 0,
-        ThirdPersonStrafing = 1
-    }
-    /**
-    * Babylon Enum Definition
-    * @interface PlayerMoveDirection
-    */
-    enum PlayerMoveDirection {
-        Stationary = 0,
-        Forward = 1,
-        ForwardLeft = 2,
-        ForwardRight = 3,
-        Backward = 4,
-        BackwardLeft = 5,
-        BackwardRight = 6,
-        StrafingLeft = 7,
-        StrafingRight = 8
-    }
-    /**
-    * Babylon Enum Definition
-    * @interface ActionAnimationType
-    */
-    enum ActionAnimationType {
-        Neutral = 0,
-        StepUp = 1,
-        JumpUp = 2,
-        ClimbUp = 3,
-        VaultOver = 4
-    }
-}
-declare namespace PROJECT {
-    /**
-     * Babylon toolkit third person player controller class (LEGACY)
-     * @class ThirdPersonPlayerController - All rights reserved (c) 2020 Mackey Kinard
-     * @deprecated This class is considered legacy and may be removed in future versions.
-    */
-    class ThirdPersonPlayerController extends TOOLKIT.ScriptComponent {
-        static MIN_VERTICAL_VELOCITY: number;
-        static MIN_GROUND_DISTANCE: number;
-        static MIN_MOVE_EPSILON: number;
-        static MIN_TIMER_OFFSET: number;
-        static MIN_SLOPE_LIMIT: number;
-        static PLAYER_HEIGHT: string;
-        enableInput: boolean;
-        attachCamera: boolean;
-        mouseWheel: boolean;
-        requireSprintButton: boolean;
-        gravitationalForce: number;
-        minFallVelocity: number;
-        verticalStepSpeed: number;
-        minStepUpHeight: number;
-        rigidBodyMass: number;
-        airbornTimeout: number;
-        maxAngle: number;
-        speedFactor: number;
-        rootMotion: boolean;
-        moveSpeed: number;
-        walkSpeed: number;
-        jumpSpeed: number;
-        jumpDelay: number;
-        lowTurnSpeed: number;
-        highTurnSpeed: number;
-        smoothDampTime: number;
-        smoothInputVectors: boolean;
-        smoothAcceleration: boolean;
-        accelerationSpeed: number;
-        decelerationSpeed: number;
-        climbVolumeTag: string;
-        vaultVolumeTag: string;
-        maxHeightRanges: any;
-        useClimbSystem: boolean;
-        distanceFactor: number;
-        inputMagnitude: number;
-        /** Unity StarterAssetsInputs.analogMovement: true drives the MotionSpeed parameter with the input magnitude (gamepad sticks), false keeps it at 1 (keyboard). */
-        analogMovement: boolean;
-        landingEpsilon: number;
-        minimumDistance: number;
-        movementAllowed: boolean;
-        playerInputX: number;
-        playerInputZ: number;
-        playerMouseX: number;
-        playerMouseY: number;
-        runKeyRequired: boolean;
-        buttonRun: number;
-        keyboardRun: number;
-        buttonJump: number;
-        keyboardJump: number;
-        buttonCamera: number;
-        keyboardCamera: number;
-        postNetworkAttributes: boolean;
-        playerNumber: TOOLKIT.PlayerNumber;
-        airbornVelocity: BABYLON.Vector3;
-        movementVelocity: BABYLON.Vector3;
-        isAnimationEnabled(): boolean;
-        isRunButtonPressed(): boolean;
-        isJumpButtonPressed(): boolean;
-        getPlayerJumped(): boolean;
-        getPlayerJumping(): boolean;
-        getPlayerFalling(): boolean;
-        getPlayerSliding(): boolean;
-        getPlayerGrounded(): boolean;
-        getFallTriggered(): boolean;
-        getMovementSpeed(): number;
-        getAnimator(): TOOLKIT.Animator;
-        getVerticalVelocity(): number;
-        getCharacterController(): TOOLKIT.CharacterController;
-        getPlayerLookRotation(): BABYLON.Vector3;
-        getPlayerMoveDirection(): PROJECT.PlayerMoveDirection;
-        getInputMovementVector(): BABYLON.Vector3;
-        getInputMagnitudeValue(): number;
-        rayClimbOffset: number;
-        rayClimbLength: number;
-        getClimbContact(): boolean;
-        getClimbContactNode(): BABYLON.TransformNode;
-        getClimbContactPoint(): BABYLON.Vector3;
-        getClimbContactAngle(): number;
-        getClimbContactNormal(): BABYLON.Vector3;
-        getClimbContactDistance(): number;
-        canClimbObstaclePredicate: (action: number) => boolean;
-        rayHeightOffset: number;
-        rayHeightLength: number;
-        getHeightContact(): boolean;
-        getHeightContactNode(): BABYLON.TransformNode;
-        getHeightContactPoint(): BABYLON.Vector3;
-        getHeightContactAngle(): number;
-        getHeightContactNormal(): BABYLON.Vector3;
-        getHeightContactDistance(): number;
-        private freeCamera;
-        private cameraForwardVector;
-        private cameraRightVector;
-        private desiredForwardVector;
-        private desiredRightVector;
-        private lastRotationQuaternion;
-        private avatarSkins;
-        private avatarRadius;
-        private navigationAgent;
-        private characterController;
-        private verticalVelocity;
-        private smoothMotionSpeed;
-        private movementSpeed;
-        private isRunPressed;
-        private isJumpPressed;
-        private isCharacterSliding;
-        private isCharacterFalling;
-        private isCharacterGrounded;
-        private isCharacterFallTriggered;
-        private isCharacterJumpFrame;
-        private isCharacterJumping;
-        private isCharacterRising;
-        private isCharacterLanding;
-        private isCharacterNavigating;
-        private navigationAngularSpeed;
-        private updateStateParams;
-        private animationStateParams;
-        private sphereCollisionShape;
-        private hasGroundedContact;
-        private showDebugColliders;
-        private colliderVisibility;
-        private colliderRenderGroup;
-        private groundCheckDistance;
-        private deltaTime;
-        private delayJumpTimer;
-        private canPlayerJump;
-        private animator;
-        private lastJumpVelocity;
-        private inputMovementVector;
-        private playerLookRotation;
-        private playerMovementVelocity;
-        private playerRotationQuaternion;
-        private playerMoveDirection;
-        private forwardDirection;
-        private downDirection;
-        private climbContact;
-        private climbContactNode;
-        private climbContactAngle;
-        private climbContactPoint;
-        private climbContactNormal;
-        private climbContactDistance;
-        private climbSensorLine;
-        private offsetClimbRaycastPosition;
-        private startClimbRaycastPosition;
-        private endClimbRaycastPosition;
-        private heightContact;
-        private heightContactNode;
-        private heightContactAngle;
-        private heightContactPoint;
-        private heightContactNormal;
-        private heightContactDistance;
-        private heightSensorLine;
-        private offsetHeightRaycastPosition;
-        private startHeightRaycastPosition;
-        private endHeightRaycastPosition;
-        protected m_velocityOffset: BABYLON.Vector3;
-        protected m_actualVelocity: BABYLON.Vector3;
-        protected m_linearVelocity: BABYLON.Vector3;
-        protected m_lastPosition: BABYLON.Vector3;
-        protected m_positionCenter: BABYLON.Vector3;
-        protected m_scaledVelocity: number;
-        protected playerDrawVelocity: number;
-        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
-        protected awake(): void;
-        protected start(): void;
-        protected after(): void;
-        protected update(): void;
-        protected destroy(): void;
-        /** Character controller position
-         * @deprecated Moved to default camera controller
-         * @see PROJECT.DefaultCameraSystem
-         */
-        boomPosition: BABYLON.Vector3;
-        /** Register handler that is triggered before the controller has been updated */
-        onPreUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered before the controller movement has been applied */
-        onBeforeMoveObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after the controller has been updated */
-        onPostUpdateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after player input has been updated */
-        onPlayerInputObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered when player position should be updated */
-        onPlayerPositionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after performing action has been updated */
-        onUpdateActionObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Register handler that is triggered after animation state has been updated */
-        onAnimationStateObservable: BABYLON.Observable<BABYLON.TransformNode>;
-        /** Observer on the Animator's `onAnimatorMoveObservable` while this controller takes root motion (D19, D20); null otherwise. */
-        private animatorMoveObserver;
-        /** The Animator's exported `applyRootMotion`, restored when this controller stops taking root motion. */
-        private exportedApplyRootMotion;
-        /** The last Animator tick's horizontal root-motion velocity (world, metres per second), moved by the character controller when `rootMotion` is on. */
-        private readonly rootMotionVelocity;
-        /**
-         * Registers the `onAnimatorMoveObservable` taker while root motion drives the player (`rootMotion` locomotion or a
-         * root-motion action) and removes it otherwise. The Animator may sit on a child model node, so the taker moves this
-         * player node rather than letting the built-in path move the model (D19, D20, D29).
-         */
-        private syncAnimatorMoveTaker;
-        /**
-         * The `onAnimatorMove` taker: a root-motion action moves and turns the player node; otherwise the horizontal root
-         * velocity is kept for the character controller's next move.
-         * @param animator The Animator that ticked.
-         */
-        private onAnimatorMove;
-        private isPerformingAction;
-        private isRootMotionAction;
-        private isActionInterruptable;
-        private afterActionHandler;
-        private performActionTimer;
-        private performActionNumber;
-        private playerRotationSpeed;
-        private rotatePlayerTowards;
-        private matchStartTime;
-        private matchTargetTime;
-        private matchTargetOffset;
-        private matchTargetHeight;
-        private lockTargetHeight;
-        private lastStartHeight;
-        private lastTargetHeight;
-        private lastTargetNormal;
-        private lastTargetRotation;
-        private lastDeltaPosition;
-        private lastDeltaRotation;
-        /** The eased player height of the height match (world metres). */
-        private smoothedPlayerHeight;
-        /** The SmoothDamp velocity of the height match (`x` holds it). */
-        private readonly playerHeightVelocity;
-        /** Full path hash of the base-layer state the running action entered; valid while `actionStateEntered`. */
-        private actionStateHash;
-        /** True once the running action's state was entered, so its exit ends the action. */
-        private actionStateEntered;
-        getIsPerformingAction(): boolean;
-        getIsRootMotionAction(): boolean;
-        getIsActionInterruptable(): boolean;
-        playActionAnimation(action: number, interruptableAction?: boolean, enableRootMotion?: boolean, afterActionComplete?: () => void): void;
-        resetActionAnimationState(): void;
-        /** Advances the action timer that drives the height match (the root motion itself is applied by the move taker). */
-        private updateAnimationActionState;
-        /**
-         * Applies a root-motion action's world root delta to the player node: the height match replaces the vertical delta
-         * between the match start and target times, and the player either turns toward the climb surface or by the root
-         * rotation delta. Called from the `onAnimatorMove` taker.
-         * @param animator The Animator that ticked.
-         */
-        private applyActionRootMotion;
-        /**
-         * The height match: from `matchStartTime` the vertical delta eases the player toward the target height
-         * (`lastTargetHeight + matchTargetOffset`, Unity SmoothDamp over the match window); once `matchTargetTime` passes it
-         * snaps to the target height once.
-         * @param deltaTime The frame delta in seconds.
-         */
-        private applyHeightMatch;
-        /**
-         * Turns the player toward the climb surface (facing into its normal) at `playerRotationSpeed`, while touching it.
-         * @param deltaTime The frame delta in seconds.
-         */
-        private rotateTowardsClimbSurface;
-        /** Set the player world position */
-        setWorldPosition(x: number, y: number, z: number): void;
-        private ikLeftFootTarget;
-        private ikLeftPoleTarget;
-        private ikRightFootTarget;
-        private ikRightPoleTarget;
-        private abstractSkinMesh;
-        private rootBoneTransform;
-        private leftFootTransform;
-        private leftFootPoleOffset;
-        private leftFootMaxAngle;
-        private rightFootTransform;
-        private rightFootPoleOffset;
-        private rightFootMaxAngle;
-        private ikLeftController;
-        private ikRightController;
-        onAnimatorIK: () => void;
-        getPlayerMesh(): BABYLON.AbstractMesh;
-        getRootHipBone(): BABYLON.Bone;
-        getLeftFootBone(): BABYLON.Bone;
-        getRightFootBone(): BABYLON.Bone;
-        getLeftFootTarget(): BABYLON.Mesh;
-        getRightFootTarget(): BABYLON.Mesh;
-        getLeftFootPoleTarget(): BABYLON.Mesh;
-        getRightFootPoleTarget(): BABYLON.Mesh;
-        getRootBoneTransform(): BABYLON.TransformNode;
-        getLeftFootTransform(): BABYLON.TransformNode;
-        getRightFootTransform(): BABYLON.TransformNode;
-        getLeftFootController(): BABYLON.BoneIKController;
-        getRightFootController(): BABYLON.BoneIKController;
-        isGroundedFootIKActive(): boolean;
-        setupBoneControllers(): void;
-        /**
-         * Finds the player's `TOOLKIT.Animator` (on this node or a child model), ends a running action when its action state
-         * exits, runs `onAnimatorIK` or the foot IK controllers in the Animator's IK pass, and takes root motion when
-         * `rootMotion` is on.
-         */
-        private attachAnimationController;
-        /**
-         * Records the base-layer state a running action enters, so that state's exit can end the action.
-         * @param change The entered state.
-         */
-        private onAnimatorStateEnter;
-        /**
-         * Ends a running action when its action state exits.
-         * @param change The exited state.
-         */
-        private onAnimatorStateExit;
-        /** The Animator's IK pass: the script's `onAnimatorIK` when set, else the foot IK controllers. */
-        private onAnimatorIKPass;
-        private updateAnimatorTargetMeshes;
-        /** TODO */
-        enableCharacterController(state: boolean): void;
-        /** TODO */
-        resetPlayerJumpingState(): void;
-        private awakePlayerController;
-        private startPlayerController;
-        private updatePlayerPosition;
-        private updatePlayerController;
-        private afterPlayerController;
-        private updateCharacterController;
-        private castPhysicsClimbingVolumeRay;
-        private castPhysicsHeightCheckVolumeRay;
-        private getCheckedVerticalVelocity;
-        private destroyPlayerController;
-        private validateAnimationStateParams;
-        /** Fills a missing params object with the defaults, and merges keys added since a params object was exported (motionSpeed). */
-        static ApplyAnimationStateParamDefaults(params: PROJECT.AnimationStateParams): PROJECT.AnimationStateParams;
-    }
-    /**
-    * Babylon Enum Definition
-    * @interface ThirdPersonControl
-    */
-    enum ThirdPersonControl {
-        ThirdPersonTurning = 0,
-        ThirdPersonForward = 1
     }
 }
 declare namespace PROJECT {
@@ -58425,10 +57722,20 @@ declare namespace TOOLKIT {
         static AllUniforms(): string[];
         private static AllUniformsBase;
         private static registered;
-        /** The scene's `hdrp.fog` block (parity scenes only), or null. */
+        /** The scene's fog block: `hdrp.fog` on a parity scene, `urp.fog` on a URP physical sky scene, otherwise null. */
         static FogBlock(scene: BABYLON.Scene): any;
-        /** The sky the aerial perspective comes from: the live PhysicallyBasedSky when it runs, else the `hdrp.sky` block. */
+        /** The sky the aerial perspective comes from: the live PhysicallyBasedSky when it runs, else the export's physical sky block. */
         static SkyOf(scene: BABYLON.Scene): any;
+        /**
+         * Binds `fogChain` for a URP physical sky, whose pass runs after everything where Unity's runs before transparents. x = the chain
+         * holds display values (decode, composite in linear, encode), y = a water surface exists, z = its height in metres, so a ray that
+         * meets the water first takes no fog, w = the fog is on, which makes Unity's opaque pass give sky pixels aerial perspective up to
+         * the fog's maximum distance (measured: the Morning preset's zenith 0.023 without it, 0.046 with it). A parity scene binds zero.
+         * @param effect The fog effect.
+         * @param scene The scene.
+         * @param fog The scene's fog block, or null.
+         */
+        private static BindChain;
         /** The fog inputs of this frame (computed once per render id). */
         static Frame(scene: BABYLON.Scene, fog: any): IHdrpFogFrame;
         /** The view depth at and beyond which a pixel is sky: the nearest face of an infinite-distance sky mesh (none -> 1e30). */
@@ -58473,6 +57780,21 @@ declare namespace TOOLKIT {
         static AmbientGlsl(): string;
         /** WGSL twin of `AmbientGlsl`. */
         static AmbientWgsl(): string;
+        /**
+         * The PhysicallyBasedSky aerial perspective at distance `tFrag` along `dir` (AtmosphericScattering.hlsl
+         * `EvaluateAtmosphericScattering`, sky part): the in-scatter from the sky's froxel LUT (`apLut`, sampled at screen `uv`) and
+         * the opacity from the optical depth, with the sky's artistic horizon / zenith tint. Shared by this pass and the volumetric
+         * clouds (at their mean cloud distance). Needs the atmosphere uniforms (HdrpPbSkyShaders.GlslUniforms + GlslCommon) and
+         * a `sampler2DArray apLut` declared first.
+         * @returns GLSL source.
+         */
+        static AerialPerspectiveGlsl(): string;
+        /**
+         * WGSL twin of AerialPerspectiveGlsl (`fogAerialPerspective` returns a `FogAerial`). Needs the atmosphere uniforms and
+         * `apLut` / `apLutSampler` declared first.
+         * @returns WGSL source.
+         */
+        static AerialPerspectiveWgsl(): string;
         static GlslHelpers(prefix: string): string;
         static WgslHelpers(prefix: string): string;
         private static Glsl;
@@ -58814,6 +58136,21 @@ declare namespace TOOLKIT {
             requested: boolean;
             captured: boolean;
         }, nowSeconds: number, frame: number, precomputationHash: string, lightHash: string, updateMode: number, updatePeriod: number): boolean;
+        /** ProbeRenderOutcome: nothing changes. */
+        static readonly ProbeRenderKept: number;
+        /** ProbeRenderOutcome: the render is the requested capture, ready for the prefilter. */
+        static readonly ProbeCaptureAccepted: number;
+        /** ProbeRenderOutcome: the render did not draw the sky, so the capture is taken again on the next frame. */
+        static readonly ProbeCaptureRetry: number;
+        /**
+         * What one finished probe render means for the live environment. A requested capture stands only when the sky was drawn;
+         * a render that did not draw it, while a capture waits for its prefilter, has replaced that capture, so it is taken again.
+         * @param capturing - True while a capture is requested.
+         * @param pendingFilter - True while an accepted capture waits for its prefilter.
+         * @param drewSky - True when the sky material was ready for this render.
+         * @returns ProbeRenderKept, ProbeCaptureAccepted or ProbeCaptureRetry.
+         */
+        static ProbeRenderOutcome(capturing: boolean, pendingFilter: boolean, drewSky: boolean): number;
         /** D34: the ambient SH - Dynamic (1) → the live read-back once it exists, else the exported static SH; Static (0) → the exported SH. */
         static SelectAmbientSh(skyAmbientMode: number, readback: BABYLON.SphericalHarmonics, exported: BABYLON.SphericalHarmonics): BABYLON.SphericalHarmonics;
         /** The polynomial scale that leaves diffuse = SH x indirect.diffuse after the environment level (pe x indirect.reflection) multiplies it. */
@@ -58899,6 +58236,8 @@ declare namespace TOOLKIT {
         private filtering;
         private pendingFilter;
         private capturing;
+        /** True when the probe's current render draws the sky (its material is ready), so the render can stand as a capture. */
+        private probeDrawsSky;
         private shReading;
         /** The live capture's ambient, pre-scaled harmonics in physical units (Dynamic ambient), null until the first read-back. */
         private readbackHarmonics;
@@ -58915,6 +58254,10 @@ declare namespace TOOLKIT {
         private apRequested;
         private apCamera;
         private readonly startTime;
+        /** Multiplies the exported sun intensity to the strength the sky scatters (`sky.sunintensityscale`, 1 on HDRP). */
+        private readonly sunIntensityScale;
+        /** The sky's stars (`params.spaceemissionurl`), or null. */
+        private readonly spaceCube;
         private constructor();
         /** "live" or "baked: <reason>" (Inspector read-out). */
         get mode(): string;
@@ -58934,7 +58277,25 @@ declare namespace TOOLKIT {
         private writeCloudUniforms;
         /** The cloud ambient: the sky's ambient SH at (0, -1, 0), physical (CloudLayerCommon `SampleSH9(_AmbientProbeBuffer, down)`). */
         private cloudAmbient;
+        /**
+         * The sky's ambient probe in one direction, physical and before the indirect-diffuse scale - the ambient the cloud layer and
+         * the volumetric clouds (TOOLKIT.VolumetricClouds) light with.
+         * @param direction The world direction.
+         * @returns The ambient radiance, black when the sky has no ambient yet.
+         */
+        ambientAt(direction: BABYLON.Vector3): BABYLON.Color3;
         private cloudLayers;
+        /**
+         * Loads the sky's exported space emission cube (`params.spaceemissionurl`).
+         * @returns The cube, or null when the export has none.
+         */
+        private loadSpaceEmission;
+        /**
+         * The `pbSpace` uniform: emission multiplier, cosine and sine of the Y rotation, and the X sign that takes a right-handed scene
+         * direction back to Unity's left-handed cube.
+         * @returns The uniform value.
+         */
+        private spaceEmissionUniform;
         private loadCloudMap;
         private bindEffect;
         /**
@@ -58945,6 +58306,12 @@ declare namespace TOOLKIT {
          * @param capturing True before the probe renders its faces, false after.
          */
         setProbeCapture(capturing: boolean): void;
+        /**
+         * True when the sky draws straight to display values: on a non-parity scene with no image-processing pass, materials encode
+         * for display themselves, and the sky's raw radiance would otherwise sit among them as linear values.
+         * @returns True for a scene whose image processing runs inside materials.
+         */
+        private encodesForDisplay;
         private applyMaterialUniforms;
         /** D37: the colour of every interacting light on surfaces x HDRP's atmospheric attenuation at the camera. */
         private attenuateSuns;
@@ -63392,6 +62759,210 @@ declare namespace TOOLKIT {
          * delivery (preloader and self-load both answering) is ignored.
          */
         private onDataLoaded;
+    }
+}
+declare namespace TOOLKIT {
+    /** One node kept around the camera while it is under water, as FollowPlayerSystem does in Unity. */
+    interface IMeshWaterFollower {
+        /** Node id. */
+        node: string;
+        /** World offset from the camera, in metres. */
+        offset: number[];
+        /** Local scale set once at start, or null to leave the node's own. */
+        scale: number[] | null;
+    }
+    /** Underwater state of a water surface drawn by an ordinary mesh. */
+    interface IMeshWaterUnderwater {
+        /** Height the camera is compared with, in metres. It can differ from the drawn surface: Unity URP Water sits 0.1 m below it. */
+        sealevel: number;
+        /** Raw RGB keys of the fog gradient (`Gradient.Evaluate`), sampled evenly from surface to `fogdepth`. Empty leaves the fog alone. */
+        fogcolors: number[][];
+        /** Added to each fog colour channel that is zero or more, then clamped to 1. A negative channel adds nothing. */
+        fogcolormultiplier: number[];
+        /** Metres of depth over which the gradient runs. */
+        fogdepth: number;
+        /** Fog density in Babylon's terms: Unity's value with the same export factor as `metadata.fogdensity`. */
+        fogdensity: number;
+        /** Linear fog start in metres. */
+        fogstart: number;
+        /** Linear fog end in metres. */
+        fogend: number;
+        /** The sun's raw colour (`Light.color`), which multiplies the fog; white when the effect has no light. */
+        suncolor: number[];
+        /** Node ids of `TOOLKIT.PostProcessor` volumes enabled only under water. */
+        volumenodes: string[];
+        /** Node ids enabled only under water. */
+        shownodes: string[];
+        /** Node ids rotated Euler(180, 0, 0) while under water. */
+        flipnodes: string[];
+        /** Nodes kept around the camera while under water. */
+        follownodes: TOOLKIT.IMeshWaterFollower[];
+    }
+    /** Exported properties of `TOOLKIT.MeshWaterSurface`. */
+    interface IMeshWaterSurfaceProperties {
+        /** World height of the still surface in metres. */
+        sealevel: number;
+        /** Vertical wave amplitude in metres (the material's `_WaveSteepness`), zero for a flat surface. */
+        waveamplitude: number;
+        /** Wave phase speed in radians per second (the material's `_WaveSpeed / 20`). */
+        wavespeed: number;
+        /** The underwater state, or null when the scene has none: the surface then only answers height queries. */
+        underwater: TOOLKIT.IMeshWaterUnderwater | null;
+    }
+    /**
+     * Water drawn by an ordinary mesh with a transpiled graph. It answers height queries in the shape of
+     * `HdrpWaterSurface`, and turns the underwater look on and off as one state switch: each frame it compares the active camera with
+     * sea level, and on a crossing it writes the scene's fog values, enables the listed volumes and nodes, plays their particles, and
+     * turns the listed nodes over. `scene.fogMode` is never written, so no material recompiles, and a scene with fog off has no underwater fog, as in Unity.
+     * @class MeshWaterSurface - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class MeshWaterSurface extends TOOLKIT.ScriptComponent {
+        /** The class name of the volumes this component switches. */
+        private static readonly POST_PROCESSOR_CLASS;
+        /** The class name of the particle systems this component plays. */
+        private static readonly PARTICLES_CLASS;
+        /** `ParticleSystemStopBehavior.StopEmittingAndClear`, because Unity deactivates the object in the same step. */
+        private static readonly STOP_AND_CLEAR;
+        /** CanvasTools doubles Unity's linear fog end on scene intake, so the underwater end takes the same factor. */
+        private static readonly LINEAR_FOG_END_SCALE;
+        /** The scene's water surface, by `scene.uniqueId`. */
+        private static Registry;
+        /** The exported properties. */
+        private waterProperties;
+        /** True between `enterUnderwater` and `leaveUnderwater`. */
+        private isUnderwater;
+        /** One fog colour, reused each frame. */
+        private readonly fogColorChannels;
+        /** The scene's fog colour above water, saved at the first switch. */
+        private readonly surfaceFogColor;
+        /** The scene's fog density above water. */
+        private surfaceFogDensity;
+        /** The scene's linear fog start above water. */
+        private surfaceFogStart;
+        /** The scene's linear fog end above water. */
+        private surfaceFogEnd;
+        /** Nodes enabled only under water. */
+        private shownNodes;
+        /** Particle systems on the shown nodes, played only under water. */
+        private shownParticles;
+        /** Volume nodes enabled only under water. */
+        private volumeNodes;
+        /** Nodes turned over while under water. */
+        private flippedNodes;
+        /** Nodes kept around the camera while under water. */
+        private followers;
+        /** One follower position, reused each frame. */
+        private readonly followPosition;
+        /**
+         * Created by the scene loader from the exported component.
+         * @param transform - The water root.
+         * @param scene - The scene.
+         * @param properties - The exported `IMeshWaterSurfaceProperties`.
+         * @param alias - The class name the component registers under.
+         */
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /**
+         * The scene's water surface. One per scene is the supported case; a second replaces the first with one warning.
+         * @param scene - The scene to look in.
+         * @returns The surface, or null when the scene has none.
+         */
+        static Get(scene: BABYLON.Scene): TOOLKIT.MeshWaterSurface;
+        /**
+         * Reads the exported properties and registers the surface.
+         * Runs before the first frame, so game code can query heights from its own `start`.
+         */
+        protected awake(): void;
+        /**
+         * Builds the components on the nodes shown only under water, which stay asleep while their node is disabled. Their particle
+         * systems then join the reveal-time warm-up, so the first dip compiles nothing.
+         */
+        protected ready(): void;
+        /** Finds the listed nodes once. A camera that starts under water enters the state at once, as Unity's `Start` does. */
+        protected start(): void;
+        /** Runs the state switch for the active camera. Allocates nothing on a frame without a crossing. */
+        protected update(): void;
+        /** Drops the surface from the registry and puts the scene back as it was above water. */
+        protected destroy(): void;
+        /** @returns World height of the still surface in metres. */
+        getSeaLevel(): number;
+        /** @returns World height of the surface now: `sealevel + sin(clockSeconds * wavespeed) * waveamplitude`. */
+        getSurfaceHeight(): number;
+        /**
+         * @param camera - The camera to measure.
+         * @returns Metres of the camera above the surface, negative under water.
+         */
+        getCameraHeight(camera: BABYLON.Camera): number;
+        /**
+         * True at or below the height the Unity underwater component compares with. That height ignores the wave, so a camera
+         * resting at the surface does not flicker between the two states.
+         * @param camera - The camera to test.
+         * @returns True when the underwater state applies to this camera.
+         */
+        isCameraUnderwater(camera: BABYLON.Camera): boolean;
+        /**
+         * Mirrors `HdrpWaterSurface.ProjectPointOnWaterSurface`. The surface is one flat height, so the search ends at once.
+         * @param searchParameters - `targetPositionWS` may be a `Vector3` or a number array.
+         * @returns The surface point under the target, or null without a target.
+         */
+        ProjectPointOnWaterSurface(searchParameters: TOOLKIT.IHdrpWaterSearchParameters): TOOLKIT.IHdrpWaterSearchResult;
+        /**
+         * Mirrors `HdrpWaterSurface.FindWaterSurfaceHeight`.
+         * @param searchParameters - As `ProjectPointOnWaterSurface`.
+         * @returns The surface point under the target, or null without a target.
+         */
+        FindWaterSurfaceHeight(searchParameters: TOOLKIT.IHdrpWaterSearchParameters): TOOLKIT.IHdrpWaterSearchResult;
+        /**
+         * Resolves node ids, skipping one the export no longer holds.
+         * @param nodeIds - Exported node ids.
+         * @returns The nodes found.
+         */
+        private findNodes;
+        /**
+         * Finds the particle systems to start and stop: Unity's underwater component does this from script, so they are authored stopped.
+         * @param nodes - The shown nodes.
+         * @returns The systems found.
+         */
+        private findParticles;
+        /**
+         * Works out a node's two rotations once. Unity turns the plane over because it draws front faces only. The node stays
+         * live: a static water mesh loads with a frozen world matrix, which would ignore the turn.
+         * @param node - The node to turn over.
+         * @returns The node and its rotations.
+         */
+        private prepareFlip;
+        /**
+         * Resolves the follow list and sets each node's fixed scale.
+         * @param follownodes - The exported list, absent on an older export.
+         * @returns The followers found.
+         */
+        private prepareFollowers;
+        /** Saves the surface fog, writes the underwater fog, and turns on everything that shows only below the surface. */
+        private enterUnderwater;
+        /** Restores the surface fog and turns off everything `enterUnderwater` turned on. */
+        private leaveUnderwater;
+        /**
+         * Saves the scene's fog and writes the underwater distances and density. The density takes the scene intake's scale for its mode.
+         * @param underwater - The underwater block.
+         */
+        private writeUnderwaterFog;
+        /** Puts the scene's fog back exactly as it was. */
+        private restoreSurfaceFog;
+        /**
+         * Switches the listed volumes. The node goes first because `IsVolumeEnabled` also tests it.
+         * @param enabled - The new state.
+         */
+        private setVolumesEnabled;
+        /**
+         * Writes the fog colour of the current depth, as the Unity underwater component does each frame, in the same raw
+         * colour values as `metadata.fogcolor`.
+         * @param depthMeters - Metres below the surface, zero or more.
+         */
+        private updateFog;
+        /**
+         * Keeps the horizon box and the particles around the camera, as `FollowPlayerSystem.LateUpdate` does.
+         * @param camera - The active camera.
+         */
+        private updateFollowers;
     }
 }
 /** Babylon Toolkit Namespace */
@@ -68154,6 +67725,11 @@ declare namespace TOOLKIT {
          * @returns True for a Cinemachine volume.
          */
         private isCinemachineVolume;
+        /**
+         * True for a volume the exporter marked `role: "switched"`, which a component turns on later.
+         * @returns True for a switched volume.
+         */
+        private isSwitchedVolume;
         /** Whether this volume contributes: `SetVolumeEnabled` and its node's own enabled state. */
         IsVolumeEnabled(): boolean;
         /** True while the per-frame local-volume observer is registered (only scenes with local volumes register one). */
@@ -69766,6 +69342,8 @@ declare namespace TOOLKIT {
         static readonly VOLUME_TYPES: string[];
         /** cinemachine-port D25: the `role` the exporter writes on a Cinemachine camera's volume. */
         static readonly CINEMACHINE_VOLUME_ROLE: string;
+        /** The `role` of a volume `TOOLKIT.MeshWaterSurface` switches on below the surface. */
+        static readonly SWITCHED_VOLUME_ROLE: string;
         /** PPv2 `GradingMode` enum (`ColorGrading.gradingMode`): 0 LowDefinitionRange, 1 HighDefinitionRange (default), 2 External. */
         static readonly GRADING_MODES: string[];
         /** Unity `RenderingPath` names as exported in `renderingpath`; PPv2 renders SSR only on `DeferredShading`. */
@@ -78843,6 +78421,23 @@ declare namespace TOOLKIT {
          * @returns The body, or null when there is no collider to build it from.
          */
         static CreateComplexCompoundBody(scene: BABYLON.Scene, entity: BABYLON.TransformNode, childItems: TOOLKIT.PhyscisContainerData[], rootMeshShape: BABYLON.PhysicsShape, motionType: BABYLON.PhysicsMotionType, physics: any, mass: number, centerOfMass: BABYLON.Vector3, layermask: number, filtermask: number): BABYLON.PhysicsBody;
+        /**
+         * Marks what the loader may dispose once a complex compound child has given its collider to the root's body: a node
+         * that exists only to carry the collider goes whole, while a node that also renders stays and only loses its
+         * `.Collider` mesh. A LOD level with a BoxCollider is such a node: disposing it would remove the visible mesh,
+         * and with it every lower level, which stay blocked by a disposed LOD master.
+         * @param entity The compound child node.
+         */
+        private static MarkCompoundChildForDisposal;
+        /**
+         * Whether a node is a mesh Unity renders, shadow-only renderers included. Having vertices is not enough: with the
+         * exporter's "Default Collision Proxy" on, a collider whose renderer is absent or disabled gets a generated box.
+         * The exporter writes `metadata.toolkit.renderer` only for a present, enabled renderer whenever physics is exported,
+         * and it writes one on a `.Collider` mesh too, so that name is ruled out first.
+         * @param node A node.
+         * @returns True when the node draws in Unity.
+         */
+        private static RendersItself;
         protected static CreateCompoundPhysicsShapeAndBody(scene: BABYLON.Scene, root: BABYLON.TransformNode, entity: BABYLON.TransformNode, element: any, impostortype: number, staticfriction: number, dynamicfriction: number, restitution: number, fcombine: number, rcombine: number, sitems: TOOLKIT.PhyscisContainerData[], item: TOOLKIT.PhyscisContainerData, center: any, complex: boolean, trigger: boolean, persist: boolean, layer: number, filter: number): void;
         protected static CreateHeightFieldTerrainShapeFromMesh(terrainMesh: BABYLON.Mesh, scaleX: number, scaleZ: number): any;
         static GetPhysicsHeapSize(): number;
@@ -80344,7 +79939,8 @@ declare namespace TOOLKIT {
         getOwnedParticleSystems(): BABYLON.IParticleSystem[];
         /**
          * True when nothing of the system is drawn and it is drawn as quads, so a warm draw can show it (mesh / graph renderers draw through
-         * meshes): idle (never started), or playing but held by culling with no live particle.
+         * meshes): idle (never started), or playing but held by culling with no live particle. A system whose object was inactive at
+         * export (`enabled: false`) counts too: script activates it later, and without this draw its first show builds a GPU pipeline.
          */
         canBeginWarmupDraw(): boolean;
         /** Starts the warm draw: one invisible particle, the clock, RNG and emission bookkeeping untouched (SceneShaderWarmup reveal-time pass). */
@@ -83723,6 +83319,10 @@ declare namespace TOOLKIT {
      */
     class TerrainBuilder extends TOOLKIT.ScriptComponent {
         private static _registry;
+        /** worldToUnityUV's inverse world matrix: height queries run every frame and must not allocate one per call. */
+        private static readonly ScratchInverse;
+        /** worldToUnityUV's terrain-local position. */
+        private static readonly ScratchLocal;
         readonly onBuiltObservable: BABYLON.Observable<TOOLKIT.TerrainBuilder>;
         /** Loading progress of this terrain, stage by stage (see ITerrainLoadProgress). */
         readonly onLoadProgressObservable: BABYLON.Observable<TOOLKIT.ITerrainLoadProgress>;
@@ -83880,6 +83480,37 @@ declare namespace TOOLKIT {
         protected destroy(): void;
         private disposeParts;
         private buildAsync;
+        /**
+         * Finds this tile's four neighbours (D17). Reads each one's heights from its contract, because its heightfield may not be built yet.
+         * @returns The neighbours, or null when the tile stands alone.
+         */
+        private resolveEdgeNeighbors;
+        /**
+         * One axis neighbour of this tile.
+         * @param tiles The scene's registered tiles.
+         * @param neighborId The exported node id, or null.
+         * @param useIds True when the export carries neighbour ids, so adjacency is not tested.
+         * @param offsetX -1 or 1 along Unity x, else 0.
+         * @param offsetZ -1 or 1 along Unity z, else 0.
+         * @returns The neighbour's heights, or null when there is no matching tile.
+         */
+        private edgeNeighborFor;
+        /**
+         * D17: tiles continue each other's normals only with equal resolution and equal x and z size.
+         * @param other Another registered tile.
+         * @returns True when a shared edge lines up sample for sample.
+         */
+        private canShareEdgeWith;
+        /**
+         * DR-6.2 rectangle adjacency, for an export without neighbour ids: both tiles allow auto connect, share a grouping id, and
+         * the other tile's origin sits one tile size away in this tile's Unity space. Measured in that space, it holds under any
+         * parent transform, where comparing world axes would swap neighbours below a mirrored root.
+         * @param other Another registered tile.
+         * @param offsetX -1 or 1 along Unity x, else 0.
+         * @param offsetZ -1 or 1 along Unity z, else 0.
+         * @returns True when the other tile is this tile's neighbour on that side.
+         */
+        private isAdjacentTile;
         /** Shows or hides the built trees and details as drawTreesAndFoliage says (on a change, and once the parts are built). */
         private applyTreesAndFoliageVisibility;
         /**
@@ -84036,6 +83667,13 @@ declare namespace TOOLKIT {
         private static NowMs;
         /** [u, v] of a world position in Unity terrain space (unclamped), or null before the contract is known. */
         private worldToUnityUV;
+        /**
+         * True when a world position lies on this tile's rectangle, widened by a tolerance.
+         * @param worldPosition The world position.
+         * @param tolerance Slack in metres on every side.
+         * @returns False outside the widened rectangle, or before the contract is known.
+         */
+        private containsWorldPosition;
         /** Height relative to the terrain (Unity semantics), clamped to the terrain rect. */
         SampleHeight(worldPosition: BABYLON.Vector3): number;
         /** Local height at normalised (u, v). */
@@ -84050,7 +83688,13 @@ declare namespace TOOLKIT {
         private static Unregister;
         /** Every registered (valid-contract) terrain of the scene. */
         static GetTerrains(scene: BABYLON.Scene): TOOLKIT.TerrainBuilder[];
-        /** The terrain whose rect contains the world position (the last registered wins overlaps), or null. */
+        /**
+         * The terrain whose rect contains the world position (the last registered wins overlaps), or null. A point that misses
+         * every rect by Float32 rounding on a shared tile edge gets a second scan with TERRAIN_EDGE_TOLERANCE_METERS of slack.
+         * @param scene The scene.
+         * @param worldPosition The world position.
+         * @returns The terrain under the position, or null when none covers it.
+         */
         static GetTerrainAt(scene: BABYLON.Scene, worldPosition: BABYLON.Vector3): TOOLKIT.TerrainBuilder;
         /** World Y of the terrain surface under a world position, or null when no terrain covers it. */
         static GetWorldHeightAt(scene: BABYLON.Scene, worldPosition: BABYLON.Vector3): number;
@@ -84173,6 +83817,20 @@ declare namespace TOOLKIT {
             speed: number;
             wavelength: number;
         } | null;
+    }
+    /** The heights of one neighbouring tile, enough to continue a central difference across a shared edge. */
+    interface ITerrainEdgeNeighbor {
+        /** The neighbour's 16-bit heights, z outer, index = z * resolution + x. */
+        heights: Uint16Array;
+        /** The neighbour's height scale in metres (`size[1]`), which may differ from this tile's. */
+        heightScale: number;
+    }
+    /** The four axis neighbours of a tile in Unity terrain space: left -x, right +x, top +z, bottom -z. */
+    interface ITerrainEdgeNeighbors {
+        left: ITerrainEdgeNeighbor | null;
+        right: ITerrainEdgeNeighbor | null;
+        top: ITerrainEdgeNeighbor | null;
+        bottom: ITerrainEdgeNeighbor | null;
     }
     interface ITerrainContract {
         contract: number;
@@ -84396,14 +84054,6 @@ declare namespace TOOLKIT {
         }[];
         /** The layer's main-pass host with room for at least count instances (created or grown on demand). */
         private ensureMain;
-        /**
-         * Babylon's thinInstanceSetBuffer("matrix") keeps the old previous-world buffer (created on the first draw once the scene
-         * needs previous world matrices, e.g. HDRP motion blur velocity), and every draw then writes the grown count into it - on
-         * WebGPU that invalidates the whole frame. Rebuilt at the new size the way Babylon's own _thinInstanceUpdateBufferSize does:
-         * merely disposing it leaves its four previousWorld vertex buffers on the geometry, and the next pipeline then counts them
-         * as four separate buffers (past WebGPU's 8).
-         */
-        private static ResizePreviousMatrices;
         /** The main host's tint buffer: Babylon's "color" for mesh layers, "tkGrassTint" for texture grass (TerrainGrassPlugin). */
         private static TintBuffer;
         /** XZ distance from the camera (Unity-local metres) to the chunk rect. */
@@ -84576,6 +84226,14 @@ declare namespace TOOLKIT {
          * Keyed on the material's type and shader name, never on a graph, scene or material name.
          */
         static IsGraphMaterial(material: BABYLON.Material): boolean;
+        /**
+         * True when a Shader Graph class alone decides how its mesh moves, so the toolkit adds no sway. In Unity a terrain tree or
+         * mesh detail on a Shader Graph gets no engine wind: only what the graph computes moves it, and the transpiled class
+         * already does that. A SpeedTree material is the exception, because its wind comes from data its host may not carry.
+         * @param material The source material of a tree or detail host.
+         * @returns True when MODE_TREE and MODE_SWAY must be left out.
+         */
+        static GraphOwnsMotion(material: BABYLON.Material): boolean;
         getClassName(): string;
         isCompatible(shaderLanguage: BABYLON.ShaderLanguage): boolean;
         /** Installs (or extends, OR-ing the modes) the plugin on a material. Idempotent per material (metadata.tkFoliage). */
@@ -84889,6 +84547,8 @@ declare namespace TOOLKIT {
         private _errors;
         private _minH;
         private _maxH;
+        /** The tile's axis neighbours, null when it stands alone, so border normals stay one-sided. */
+        private edgeNeighbors;
         constructor(contract: TOOLKIT.ITerrainContract, heights: Uint16Array);
         get cellSizeX(): number;
         get cellSizeZ(): number;
@@ -84898,6 +84558,12 @@ declare namespace TOOLKIT {
         sampleHeight(x: number, z: number): number;
         /** Terrain-local normal (handedness applied to x). */
         normalAt(u: number, v: number, out: number[]): void;
+        /**
+         * Sets the tiles whose heights continue this tile's normals across its shared edges. Call it before any normal is read:
+         * the normal textures are built once from normalAt.
+         * @param neighbors The axis neighbours, or null when the tile stands alone.
+         */
+        setEdgeNeighbors(neighbors: TOOLKIT.ITerrainEdgeNeighbors): void;
         /** Fills the holes grid from TerrainImages pixels (R channel, > 127 = solid). Image row 0 = terrain z 0. */
         setHoles(pixels: Uint8ClampedArray, width: number): void;
         private cellX;
@@ -84953,8 +84619,19 @@ declare namespace TOOLKIT {
         static DecodeHeight(value: number, sizeY: number): number;
         /** Bilinear local height at normalised (u, v), both clamped to 0..1. */
         static SampleHeightBilinear(h: Uint16Array, R: number, sizeY: number, u: number, v: number): number;
-        /** Central difference at the nearest sample (one-sided on border samples), normalised [x, y, z] into out. */
-        static SampleNormal(h: Uint16Array, R: number, size: number[], u: number, v: number, out: number[]): void;
+        /**
+         * Central difference at the nearest sample, normalised [x, y, z] into out. A border sample continues across its shared
+         * edge into a neighbouring tile, each height decoded with its own tile's scale, so both tiles compute the same normal
+         * on the edge. A border sample without a neighbour stays one-sided.
+         * @param h The tile's heights, z outer.
+         * @param R The tile's samples per side.
+         * @param size The tile's size [x, y, z] in metres.
+         * @param u Unity-space normalised x, clamped to 0..1.
+         * @param v Unity-space normalised z, clamped to 0..1.
+         * @param out Receives the unit normal.
+         * @param neighbors The tile's axis neighbours, or null when it stands alone.
+         */
+        static SampleNormal(h: Uint16Array, R: number, size: number[], u: number, v: number, out: number[], neighbors?: TOOLKIT.ITerrainEdgeNeighbors): void;
         /** handedness 0 → -x */
         static UnityToLocalX(x: number, handedness: number): number;
         /** handedness 0 → -yaw */
@@ -85309,7 +84986,8 @@ declare namespace TOOLKIT {
     }
     /**
      * Terrain trees (unity-terrain-system-parity D15-D18, D29, D41, Design Reference §4.4, §14). Every prototype LOD renderer
-     * becomes one thin-instance host parented to the terrain node. Each update selects a Unity LODGroup level per instance
+     * becomes one thin-instance host parented to the terrain node. Hosts start small and grow to what is really drawn (D18), and
+     * every tile's hosts draw one scene-owned copy of each prototype's geometry (D19). Each update selects a Unity LODGroup level per instance
      * (relative height, maxfulllod, 0.5 s dithered crossfade), culls by distance and frustum, and rewrites the host buffers.
      * Instances outside the frustum but inside the terrain's shadow reach still go to the casting hosts, so trees behind
      * the camera cast into view (D44). Instances are visited through a 64 m grid (D45). Tree colliders are one static
@@ -85327,6 +85005,12 @@ declare namespace TOOLKIT {
         private static readonly NO_PROBE_RECORD;
         /** cos(0.5 deg): a smaller dot between light directions counts as the light turning. */
         private static readonly LIGHT_TURN_DOT;
+        /** The clone state a shared host must keep to draw as the renderer mesh does: winding, render group, layer, sort order, vertex colours, bones. */
+        private static readonly HOST_DRAW_STATE;
+        /** Per scene (uniqueId): one hidden mesh per "<templateid>|<lod>|<source uniqueId>", whose GPU buffers every tile's hosts share (D19). */
+        private static PreparedHosts;
+        /** The probe buffer a host holds now: growth replaces it, and the host's dispose must free the current one. */
+        private static ProbeBuffers;
         /** Per-scene clones of prototype materials, keyed "<templateid>|<material uniqueId>" (D41), with a reference count. */
         private static _materials;
         private _owner;
@@ -85340,6 +85024,8 @@ declare namespace TOOLKIT {
         private _colliderShapes;
         private _distance;
         private _built;
+        /** True once a host of this tile fell back to its own geometry, so the warning prints once per tile. */
+        private _warnedUniqueHost;
         private _n;
         private _proto;
         private _local;
@@ -85410,14 +85096,24 @@ declare namespace TOOLKIT {
          * @returns A new array of caster meshes.
          */
         getCasterMeshes(): BABYLON.AbstractMesh[];
-        /** Host count and instances drawn per host (diagnostics). */
+        /**
+         * Host count, instances drawn per host, and instances the hosts and caster slots have room for (diagnostics).
+         * @returns The numbers; capacity counts every host and slot.
+         */
         getStats(): {
             hosts: number;
             instances: number;
             drawn: number;
             visibleHosts: number;
             colliders: boolean;
+            capacity: number;
         };
+        /**
+         * How many prepared prototype geometries a scene holds (tests and diagnostics).
+         * @param scene The scene.
+         * @returns One per (template, LOD, source) in use, 0 when the scene has no trees.
+         */
+        static PreparedHostCount(scene: BABYLON.Scene): number;
         /**
          * Builds the tree instancer from the terrain contract: one camera host per LOD renderer of each prototype (plus the
          * caster slots of each casting host, terrain-performance D8), registers the shadow casters with the owner, decodes the
@@ -85428,9 +85124,9 @@ declare namespace TOOLKIT {
         /**
          * Creates the hosts of one prototype (§4.4 step 1): one thin-instance host per renderer mesh of each LOD level, with the
          * host's shadow-casting flag, its light-probe use and, for a casting host, its caster slots (terrain-performance D8).
-         * @param p The exported tree prototype.
-         * @param tpl The prototype's template node in the scene.
-         * @param cap The prototype's instance count (each host's capacity).
+         * @param prototype The exported tree prototype.
+         * @param template The prototype's template node in the scene.
+         * @param instanceCount The prototype's instance count: the ceiling each host and slot can grow to (D18).
          * @returns The prototype's runtime data, or null when no LOD produced a host.
          */
         private buildPrototype;
@@ -85441,6 +85137,19 @@ declare namespace TOOLKIT {
          * TerrainProbePlugin) over `probes` (every record starts at "no probe") - and the probe plugin on its material(s).
          */
         static AttachProbeBuffer(host: BABYLON.Mesh, probes: Float32Array): BABYLON.Buffer;
+        /**
+         * One instanced buffer over a host's probe records, bound as the three vec4 views of TerrainProbePlugin.
+         * @param host The host mesh.
+         * @param probes The packed records, TerrainProbePlugin.STRIDE each.
+         * @returns The new buffer.
+         */
+        private static CreateProbeBuffer;
+        /**
+         * Gives a grown host a probe buffer of its new size. The plugin stays attached, and the views' attribute names do not
+         * change, so no shader recompiles.
+         * @param host The host whose probes array was replaced.
+         */
+        private static ResizeProbeBuffer;
         /**
          * X10 fix loop 2: samples the scene's light-probe network once per instance (spatially ordered by the D45 grid so each
          * tetrahedral walk starts in the previous instance's cell), at the instance's world position (ProbeSampleHeight 0).
@@ -85497,12 +85206,49 @@ declare namespace TOOLKIT {
          * @throws Error when the source has no index buffer, no vertex buffers, or a vertex buffer without a GPU wrapper.
          */
         static CreateSharedHost(scene: BABYLON.Scene, source: BABYLON.Mesh, name: string): BABYLON.Mesh;
+        /**
+         * The mesh a renderer's geometry is drawn from: a copy baked into prototype space, in one interleaved buffer.
+         * @param source The renderer's mesh.
+         * @param templateWorldInverse The inverse world matrix of the prototype's template.
+         * @param name The new mesh's name.
+         * @returns The mesh, or null when the source cannot be cloned.
+         */
+        private static BakeHostGeometry;
+        /**
+         * The scene's one hidden copy of a prototype renderer's geometry (D19): it owns the GPU buffers every tile's hosts draw, so
+         * a tile's dispose never frees another tile's geometry. Lives until the scene is disposed.
+         * @param prototype The exported tree prototype.
+         * @param lod The LOD level.
+         * @param source The renderer's mesh.
+         * @param templateWorldInverse The inverse world matrix of the prototype's template.
+         * @returns The prepared mesh, or null when the source cannot be cloned.
+         */
+        private prepareHostGeometry;
+        /**
+         * Today's path for an engine without shared GPU buffers: the tile keeps its own geometry copy, so its trees never vanish.
+         * @param source The renderer's mesh.
+         * @param templateWorldInverse The inverse world matrix of the prototype's template.
+         * @param name The host's name.
+         * @param reason Why sharing failed, for the warning.
+         * @returns The host, or null when the source cannot be cloned.
+         */
+        private createUniqueHost;
+        /**
+         * One camera host of this tile: the scene's prepared geometry (D19) with this tile's own instance buffers.
+         * @param prototype The exported tree prototype.
+         * @param lod The LOD level.
+         * @param source The renderer's mesh.
+         * @param templateWorldInverse The inverse world matrix of the prototype's template.
+         * @param matrices The host's first instance matrices.
+         * @param fades The host's first LOD fades.
+         * @returns The host, or null when the source cannot be cloned.
+         */
         private createHost;
         /**
          * Builds the CASTER_SLOTS caster-only meshes of a casting host (terrain-performance D8). When GPU sharing fails the host keeps
          * no slots and casts itself, as before.
          * @param host The casting host.
-         * @param capacity Instances each slot can hold (the prototype's instance count).
+         * @param capacity Instances each slot can hold at first; it grows to the host's capacityCeiling (D18).
          */
         private createCasterSlots;
         /**
@@ -85524,6 +85270,7 @@ declare namespace TOOLKIT {
         /**
          * D41: one clone per (prototype, source material), named "<material>.<prototype>", with the foliage plugin attached.
          * T8: a SpeedTree 8 material on a host with wind vertex data gets its own clone without the MODE_TREE bend.
+         * A Shader Graph tree gets no bend either, because only its graph moves it in Unity (TerrainFoliagePlugin.GraphOwnsMotion).
          * @param p The exported tree prototype.
          * @param lod The LOD level of the host.
          * @param source The renderer's material (a MultiMaterial is cloned per sub-material).
@@ -85668,12 +85415,19 @@ declare namespace TOOLKIT {
         private static KthSmallest;
         /**
          * Appends instance `instanceIndex` to a host or slot: its matrix, the fade, its probe SH when the target binds probes (a "no probe" record while the scene's network is switched off), and the
-         * instance's sphere in the target's terrain-local box. A full target ignores the instance.
+         * instance's sphere in the target's terrain-local box. A full target grows (D18); one at its ceiling ignores the instance.
          * @param target The camera host or caster slot.
          * @param instanceIndex The instance index.
          * @param fade The LOD fade value (1 steady; signed crossfade weight otherwise).
          */
         private appendInstance;
+        /**
+         * Gives a full host or slot larger arrays, keeping the instances written so far (D18). The GPU buffers follow in uploadTarget.
+         * @param target The camera host or caster slot.
+         * @param ceiling The most instances the target can ever hold.
+         * @returns False when the target is already at its ceiling.
+         */
+        private static GrowTarget;
         /**
          * True when any host of a prototype's LOD level casts shadows (billboard LODs and castshadows:false renderers do not).
          * @param hosts The instancer's hosts.
@@ -85700,6 +85454,21 @@ declare namespace TOOLKIT {
          * @param shadowOnly True when the instance is outside the view (state 2).
          */
         private writeCaster;
+        /**
+         * Binds a grown host's or slot's new arrays. Each set uploads its whole array, so the frame needs no partial update.
+         * @param target The camera host or caster slot.
+         */
+        private static RebindGrownTarget;
+        /**
+         * Babylon's thinInstanceSetBuffer("matrix") keeps the old previous-world buffer (created on the first draw once the scene
+         * needs previous world matrices, e.g. HDRP motion blur velocity), and every draw then writes the grown count into it - on
+         * WebGPU that invalidates the whole frame. Rebuilt at the new size the way Babylon's own _thinInstanceUpdateBufferSize does:
+         * merely disposing it leaves its four previousWorld vertex buffers on the geometry, and the next pipeline then counts them
+         * as four separate buffers (past WebGPU's 8).
+         * @param mesh The grown thin-instance mesh.
+         * @param matrices Its new instance matrices.
+         */
+        static ResizePreviousMatrices(mesh: BABYLON.Mesh, matrices: Float32Array): void;
         /**
          * Uploads a host's or slot's instances written this update: count, matrices, fades, the probe buffer when bound, the bounding
          * box, and visibility (an empty target is hidden; a slot must be visible to cast). An empty slot is also disabled, and a
@@ -93294,6 +93063,515 @@ declare namespace TOOLKIT {
          * @returns Whether the burst fires in this interval.
          */
         private static crosses;
+    }
+}
+declare namespace TOOLKIT {
+    /** The exported curves of `urp.clouds`: 64 samples each over the layer height (CloudExportMath.CloudCurveSamples). */
+    interface ICloudCurves {
+        density?: number[];
+        erosion?: number[];
+        ambientocclusion?: number[];
+    }
+    /** One noise sidecar: its url, relative to the scene folder, and its volume edge in texels. */
+    interface ICloudNoiseFile {
+        url: string;
+        size: number;
+    }
+    /**
+     * The exported `urp.clouds` block (DR-4.6): the VolumetricClouds Volume fields under their lowercased names, the renderer
+     * feature's resolution scale, the curves and the noise sidecars. Every value may be missing from an older export.
+     */
+    interface IUrpCloudsBlock {
+        state?: boolean;
+        localclouds?: boolean;
+        resolutionscale?: number;
+        densitymultiplier?: number;
+        shapefactor?: number;
+        shapescale?: number;
+        shapeoffset?: number[];
+        coveragevariation?: number;
+        coveragepatternsize?: number;
+        coveragegapamount?: number;
+        coveragepatternoffset?: number[];
+        erosionfactor?: number;
+        erosionscale?: number;
+        microerosion?: boolean;
+        microerosionfactor?: number;
+        microerosionscale?: number;
+        bottomaltitude?: number;
+        altituderange?: number;
+        earthcurvature?: number;
+        globalspeed?: number;
+        globalorientation?: number;
+        shapespeedmultiplier?: number;
+        erosionspeedmultiplier?: number;
+        altitudedistortion?: number;
+        verticalshapewindspeed?: number;
+        verticalerosionwindspeed?: number;
+        cloudmapspeedmultiplier?: number;
+        ambientlightprobedimmer?: number;
+        sunlightdimmer?: number;
+        erosionocclusion?: number;
+        scatteringtint?: number[];
+        powdereffectintensity?: number;
+        multiscattering?: number;
+        temporalaccumulationfactor?: number;
+        perceptualblending?: number;
+        numprimarysteps?: number;
+        longraysamplemultiplier?: number;
+        numlightsteps?: number;
+        fadeinmode?: number;
+        fadeinstart?: number;
+        fadeindistance?: number;
+        curves?: TOOLKIT.ICloudCurves;
+        noise?: {
+            worley?: TOOLKIT.ICloudNoiseFile;
+            erosion?: TOOLKIT.ICloudNoiseFile;
+        };
+    }
+    /** The two `urp.sky` fields the clouds read: the planet and the sun's intensity scale. */
+    interface ICloudSkyFields {
+        planet?: {
+            radius?: number;
+            renderingspace?: number;
+            center?: number[];
+        };
+        sunintensityscale?: number;
+    }
+    /** One tier's march settings (DR-6.4). */
+    interface ICloudTierSettings {
+        /** Cloud target size as a fraction of the render size. */
+        resolutionScale: number;
+        /** Primary march steps. */
+        primarySteps: number;
+        /** How much longer rays may multiply their step count. */
+        longRayMultiplier: number;
+        /** Light march steps toward the sun. */
+        lightSteps: number;
+    }
+    /**
+     * unity-gaia-terrain-port T19 / T20: the pure maths of the volumetric clouds - shell intersection, step size, tier settings and
+     * the curve texture - free of Babylon so the tests run it without a scene.
+     */
+    class VolumetricCloudsMath {
+        /** The lowest tier: clouds are never switched off, only coarser. */
+        static readonly LowestTier: number;
+        /**
+         * Where a ray enters and leaves the cloud shell (the local-clouds case of `IntersectCloudVolume`).
+         * @param rayOrigin - Ray origin in planet space (relative to the planet centre), metres.
+         * @param rayDirection - Normalised ray direction.
+         * @param innerRadius - Radius of the layer bottom, metres from the planet centre.
+         * @param outerRadius - Radius of the layer top, metres from the planet centre.
+         * @param planetRadius - Planet radius for the earth-shadow test below the layer. Defaults to `innerRadius` (no test lost for a ray going up).
+         * @returns `[entry, exit]` in metres along the ray, or null when the ray misses the shell or the planet hides it.
+         */
+        static ShellInterval(rayOrigin: number[], rayDirection: number[], innerRadius: number, outerRadius: number, planetRadius?: number): number[];
+        /**
+         * The primary step length before the long-ray refinement (`TraceVolumetricRay`).
+         * @param shellLength - Metres of the ray inside the shell.
+         * @param steps - Primary step count.
+         * @param maximumStep - The largest step, metres (layer thickness / 8).
+         * @returns The step length in metres.
+         */
+        static StepSize(shellLength: number, steps: number, maximumStep: number): number;
+        /**
+         * The largest primary step (`_MaxStepSize`, layer thickness / 8), lengthened when a tier marches fewer steps than authored so
+         * the march still reaches as far as Unity's, up to CLOUD_MAX_STEP_STRETCH times.
+         * @param altitudeRange - Layer thickness, metres.
+         * @param authoredSteps - The Volume's primary steps (missing gives no stretch).
+         * @param tierSteps - The tier's primary steps.
+         * @returns The largest step, metres.
+         */
+        static MaximumStep(altitudeRange: number, authoredSteps: number, tierSteps: number): number;
+        /**
+         * The march settings of one tier (DR-6.4): every value is the authored one capped by the tier's CLOUD_TIER_CAPS row. Tier 0 caps
+         * at the browser ceiling; tiers 1 and 2 lower the resolution, long-ray refinement and light steps but keep 64 primary steps.
+         * @param tier - 0, 1 or 2 (clamped).
+         * @param authored - The `urp.clouds` block.
+         * @returns The settings.
+         */
+        static TierSettings(tier: number, authored: TOOLKIT.IUrpCloudsBlock): TOOLKIT.ICloudTierSettings;
+        /**
+         * The tier clouds start at: 1 on a phone-width viewport or a GPU whose textures stop below 8192, otherwise 0.
+         * @param maximumTextureSize - `engine.getCaps().maxTextureSize`.
+         * @param viewportCssWidth - The canvas width in CSS pixels.
+         * @returns The starting tier.
+         */
+        static StartTier(maximumTextureSize: number, viewportCssWidth: number): number;
+        /**
+         * True when the camera moved far enough in one frame to be a cut, so the temporal history no longer matches.
+         * @param previousPosition - Last frame's camera position, or null on the first frame.
+         * @param currentPosition - This frame's camera position.
+         * @returns True for a cut (or the first frame).
+         */
+        static IsCameraCut(previousPosition: number[], currentPosition: number[]): boolean;
+        /**
+         * The 64 x 1 curve texture (`PrepareCustomLutData`): density in red (zero at both ends), erosion in green, one minus ambient
+         * occlusion in blue, each clamped to 0..1. Missing curves give white, as the cloud feature does without a density curve.
+         * @param density - 64 density samples over the layer height.
+         * @param erosion - 64 erosion samples.
+         * @param ambientOcclusion - 64 ambient occlusion samples.
+         * @returns RGBA floats, 64 texels.
+         */
+        static PackCurves(density: number[], erosion: number[], ambientOcclusion: number[]): Float32Array;
+        /**
+         * Both hits of a sphere centred on the planet (`IntersectSphere`), or a negative pair when the ray misses.
+         * @param sphereRadius - Sphere radius, metres.
+         * @param cosChi - Cosine between the ray and the up vector at the origin.
+         * @param radialDistance - Distance of the origin from the planet centre, metres.
+         * @returns `[near, far]` distances along the ray.
+         */
+        private static IntersectSphere;
+    }
+    /**
+     * unity-gaia-terrain-port T20 / T21 (DR-6.4, amended): decides the cloud tier from what a tier saves, not from the whole frame.
+     * Frame times are averaged over windows of CLOUD_TIER_WINDOW_FRAMES frames. A second steady window over CLOUD_TIER_BUDGET_MS steps
+     * down one tier on trial; if the next window is not at least CLOUD_TIER_MINIMUM_SAVING faster, the clouds were not what made the frame
+     * slow, so the previous tier comes back and the tier stays there for the scene. A step that saves time stays, and a later slow
+     * window may try the next tier. The tier never goes above the starting tier, and clouds are never switched off.
+     */
+    class VolumetricCloudsTier {
+        /** The tier now drawn. */
+        tier: number;
+        /** True once a trial step saved nothing: the tier no longer changes. */
+        isSettled: boolean;
+        private windowMilliseconds;
+        private windowFrames;
+        /** The mean frame time of the window before the step on trial, or 0 when no step is on trial. */
+        private meanBeforeStep;
+        /** The previous window's mean frame time, or 0 before the first window. */
+        private previousMean;
+        /**
+         * Starts tracking at a tier.
+         * @param startTier - The starting tier (VolumetricCloudsMath.StartTier).
+         */
+        constructor(startTier: number);
+        /**
+         * Adds one frame.
+         * @param frameMilliseconds - The frame's duration (engine.getDeltaTime()).
+         * @returns True when this frame closed a window that changed the tier (a trial step down, or the restore of one).
+         */
+        addFrame(frameMilliseconds: number): boolean;
+    }
+    /**
+     * unity-gaia-terrain-port T19 / T20 (D16): the URP volumetric clouds (`urp.clouds`) drawn in the browser. One fragment pass marches
+     * the clouds into a half-float target at the authored resolution scale, limited by the camera depth copy, and a full-screen mesh
+     * composites them as the first transparent of the main rendering group, so water draws over the clouds and terrain hides them.
+     * A temporal pass reprojects last frame's clouds and blends them in (`temporalaccumulationfactor`), and the march settings step
+     * down a tier when frames run slow (DR-6.4).
+     * One instance per scene, on `scene._tkVolumetricClouds`. Cloud shadows on the ground and the clouds' own ambient probe are not
+     * carried (the export reports it).
+     */
+    class VolumetricClouds {
+        /** The composite mesh's name. */
+        static readonly MeshName: string;
+        /**
+         * Creates the scene's clouds when the export carries a `urp.clouds` block and the engine can render half-float targets.
+         * @param scene - The scene being loaded.
+         * @param metadata - The scene metadata.
+         * @param root - The scene's root url, which the noise urls are relative to.
+         * @returns The clouds, or null when there are none to draw.
+         */
+        static TryCreate(scene: BABYLON.Scene, metadata: unknown, root: string): TOOLKIT.VolumetricClouds;
+        /**
+         * The scene's clouds.
+         * @param scene - The scene.
+         * @returns The live clouds, or null.
+         */
+        static Get(scene: BABYLON.Scene): TOOLKIT.VolumetricClouds;
+        /** The scene the clouds draw in. */
+        readonly scene: BABYLON.Scene;
+        /** The exported `urp.clouds` block. */
+        readonly block: TOOLKIT.IUrpCloudsBlock;
+        /** True once disposed. */
+        disposed: boolean;
+        /** The tier now drawn (DR-6.4). */
+        tier: number;
+        private readonly sky;
+        private readonly root;
+        private readonly isLocal;
+        /** True when the live sky draws aerial perspective, so the march hazes the clouds at their distance (`CLOUD_AERIAL`). */
+        private hasAerial;
+        /** Bound to `apLut` until the sky's aerial perspective exists (a 1 x 1 x 1 black layer). */
+        private placeholderAerial;
+        private readonly planetRadius;
+        private readonly planetCenter;
+        private readonly scatteringTint;
+        private settings;
+        private worleyTexture;
+        private erosionTexture;
+        private curveTexture;
+        private placeholderDepth;
+        private marchTarget;
+        private renderer;
+        private marchPass;
+        private temporalPass;
+        /** Ping-pong history at cloud resolution: the temporal pass reads one and writes the other. */
+        private readonly historyTargets;
+        private historyIndex;
+        private hasHistory;
+        private compositeMesh;
+        private compositeMaterial;
+        private isReady;
+        private isPending;
+        private preExposure;
+        private preExposureBinding;
+        private frameSeed;
+        private readonly windOffset;
+        private verticalShapeOffset;
+        private verticalErosionOffset;
+        private sceneDepth;
+        private beforeRenderObserver;
+        private afterRenderObserver;
+        private tierTracker;
+        private targetWidth;
+        private targetHeight;
+        private lastCamera;
+        private sunLight;
+        private ambientSource;
+        private ambientCaptureCount;
+        private readonly previousEye;
+        private readonly currentEye;
+        private hasPreviousEye;
+        private beforeTargetsObserver;
+        private afterTargetsObserver;
+        private disposeObserver;
+        private readonly mirror;
+        private readonly inverseViewProjection;
+        /** Last frame's view-projection (Babylon space), for the temporal reprojection. */
+        private readonly previousViewProjection;
+        /** Last frame's view-projection taking Unity-space points, bound to the temporal pass. */
+        private readonly previousViewProjectionUnity;
+        private readonly sunDirection;
+        private readonly cameraForward;
+        /** The camera's local forward axis: +Z, or -Z in a right-handed scene. */
+        private readonly localForward;
+        private readonly ambientTop;
+        private readonly ambientBottom;
+        /**
+         * Builds the passes and starts loading the noise. The scene's loading is held until both noise volumes are uploaded and every
+         * shader compiled, so the first frame has clouds and no compile follows the reveal.
+         * @param scene - The scene.
+         * @param block - The `urp.clouds` block.
+         * @param sky - The `urp.sky` block (planet), or null.
+         * @param root - The scene's root url.
+         */
+        private constructor();
+        /** Releases every target, texture, mesh and observer, and the scene's loading if it is still held. */
+        dispose(): void;
+        /** Creates the curve texture, the march target and pass, and the composite mesh. */
+        private createPasses;
+        /**
+         * One half-float RGBA target at cloud resolution, sampled bilinearly and clamped.
+         * @param name - Target name.
+         * @param textureType - Half float, or float where half-float targets cannot render.
+         * @returns The target.
+         */
+        private createCloudTarget;
+        /**
+         * The 64 x 1 half-float curve texture (density, erosion, ambient occlusion), sampled with a repeating bilinear sampler as
+         * Unity's `s_linear_repeat_sampler` does.
+         * @returns The texture.
+         */
+        private createCurveTexture;
+        /**
+         * The composite: a clip-space quad drawn as the first transparent of the default rendering group, blending
+         * `scene x transmittance + scattering`. It is hidden while render targets (probes, reflections) draw.
+         * @param language - The shader language of the engine.
+         */
+        private createCompositeMesh;
+        /**
+         * Loads both noise sidecars into wrapping single-channel 3D textures.
+         * @returns True when both loaded. On a failure one warning prints and the clouds do not draw (the sky still does).
+         */
+        private loadNoise;
+        /**
+         * One noise volume: `size³` bytes, x fastest, then y, then slice, as CloudExportMath.FlipbookToVolume wrote them.
+         * @param name - Texture name.
+         * @param buffer - The sidecar bytes.
+         * @param size - Volume edge in texels.
+         * @returns The texture, or null (with one warning) when the file has the wrong length.
+         */
+        private createNoiseTexture;
+        /** Polls until the noise is uploaded and every shader compiled, then starts drawing and releases the scene's loading. */
+        private waitUntilReady;
+        /** Lets the scene finish loading (once). */
+        private releasePending;
+        /**
+         * Advances the wind, sizes the targets, marches the clouds and blends in the reprojected history. The composite then reads
+         * the new history (or the march itself when the accumulation factor is off, as Unity's `denoiseClouds`).
+         */
+        private render;
+        /**
+         * True when the colour buffer holds display-encoded values: a non-parity scene whose image processing runs in the materials
+         * (the sky encodes for display and the fog pass decodes the same way, HdrpPhysicallyBasedSky.encodesForDisplay).
+         * @returns True to encode the composite.
+         */
+        private isDisplayEncoded;
+        /**
+         * Resets the temporal history on the first frame, a camera switch or a cut (a move above CLOUD_CAMERA_CUT_METERS in one frame).
+         * @param camera - The active camera.
+         */
+        private trackCamera;
+        /**
+         * DR-6.4: one frame into the tier window; a slow window steps the clouds down one tier, resizes the targets once and reports it.
+         */
+        private updateTier;
+        /** Reports once each authored value the starting tier lowers (tier 0 holds the browser ceiling). */
+        private reportLoweredSettings;
+        /**
+         * Accumulates the wind offsets like VolumetricCloudsURP: kilometres per hour along the global orientation, wrapped.
+         * @param deltaSeconds - Seconds since the last frame.
+         */
+        private advanceWind;
+        /** Resizes the cloud targets (once) when the render size or the tier's resolution scale changed; the history restarts. */
+        private resizeTargets;
+        /**
+         * Sets the cloud target size: the render size times the tier's resolution scale, at least 1 pixel.
+         * @returns True when the size changed.
+         */
+        private updateTargetSize;
+        /**
+         * Binds the march uniforms. Each vec4 packs (VolumetricCloudsURP.UpdateMaterialProperties):
+         * cloudEye = camera position · cloudForward = (camera forward, x mirror sign) · cloudCamera = (far plane, depth copy bound, frame seed,
+         * pre-exposure) · cloudPlanet = (planet centre, radius) · cloudLayer = (bottom radius, top radius, largest step, primary steps)
+         * · cloudSteps = (long ray multiplier, light steps, fade start, fade distance) · cloudShape = (shape scale, shape factor,
+         * erosion scale, erosion factor) · cloudDetail = (erosion occlusion, micro erosion scale, micro erosion factor, density)
+         * · cloudShapeOffset = (offset x, offset z, offset y, altitude distortion) · cloudWind = (wind direction, wind offset)
+         * · cloudWindSpeed = (shape speed, erosion speed, vertical shape offset, vertical erosion offset) · cloudCoverage = (variation,
+         * inverse pattern size, gap amount) · cloudScattering = (multi scattering, powder) · cloudTint · cloudSunDirection (toward the
+         * sun) · cloudSunColor · cloudAmbientTop / Bottom. Positions and directions are mirrored into Unity's space.
+         * @param effect - The march effect.
+         */
+        private bindMarch;
+        /**
+         * The sun and ambient terms: the first interacting directional light's colour (already attenuated by the sky) times its
+         * intensity, the sky's sun scale and the sun dimmer, and the sky's ambient probe evaluated up and down times the probe dimmer.
+         * @param effect - The march effect.
+         * @param mirrorX - -1 in a right-handed scene, else 1.
+         */
+        private bindLighting;
+        /**
+         * Binds the live sky's aerial perspective (its froxel LUT, camera and atmosphere uniforms) for the haze at cloud distance.
+         * Until the sky has built the LUT (its first frames) the placeholder is bound and the haze is skipped.
+         * @param effect - The march effect.
+         */
+        private bindAerial;
+        /**
+         * The sun: the first interacting directional light, looked up again only when the cached one is gone or switched off. Its
+         * world direction (parent rotation applied) is written to `sunDirection` without allocating.
+         * @returns The sun, or null when the scene has no enabled directional light.
+         */
+        private resolveSun;
+        /**
+         * Re-evaluates the ambient up and down only when its source changed (the live sky captured again, or a new environment), so
+         * the per-frame bind does not allocate: the live sky's ambient probe, else the environment's polynomial, else the scene's
+         * ambient colour.
+         */
+        private refreshAmbient;
+        /**
+         * Binds the temporal pass: this frame's march, last frame's history and view-projection (into Unity's space), and
+         * `cloudCamera` = (far plane, depth copy bound, history valid, accumulation factor).
+         * @param effect - The temporal effect.
+         */
+        private bindTemporal;
+        /**
+         * Unity hands the shader `white - tint x 0.75` through Material.SetColor, which linearises it.
+         * @param tint - The authored scattering tint (sRGB components).
+         * @returns The linear extinction tint.
+         */
+        private static LinearScatteringTint;
+        /**
+         * The canvas width in CSS pixels (the render width when there is no canvas).
+         * @param scene - The scene.
+         * @returns The width.
+         */
+        private static CanvasCssWidth;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * unity-gaia-terrain-port T19 (D16): the GLSL and WGSL sources of the volumetric clouds - a line-for-line fragment port of the
+     * cloud march (`TraceVolumetricRay`, `EvaluateCloudProperties`, the two-octave light march `EvaluateSunTransmittance`) and of the
+     * combine pass. Every shader is registered in `ShaderStore` (GLSL) and `ShaderStoreWGSL` (WGSL) as twins.
+     * No `;` inside `//` comments of a shader string, no sampler function parameters, WGSL samplers at module scope.
+     * Defines: `CLOUD_LOCAL` (the camera flies through the layer, Unity's `_LOCAL_VOLUMETRIC_CLOUDS`), `CLOUD_MICRO_EROSION`, and
+     * `CLOUD_AERIAL`: the sky's aerial perspective at the mean cloud distance, as Unity's clouds combine pass with
+     * `PHYSICALLY_BASED_SKY` (VolumetricClouds.shader, `EvaluateAtmosphericScattering` at cloud depth). It reuses the fog pass's
+     * shared function (HdrpFogPass.AerialPerspectiveGlsl / Wgsl), so clouds take the in-scatter and extinction terrain takes at
+     * the same distance.
+     */
+    class VolumetricCloudsShaders {
+        /** The march pass: scattering in rgb, transmittance in alpha, one fragment per cloud-target pixel. */
+        static readonly MarchName: string;
+        /** The full-screen composite drawn as the first transparent. */
+        static readonly CompositeName: string;
+        /** The temporal pass: reprojects last frame's clouds and blends them in (pass 3, Temporal Denoising). */
+        static readonly TemporalName: string;
+        /** Every vec4 / mat4 uniform of the temporal pass. */
+        static readonly TemporalUniforms: string[];
+        /** The samplers of the temporal pass. */
+        static readonly TemporalSamplers: string[];
+        /** Every vec4 / mat4 uniform of the march pass, in declaration order. */
+        static readonly MarchUniforms: string[];
+        /** The samplers of the march pass. */
+        static readonly MarchSamplers: string[];
+        /** The extra sampler of the march when `CLOUD_AERIAL` is on: the live sky's aerial perspective froxels. */
+        static readonly AerialSampler: string;
+        /** The extra uniform of the march when `CLOUD_AERIAL` is on: (camera - planet centre, 1 when the LUT is bound). */
+        static readonly AerialCameraUniform: string;
+        private static registered;
+        /** Registers every cloud shader once (GLSL in ShadersStore, WGSL in ShadersStoreWGSL). */
+        static Register(): void;
+        /**
+         * Every source, GLSL then WGSL (tests scan them for `;` inside `//` comments).
+         * @returns The shader strings.
+         */
+        static AllSources(): string[];
+        /** The march pass uniforms. The packing of each vec4 is documented on `VolumetricClouds.bindMarch`. */
+        private static GlslMarchUniforms;
+        /** Constants of VolumetricCloudsUtilities.hlsl. */
+        private static GlslConstants;
+        /** Ray and shell geometry: sphere intersections in planet space (`cloudPlanet.xyz` is the planet centre, `.w` its radius). */
+        private static GlslGeometry;
+        /** Cloud density: coverage pattern, shape and erosion noise, the curve texture (`EvaluateCloudProperties`). */
+        private static GlslDensity;
+        /** Lighting: phase function, powder effect and the light march toward the sun (`EvaluateSunTransmittance`, `EvaluateCloud`). */
+        private static GlslLighting;
+        /** The aerial perspective declarations and functions of the march (only under `CLOUD_AERIAL`). */
+        private static GlslAerial;
+        /** The march pass (`frag` of pass 0 and `TraceVolumetricRay`). */
+        private static GlslMarch;
+        /** A clip-space quad: positions are already in clip space, the uv follows them. */
+        private static GlslCompositeVertex;
+        /**
+         * Pass 1 (Combine): blending gives scene x transmittance + scattering (premultiplied, alpha = 1 - transmittance). When the
+         * colour buffer holds display-encoded values (`cloudDisplayEncoded` = 1: a non-parity scene whose image processing runs in
+         * the materials, as the sky and fog pass assume), the wanted `encode(L x T + S)` is not linear in the encoded scene `d`,
+         * so the blend uses the straight line through its two ends: `encode(S)` at d = 0 and `encode(T + S)` at d = 1, that is
+         * `encode(S) + d x (encode(T + S) - encode(S))` (the slope from the scattering's luminance). It is exact where the cloud
+         * is clear or opaque and within a few hundredths over a bright sky, where a plain `T^(1/gamma)` overshoots cloud edges.
+         */
+        private static GlslCompositeFragment;
+        /**
+         * Pass 3 (Temporal Denoising): the history is reprojected with last frame's view-projection at the distance where the ray
+         * enters the cloud layer (or the scene depth, when nearer), clamped to the current colour's 5-tap box and blended in by
+         * the accumulation factor, faded by the reprojection velocity. Transmittance stays the current frame's, as in Unity.
+         * `cloudCamera` = (far plane, depth copy bound, history valid, accumulation factor), `cloudTexel` = (1 / width, 1 / height).
+         */
+        private static GlslTemporal;
+        /** The march pass uniforms (WGSL twin of GlslMarchUniforms). */
+        private static WgslMarchUniforms;
+        private static WgslConstants;
+        private static WgslGeometry;
+        private static WgslDensity;
+        private static WgslLighting;
+        /** WGSL twin of GlslAerial. */
+        private static WgslAerial;
+        private static WgslMarch;
+        private static WgslCompositeVertex;
+        private static WgslCompositeFragment;
+        private static WgslTemporal;
     }
 }
 /** Babylon Toolkit Namespace */
