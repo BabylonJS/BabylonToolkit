@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.34.100 - R1) */
+        /** Gets the toolkit framework version string (9.35.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -17391,6 +17391,8 @@ declare namespace TOOLKIT {
         transports: TOOLKIT.GameServerTransports;
         /** True when joins need an auth token. */
         authRequired: boolean;
+        /** True when players can sign in with Discord (Babylon Game Server discordSignIn). */
+        discordSignIn?: boolean;
     }
     /** The connections a game server accepts. */
     interface GameServerTransports {
@@ -23895,6 +23897,629 @@ declare namespace TOOLKIT {
     }
 }
 declare namespace TOOLKIT {
+    /** Which scores rank first: "lowerIsBetter" for times, "higherIsBetter" for points and counters. */
+    type LeaderboardSortOrder = "higherIsBetter" | "lowerIsBetter";
+    /** How a score is shown: a plain integer, milliseconds shown as a time, or points. Scores are integers (D12). */
+    type LeaderboardScoreFormat = "integer" | "timeMilliseconds" | "points";
+    /** What a new score does to a player's entry: keep the best, keep the latest, or add to a running total (D14). */
+    type LeaderboardKeepPolicy = "best" | "latest" | "sum";
+    /** How far a submission can be trusted (D9): signed by the game client, confirmed by session presence, or sent by a server API key. */
+    type LeaderboardTrustLevel = "client" | "session" | "server";
+    /** Why a request or one score was refused. */
+    type LeaderboardRefusalReason = "invalidRequest" | "authRequired" | "authRefused" | "banned" | "invalidPlayer" | "rateLimited" | "tooManyScores" | "unknownBoard" | "variantNotAllowed" | "scoreNotInteger" | "scoreOutOfRange" | "trustLevelNotAccepted" | "implausibleDuration" | "metadataTooLarge" | "nameInvalid" | "nameBlocked" | "nameManaged";
+    /** What a write did to the player's stored entry (D14). */
+    type LeaderboardWriteOutcome = "created" | "improved" | "replaced" | "added" | "kept";
+    /** A JSON value allowed in entry metadata (display-only details next to a score). */
+    type LeaderboardMetadataValue = string | number | boolean | null | LeaderboardMetadataValue[] | {
+        [key: string]: LeaderboardMetadataValue;
+    };
+    /** Free-form, size-capped details stored with an entry; never ranked or queried. */
+    type LeaderboardMetadata = {
+        [key: string]: LeaderboardMetadataValue;
+    };
+    /** One way a board's rankings are split (a "map", a "difficulty"), with the values a submission may use (D16). */
+    interface LeaderboardVariantDimension {
+        /** Key in a submission's variant object. */
+        name: string;
+        /** Label shown in the console and in games. */
+        label: string;
+        /** Allowed values, in display order. */
+        values: string[];
+    }
+    /** A board as game clients see it. */
+    interface LeaderboardPublicBoardView {
+        boardId: string;
+        displayName: string;
+        description: string;
+        sortOrder: LeaderboardSortOrder;
+        scoreFormat: LeaderboardScoreFormat;
+        keepPolicy: LeaderboardKeepPolicy;
+        dimensions: LeaderboardVariantDimension[];
+        currentSeasonId: number;
+        currentSeasonStartedAt: string;
+        /** ISO time of the next scheduled reset, or null. */
+        nextResetAt: string | null;
+    }
+    /** One season of a board. */
+    interface LeaderboardSeasonView {
+        /** 1, 2, 3 … */
+        seasonId: number;
+        /** ISO start. */
+        startedAt: string;
+        /** ISO end, or null for the current season. */
+        endedAt: string | null;
+        isCurrent: boolean;
+    }
+    /** One ranked entry. */
+    interface LeaderboardEntryView {
+        /** 1-based rank in its ranking. */
+        rank: number;
+        playerId: string;
+        /** The name the player had when the entry was written (console renames update it). */
+        displayName: string;
+        /** The player's avatar claim (a Discord avatar hash for user:discord: players), or null. */
+        avatar?: string | null;
+        score: number;
+        metadata: LeaderboardMetadata | null;
+        trustLevel: LeaderboardTrustLevel;
+        /** ISO time of the last accepted submission. */
+        submittedAt: string;
+        /** ISO time the stored score was reached (tie-break, D13). */
+        achievedAt: string;
+    }
+    /** A page of one ranking. */
+    interface LeaderboardEntriesPage {
+        boardId: string;
+        seasonId: number;
+        variantKey: string;
+        /** Entries in the ranking. */
+        total: number;
+        /** Zero-based index of the first entry. */
+        offset: number;
+        entries: LeaderboardEntryView[];
+    }
+    /** A window around one player; `playerRank` is null when the player has no entry. */
+    interface LeaderboardAroundPage extends LeaderboardEntriesPage {
+        playerRank: number | null;
+    }
+    /** A player as games see them. */
+    interface LeaderboardPlayerView {
+        playerId: string;
+        displayName: string;
+        kind: "anonymous" | "user" | "manual";
+        createdAt: string;
+    }
+    /** The answer to POST players: the player and, only when it was just created anonymously, its one-time key. */
+    interface LeaderboardPlayerSession {
+        player: LeaderboardPlayerView;
+        playerKey: string | null;
+    }
+    /** One score in a submission. */
+    interface LeaderboardScoreSubmission {
+        boardId: string;
+        /** Dimension values; null or {} for a board without dimensions. */
+        variant: Record<string, string> | null;
+        score: number;
+        metadata: LeaderboardMetadata | null;
+    }
+    /** POST submissions: the envelope every game sends at a key stage (spec D13). */
+    interface LeaderboardSubmissionRequest {
+        /** The anonymous player's key, or omitted for an auth user. */
+        playerKey?: string;
+        /** Client-made unique id, 8–64 of `[A-Za-z0-9-]` (exactly-once, D15). */
+        submissionId: string;
+        /** The game's mode name, at most 64 characters, or null. */
+        gameMode: string | null;
+        /** The game's build version, at most 64 characters, or null. */
+        buildVersion: string | null;
+        /** The network session name when the scores come from a network game, or null. */
+        sessionName: string | null;
+        /** How long the run lasted, in milliseconds, or null. */
+        durationMs: number | null;
+        /** The client's ISO clock (informational only; the server stamps its own time). */
+        clientTime: string | null;
+        /** 1–maximumScoresPerSubmission scores. */
+        scores: LeaderboardScoreSubmission[];
+    }
+    /** What happened to one score. */
+    interface LeaderboardScoreResult {
+        boardId: string;
+        variantKey: string | null;
+        status: "accepted" | "duplicate" | "refused";
+        outcome: LeaderboardWriteOutcome | null;
+        /** The stored score after the keep policy, or null when refused. */
+        score: number | null;
+        previousScore: number | null;
+        /** True when this submission created or improved the player's entry (or changed a latest/sum entry). */
+        isPersonalBest: boolean;
+        rank: number | null;
+        total: number | null;
+        seasonId: number | null;
+        trustLevel: LeaderboardTrustLevel | null;
+        refusal: LeaderboardRefusalReason | null;
+    }
+    /** The answer to POST submissions. */
+    interface LeaderboardSubmissionResponse {
+        submissionId: string;
+        playerId: string;
+        results: LeaderboardScoreResult[];
+    }
+    /** One ranking a player asks about. */
+    interface LeaderboardTarget {
+        boardId: string;
+        variant: Record<string, string> | null;
+        /** A season, or omitted for the current one. */
+        seasonId?: number;
+    }
+    /** A player's entry in one ranking (null when they have none). */
+    interface LeaderboardTargetEntry {
+        boardId: string;
+        variantKey: string;
+        seasonId: number;
+        total: number;
+        entry: LeaderboardEntryView | null;
+    }
+    /** The error body of a refused public request. */
+    interface LeaderboardErrorBody {
+        error: string;
+        reason: LeaderboardRefusalReason;
+    }
+    /** The part of the Web Storage API the client keeps its player key and unsent scores in (window.localStorage fits). */
+    interface LeaderboardStorage {
+        getItem(key: string): string | null;
+        setItem(key: string, value: string): void;
+        removeItem(key: string): void;
+    }
+    /** A fetch function (globalThis.fetch fits; tests pass a stub). */
+    type LeaderboardFetch = (url: string, init: RequestInit) => Promise<Response>;
+    /** Options of a LeaderboardClient. */
+    interface LeaderboardClientOptions {
+        /** The game's session server URL (ws://, wss://, http:// or https://), the same URL its network sessions use. */
+        serverUrl: string;
+        /** The server's auth token (the one startGame takes), or omitted when the server's auth is off. */
+        authToken?: string;
+        /** The game's build version, sent with every submission. */
+        buildVersion?: string;
+        /** Where the key and unsent scores are kept; default window.localStorage, null keeps nothing. */
+        storage?: LeaderboardStorage | null;
+        /** The fetch to use; default globalThis.fetch. */
+        fetchFunction?: LeaderboardFetch;
+        /** Milliseconds before a request counts as not sent; default 8000. */
+        requestTimeoutMs?: number;
+        /** Most unsent submissions kept on the device; default 50 (the oldest is dropped). */
+        maximumPendingSubmissions?: number;
+    }
+    /** What a game passes at a key stage: its scores and the run's facts; the client adds the rest of the envelope. */
+    interface LeaderboardSubmission {
+        scores: TOOLKIT.LeaderboardScoreSubmission[];
+        /** The game's mode name. */
+        gameMode?: string;
+        /** The network session name, when the scores come from a network game. */
+        sessionName?: string;
+        /** How long the run lasted, in milliseconds. */
+        durationMs?: number;
+    }
+    /** The result of a read or profile call: the value, a refusal, or not sent (offline, timeout, server error). */
+    type LeaderboardCallResult<Value> = {
+        status: "ok";
+        value: Value;
+    } | {
+        status: "refused";
+        reason: TOOLKIT.LeaderboardRefusalReason;
+        message: string;
+    } | {
+        status: "notSent";
+        message: string;
+    };
+    /** The result of a submission: sent, queued for later (offline), or refused. Never thrown. */
+    type LeaderboardSubmitResult = {
+        status: "sent";
+        response: TOOLKIT.LeaderboardSubmissionResponse;
+    } | {
+        status: "queued";
+        submissionId: string;
+        message: string;
+    } | {
+        status: "refused";
+        reason: TOOLKIT.LeaderboardRefusalReason;
+        message: string;
+    };
+    /** A read of one ranking. */
+    interface LeaderboardRangeQuery {
+        variant?: Record<string, string> | null;
+        seasonId?: number;
+        offset?: number;
+        limit?: number;
+    }
+    /**
+     * Talks to the Babylon Game Server's leaderboard service over HTTP (game-server-leaderboards D7, D8). It needs no
+     * network session, so single-player screens use it too, and it never loads the Colyseus client. Submit at key
+     * stages only (a match, round or level finish; the end of a multi-part run), one call per stage with every board that
+     * stage updates. Failed submissions wait on the device and are sent, once, on a later call.
+     * @example
+     * const client: TOOLKIT.LeaderboardClient = new TOOLKIT.LeaderboardClient({ serverUrl: "wss://game.example.com", authToken: token });
+     * const result: TOOLKIT.LeaderboardSubmitResult = await client.submit({ gameMode: "arena", durationMs: 92500, scores: [
+     *     { boardId: "arena-high-score", variant: { map: "harbor" }, score: 1840, metadata: { hero: "knight" } }
+     * ] });
+     */
+    class LeaderboardClient {
+        /** Milliseconds before a request counts as not sent, when the options name none. */
+        static readonly DEFAULT_REQUEST_TIMEOUT_MS: number;
+        /** Most unsent submissions kept on the device, when the options name none. */
+        static readonly DEFAULT_MAXIMUM_PENDING_SUBMISSIONS: number;
+        /** The server path every leaderboard route sits under. */
+        static readonly API_PATH: string;
+        /** Prefix of every storage key the client writes. */
+        static readonly STORAGE_PREFIX: string;
+        /** Storage key suffix of the anonymous identity. */
+        private static readonly PLAYER_STORAGE_SUFFIX;
+        /** Storage key suffix of the unsent submissions. */
+        private static readonly PENDING_STORAGE_SUFFIX;
+        /** Bytes of randomness in a submission id made from crypto.getRandomValues. */
+        private static readonly SUBMISSION_ID_RANDOM_BYTES;
+        /** Shortest submission id the server accepts. */
+        private static readonly MINIMUM_SUBMISSION_ID_LENGTH;
+        /** Random decimal digits appended to the clock in the last-resort submission id. */
+        private static readonly FALLBACK_RANDOM_DIGITS;
+        /** First HTTP status that is not a success. */
+        private static readonly HTTP_FIRST_FAILURE_STATUS;
+        /** HTTP status of a rate-limited request: sent again later, never refused. */
+        private static readonly HTTP_TOO_MANY_REQUESTS;
+        /** First HTTP status of a server error: sent again later, never refused. */
+        private static readonly HTTP_FIRST_SERVER_ERROR;
+        /** Message of a call made where no fetch exists. */
+        private static readonly NO_FETCH_MESSAGE;
+        /** Message of a queued submission. */
+        private static readonly QUEUED_MESSAGE;
+        /** The server's HTTP(S) address. */
+        private readonly endpoint;
+        /** The server's auth token, or an empty string to send none (setAuthToken changes it). */
+        private authToken;
+        /** The game's build version, or null. */
+        private readonly buildVersion;
+        /** Where the identity and unsent submissions are kept, or null for memory only. */
+        private readonly storage;
+        /** The fetch from the options, or null for globalThis.fetch at call time. */
+        private readonly fetchFunction;
+        /** Milliseconds before a request counts as not sent. */
+        private readonly requestTimeoutMs;
+        /** Most unsent submissions kept. */
+        private readonly maximumPendingSubmissions;
+        /** The identity as last written, used when the storage is missing or throws. */
+        private memoryPlayer;
+        /** The unsent submissions as last written, used when the storage is missing or throws. */
+        private memoryPending;
+        /** True once a storage call has thrown: from then on the identity and the waiting list live in memory only. */
+        private storageFailed;
+        /** The flush running now, shared by calls that overlap it, or null. */
+        private flushInFlight;
+        /**
+         * Creates a client for one game server. Nothing is sent until a method is called.
+         * @param options The server URL, auth token, build version, storage, fetch and limits.
+         */
+        constructor(options: TOOLKIT.LeaderboardClientOptions);
+        /** The server's HTTP(S) address (ws:// → http://, wss:// → https://). */
+        get httpEndpoint(): string;
+        /** Unsent submissions waiting on this device. */
+        get pendingCount(): number;
+        /**
+         * This device's anonymous player key for this server, or null before the first identity call or when nothing
+         * is stored. Send it only to the game's own server (for example so a sign-in can move the anonymous history);
+         * never show or log it.
+         */
+        get playerKey(): string | null;
+        /**
+         * The HTTP(S) address of a session server URL: ws:// maps to http://, wss:// to https://, anything else is kept.
+         * @param serverUrl The game's session server URL.
+         * @returns The HTTP(S) address.
+         */
+        static toHttpEndpoint(serverUrl: string): string;
+        /**
+         * Changes the token every later request sends, for a game whose player signs in or out without a reload.
+         * Waiting submissions stay queued and are sent with the new token.
+         * @param token The new token; null or an empty string sends none.
+         */
+        setAuthToken(token: string | null): void;
+        /**
+         * Forgets this device's anonymous player key for this server, in memory and in the storage, for a game whose
+         * anonymous player was moved into a signed-in player (the server erased it, so the key would only be refused).
+         * The next identity call makes a new anonymous player. Never throws.
+         */
+        forgetPlayerKey(): void;
+        /**
+         * Reads this device's player (POST players), creating an anonymous identity the first time. A new key is stored;
+         * a stored key the server no longer knows is forgotten and a new identity is made, once.
+         * @returns The player, a refusal, or not sent. Never throws.
+         */
+        getPlayer(): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardPlayerView>>;
+        /**
+         * Changes the player's display name (POST players/me/name), creating the identity first when there is none.
+         * @param displayName The new name; the server checks its length and blocked words.
+         * @returns The renamed player, a refusal (nameInvalid, nameBlocked …), or not sent. Never throws.
+         */
+        setDisplayName(displayName: string): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardPlayerView>>;
+        /**
+         * Submits the scores of one key stage. Waiting submissions are flushed first, then the identity is ensured, then
+         * this one is posted. Offline, timed out, rate limited or a server error: it is queued and sent once on a later call.
+         * An auth refusal keeps the submission queued, so it is sent once the game has a token the server accepts.
+         * @param submission The scores and the run's facts.
+         * @returns Sent with the server's per-score results, queued, or refused. Never throws.
+         */
+        submit(submission: TOOLKIT.LeaderboardSubmission): Promise<TOOLKIT.LeaderboardSubmitResult>;
+        /**
+         * Sends the waiting submissions, oldest first, with the current identity. It stops at the first one that is not
+         * sent or that the server refuses for its token (keeping it and the rest) and drops other refused ones. Overlapping
+         * calls share one flush.
+         * @returns How many were sent. Never throws.
+         */
+        flushPending(): Promise<number>;
+        /**
+         * Lists the public boards (GET boards).
+         * @returns The boards, a refusal, or not sent. Never throws.
+         */
+        listBoards(): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardPublicBoardView[]>>;
+        /**
+         * Lists a board's seasons (GET boards/:boardId/seasons).
+         * @param boardId The board.
+         * @returns The seasons, a refusal, or not sent. Never throws.
+         */
+        listSeasons(boardId: string): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardSeasonView[]>>;
+        /**
+         * Reads a page of one ranking from the top (GET boards/:boardId/entries).
+         * @param boardId The board.
+         * @param query The variant, season (default current), offset (default 0) and page size (the server's default).
+         * @returns The page, a refusal, or not sent. Never throws.
+         */
+        getTop(boardId: string, query?: TOOLKIT.LeaderboardRangeQuery): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardEntriesPage>>;
+        /**
+         * Reads the entries around this device's player in one ranking (POST boards/:boardId/around).
+         * @param boardId The board.
+         * @param variant The ranking's dimension values, or null for a board without dimensions.
+         * @param window Entries above and below the player (the server's default when omitted).
+         * @param seasonId A season, or omitted for the current one.
+         * @returns The page with the player's rank (null without an entry), a refusal, or not sent. Never throws.
+         */
+        getAroundMe(boardId: string, variant: Record<string, string> | null, window?: number, seasonId?: number): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardAroundPage>>;
+        /**
+         * Reads this device's player's entry in several rankings at once (POST entries/mine).
+         * @param targets The rankings.
+         * @returns One answer per target (entry null where the player has none), a refusal, or not sent. Never throws.
+         */
+        getMyEntries(targets: TOOLKIT.LeaderboardTarget[]): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardTargetEntry[]>>;
+        /**
+         * Reads the entries of chosen players in one ranking (POST boards/:boardId/players), e.g. the players of a session.
+         * @param boardId The board.
+         * @param playerIds The players (at most 50).
+         * @param variant The ranking's dimension values, or null for a board without dimensions.
+         * @param seasonId A season, or omitted for the current one.
+         * @returns The players' entries (players without one are absent), a refusal, or not sent. Never throws.
+         */
+        getPlayersEntries(boardId: string, playerIds: string[], variant?: Record<string, string> | null, seasonId?: number): Promise<TOOLKIT.LeaderboardCallResult<TOOLKIT.LeaderboardEntryView[]>>;
+        /**
+         * Erases this device's player and every entry of theirs on the server (POST players/me/delete). On success the
+         * stored identity and the waiting submissions are forgotten too.
+         * @returns How many entries were erased, a refusal, or not sent. Never throws.
+         */
+        deleteMyData(): Promise<TOOLKIT.LeaderboardCallResult<number>>;
+        /**
+         * Posts a JSON body.
+         * @param path The route after API_PATH.
+         * @param body The body.
+         * @returns The answer.
+         */
+        private postJson;
+        /**
+         * Reads a route.
+         * @param path The route after API_PATH, with its query string.
+         * @returns The answer.
+         */
+        private getJson;
+        /**
+         * Sends one request and sorts its answer: 2xx is ok, 429 and 5xx are not sent, any other 4xx is refused with the
+         * body's reason (invalidRequest when it has none). A network failure or timeout is not sent.
+         * @param method The HTTP method.
+         * @param path The route after API_PATH.
+         * @param body The JSON body, or null for none.
+         * @returns The answer. Never throws.
+         */
+        private send;
+        /**
+         * The full URL of a route.
+         * @param path The route after API_PATH.
+         * @returns The URL.
+         */
+        private routeUrl;
+        /**
+         * The fetch options of a request: plain-object headers (JSON content type on bodies, the bearer token when auth
+         * is on) and a timeout signal when the environment has one.
+         * @param method The HTTP method.
+         * @param body The JSON body, or null for none.
+         * @returns The options.
+         */
+        private requestInit;
+        /**
+         * Posts a route that names a player, with the stored key when there is one. A key the server no longer knows is
+         * forgotten.
+         * @param path The route after API_PATH.
+         * @param fields The body without the key.
+         * @returns The answer.
+         */
+        private postAsStoredPlayer;
+        /**
+         * Posts a route that names a player after making sure the device has an identity. A key the server no longer
+         * knows is forgotten, a new identity is made and the post is repeated once.
+         * @param path The route after API_PATH.
+         * @param fields The body without the key.
+         * @returns The answer.
+         */
+        private postAsIdentifiedPlayer;
+        /**
+         * Ensures the identity, then posts with its key.
+         * @param path The route after API_PATH.
+         * @param fields The body without the key.
+         * @returns The answer and whether a key was sent.
+         */
+        private postWithIdentity;
+        /**
+         * Makes sure the device can name its player: a stored key is enough; otherwise POST players (an auth user, or a
+         * new anonymous identity).
+         * @returns Ok, or why there is no identity.
+         */
+        private ensureIdentity;
+        /**
+         * POST players with a key or without one; a key in the answer is stored.
+         * @param storedPlayer The identity whose key is sent, or null to send none.
+         * @returns The player.
+         */
+        private requestPlayerSession;
+        /**
+         * Posts one submission envelope as the device's player.
+         * @param request The envelope, without a key.
+         * @returns The server's per-score results, a refusal, or not sent.
+         */
+        private postSubmission;
+        /**
+         * Builds the full envelope of a submission.
+         * @param submission What the game passed.
+         * @returns The envelope, without a key.
+         */
+        private buildSubmissionRequest;
+        /**
+         * Sends the waiting submissions (flushPending's work).
+         * @returns How many were sent. Never throws.
+         */
+        private flushQueue;
+        /**
+         * Puts a submission at the end of the waiting list, dropping the oldest beyond the limit.
+         * @param request The envelope, without a key.
+         * @returns The queued result.
+         */
+        private queueSubmission;
+        /**
+         * Takes one submission off the waiting list.
+         * @param submissionId Its id.
+         */
+        private removePending;
+        /**
+         * The stored anonymous identity.
+         * @returns The identity, or null when there is none (memory's copy when the storage is missing or has thrown).
+         */
+        private readStoredPlayer;
+        /**
+         * Keeps the anonymous identity, in memory and in the storage.
+         * @param player The identity.
+         */
+        private storePlayer;
+        /** Forgets the anonymous identity, in memory and in the storage. */
+        private forgetPlayer;
+        /**
+         * The waiting submissions, oldest first.
+         * @returns The envelopes, without keys.
+         */
+        private readPending;
+        /**
+         * Replaces the waiting submissions, in memory and in the storage (an empty list removes the storage item).
+         * @param pending The envelopes, without keys, oldest first.
+         */
+        private writePending;
+        /**
+         * A storage key of this server.
+         * @param suffix The item's suffix.
+         * @returns The key.
+         */
+        private storageKey;
+        /**
+         * Reads a storage item.
+         * @param key The key.
+         * @returns The text, null when the item is absent, or undefined when there is no usable storage (read memory).
+         */
+        private readStorageItem;
+        /**
+         * Writes a storage item; a missing or throwing storage keeps nothing (memory keeps it).
+         * @param key The key.
+         * @param value The text.
+         */
+        private writeStorageItem;
+        /**
+         * Removes a storage item; a missing or throwing storage keeps nothing (memory keeps it).
+         * @param key The key.
+         */
+        private removeStorageItem;
+        /**
+         * A new submission id of 8–64 characters from `[A-Za-z0-9-]`: crypto.randomUUID(), else 16 random bytes in hex
+         * from crypto.getRandomValues, else the clock and Math.random digits.
+         * @returns The id.
+         */
+        private static newSubmissionId;
+        /**
+         * A signal that aborts the request after requestTimeoutMs, when the environment has AbortSignal.timeout.
+         * @returns The signal, or null.
+         */
+        private timeoutSignal;
+        /**
+         * A query string built with encodeURIComponent; parameters without a value are left out.
+         * @param parameters Names and values.
+         * @returns "?name=value&…", or an empty string.
+         */
+        private static queryString;
+        /**
+         * window.localStorage when the page has one and it can be reached.
+         * @returns The storage, or null.
+         */
+        private static defaultStorage;
+        /**
+         * globalThis.fetch, bound to the global object.
+         * @returns The fetch, or null when the environment has none.
+         */
+        private static globalFetch;
+        /**
+         * A body with the identity's key added (never in a header or the URL, D6).
+         * @param fields The body without the key.
+         * @param storedPlayer The identity, or null to add no key.
+         * @returns A new body.
+         */
+        private static withPlayerKey;
+        /**
+         * Reads a response's JSON body.
+         * @param response The response.
+         * @returns The parsed body, or null when it is empty or not JSON.
+         */
+        private static readBody;
+        /**
+         * Sorts an HTTP answer into ok, refused or not sent.
+         * @param status The HTTP status.
+         * @param body The parsed body.
+         * @returns The call result.
+         */
+        private static sortAnswer;
+        /**
+         * Whether an answer says the sent player key is unknown.
+         * @param answer The answer.
+         * @returns True for a refusal with reason invalidPlayer.
+         */
+        private static isInvalidPlayer;
+        /**
+         * Whether an answer is the server refusing the token itself (the player's session ended or changed), which must
+         * never cost a waiting score.
+         * @param answer The answer.
+         * @returns True for a refusal with reason authRequired or authRefused.
+         */
+        private static isAuthRefusal;
+        /**
+         * A not-sent result for something thrown.
+         * @param error What was thrown.
+         * @returns The result.
+         */
+        private static notSent;
+        /**
+         * A one-line description of something thrown.
+         * @param error What was thrown.
+         * @returns Its message.
+         */
+        private static describeError;
+    }
+}
+declare namespace TOOLKIT {
     /** Marks a kart that this client does not simulate (a network replica) so local karts still bump it (D16). */
     class KartBumpTarget extends TOOLKIT.ScriptComponent {
         /** True while the remote kart has star power; contact then spins the local kart out. */
@@ -23954,6 +24579,11 @@ declare namespace TOOLKIT {
     const DRIVER_HAS_ITEM_PARAMETER: string;
     /** Reversing: the driver turns to look behind (`Player.cs:1479-1489`, `Driver.SetBool("Reverse", …)`). */
     const DRIVER_REVERSE_PARAMETER: string;
+    /**
+     * The driver's trick triggers, in the order Unity fires them: `Player.cs:2557-2600` `trickJump()` cycles
+     * `trickAnimCounter` 0 → 1 → 2 → 0 and sets `Driver.SetTrigger("JumpTrick1")`, `"JumpTrick2"`, `"GliderTrick"`.
+     */
+    const DRIVER_TRICK_TRIGGERS: readonly string[];
     /** Which way the driver leans this frame. Both false is the upright `New State`. */
     interface IDriverLeanState {
         /** The `TurnLeft` bool. */
@@ -24012,6 +24642,8 @@ declare namespace TOOLKIT {
         private hasWrittenHead;
         /** The `Reverse` value last delivered to at least one Animator; the bool is written only when it changes. */
         private reverseWritten;
+        /** Index into `DRIVER_TRICK_TRIGGERS` of the next trick pose (Unity's `trickAnimCounter`). */
+        private trickAnimationIndex;
         /** Scratch values, so the per-frame work allocates nothing. */
         private readonly lookRotation;
         private readonly localAxis;
@@ -24097,6 +24729,14 @@ declare namespace TOOLKIT {
          * @param animators The rig Animators; each that declares `Reverse` receives it.
          */
         private writeReverse;
+        /**
+         * `Player.cs:2557-2600`. Fires the next trick pose in Unity's rotation (`JumpTrick1`, `JumpTrick2`, `GliderTrick`,
+         * then round again) on every rig Animator that declares it, and advances the rotation whether or not any did —
+         * an Animator without the triggers plays nothing, as in Unity.
+         * @param animators The rig Animators, as `updateFrame` receives them.
+         * @returns The trigger name fired.
+         */
+        playTrick(animators: TOOLKIT.Animator[]): string;
         /**
          * Turns the steering wheel about its own column: Unity writes `localEulerAngles = (0, 180 ± 25, 0)` onto a
          * wheel whose rest is `(0, 180, 0)`, so the turn is the rest followed by a local yaw.
@@ -27237,7 +27877,10 @@ declare namespace TOOLKIT {
          * moment the race camera takes over, before the countdown starts charging the launch.
          */
         isRevvingOnGrid?(): boolean;
-        /** `RACE_MANAGER.RACE_COMPLETED` (`Player.cs:1193`) — silences the glider trick voice. */
+        /**
+         * `RACE_MANAGER.RACE_COMPLETED` (`Player.cs:1193`) — silences the glider trick voice and fades the engine out
+         * (`PlayerSounds.cs:147-151`).
+         */
         isRaceCompleted?(): boolean;
         /**
          * `RACE_STARTED` — the green light. Optional: the player's idle starts fading in at the latest here when the game
@@ -27286,6 +27929,13 @@ declare namespace TOOLKIT {
         driftAudioEnabled: boolean;
         /** The engine and idle loops (`PlayerSounds.kart_sounds`). */
         engineAudioEnabled: boolean;
+        /**
+         * `RACE_MANAGER.RACE_COMPLETED` for this kart's engine: true fades the engine out (`PlayerSounds.cs:147-151`,
+         * `ComputerDriverSounds.cs:122-125`), false brings it back to its road level. Unity's flag is one static set when
+         * the player finishes, so every kart's engine fades together; a kart's own `isRaceCompleted()` fades it without
+         * this, so the game sets it on the other karts when its player finishes, and clears it for a new race.
+         */
+        raceCompleted: boolean;
         /** The payout voice (`Mario_Boost_Sounds`). */
         boostAudioEnabled: boolean;
         /** The hop blip (`effectSounds[6]`). Separate from `driftAudioEnabled` — see `tickHopAudio`. */
@@ -27458,6 +28108,8 @@ declare namespace TOOLKIT {
         protected enginePlayhead: KartEnginePlayhead;
         /** `kartSound.pitch` (`PlayerSounds.cs:122`). */
         protected enginePitch: number;
+        /** `kartSound.volume` while it fades after the race (`PlayerSounds.cs:147-151`), before the master gain; null while racing. */
+        protected raceEndEngineVolume: number | null;
         /** `kartIdle.volume` before the master gain: the player's eases from 0 to 0.8, an opponent's is 1 (D2). */
         protected idleLevel: number;
         /** `PlayerSounds.SceneEntryFinished` — the race intro has handed off, so the player's idle fades in. */
@@ -28022,6 +28674,22 @@ declare namespace TOOLKIT {
          * @returns The volume, `[0..1]`.
          */
         protected engineVolume(gliding: boolean): number;
+        /**
+         * This frame's engine volume before the master gain (`PlayerSounds.cs:138-151`). While racing it is the road level
+         * or the glider duck, written every frame. Once the race is completed Unity stops writing those levels and takes
+         * 0.01 off the volume every frame instead, down to silence, so the engine fades out while the race-end drive still
+         * holds the kart at speed.
+         * @param gliding Whether the kart is gliding.
+         * @param deltaSeconds Frame time, seconds.
+         * @returns The volume, `[0..1]`.
+         */
+        protected stepEngineLevel(gliding: boolean, deltaSeconds: number): number;
+        /**
+         * Whether the engine fades for a completed race: the game says so (`raceCompleted`, Unity's one static flag), or
+         * the kart's own race is completed.
+         * @returns True once the race is completed for this kart's engine.
+         */
+        protected isEngineRaceCompleted(): boolean;
         /**
          * D2: gives the engine and idle sources the rig's spatial values, whatever container they came from — so a person
          * driving Luigi (an AI-rig container) still hears a 2D engine, and a remote Mario (a player-rig container) is heard
@@ -29051,7 +29719,10 @@ declare namespace TOOLKIT {
      * volume nudges the kart's heading, it does not snap it.
      */
     const JUMP_PANEL_ROTATE_RATE: number;
-    /** `Player.cs:229`. Minimum `REALCURRENTSPEED` a trick needs — the ACTUAL nose-local speed. */
+    /**
+     * Minimum `REALCURRENTSPEED` a trick needs — the ACTUAL nose-local speed. Unity's `Player.cs:229` gate is 40; the
+     * game lowers it to 30 (user, 2026-11-10) so tricks are easier to hit.
+     */
     const TRICK_MIN_SPEED: number;
     /** How long the trick's upward push lasts, seconds. */
     const TRICK_SECONDS: number;
@@ -29070,7 +29741,10 @@ declare namespace TOOLKIT {
     const TRICK_FORCE_FLOOR: number;
     /** `Player.cs:539-541`. Seconds of boost a landed trick FLOORS `Boost_time` at. Never assigns. */
     const TRICK_LANDING_BOOST: number;
-    /** `Player.cs:1109-1214`. Above this `REALCURRENTSPEED` a glider deploy plays the trick variant. */
+    /**
+     * Above this `REALCURRENTSPEED` a glider deploy plays the trick variant (`Player.cs:1109-1214`). Unity's gate is 60;
+     * the game lowers it to 50 (user, 2026-11-10) so glider tricks are easier to hit.
+     */
     const GLIDER_TRICK_SPEED: number;
     /** The trick variant's pause before the canopy opens, seconds. */
     const GLIDER_TRICK_OPEN_DELAY: number;
@@ -30409,12 +31083,32 @@ declare namespace TOOLKIT {
         protected inputTrick: boolean;
         /** Seconds into the trick's upward push, or `-1` when no trick is running. */
         protected trickTime: number;
-        /** A `TrickCollider` has been touched, so a trick is allowed. Cleared on landing. */
+        /**
+         * Inside a `TrickCollider`, so a trick press is allowed (Unity's `trickAvailable`). Set on entering the volume,
+         * cleared on leaving it and when a trick starts (`Player.cs:1030`, `:1221`, `:232`).
+         */
         protected trickArmed: boolean;
-        /** A trick was performed this flight and its landing still owes the 0.9 s boost floor. */
+        /**
+         * A trick has started and its landing still owes the 0.9 s boost floor. Survives the end of the push window (the
+         * landing normally comes later); cleared on landing, or when the window ends without the kart leaving the ground.
+         */
         protected trickPerformed: boolean;
-        /** Edge-detect for the trick button: a trick fires on the PRESS, not on the hold. */
+        /** The kart has left the ground since the running trick started; only a ground contact after this lands it. */
+        protected trickLeftGround: boolean;
+        /** A `Ground`/`Dirt`/`AntiGravity` contact arrived since the last step. Read and cleared by `trackTrickGroundContact`. */
+        protected trickGroundContact: boolean;
+        /** Edge-detect for the trick button, read in `drive()`: a trick fires on the PRESS, not on the hold. */
         protected trickPressed: boolean;
+        /**
+         * A trick press `drive()` saw that no physics step has read yet. Set on the press, cleared by the next step.
+         *
+         * WHY A QUEUE: `drive()` runs once per rendered frame, and the physics runs on a fixed 0.02 s step (0..N steps a
+         * frame). A press is true for one frame only, so a frame that runs no step lost it — 17 % of frames at 60 Hz,
+         * 58 % at 120 Hz, 65 % at 144 Hz. That made the trick hit or miss on the same ramp.
+         */
+        protected trickPressQueued: boolean;
+        /** The driver trick trigger the last trick fired (`DRIVER_TRICK_TRIGGERS`), or null before the first one. */
+        protected lastTrickTrigger: string | null;
         /** Set each step by `move()`: does a vertical push survive into the next step? See its note there. */
         protected verticalAccumulates: boolean;
         /**
@@ -30946,12 +31640,20 @@ declare namespace TOOLKIT {
         /** Ends a jump-panel flight. `Player.cs:494`/`529` — contact with `Ground` or `Dirt`. */
         protected endJumpPanel(): void;
         /**
-         * `Player.cs:229`. Starts a trick if all three gates pass, otherwise does nothing at all.
-         *
-         * Returns whether one started, because "the trick did nothing" is a thing the bench and the
-         * tests need to be able to assert positively rather than infer from an unchanged trajectory.
+         * `Player.cs:229-232`. Starts a trick on the button press when every gate passes, otherwise does nothing at all.
+         * A started trick disarms its volume (`trickAvailable = false`, `:232`), so a second press in it does nothing.
+         * @returns Whether a trick started — so the bench and the tests can assert "nothing happened" positively.
          */
         protected tryTrick(): boolean;
+        /**
+         * Once per step, before the trick button is read: notes whether a trick in flight has left the ground, and clears
+         * the per-step contact flag.
+         *
+         * "Left the ground" is the first step with no `Ground`/`Dirt`/`AntiGravity` contact (the contact analogue of Unity's
+         * `OnCollisionExit`) or the ground probe reporting airborne, whichever comes first. The probe alone reaches
+         * `activeGroundRayDist` (2 units) down and still reports grounded for a while past the lip.
+         */
+        protected trackTrickGroundContact(): void;
         /**
          * One step of the trick's upward push.
          *
@@ -30960,6 +31662,10 @@ declare namespace TOOLKIT {
          * which is the same curve sampled differently. The floor is what makes the last third of the
          * trick a gentle hold rather than the force going negative and hauling the kart down.
          *
+         * When the window runs out the push stops but the landing is still owed (`trickPerformed`
+         * survives), because the window normally ends mid-air. Only a trick whose kart never left the
+         * ground ends there with nothing owed.
+         *
          * HOW IT IS DELIVERED DEPENDS ON THE FRAME, not on the mode — see the branch in the body and
          * `verticalAccumulates`. This doc used to say "a STEP VELOCITY, not an acceleration, because the
          * clamp never lets the heading ADD vertical speed, so an upward force cannot accumulate in ANY
@@ -30967,10 +31673,15 @@ declare namespace TOOLKIT {
          * clamp, so it lands in the body, and the clamp then preserves the body's `y` on every frame
          * where the nose is pitched above it — which is every frame of a ramp jump. The claim was wrong,
          * and the code that followed from it made a trick 3.87x higher at 144 Hz than at 30 Hz.
+         * @param dt Step length, seconds.
          */
         protected tickTrick(dt: number): void;
         /**
-         * `Player.cs:539-541`. Landing after a trick floors the boost at 0.9 s.
+         * `Player.cs:537-545`. A trick's landing: the first `Ground`/`Dirt`/`AntiGravity` contact after the kart left the
+         * ground ends the trick and floors the boost at 0.9 s. `AntiGravity` is a deliberate departure from Unity's
+         * OnCollisionEnter list (mario-kart-trick-fixes F5): a ramp onto an anti-gravity road pays on that landing.
+         * Called from `onSurfaceContact` on every contact step, enter and stay alike; a contact before the kart has left
+         * the ground (the ramp it is still on) neither ends the trick nor pays.
          *
          * **A FLOOR, NEVER AN ASSIGNMENT** (§E.4). Landing a trick in the middle of a 2.5 s drift
          * payout must not cut it to 0.9, which is what an assignment would do and what would make
@@ -30978,6 +31689,13 @@ declare namespace TOOLKIT {
          * when it is called.
          */
         protected landTrick(): void;
+        /**
+         * `Player.cs:2557-2600`. Fires the driver's next trick pose on the rig Animators and remembers which. Only a
+         * player trick calls it — the glider trick's payout does not.
+         */
+        protected playTrickAnimation(): void;
+        /** Ends the running trick with nothing owed: no push, no pending landing, no flight noted. */
+        protected clearTrickState(): void;
         /**
          * `Player.cs:1109-1214`. Leaving a `GliderPanelFly` volume deploys the glider.
          *
@@ -33294,9 +34012,15 @@ declare namespace TOOLKIT {
         isTricking(): boolean;
         /** Seconds into the trick push, or `-1`. */
         getTrickTime(): number;
-        /** A `TrickCollider` has been touched, so a trick is allowed until the next landing. */
+        /**
+         * The driver trick trigger the last trick fired — `JumpTrick1`, `JumpTrick2` or `GliderTrick`, in Unity's rotation —
+         * or null before the first trick. Set even when no rig Animator declares it (only some racers have the poses).
+         * @returns The trigger name, or null.
+         */
+        getLastTrickTrigger(): string | null;
+        /** The kart is inside a `TrickCollider` it has not tricked in yet, so a trick press is allowed. */
         isTrickArmed(): boolean;
-        /** A trick was performed this flight and its landing still owes the 0.9 s boost floor. */
+        /** A trick has started and its landing still owes the 0.9 s boost floor. */
         isTrickPending(): boolean;
         /** Front-wheel steer angle, degrees. Presentation only — see `updateWheels`. */
         getWheelSteer(): number;
@@ -62707,6 +63431,36 @@ declare namespace TOOLKIT {
         private static WarnLightmappedMaterial;
         /** Clears the riders of a mesh this network attached, lifts the ambient and Baked-light exclusions, removes the dispose observer, and (dynamic) compacts the registry by moving the last entry in. A mesh another network attached, or a raw clone sharing a rider, is left alone. */
         detach(mesh: BABYLON.AbstractMesh): void;
+        /**
+         * The dispose observer's detach. It runs before the loader's DisposeEntity, so the rider is normally intact and
+         * detach() does the work. When the mesh's metadata is already gone (another observer cleared it first), the
+         * registry entry is found by identity instead - never through metadata - so a disposed mesh never stays in the
+         * registry for sampleDynamic to read.
+         * @param mesh The mesh being disposed.
+         */
+        private detachDisposed;
+        /**
+         * Lets go of a mesh this network attached, reading nothing from its metadata (it may already be gone): lifts the
+         * ambient and Baked-light exclusions, removes its dynamic registry entry (or its static count), clears the owner
+         * and removes the dispose observer. The rider itself is detach()'s to clear.
+         * @param mesh The mesh to release.
+         * @param registryIndex The mesh's dynamic registry index, or -1 for a static mesh.
+         */
+        private releaseMesh;
+        /**
+         * Removes one dynamic registry entry by its index, never by reading the removed mesh's metadata: the last entry
+         * moves into the freed index, the last slot is nulled and the count drops by one. The moved mesh's
+         * lightProbeSlot follows it only while its metadata.toolkit exists - a moved mesh that lost its metadata is
+         * dropped by the next late().
+         * @param registryIndex The entry to remove, in [0, getDynamicCount()).
+         */
+        private removeDynamicEntry;
+        /**
+         * Drops every registry entry whose mesh was disposed, or lost its metadata, without the dispose observer
+         * removing it, so sampleDynamic never reads a dead mesh. Walks from the end, so the move-last-in of
+         * removeDynamicEntry only ever moves an entry that was already checked. One check per entry, no allocation.
+         */
+        private dropDisposedEntries;
         /** Re-interpolates one dynamic mesh now (ignores MoveThreshold). Returns the cell used. */
         sampleMeshNow(mesh: BABYLON.AbstractMesh): number;
         /** One registry entry's re-interpolation (Control flow › Frame step 4). */
