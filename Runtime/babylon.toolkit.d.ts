@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.0 - R1) */
+        /** Gets the toolkit framework version string (9.35.1 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -15567,6 +15567,11 @@ declare namespace TOOLKIT {
     const NETWORK_DEFAULT_TELEPORT_DISTANCE: number;
     /** Default longest extrapolation past the newest snapshot, in seconds (D16). */
     const NETWORK_DEFAULT_MAX_EXTRAPOLATION_SECONDS: number;
+    /**
+     * Longest an interpolated remote object coasts past its newest snapshot when the next one is late, in seconds: it
+     * keeps moving on that snapshot's velocity instead of freezing, and slides onto the late snapshot when it arrives.
+     */
+    const NETWORK_UNDERRUN_EXTRAPOLATION_SECONDS: number;
     /** Scene object ids are below this value (D7). */
     const NETWORK_SCENE_OBJECT_ID_LIMIT: number;
     /** First id of objects spawned by a server or host (D7). */
@@ -16013,6 +16018,13 @@ declare namespace TOOLKIT {
         readonly isServer: boolean;
         /** Time remote objects are drawn at, in seconds: estimated server time minus the interpolation delay (D15, A6). */
         readonly remoteRenderTime: number;
+        /**
+         * Time one remote object is drawn at, in seconds (in Shared mode, on its holder's arrival timeline). Optional: a
+         * view without it draws every object at remoteRenderTime.
+         * @param networkObject The object.
+         * @returns Seconds on the session clock.
+         */
+        remoteRenderTimeOf?(networkObject: TOOLKIT.NetworkObject | null): number;
         /**
          * Finds a spawned network object.
          * @param id The object's network id.
@@ -17522,6 +17534,8 @@ declare namespace TOOLKIT {
     interface NetworkSourcedFrame {
         sourcePlayerId: number;
         frame: Uint8Array;
+        /** The local clock when the frame arrived, in seconds; absent once it was held for a scene load. */
+        receivedSeconds?: number;
     }
     /** Header of one object block (Data shapes). Fields a block's flags do not carry are 0. */
     interface NetworkObjectBlockHeader {
@@ -18830,6 +18844,94 @@ declare namespace TOOLKIT {
          */
         private static pushSample;
     }
+    /**
+     * A clock offset that follows its target without steps: each update moves it towards the target by at most a rate
+     * times the elapsed time (so a clock read through it runs at most that much fast or slow, which the eye does not see),
+     * and a target further away than the snap distance is taken at once (a paused tab, a fresh clock).
+     */
+    class NetworkSmoothedOffset {
+        private readonly increaseRate;
+        private readonly decreaseRate;
+        private readonly snapSeconds;
+        /** The offset, in seconds. */
+        private currentSeconds;
+        /** The local clock at the last update, or NaN before the first. */
+        private lastUpdateSeconds;
+        /**
+         * Creates the offset.
+         * @param increaseRate Most seconds the offset may grow per elapsed second.
+         * @param decreaseRate Most seconds the offset may shrink per elapsed second.
+         * @param snapSeconds A target further than this from the offset is taken at once.
+         */
+        constructor(increaseRate: number, decreaseRate: number, snapSeconds: number);
+        /** True once the offset has a value. */
+        get hasValue(): boolean;
+        /** The offset, in seconds (0 before the first update). */
+        get valueSeconds(): number;
+        /**
+         * Moves the offset towards a target. Several updates at the same local time move it once.
+         * @param targetSeconds The offset it should reach.
+         * @param nowSeconds The local clock.
+         * @returns The offset after the update.
+         */
+        update(targetSeconds: number, nowSeconds: number): number;
+        /** Forgets the offset. */
+        reset(): void;
+    }
+    /**
+     * The timeline one sender's Shared-mode state arrives on (A6): every frame's stamp (the sender's session time of the
+     * tick it carries) minus the local time it arrived. Objects the sender holds are drawn on it, an interpolation delay
+     * behind, so the newest snapshot is always ahead of the drawn time whatever the two-hop trip through the session
+     * costs. The delay is one send interval plus a few deviations of the arrival times (at least two send intervals), and
+     * the drawn timeline eases into a new delay instead of jumping.
+     */
+    class NetworkArrivalClock {
+        /** Weight of a new sample in the mean arrival offset and its deviation. */
+        private static readonly SMOOTHING;
+        /** Deviations of the arrival times the delay covers beyond one send interval. */
+        private static readonly JITTER_DEVIATIONS;
+        /** Send intervals the delay always covers. */
+        private static readonly MINIMUM_SEND_INTERVALS;
+        /** A sample this far from the mean, in seconds, restarts the clock (the sender paused, or its clock was reset). */
+        private static readonly RESTART_SECONDS;
+        /** How fast the drawn timeline catches up when the delay shrinks: 2 % faster than real time. */
+        private static readonly CATCH_UP_RATE;
+        /** How fast the drawn timeline falls back when the delay grows: 8 % slower than real time. */
+        private static readonly FALL_BACK_RATE;
+        /** Mean of the stamps minus their arrival times, in seconds. */
+        private meanOffsetSeconds;
+        /** Smoothed variance of the samples around the mean, in seconds squared. */
+        private varianceSeconds;
+        /** Samples taken. */
+        private sampleCount;
+        /** The delay of the last render time, in seconds. */
+        private lastDelaySeconds;
+        /** The drawn timeline's offset from the local clock (mean offset minus delay), eased. */
+        private readonly renderOffset;
+        /** True once a sample was taken. */
+        get hasSamples(): boolean;
+        /** Standard deviation of the arrival times, in seconds. */
+        get jitterSeconds(): number;
+        /** The interpolation delay of the last render time, in seconds. */
+        get delaySeconds(): number;
+        /**
+         * Takes one arrival.
+         * @param stampSeconds The frame's stamp on the session clock, in seconds.
+         * @param arrivalSeconds The local clock when the frame arrived.
+         */
+        addSample(stampSeconds: number, arrivalSeconds: number): void;
+        /**
+         * The time the sender's objects are drawn at now.
+         * @param nowSeconds The local clock.
+         * @param sendIntervalSeconds The sender's send interval, in seconds.
+         * @param minimumDelaySeconds The shortest delay allowed.
+         * @param maximumDelaySeconds The longest delay allowed.
+         * @returns Seconds on the session clock.
+         */
+        renderTimeSeconds(nowSeconds: number, sendIntervalSeconds: number, minimumDelaySeconds: number, maximumDelaySeconds: number): number;
+        /** Forgets every sample. */
+        reset(): void;
+    }
 }
 declare namespace TOOLKIT {
     /**
@@ -19911,6 +20013,10 @@ declare namespace TOOLKIT {
         private static readonly TICK_EPSILON_SECONDS;
         /** Milliseconds per second. */
         private static readonly MILLISECONDS_PER_SECOND;
+        /** Most a Shared stamp's clock offset changes per elapsed second, so a new clock estimate never steps the stamps. */
+        private static readonly STAMP_OFFSET_RATE;
+        /** A Shared stamp clock offset further than this from its target, in seconds, is taken at once (dropped ticks). */
+        private static readonly STAMP_OFFSET_SNAP_SECONDS;
         /** Registered class name of the network identity component. */
         private static readonly NETWORK_OBJECT_CLASS;
         /** The runner this simulation drives. */
@@ -19951,6 +20057,10 @@ declare namespace TOOLKIT {
         private spawnCounter;
         /** The tick of the last Shared-mode state send. */
         private lastSharedSendTick;
+        /** Shared-mode stamps: the session time of tick 0 on this peer's tick timeline, eased so a new clock estimate never steps. */
+        private readonly sharedStampOffset;
+        /** Shared mode: the arrival timeline of each sender's state, by player id. */
+        private readonly arrivalClocks;
         /** The last rendered frame's length, in seconds. */
         private lastFrameDeltaSeconds;
         /** The local clock when the accumulator was last advanced, in seconds (the server tick clock's reference). */
@@ -20214,12 +20324,16 @@ declare namespace TOOLKIT {
          * Applies one received frame by its kind.
          * @param sourcePlayerId The sending player.
          * @param frame The frame.
+         * @param receivedSeconds The local clock when it arrived, or undefined when that says nothing (a held frame).
          */
         private applyFrame;
         /**
          * Applies a SharedState frame (T6 step 2): an unknown object with spawn fields is acquired and spawned as a proxy;
-         * a known object the local peer does not hold takes the block as its newest remote snapshot and live words.
+         * a known object the local peer does not hold takes the block as its newest remote snapshot and live words. A frame a
+         * player sent (not one the session replays from its store) also times that player's arrival clock.
          * @param frame The frame.
+         * @param sourcePlayerId The sending player (0 for the session itself).
+         * @param receivedSeconds The local clock when it arrived, or undefined when that says nothing (a held frame).
          */
         private applySharedState;
         /**
@@ -20296,11 +20410,35 @@ declare namespace TOOLKIT {
         private sendSharedDespawn;
         /**
          * Shared send (T6 step 1, D12): at the client send rate, one SharedState frame with the full words of every object
-         * this peer holds that changed since its last send (spawn fields the first time), stamped with the sender's
-         * estimate of the session clock.
+         * this peer holds that changed since its last send (spawn fields the first time), stamped with the session time of
+         * the tick the words hold (see {@link sharedStampSeconds}).
          * @param nowSeconds The local clock.
          */
         private sendSharedState;
+        /**
+         * The session time of the newest tick, for a Shared stamp. The words a frame carries were simulated for the
+         * newest tick, which lies the unsimulated accumulator time before now, so stamping the send moment would put every
+         * pose up to a tick off its time and a receiver would draw the object speeding up and slowing down. The tick
+         * timeline is mapped to the session clock through an offset that eases into each new clock estimate instead of
+         * stepping with it.
+         * @param nowSeconds The local clock.
+         * @returns Seconds on the session clock.
+         */
+        private sharedStampSeconds;
+        /**
+         * Internal: a Shared sender's arrival clock, created on first use.
+         * @param playerId The sender's player id.
+         * @returns The clock.
+         */
+        getArrivalClock(playerId: number): TOOLKIT.NetworkArrivalClock;
+        /**
+         * Internal: a Shared sender's arrival clock once it has timed a frame.
+         * @param playerId The sender's player id.
+         * @returns The clock, or null before that sender's first frame.
+         */
+        findArrivalClock(playerId: number): TOOLKIT.NetworkArrivalClock | null;
+        /** Internal: every Shared sender's arrival clock that has timed a frame. */
+        get activeArrivalClocks(): TOOLKIT.NetworkArrivalClock[];
         /**
          * One object's Shared block, when this peer holds it and something changed since the last send.
          * @param entry The object's entry.
@@ -20766,6 +20904,30 @@ declare namespace TOOLKIT {
          * interpolation delay (D15, A6). A server, host or Single peer draws everything locally.
          */
         get remoteRenderTime(): number;
+        /**
+         * Time one object on the Remote timeframe is drawn at, in seconds. In Shared mode an object is drawn on the arrival
+         * timeline of its state authority's frames (NetworkArrivalClock): the session clock would put the drawn time ahead of
+         * every snapshot whenever the two-hop trip through the session is longer than the delay, and the object would stop
+         * on its newest snapshot and jump at each arrival. Everywhere else, and before the holder's first frame, it is
+         * {@link remoteRenderTime}.
+         * @param networkObject The object.
+         * @returns Seconds on the session clock.
+         */
+        remoteRenderTimeOf(networkObject: TOOLKIT.NetworkObject | null): number;
+        /**
+         * The interpolation delay one object is drawn with, in seconds: its sender's arrival delay in Shared mode, else
+         * {@link interpolationDelaySeconds}.
+         * @param networkObject The object.
+         * @returns The delay.
+         */
+        interpolationDelaySecondsOf(networkObject: TOOLKIT.NetworkObject | null): number;
+        /**
+         * The arrival clock an object is drawn on: its state authority's, in a Shared session, once that player's frames
+         * arrived; null otherwise.
+         * @param networkObject The object.
+         * @returns The clock, or null.
+         */
+        private findSenderArrivalClock;
         /**
          * The remote interpolation delay (D15): max(2 send intervals, 1 send interval + 2 jitter deviations), clamped to
          * the configured minimum and maximum. Shared peers receive at the client send rate.
@@ -21610,6 +21772,8 @@ declare namespace TOOLKIT {
         private predictionCorrectionPending;
         /** The server tick of the newest remote snapshot the last extrapolated pose started from, or -1. */
         private extrapolationBaseTick;
+        /** The server tick of the snapshot an interpolated pose last coasted from (a late next snapshot), or -1. */
+        private underrunBaseTick;
         /** The pose drawn before a rewind, offset included (T12.1). */
         private readonly correctionPose;
         /** Scratch: an extrapolation from the previous newest snapshot. */
@@ -21806,12 +21970,25 @@ declare namespace TOOLKIT {
          */
         private sampleLocalPose;
         /**
-         * Samples the Remote timeframe from authoritative snapshots at the runner's remote render time: interpolated
+         * Samples the Remote timeframe from authoritative snapshots at the object's remote render time: interpolated
          * (Linear or Hermite) or extrapolated per renderMode (D16). Before any snapshot the live words are drawn.
          * @param result Receives the pose.
          * @returns True when the sample crosses a teleport (the newer pose is used as is).
          */
         private sampleRemotePose;
+        /**
+         * Samples an interpolated remote pose at a render time. When the render time has passed the newest snapshot (the
+         * next one is late), the object coasts on the newest snapshot's motion for up to
+         * NETWORK_UNDERRUN_EXTRAPOLATION_SECONDS instead of stopping on it; once a newer snapshot arrives, the difference
+         * between the coasted pose and the new sample at the same time goes into the error correction, so the object
+         * slides onto the late snapshot and the motion expected between frames is never counted as a jump.
+         * @param result Receives the pose.
+         * @param renderTime The render time, in seconds.
+         * @returns True when the sample crosses a teleport (the newer pose is used as is).
+         */
+        private sampleInterpolatedPose;
+        /** @returns The time this object is drawn at on the Remote timeframe, in seconds (its holder's arrival timeline in Shared mode). */
+        private remoteRenderTimeNow;
         /**
          * Samples an extrapolated remote pose (D16): from the newest snapshot B to the estimated session time,
          * p = pB + vB·dt + ½·a·dt² with a = (vB − vA) / Δt (its length capped at MAX_EXTRAPOLATION_ACCELERATION), dt clamped
@@ -21829,6 +22006,7 @@ declare namespace TOOLKIT {
          * @param index The snapshot's chronological index.
          * @param sessionTime The session time to extrapolate to, in seconds.
          * @param result Receives the pose.
+         * @param maximumSeconds Longest extrapolation past the snapshot, in seconds (maxExtrapolationSeconds by default).
          */
         private extrapolateSnapshotToRef;
         /**
@@ -22481,6 +22659,12 @@ declare namespace TOOLKIT {
          * @returns The depth (0 when nothing is drawn from snapshots).
          */
         private static remoteBufferDepth;
+        /**
+         * The longest interpolation delay remote objects are drawn with: in Shared mode the largest sender arrival delay.
+         * @param runner The runner.
+         * @returns The delay, in seconds.
+         */
+        private static largestInterpolationDelay;
     }
 }
 declare namespace TOOLKIT {
@@ -55237,7 +55421,7 @@ declare namespace TOOLKIT {
         manifestUrl: string;
         /** Folder the manifest's paths resolve against; defaults to the manifest's folder. */
         baseUrl?: string;
-        /** True for the app shell root (D23): always updated automatically, announced by the shell toast. */
+        /** True for the app shell root (D23): its updates follow the update policy like content (offered under "prompt"). */
         isAppShell?: boolean;
     }
     /** Options for ContentInstaller.Initialize. */
@@ -55250,7 +55434,7 @@ declare namespace TOOLKIT {
         workerScope?: string;
         /** What to store (default "as-you-play"). */
         installPolicy?: ContentInstallPolicy;
-        /** How content updates are taken (default "prompt"; the app shell root is always automatic). */
+        /** How updates are taken, the app shell's included (default "prompt": nothing downloads until the host accepts). */
         updatePolicy?: ContentUpdatePolicy;
         /** True to run on localhost and private network hosts too (default false: a dev session behaves as before). */
         enableOnLocalHost?: boolean;
@@ -55675,7 +55859,8 @@ declare namespace TOOLKIT {
          */
         static CheckForUpdates(): Promise<TOOLKIT.IContentUpdateInfo[]>;
         /**
-         * Downloads the pending version's delta for the installed groups in the background; resolves true when updateReady.
+         * Downloads the pending version's delta for the installed groups in the background, the app shell's included (a
+         * stored shell is then announced by `shellUpdateReady`); resolves true when every pending update is stored.
          * A follower tab does not download; it returns the leader's mirrored `updateReady`.
          * @returns True when every pending update is completely stored.
          */
@@ -55782,9 +55967,12 @@ declare namespace TOOLKIT {
         /** Runs every request this tab forwarded to a leader that closed before answering. */
         private static replayForwardedRequests;
         /**
-         * Leader start-up work: resume requested groups, install everything under that policy, run update policies. The
-         * start-up installs skip roots with a pending version: the server no longer sends the active version's changed files,
-         * so they would only fail; those groups install once the update is applied.
+         * Leader start-up work: install everything under that policy, run update policies. Nothing else downloads on its
+         * own: a group the player asked for on an earlier visit and that did not finish is not resumed at page start (the
+         * host offers it again); only a tab taking over from a leader that closed mid-download resumes it
+         * (`resumeInterruptedRequests`). The start-up installs skip roots with a pending version: the server no longer
+         * sends the active version's changed files, so they would only fail; those groups install once the update is applied.
+         * @param resumeInterruptedRequests - True when this tab took over from a leader that closed.
          */
         private static startLeaderWork;
         /** Queues every requested group that is not installed (never an evicted one: eviction un-requests it), skipping roots with a pending version. */
@@ -55863,7 +56051,7 @@ declare namespace TOOLKIT {
          */
         private static isValidManifest;
         /**
-         * Returns a root's effective update policy (the app shell is always automatic, D19).
+         * Returns a root's effective update policy: the installer's policy for every root, the app shell's included.
          * @param root - The root.
          * @returns The policy.
          */
@@ -56394,6 +56582,12 @@ declare namespace TOOLKIT {
          */
         private static isPendingReady;
         /**
+         * Describes the pending updates of several roots as one offer: the first root's versions, every root's delta summed.
+         * @param roots - Roots with a pending manifest (at least one).
+         * @returns The update info.
+         */
+        private static combinedUpdateInfo;
+        /**
          * Describes a root's pending update.
          * @param root - A root with a pending manifest.
          * @returns The update info.
@@ -56406,7 +56600,7 @@ declare namespace TOOLKIT {
          */
         private static downloadUpdateFor;
         /**
-         * Leader: downloads and accepts the updates of automatic roots (the app shell always; content roots under the
+         * Leader: downloads and accepts the updates of automatic roots (every root, the app shell's included, under the
          * automatic policy). Prompt and manual roots wait for the host.
          */
         private static runUpdatePolicies;
