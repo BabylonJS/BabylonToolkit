@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.1 - R1) */
+        /** Gets the toolkit framework version string (9.35.101 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -62,6 +62,8 @@ declare namespace TOOLKIT {
         private static FPSFrameRateLine;
         /** The counter's second line, `NN.NN ms`. */
         private static FPSFrameTimeLine;
+        /** The counter's third line, the graphics backend of the followed engine (`WebGPU`, `WebGL 2`, `WebGL 1` or `Native`). */
+        private static FPSEngineLine;
         /** The engine the visible counter reads; null while hidden, so no engine is held past a hide or a dispose. */
         private static FPSCounterEngine;
         /** The counter's end-of-frame observer on `FPSCounterEngine` (null while hidden). */
@@ -566,7 +568,7 @@ declare namespace TOOLKIT {
         static GetAnimationRatio(scene: BABYLON.Scene): number;
         /**
          * Shows or hides an Unreal Engine `stat fps` style frame counter: the average frame rate over the average frame
-         * time, coloured green, yellow or red against `FPSTargetFrameTime` / `FPSUnacceptableFrameTime`. It reads what
+         * time over the engine's graphics backend (`WebGPU`, `WebGL 2`, `WebGL 1` or `Native`), coloured green, yellow or red against `FPSTargetFrameTime` / `FPSUnacceptableFrameTime`. It reads what
          * BabylonJS already measures every frame, refreshes every `FPSRefreshInterval` ms and does no work while hidden.
          * Calling it again while showing moves the one counter (an omitted corner means `TopRight`) or follows another
          * engine; it never adds a second counter. Without a `document` (headless runtime) or an engine it logs one
@@ -592,7 +594,7 @@ declare namespace TOOLKIT {
          * @returns Milliseconds per frame, or 0 without an engine or before a valid measurement.
          */
         static GetAverageFrameMilliseconds(engine?: BABYLON.AbstractEngine): number;
-        /** Creates the counter element and its two lines once, and (re)attaches it to the page body when it is detached. */
+        /** Creates the counter element and its three lines once, and (re)attaches it to the page body when it is detached. */
         private static CreateFPSCounterElement;
         /**
          * Returns a valid corner: an omitted corner is `TopRight`; an unknown value is `TopRight` with one warning.
@@ -607,7 +609,14 @@ declare namespace TOOLKIT {
          */
         private static PlaceFPSCounter;
         /**
-         * Moves the counter's observers to an engine and refreshes at once, so the counter is never blank.
+         * The graphics backend an engine renders with, for the counter's third line. An engine never changes backend,
+         * so it is written once when the counter follows the engine, never per refresh.
+         * @param engine The engine to name.
+         * @returns `WebGPU`, `Native`, or `WebGL 2` / `WebGL 1` from the engine's WebGL version.
+         */
+        private static GetGraphicsBackendName;
+        /**
+         * Moves the counter's observers to an engine, names its graphics backend and refreshes at once, so the counter is never blank.
          * @param engine The engine to follow.
          */
         private static FollowFPSEngine;
@@ -12066,6 +12075,28 @@ declare namespace TOOLKIT {
         uiTextureSize: number[];
         uiScreen: number[];
         private constructor();
+        /**
+         * Engine uniforms the material host declares itself, which the transpiler can reference from a pass program without
+         * declaring: each with its SgPass type, GLSL type, WGSL type and the value the pass host binds by default.
+         */
+        private static readonly ImplicitUniforms;
+        /**
+         * Repairs a generated pass whose GLSL / WGSL references an engine uniform (ImplicitUniforms) that its `uniforms` list and
+         * shader declarations leave out. Toolkit 9.35.1 transpiles a Fullscreen graph's Position node to `g_sgOriginOffset` without
+         * declaring it, so the WGSL module fails to parse, the pipeline is invalid and WebGPU rejects every frame (a blank canvas).
+         * @param className The generated class name, for the one-time warning.
+         * @param data The generated class's SgPass block (never modified).
+         * @returns The same block when nothing is missing, otherwise a copy with each missing uniform listed, declared and defaulted.
+         */
+        private static DeclareImplicitUniforms;
+        /**
+         * Inserts uniform declarations after a shader's last top-level `uniform` line, or before its entry point when it has none.
+         * @param source The shader source.
+         * @param declarations The declaration lines to insert (each ending in a newline).
+         * @param entryPoint The text that opens the entry point, the fallback insertion point.
+         * @returns The source with the declarations inserted, or unchanged when it is empty.
+         */
+        private static InsertAfterUniforms;
         /** The generated class by name (TOOLKIT.Utilities.InstantiateClass), or the class itself. */
         static ResolveClass(klassOrName: any): any;
         /** D49: wrap a generated Pass data class (reads klass.SgInfo + klass.SgPass); null when it is not one. */
@@ -13837,6 +13868,23 @@ declare namespace TOOLKIT {
          * @returns the transform node that was duplicated
          */
         static CloneAssetContainerItem(container: BABYLON.AssetContainer, assetName: string, nameFunction?: (sourceName: string) => string, newParent?: BABYLON.Nullable<BABYLON.TransformNode>, makeNewMaterials?: boolean, cloneAnimations?: boolean, createInstancedMesh?: BABYLON.Nullable<boolean>): BABYLON.TransformNode;
+        /** The root node of every prefab copy made at run time (CloneAssetContainerItem, CreateInstancedModelsFromContainer). */
+        private static readonly PrefabInstanceRoots;
+        /**
+         * Records a node as the root of one prefab copy, so references inside that copy resolve among its own nodes even
+         * when several copies share a parent (FindPrefabInstanceRoot). The prefab spawn functions call it. (Internal Use Only)
+         * @param root defines the root node of the copy
+         */
+        static MarkPrefabInstanceRoot(root: BABYLON.Node): void;
+        /**
+         * The root of the prefab copy a node belongs to: the nearest ancestor (or the node itself) a prefab spawn marked as
+         * a copy root. Design-time references inside a copy (`metadata.toolkit.sourceid`) resolve among this node and its
+         * descendants. Copies parented under one shared node (a race holder, a spawn group) therefore never resolve into a
+         * sibling copy. Without a marked ancestor it is the topmost ancestor, as before.
+         * @param node defines the node to start from
+         * @returns the copy root, or the topmost ancestor when the node is in no marked copy (null when node is null)
+         */
+        static FindPrefabInstanceRoot(node: BABYLON.Node): BABYLON.Node;
         /**
          * Gives one copied node its per-copy identity. Records the design time node id as sourceid (copies get brand
          * new node ids, so serialized guid references can only be resolved back to copied nodes through it), then
@@ -27617,6 +27665,16 @@ declare namespace TOOLKIT {
         private static SharedContext;
         /** `true` once the context has been attempted and refused, so it is not retried every frame. */
         private static ContextUnavailable;
+        /**
+         * The one gain every voice plays through on its way to the speakers. It follows the toolkit's master volume and
+         * mute (`TOOLKIT.AudioSource.SetMasterVolume` / `SetMasterMuted`), which never reach this context otherwise:
+         * the audio engine's volume applies to the engine's own context only.
+         */
+        private static MasterGainNode;
+        /** The master-gain subscription, removed with the context. */
+        private static MasterGainObserver;
+        /** How quickly the master gain glides to a new value, seconds: a step would click. */
+        private static readonly MASTER_GAIN_GLIDE_SECONDS;
         /** Seconds of audible life left in the current start. `Infinity` while looping. */
         private remaining;
         private readonly waveform;
@@ -27649,6 +27707,30 @@ declare namespace TOOLKIT {
          * as "the browser said no".
          */
         private static GetContext;
+        /**
+         * The master gain the voices play at now, for tests and diagnostics.
+         * @returns The master gain node's current value, or 1 while there is no context (nothing plays then).
+         */
+        static GetMasterOutputGain(): number;
+        /**
+         * Creates the master gain on a new context, starting at the toolkit's master gain, and keeps it there.
+         * Without one (a refused node), voices fall back to the speakers directly, as before.
+         * @param context The shared synth context.
+         */
+        private static CreateMasterGain;
+        /** Unsubscribes and disconnects the master gain. Safe when there is none. */
+        private static ReleaseMasterGain;
+        /**
+         * The toolkit's master gain.
+         * @returns `TOOLKIT.AudioSource.GetMasterGain()`, or 1 where the toolkit has no master volume (a stubbed TOOLKIT).
+         */
+        private static ReadToolkitMasterGain;
+        /**
+         * Finds the toolkit's AudioSource class when it carries the master volume. Read at call time, never at load:
+         * the karting kit loads before the rest of the toolkit's `pro` classes in the bundle.
+         * @returns The class, or null in a stubbed TOOLKIT without it.
+         */
+        private static FindToolkitAudioSource;
         /** Drops the shared context. Called by tests and by a full scene teardown. */
         static ResetContext(): void;
         play(): void;
@@ -30016,6 +30098,8 @@ declare namespace TOOLKIT {
     const KART_DRIFT_BRAKE_FLOOR_FRACTION: number;
     /** Rate the Drift Brake pulls `currentspeed` toward its floor, per second. 0 restores Unity's full brake. */
     const KART_DRIFT_BRAKE_RATE: number;
+    /** The brake's dt-less fraction per 50 Hz step while the kart still rolls forward: half of Unity's (0.75/s). */
+    const KART_FORWARD_BRAKE_FRACTION_PER_STEP: number;
     /**
      * One step of the Drift Brake: `currentSpeed` approaches `floorFraction × maxSpeed` at `ratePerSecond`, and a speed
      * already at or below the floor is left as it is (the Drift Brake slows, it never speeds a kart up or reverses it).
@@ -30754,6 +30838,15 @@ declare namespace TOOLKIT {
         driftBrakeRate: number;
         /** The Drift Brake's floor as a fraction of `max_speed` (0 to 1). See `KART_DRIFT_BRAKE_FLOOR_FRACTION`. */
         driftBrakeFloorFraction: number;
+        /**
+         * The brake's dt-less fraction per 50 Hz step toward the reverse speed while the kart still rolls forward (outside
+         * the Drift Brake). Once stopped or rolling backwards the source's `BRAKE_FRACTION_PER_STEP` builds the reverse.
+         *
+         * **DEFAULTS TO THE NEW FEEL**: Unity's 0.03 stops the kart from top speed in about 0.64 s, which felt like an
+         * instant stop. Assign `BRAKE_FRACTION_PER_STEP` to restore the source's behaviour. See
+         * `KART_FORWARD_BRAKE_FRACTION_PER_STEP`.
+         */
+        forwardBrakeFractionPerStep: number;
         /**
          * Charge boundaries for the three payout tiers, seconds — ascending.
          *
@@ -40947,7 +41040,8 @@ declare namespace TOOLKIT {
         get isBound(): boolean;
         /**
          * D4 rule: the node a reference names. Inside a prefab clone (the owner carries `metadata.toolkit.sourceid`) it is the
-         * root ancestor or a descendant with that design-time id; otherwise the scene node with that id.
+         * clone's own root (`Utilities.FindPrefabInstanceRoot`) or a descendant with that design-time id, so clones that share
+         * a parent never bind each other's nodes; otherwise the scene node with that id.
          * @param owner The Animator's node.
          * @param reference The exported reference, or null.
          * @returns The node, or null when the reference is null or the node is missing.
@@ -41163,10 +41257,8 @@ declare namespace TOOLKIT {
         private static packColor;
         /** The design-time id a prefab clone recorded on a node, or null for a node that is not a clone. */
         private static getSourceId;
-        /** The topmost ancestor of a node (the node itself when it has no parent). */
-        private static findRootAncestor;
         /**
-         * Per prefab instance root: design-time id → node, from one hierarchy walk. resolveNode runs once per human bone,
+         * Per prefab instance root (`Utilities.FindPrefabInstanceRoot`): design-time id → node, from one hierarchy walk. resolveNode runs once per human bone,
          * curve and clip of every Animator; walking the whole instance for each lookup was 1.6 s of a cold race load
          * (8 rigged karts). `fresh` is true until the current synchronous pass ends, so a miss inside one bind pass does not
          * walk the instance again, while a node added later is still found.
@@ -43222,6 +43314,15 @@ declare namespace TOOLKIT {
         private static AUDIO_ENGINE_V2;
         /** The engine creation in flight, so concurrent first calls share one engine (and one AudioContext). */
         private static AUDIO_ENGINE_V2_PENDING;
+        /** The master volume the game set, from 0 to 1. Kept while muted, so unmuting restores it. */
+        private static MasterVolume;
+        /** True while every toolkit output is muted. */
+        private static MasterMuted;
+        /**
+         * Notifies the outputs that are not on the toolkit's audio engines (KartSynthVoice, WebVideoPlayer) with the new
+         * master gain, from 0 to 1, each time the master volume or mute changes.
+         */
+        static readonly OnMasterGainChangedObservable: BABYLON.Observable<number>;
         /** Unity's AudioSource.Play restarts its single voice: a looping clip never plays two overlapping copies. */
         private static readonly LOOPING_MAX_INSTANCES;
         /** One-shots may overlap (PlayOneShot-style retriggers), as Babylon's StaticSound allows by default. */
@@ -43505,6 +43606,46 @@ declare namespace TOOLKIT {
         static UnlockLegacyAudio(): void;
         /** Unlocks The Current Audio Engine */
         static UnlockAudioEngine(): Promise<void>;
+        /**
+         * Sets the master volume every sound the toolkit plays is scaled by: the audio engine, the legacy audio engine,
+         * the karting synth voices and video players. The runtime does not save it; the game owns that.
+         * @param volume From 0 (silent) to 1 (full, the default). Clamped; a non-finite value is ignored.
+         */
+        static SetMasterVolume(volume: number): void;
+        /**
+         * Gets the master volume.
+         * @returns The master volume, from 0 to 1, whether or not muted.
+         */
+        static GetMasterVolume(): number;
+        /**
+         * Mutes or unmutes every sound the toolkit plays, keeping the master volume for when it comes back.
+         * @param muted True to mute.
+         */
+        static SetMasterMuted(muted: boolean): void;
+        /**
+         * Tells whether the master is muted.
+         * @returns True while every toolkit output is muted.
+         */
+        static IsMasterMuted(): boolean;
+        /**
+         * Gets the gain every toolkit output plays at.
+         * @returns 0 while muted, otherwise the master volume.
+         */
+        static GetMasterGain(): number;
+        /** Applies the master gain to the audio engine, the legacy audio engine and every observer of the change. */
+        private static ApplyMasterGain;
+        /**
+         * Sets one audio engine's output volume to the master gain. Uses the `volume` property, not `setVolume`: the
+         * property is stored and applied when the engine's main output initializes, while `setVolume` throws until then
+         * and leaves `volume` reading the old value.
+         * @param engine The toolkit's audio engine.
+         */
+        private static ApplyEngineMasterGain;
+        /**
+         * Sets the legacy audio engine's global volume to the master gain, when a legacy engine exists.
+         * @param masterGain The gain, from 0 to 1.
+         */
+        private static ApplyLegacyMasterGain;
         /** Attach Audio Spatial Camera */
         static AttachSpatialCamera(node: BABYLON.Node): Promise<void>;
         /**
@@ -67253,7 +67394,8 @@ declare namespace TOOLKIT {
         static GetCameraOwner(scene: BABYLON.Scene): TOOLKIT.PlayableDirector;
         /**
          * Resolves an exported object reference to its node (D17). A director inside a prefab clone (its node carries
-         * metadata.toolkit.sourceid) resolves among its own instance: the root ancestor and its descendants, matched by
+         * metadata.toolkit.sourceid) resolves among its own instance: the clone root (`Utilities.FindPrefabInstanceRoot`, so
+         * clones that share a parent stay apart) and its descendants, matched by
          * their recorded design-time id. Any other director resolves by node id in the scene.
          * @param director The director that owns the reference.
          * @param reference The exported reference ({ id }), or null.
@@ -67264,8 +67406,6 @@ declare namespace TOOLKIT {
         private static RemoveClaimant;
         /** @returns The design-time id a prefab clone recorded on the node, or null for a node that is not a clone. */
         private static GetSourceId;
-        /** @returns The topmost ancestor of the node (the node itself when it has no parent). */
-        private static FindRootAncestor;
         /** @returns The transform node among the root and its descendants whose recorded design-time id is sourceId, or null. */
         private static FindInInstance;
     }
@@ -94546,6 +94686,8 @@ declare namespace TOOLKIT {
         private videoSourceUrl;
         private videoSettingsRead;
         private _initializedReadyInstance;
+        /** The subscription that keeps the element's volume on the toolkit's master gain, removed with the player. */
+        private masterGainObserver;
         getVideoMaterial(): BABYLON.StandardMaterial;
         getVideoTexture(): BABYLON.VideoTexture;
         getVideoElement(): HTMLVideoElement;
@@ -94600,14 +94742,24 @@ declare namespace TOOLKIT {
          */
         unmute(): boolean;
         /**
-         * Gets the video volume
+         * Gets the player's own video volume. The element plays at this volume times the toolkit's master gain
+         * (`TOOLKIT.AudioSource.SetMasterVolume`), which this value leaves out.
+         * @returns The player's volume, from 0 to 1.
          */
         getVolume(): number;
         /**
-         * Sets the video volume
-         * @param volume Define the new volume of the sound
+         * Sets the player's own video volume; the element plays at it times the toolkit's master gain.
+         * @param volume Define the new volume of the sound, from 0 to 1
+         * @returns True when a video element took the new volume now; the volume is kept for the next video either way.
          */
         setVolume(volume: number): boolean;
+        /**
+         * Writes the element's volume: the player's own volume times the toolkit's master gain.
+         * @returns True when there is a video element to write to.
+         */
+        private applyElementVolume;
+        /** Keeps the element's volume on the toolkit's master gain from now on (once per player). */
+        private followMasterGain;
         /** Set video data source */
         setDataSource(source: string | string[] | HTMLVideoElement): void;
         /** Revokes the current video blob url and releases resouces */
