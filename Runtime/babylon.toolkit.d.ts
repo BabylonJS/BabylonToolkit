@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.101 - R1) */
+        /** Gets the toolkit framework version string (9.35.1001 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -43720,6 +43720,92 @@ declare namespace TOOLKIT {
          */
         static BuildTable(keys: number[][]): Float32Array;
         static EvaluateKeys(keys: number[][], t: number): number;
+    }
+    /** The platform facts AudioRingerSwitch.HasSwitch reads; `navigator` has them, a test passes its own. */
+    interface IRingerSwitchDevice {
+        readonly userAgent: string;
+        readonly platform: string;
+        readonly maxTouchPoints: number;
+    }
+    /**
+     * The iPhone / iPad ringer switch and the toolkit's sound.
+     *
+     * iOS mutes Web Audio while the ringer switch is on silent, unless the page is also playing an `<audio>` element.
+     * Babylon's audio engine works around that by looping a hidden silent `<audio>` clip whenever a sound plays. Its clip
+     * is 6 samples long (0.000125 s), so Safari's media player seeks back to the start about 22 times a second, and each
+     * seek stalls the process that also presents the canvas. Measured on an iPhone 16 Pro (iOS 26.6, a race scene, WebGPU
+     * and WebGL2 alike): 24 to 25 FPS with that loop playing, 60 FPS with it paused, the scene's sound audible in both.
+     * The stall follows the loop, not the sound: muting the sound or suspending the audio context changed nothing.
+     *
+     *  - Babylon's loop is therefore always off: GetAudioEngine creates the engine with `disableIOSRingerSwitchWorkaround`,
+     *    and the legacy audio engine (a wrapper around the same engine, with no option for it) is told the same before the
+     *    first tap. A silenced iPhone then plays no toolkit sound, as on any web page.
+     *  - The project setting "Disable Ringer Switch" (scene metadata `disableringerswitch`, off by default) brings the
+     *    sound back on a silenced device: the toolkit then loops SILENCE_SECONDS of silence, started inside a tap. One seek
+     *    every 30 seconds does not show.
+     * @class AudioRingerSwitch - All rights reserved (c) 2024 Mackey Kinard
+     */
+    class AudioRingerSwitch {
+        /** Length of the silent clip the toolkit loops, seconds. */
+        static readonly SILENCE_SECONDS: number;
+        /** Sample rate of the silent clip, hertz (mono, 16 bit). */
+        static readonly SILENCE_SAMPLE_RATE: number;
+        /** Bytes in a WAV header with one format chunk and one data chunk. */
+        static readonly WAV_HEADER_BYTES: number;
+        /** Bytes per sample of 16-bit mono audio. */
+        static readonly BYTES_PER_SAMPLE: number;
+        private static Installed;
+        private static Disabled;
+        private static SilenceUrl;
+        private static Loop;
+        /**
+         * Whether the device has a ringer switch that mutes Web Audio: an iPhone, an iPod touch or an iPad (an iPad reports
+         * itself as a Mac with a touch screen).
+         * @param device The platform facts, usually `navigator`.
+         * @returns True on iOS and iPadOS.
+         */
+        static HasSwitch(device: TOOLKIT.IRingerSwitchDevice): boolean;
+        /**
+         * A copy of the audio engine options with Babylon's own silent loop turned off.
+         * @param options The options to copy; null reads as none.
+         * @returns A new options object; the input is not changed.
+         */
+        static WithoutEngineLoop(options: BABYLON.IWebAudioEngineOptions): BABYLON.IWebAudioEngineOptions;
+        /**
+         * The bytes of a WAV file holding silence (mono, 16 bit).
+         * @param seconds Length of the clip; not finite or not positive gives an empty clip.
+         * @param sampleRate Samples per second.
+         * @returns The whole file, header included.
+         */
+        static SilentWav(seconds: number, sampleRate: number): ArrayBuffer;
+        /**
+         * Tells whether the toolkit's sound plays on a device whose ringer switch is on silent.
+         * @returns True when the project setting "Disable Ringer Switch" is on.
+         */
+        static IsDisabled(): boolean;
+        /**
+         * Sets whether the toolkit's sound plays on a device whose ringer switch is on silent. The scene loader calls this
+         * with the project setting; a game may call it too. Turning it on starts the silent loop with the next tap (iOS
+         * starts a new sound only inside a tap); turning it off stops the loop at once.
+         * @param disabled True to play sound even when the ringer switch is on silent.
+         */
+        static SetDisabled(disabled: boolean): void;
+        /** Listens for taps and page visibility. Runs once, when the toolkit loads in a page. */
+        static Install(): void;
+        /** Keeps the legacy audio engine from creating Babylon's 6-sample loop, and starts the toolkit's loop when it is wanted. */
+        private static OnTap;
+        /** Stops the loop while the page is hidden and plays it again when the page is shown. */
+        private static OnVisibilityChange;
+        /**
+         * Babylon's legacy audio engine wraps the same engine and creates it with no way to pass
+         * `disableIOSRingerSwitchWorkaround`, so the flag is set on that inner engine before its first tap creates the loop.
+         * These two fields are Babylon internals; when a Babylon release renames them this does nothing.
+         */
+        private static QuietLegacyEngine;
+        /** Plays the silent loop, creating it on first use. Outside a tap iOS may refuse; the next tap tries again. */
+        private static StartLoop;
+        /** Pauses the silent loop. */
+        private static StopLoop;
     }
 }
 declare namespace TOOLKIT {
