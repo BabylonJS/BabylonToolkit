@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.1001 - R1) */
+        /** Gets the toolkit framework version string (9.35.1501 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -24749,6 +24749,164 @@ declare namespace TOOLKIT {
          * @returns Its message.
          */
         private static describeError;
+    }
+}
+declare namespace TOOLKIT {
+    /**
+     * A Simple Player driver (Optional)
+     * Makes an exported racer prefab drivable by a person, with no race around it.
+     *
+     * `TOOLKIT.StandardKartController` never reads the keyboard itself: `drive()` is its only input, so a player, an AI
+     * or a replay can all steer it. This component does what BtMarioKartWeb's race modes do at runtime
+     * (`KartSpawner.attachKit`, `PlayerKartDriver`, `RaceCamera.setup`), on the node it is attached to:
+     *   1. turns on the toolkit's user input;
+     *   2. constructs the kart kit on the racer root: StandardKartController (configured with Mario's player rig names),
+     *      and optionally StandardKartEffects, StandardKartAudio and a StandardKartCamera driving the main camera;
+     *   3. every frame, reads the keyboard and gamepad and calls `kart.drive(...)`.
+     *
+     * No race manager is needed: the controller's race gate (`RACE_STARTED`) is open by default.
+     * The road must be a collider tagged `Ground` on a layer the ground probe includes (Default is one).
+     *
+     * Keyboard: W / Up accelerate, S / Down brake and reverse, A / D or Left / Right steer, Space drift / hop / trick.
+     * While gliding, S / Down put the nose up and W / Up put it down.
+     * Gamepad: right trigger accelerate, left trigger or B brake, left stick steer (and glider pitch), A or RB drift.
+     */
+    class BasicKartController extends TOOLKIT.ScriptComponent {
+        /** Registered class name, matched by the C# `[Babylon(Class=...)]` attribute. */
+        static readonly CLASS_NAME: string;
+        /** Gamepad trigger index of the left trigger. */
+        private static readonly LEFT_TRIGGER;
+        /** Gamepad trigger index of the right trigger. */
+        private static readonly RIGHT_TRIGGER;
+        /** Trigger travel below this counts as released. */
+        private static readonly TRIGGER_DEADZONE;
+        /** Stick deflection below this counts as centred. */
+        private static readonly STICK_DEADZONE;
+        /** Left-stick travel past which the stick pitches the glider (the kit's glider pitch is digital). */
+        private static readonly GLIDER_PITCH_STICK_THRESHOLD;
+        /** Glider pitch input: nose up. */
+        private static readonly PITCH_NOSE_UP;
+        /** Glider pitch input: nose down. */
+        private static readonly PITCH_NOSE_DOWN;
+        /** Glider pitch input: neutral. */
+        private static readonly PITCH_NEUTRAL;
+        /** Keys that accelerate. */
+        private static readonly ACCELERATE_KEYS;
+        /** Keys that brake and reverse. */
+        private static readonly BRAKE_KEYS;
+        /** Keys that steer left. */
+        private static readonly STEER_LEFT_KEYS;
+        /** Keys that steer right. */
+        private static readonly STEER_RIGHT_KEYS;
+        /** Keys that drift, hop and trick. */
+        private static readonly DRIFT_KEYS;
+        /**
+         * StandardKartController rig node names of Mario's full player rig (Assets/Prefabs/Racers/Mario.prefab), the same
+         * names BtMarioKartWeb's `RACER_RIG_PROFILE.controller` passes.
+         */
+        private static readonly CONTROLLER_RIG_NAMES;
+        /** The human's drift charge tiers, seconds (BtMarioKartWeb `HUMAN_DRIFT_TIER_TIMES`). */
+        private static readonly HUMAN_DRIFT_TIER_TIMES;
+        /** StandardKartEffects particle node names of Mario's rig (BtMarioKartWeb `RACER_RIG_PROFILE.effects`). */
+        private static readonly EFFECTS_PROPERTIES;
+        /**
+         * StandardKartAudio voice slot → AudioSource node name on Mario's rig (BtMarioKartWeb
+         * `RACER_RIG_PROFILE.voiceSourceNames`). Unmapped slots keep the kit's own fallback.
+         */
+        private static readonly VOICE_SOURCE_NAMES;
+        /** Name of the node the chase camera component lives on. */
+        private static readonly CHASE_RIG_NODE_NAME;
+        /** Name of the driver model node that carries the driver's Animator, from the Unity inspector. */
+        private driverModelName;
+        /** Top speed on the ground, units per second, from the Unity inspector. */
+        private desiredMaxSpeed;
+        /** Top speed while a boost runs, units per second, from the Unity inspector. */
+        private boostSpeed;
+        /** Drive the scene's main camera with the kart chase camera. */
+        private chaseCamera;
+        /**
+         * The main camera's local position under the chase rig's child node, units, from the Unity inspector
+         * (StandardKartCamera `cameraLocalPosition`; Unity Main Camera under Cam: 0, -0.25, -5.0).
+         */
+        private cameraPosition;
+        /** Add the kart particles. */
+        private kartEffects;
+        /** Add the kart and driver sounds. */
+        private kartAudio;
+        /** The kart this component drives; null until `start()` builds it. */
+        private kart;
+        /** The node carrying the chase camera component, or null without a chase camera. */
+        private chaseRigNode;
+        /** Whether the drift input was held last frame; its press is the trick input. */
+        private wasDriftHeld;
+        /**
+         * Creates the component on the racer root.
+         * @param transform The racer root (the exported `Mario` node, carrying its RigidbodyPhysics).
+         * @param scene The scene.
+         * @param properties Exported property bag (the C# public fields).
+         * @param alias Registered class name.
+         */
+        constructor(transform: BABYLON.TransformNode, scene: BABYLON.Scene, properties?: any, alias?: string);
+        /** Reads the exported inspector values. */
+        protected awake(): void;
+        /**
+         * Builds the kart kit once every exported component (the RigidbodyPhysics body included) has woken up. The kit
+         * components are constructed after this one, so this component's `update()` hands the kart its input before the
+         * kart's own update runs, as BtMarioKartWeb's race session does.
+         */
+        protected start(): void;
+        /** Hands the kart this frame's keyboard and gamepad input. */
+        protected update(): void;
+        /** Releases the chase camera rig this component created; the kit components go with the racer node. */
+        protected destroy(): void;
+        /** Turns on the toolkit's keyboard, mouse and gamepad state once; the exported page does not. */
+        private enableUserInput;
+        /**
+         * Builds the StandardKartController property bag: Mario's rig names, the driver Animator node and the speeds.
+         * @returns A fresh property bag (arrays are copies, so two karts never share one).
+         */
+        private buildControllerProperties;
+        /**
+         * Puts a StandardKartCamera on a fresh, unscaled rig node and hands it the scene's main camera, which it then
+         * places behind the kart every frame (BtMarioKartWeb `RaceCamera.setup`).
+         */
+        private attachChaseCamera;
+        /**
+         * Throttle in [-1, 1]: 1 while accelerate is held, -1 for the brake alone, 0 otherwise. While gliding only the
+         * gamepad's right trigger throttles, because the keys pitch the glider then.
+         * @param gliding Whether the kart is gliding this frame.
+         * @returns The throttle for `drive()`.
+         */
+        private static readThrottle;
+        /**
+         * Steering in [-1, 1], positive to the right: the keys are digital, the left stick is analog.
+         * @returns The steering for `drive()`.
+         */
+        private static readSteering;
+        /**
+         * The glider pitch, airplane style: the brake keys or a pulled-back stick put the nose up, the accelerate keys
+         * or a pushed stick put it down.
+         * @returns +1 nose up, -1 nose down, 0 neutral.
+         */
+        private static readGliderPitch;
+        /** @returns True while W / Up or the right trigger is held. */
+        private static isAccelerateHeld;
+        /** @returns True while S / Down, gamepad B or the left trigger is held. */
+        private static isBrakeHeld;
+        /** @returns True while Space, gamepad A or the right bumper is held. */
+        private static isDriftHeld;
+        /**
+         * Tells whether any of the keys is down.
+         * @param keyCodes Toolkit key codes (`TOOLKIT.UserInputKey`).
+         * @returns True when at least one key is held.
+         */
+        private static isAnyKeyDown;
+        /**
+         * Tells whether a gamepad trigger is pulled past the dead zone.
+         * @param trigger Trigger index (0 left, 1 right).
+         * @returns True when pulled.
+         */
+        private static isTriggerPulled;
     }
 }
 declare namespace TOOLKIT {
