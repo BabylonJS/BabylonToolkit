@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.1501 - R1) */
+        /** Gets the toolkit framework version string (9.35.1601 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -2956,7 +2956,9 @@ declare namespace TOOLKIT {
         private ListenerDictionary;
     }
     /**
-     * Global Message Bus (Safe Post Window Message Communication)
+     * Global Message Bus (Safe Post Window Message Communication). It listens and posts on the top browser window when
+     * this page may reach it (see WindowManager.GetReachableTopWindow), so same-site frames share one bus; inside a frame
+     * of another site (a Discord Activity, a partner embed) it stays on this page's own window.
      * @class GlobalMessageBus - All rights reserved (c) 2024 Mackey Kinard
      */
     class GlobalMessageBus {
@@ -3002,6 +3004,8 @@ declare namespace TOOLKIT {
          */
         private OnDispatchMessage;
         private ListenerDictionary;
+        /** The window this bus listens and posts on: the reachable top window, chosen once at construction. */
+        private messageWindow;
     }
     /**
      * Prefab Object Pool
@@ -37207,7 +37211,15 @@ declare namespace TOOLKIT {
         static AlertMessage(text: string, title?: string): any;
         /**  Gets the names query string from page url. */
         static GetQueryStringParam(name: string, url: string): string;
-        /** Post a safe message to the top browser window */
+        /**
+         * The top browser window when this page may reach it, otherwise this page's own window. A page framed by the same
+         * site (a website, a same-site preview frame) gets the top window. A page framed by another site (a Discord
+         * Activity inside discord.com, an embed on a partner site) may not touch that site's window, and the browser
+         * throws a SecurityError on any use of it, so it gets its own window.
+         * @returns The reachable top window, this window, or null where there is no window (a worker or a server).
+         */
+        static GetReachableTopWindow(): Window;
+        /** Post a safe message to the top browser window when this page may reach it, else to this page's own window (see GetReachableTopWindow) */
         static PostWindowMessage(msg: TOOLKIT.IWindowMessage, targetOrigin?: string, localWindow?: boolean): void;
         /** Shows the default page scene loader. */
         static ShowSceneLoader(): void;
