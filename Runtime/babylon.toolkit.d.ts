@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.1601 - R1) */
+        /** Gets the toolkit framework version string (9.35.1606 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -28077,8 +28077,10 @@ declare namespace TOOLKIT {
          */
         private getClipUrl;
         /**
-         * The decoded clip's length. The legacy `BABYLON.Sound` hands its buffer out through `getAudioBuffer()`; a v2
-         * `StaticSound` keeps it on its sound buffer.
+         * The decoded clip's length, read from the v2 `StaticSound`'s sound buffer (on the legacy engine, the inner v2 sound
+         * of the `BABYLON.Sound`). The buffer only exists once the async decode finishes, so this is polled every frame
+         * until then. The legacy `getAudioBuffer()` is not used: it reads `buffer._audioBuffer` unguarded and throws
+         * before the decode — fatal for a remote kart that joins mid-session and ticks its engine audio straight away.
          * @returns Seconds, or 0 while the clip has not decoded.
          */
         private getClipDuration;
