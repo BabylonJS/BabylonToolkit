@@ -7,7 +7,7 @@ declare namespace TOOLKIT {
     * @class SceneManager - All rights reserved (c) 2024 Mackey Kinard
     */
     class SceneManager {
-        /** Gets the toolkit framework version string (9.35.1606 - R1) */
+        /** Gets the toolkit framework version string (9.38.0 - R1) */
         static get Version(): string;
         /** Gets the toolkit framework copyright notice */
         static get Copyright(): string;
@@ -15472,7 +15472,11 @@ declare namespace TOOLKIT {
         ConnectionTimeout = 18,
         ConnectionRefused = 19,
         OperationTimeout = 20,
-        OperationCanceled = 21
+        OperationCanceled = 21,
+        /** Toolkit only: the join carried no valid game id (multiplayer-game-id D2); appended, never renumbered. */
+        GameIdRequired = 22,
+        /** Toolkit only: the join named a different game than the session it reached (multiplayer-game-id D4). */
+        GameIdMismatch = 23
     }
     /** Which peers may call an RPC, as the original API's RpcSources (bit flags). */
     enum RpcSources {
@@ -15842,6 +15846,15 @@ declare namespace TOOLKIT {
         sceneFiles: string[];
         /** Session server URL (default "ws://localhost:2567"). */
         serverUrl: string;
+        /**
+         * The web app's game id, sent with every session and lobby join so only clients of the same game play together
+         * (multiplayer-game-id D3): lowercase letters and digits joined by single dashes, at most 64 characters, e.g.
+         * "bt-mario-kart". Required outside Single mode whenever the runner connects through a ColyseusTransport, its own
+         * or one given as StartGameArgs.transport (per-game-voice-leaderboards D9). Set it through StartGameArgs.gameId,
+         * StartGameArgs.config.gameId or runner.gameId; the scene's NetworkSettings.gameId (authored in Unity) is the last
+         * fallback, so code always wins (per-game-voice-leaderboards D8). Default: "".
+         */
+        gameId?: string;
     }
     /** Result of NetworkRunner.startGame, as the original API's StartGameResult. */
     interface StartGameResult {
@@ -17421,6 +17434,10 @@ declare namespace TOOLKIT {
     const NETWORK_DEDICATED_SCENE_PROPERTY: string;
     /** Path of the game server's public info endpoint (D15). */
     const GAME_SERVER_INFO_PATH: string;
+    /** Query parameter of GAME_SERVER_INFO_PATH naming the asking game, so the answer is that game's (multiplayer-game-id D6). */
+    const GAME_SERVER_INFO_GAME_ID_PARAMETER: string;
+    /** Most characters a game id may have (multiplayer-game-id D1). */
+    const NETWORK_GAME_ID_MAX_LENGTH: number;
     /** Control message: the session welcomes a joining client (NetworkWelcome). */
     const FUSION_CONTROL_WELCOME: string;
     /** Control message: a player joined ({ playerId }). */
@@ -17457,6 +17474,11 @@ declare namespace TOOLKIT {
         authRequired: boolean;
         /** True when players can sign in with Discord (Babylon Game Server discordSignIn). */
         discordSignIn?: boolean;
+        /**
+         * True when the game named by the request's ?gameId= is a Private Demo on this server (multiplayer-game-id D6);
+         * absent for a public game, a request without a game id, or an older server.
+         */
+        privateDemo?: boolean;
     }
     /** The connections a game server accepts. */
     interface GameServerTransports {
@@ -17520,6 +17542,11 @@ declare namespace TOOLKIT {
         hostMigration?: boolean;
         /** The client's NETWORK_PROTOCOL_VERSION (D5). */
         protocolVersion: number;
+        /**
+         * The web app's normalised game id (multiplayer-game-id D3). The server matches sessions by it and refuses a join
+         * without one (GameIdRequired) or into another game's session (GameIdMismatch); "" only on a custom transport.
+         */
+        gameId: string;
         /** Set by the server from the verified token; a client-sent value is overwritten (D12). */
         authIdentity?: Record<string, unknown> | null;
     }
@@ -17731,6 +17758,20 @@ declare namespace TOOLKIT {
         private static readonly BITS_PER_BYTE;
         /** Mask of one byte. */
         private static readonly BYTE_MASK;
+        /** A game id: lowercase ASCII letters and digits in runs joined by single dashes (multiplayer-game-id D1). */
+        private static readonly GAME_ID_PATTERN;
+        /**
+         * Checks a game id against the rule the Babylon Game Server applies (multiplayer-game-id D1): lowercase ASCII
+         * letters and digits joined by single dashes, at most NETWORK_GAME_ID_MAX_LENGTH characters. Nothing is fixed up:
+         * capitals, spaces, leading, trailing or doubled dashes, an empty string or a non-string are all invalid, so one
+         * game can never split into two by a stray character.
+         * @param rawGameId The candidate id, from code or configuration.
+         * @returns The game id when it is valid, else null.
+         * @example
+         * TOOLKIT.NetworkProtocol.normalizeGameId("bt-mario-kart"); // "bt-mario-kart"
+         * TOOLKIT.NetworkProtocol.normalizeGameId("Game A");        // null
+         */
+        static normalizeGameId(rawGameId: unknown): string | null;
         /**
          * Wraps a frame for the room: route byte, uint16 target player, frame (D11).
          * @param route Where the room sends it.
@@ -20658,6 +20699,15 @@ declare namespace TOOLKIT {
         authToken?: string;
         /** Which connection to use (default Auto, D25). */
         transportPreference?: TOOLKIT.NetworkTransportPreference;
+        /**
+         * The web app's game id (multiplayer-game-id D3), sent with every session and lobby join: lowercase letters and
+         * digits joined by single dashes, at most 64 characters. It wins over config.gameId, the runner's gameId and the
+         * scene's NetworkSettings.gameId (per-game-voice-leaderboards D8). Required outside Single mode whenever the start
+         * connects through a ColyseusTransport, the runner's own or one given as transport (D9); a LoopbackTransport or
+         * another custom transport needs none. Without a valid one startGame fails with ShutdownReason.GameIdRequired
+         * before it connects.
+         */
+        gameId?: string;
         /** Overrides the scene's NetworkSettings, which override the defaults (D6). */
         config?: Partial<TOOLKIT.NetworkProjectConfig>;
         /** The game's input struct, as the original API's INetworkInput (D3); default NetworkRunner.setDefaultInputDefinition's. */
@@ -20741,6 +20791,8 @@ declare namespace TOOLKIT {
         private exportedSceneFiles;
         /** Exported serverUrl. */
         private exportedServerUrl;
+        /** Exported gameId ("" when the scene authors none). */
+        private exportedGameId;
         /**
          * Creates the component. The toolkit constructs script components from exported metadata.
          * @param transform The node the component is on.
@@ -20771,6 +20823,12 @@ declare namespace TOOLKIT {
         get sceneFiles(): string[];
         /** Session server URL. */
         get serverUrl(): string;
+        /**
+         * The game id authored on the scene (per-game-voice-leaderboards D8), as exported: not checked here. startGame
+         * uses it only when StartGameArgs.gameId, StartGameArgs.config.gameId and runner.gameId are all unset; "" when
+         * the scene authors none.
+         */
+        get gameId(): string;
         /** Receives the exported bag value. */
         private set tickRate(value);
         /** Receives the exported bag value. */
@@ -20791,6 +20849,8 @@ declare namespace TOOLKIT {
         private set sceneFiles(value);
         /** Receives the exported bag value. */
         private set serverUrl(value);
+        /** Receives the exported bag value. */
+        private set gameId(value);
         /** @returns The authored values as a configuration. */
         toConfig(): TOOLKIT.NetworkProjectConfig;
     }
@@ -20836,6 +20896,8 @@ declare namespace TOOLKIT {
         private static readonly NETWORK_OBJECT_CLASS;
         /** Registered class name of the settings component. */
         private static readonly NETWORK_SETTINGS_CLASS;
+        /** What a startGame without a valid game id logs and reports (multiplayer-game-id D2). */
+        private static readonly GAME_ID_REQUIRED_MESSAGE;
         /** Static RPCs by name hash: a code registry (handlers take the runner), not session state (A16). */
         private static readonly staticRpcs;
         /** The game's input struct for runners started without StartGameArgs.inputDefinition: a code registry, as the original API's INetworkInput type. */
@@ -21001,6 +21063,14 @@ declare namespace TOOLKIT {
         get sessionInfo(): TOOLKIT.SessionInfo;
         /** The merged configuration (defaults < NetworkSettings < StartGameArgs.config). */
         get config(): TOOLKIT.NetworkProjectConfig;
+        /**
+         * The game id this runner sends with every session and lobby join (multiplayer-game-id D3), as the configuration
+         * holds it: once started, the normalised id startGame resolved ("" when none was needed). Set it before startGame
+         * (or before joinSessionLobby) when StartGameArgs carries none.
+         */
+        get gameId(): string;
+        /** Stores the game id in the runner's configuration; ignored with a warning once the runner has started. */
+        set gameId(value: string);
         /** The scene the runner simulates. */
         get scene(): BABYLON.Scene;
         /** The object provider (set at startGame). */
@@ -21241,10 +21311,12 @@ declare namespace TOOLKIT {
         /**
          * Joins the session lobby, as the original API's JoinSessionLobby (T9 step 6): the server's listed sessions arrive through
          * onSessionListUpdated, again after every change, until shutdown. It may be called before startGame. The server is
-         * NetworkProjectConfig.serverUrl (StartGameArgs.config, else the scene's NetworkSettings).
+         * NetworkProjectConfig.serverUrl (StartGameArgs.config, else the scene's NetworkSettings). The lobby lists only the
+         * sessions of this runner's game id (runner.gameId before startGame, multiplayer-game-id D3).
          * @param lobbyName The original API's custom lobby name; this port has one lobby per server, so a name other than the
          * default only logs a warning and the shared lobby is joined.
-         * @throws NetworkError when the Colyseus client is missing or the server cannot be reached.
+         * @throws NetworkError GameIdRequired without a valid game id, or when the Colyseus client is missing or the server
+         * cannot be reached.
          */
         joinSessionLobby(lobbyName?: string): Promise<void>;
         /**
@@ -21517,12 +21589,44 @@ declare namespace TOOLKIT {
         /** Hands physics stepping back to the frame clock. */
         private releasePhysicsControl;
         /**
+         * The normalised game id a start sends (multiplayer-game-id D3, per-game-voice-leaderboards D8): the first one set
+         * of StartGameArgs.gameId, StartGameArgs.config.gameId, the runner's own configuration (runner.gameId) and, last,
+         * the scene's NetworkSettings.gameId, checked by NetworkProtocol.normalizeGameId. Code always wins over the scene.
+         * An empty or missing value falls through to the next; a set but invalid one does not. Outside Single mode a start
+         * that connects through a ColyseusTransport (the runner's own, or one passed as StartGameArgs.transport) needs a
+         * valid id (per-game-voice-leaderboards D9); Single mode, a LoopbackTransport and other custom transports need
+         * none ("" when none is valid).
+         * @param args The start arguments.
+         * @returns The game id, or "" when this start needs none and has no valid one.
+         * @throws NetworkError GameIdRequired (logged with console.error) when the start connects through a
+         * ColyseusTransport and has no valid game id, before any transport connects.
+         */
+        private resolveGameId;
+        /**
+         * Whether a start connects through a ColyseusTransport (per-game-voice-leaderboards D9): outside Single mode, the
+         * runner's own (no StartGameArgs.transport) or one the game created and passed in.
+         * @param args The start arguments.
+         * @returns True when the start needs a game id.
+         */
+        private static connectsThroughColyseus;
+        /**
+         * The first game id candidate that is set: null, undefined and "" count as not set.
+         * @param candidates The candidates, highest priority first.
+         * @returns The first set candidate, or undefined when none is.
+         */
+        private static firstSetGameId;
+        /**
          * Merges the configuration: defaults (D6) < the scene's NetworkSettings (A2) < StartGameArgs.config. Runtime
          * prefabs come only from StartGameArgs.config.
          * @param overrides StartGameArgs.config.
          * @returns The configuration.
          */
         private resolveConfig;
+        /**
+         * The scene's NetworkSettings (A2), awake so its exported values are read.
+         * @returns The settings, or null when no scene node has one.
+         */
+        private findSceneSettings;
         /**
          * A SceneInfo entry for a scene reference.
          * @param scene The reference.
@@ -22868,7 +22972,7 @@ declare namespace TOOLKIT {
      * @example
      * // ESM host: provide the client module once, before startGame.
      * TOOLKIT.ColyseusTransport.ClientModule = await import("@colyseus/sdk");
-     * await runner.startGame({ gameMode: TOOLKIT.GameMode.Shared, sessionName: "race", transport: new TOOLKIT.ColyseusTransport("ws://localhost:2567") });
+     * await runner.startGame({ gameMode: TOOLKIT.GameMode.Shared, sessionName: "race", gameId: "my-game", transport: new TOOLKIT.ColyseusTransport("ws://localhost:2567") });
      */
     class ColyseusTransport implements TOOLKIT.INetworkTransport {
         /** The Colyseus client module an ESM host provides (`await import("@colyseus/sdk")`); null to use globalThis.Colyseus. */
@@ -22945,9 +23049,18 @@ declare namespace TOOLKIT {
          * Reads the game server's public description (GET GAME_SERVER_INFO_PATH, D25). An older server without the
          * endpoint, an unreachable one, a slow one (serverInfoTimeoutMs) or an environment without fetch gives null.
          * @param httpEndpoint The server's HTTP(S) endpoint.
+         * @param gameId The asking game's id, sent as ?gameId= so per-game answers (privateDemo) are that game's
+         * (multiplayer-game-id D6); "" sends no query.
          * @returns The description, or null.
          */
-        static fetchServerInfo(httpEndpoint: string): Promise<TOOLKIT.GameServerInfo | null>;
+        static fetchServerInfo(httpEndpoint: string, gameId?: string): Promise<TOOLKIT.GameServerInfo | null>;
+        /**
+         * The URL of the server's public description, naming the asking game when there is one (multiplayer-game-id D6).
+         * @param httpEndpoint The server's HTTP(S) endpoint.
+         * @param gameId The asking game's id, or "" for none.
+         * @returns GAME_SERVER_INFO_PATH on the endpoint, with ?gameId= when a game id is given.
+         */
+        static serverInfoUrl(httpEndpoint: string, gameId?: string): string;
         /**
          * Tries a WebTransport session to the server and closes it (D25): true when it is ready within
          * webTransportProbeTimeoutMs, false on failure, timeout, or a browser without WebTransport. A server with a pinned
@@ -22963,9 +23076,11 @@ declare namespace TOOLKIT {
          * Server mode.
          * @param request The connect request (sent as the room's join options).
          * @returns The welcome.
-         * @throws NetworkError named after the ShutdownReason that refused the join (GameNotFound when no session matches),
-         * IncompatibleConfiguration when the server speaks another protocol version, ConnectionRefused when WebTransport
-         * was required and is unavailable, InvalidArguments for Server or Single mode, or MISSING_CLIENT_MESSAGE.
+         * @throws NetworkError GameIdRequired, before anything is fetched, when request.gameId is not a valid game id
+         * (per-game-voice-leaderboards D9); otherwise named after the ShutdownReason that refused the join (GameNotFound
+         * when no session matches), IncompatibleConfiguration when the server speaks another protocol version,
+         * ConnectionRefused when WebTransport was required and is unavailable, InvalidArguments for Server or Single mode,
+         * or MISSING_CLIENT_MESSAGE.
          */
         connect(request: TOOLKIT.NetworkConnectRequest): Promise<TOOLKIT.NetworkWelcome>;
         /**
@@ -22990,6 +23105,14 @@ declare namespace TOOLKIT {
         setHandlers(handlers: TOOLKIT.NetworkTransportHandlers): void;
         /** Leaves the room (a consented leave: the session does not hold the slot). */
         disconnect(): Promise<void>;
+        /**
+         * The connect request's game id, checked by NetworkProtocol.normalizeGameId (per-game-voice-leaderboards D9), so a
+         * transport a game created itself, or a direct connect with no runner, never reaches the server without one.
+         * @param request The connect request.
+         * @returns The valid game id.
+         * @throws NetworkError GameIdRequired, logged with console.error, when the id is invalid or missing.
+         */
+        private static requireRequestGameId;
         /**
          * Refuses a game server that speaks another network protocol version (D5); a null description (an older server)
          * is not checked.
@@ -23130,24 +23253,37 @@ declare namespace TOOLKIT {
         private room;
         /** Token sent as a bearer token when joining the lobby (empty: none, D26). */
         private readonly authToken;
+        /** The game whose sessions the lobby lists, as given to the constructor (multiplayer-game-id D3). */
+        readonly gameId: string;
         /**
          * Creates the lobby.
          * @param serverUrl The session server, e.g. "ws://localhost:2567".
          * @param onSessionsChanged Receives the whole session list after every change.
          * @param authToken Token for the server's auth (empty: none).
+         * @param gameId The web app's game id (multiplayer-game-id D3): the server lists only this game's sessions. join()
+         * refuses an invalid or missing one with GameIdRequired, so the parameter is effectively required.
+         * @example
+         * const lobby = new TOOLKIT.ColyseusSessionLobby("wss://game.example.com", (sessions) => showSessions(sessions), authToken, "bt-mario-kart");
          */
-        constructor(serverUrl: string, onSessionsChanged: (sessions: TOOLKIT.SessionInfo[]) => void, authToken?: string);
+        constructor(serverUrl: string, onSessionsChanged: (sessions: TOOLKIT.SessionInfo[]) => void, authToken?: string, gameId?: string);
         /** The listed sessions (a copy). */
         get sessions(): TOOLKIT.SessionInfo[];
         /** True while joined. */
         get isJoined(): boolean;
         /**
-         * Joins the lobby room; the first listing arrives as an onSessionsChanged call.
-         * @throws NetworkError when the Colyseus client is missing or the server cannot be reached.
+         * Joins the lobby room with this lobby's game id ({ gameId }); the first listing arrives as an onSessionsChanged call.
+         * @throws NetworkError GameIdRequired (logged with console.error, before any connection) without a valid game id,
+         * or when the Colyseus client is missing or the server cannot be reached.
          */
         join(): Promise<void>;
         /** Leaves the lobby room and forgets the list. */
         leave(): Promise<void>;
+        /**
+         * The lobby's game id, checked by NetworkProtocol.normalizeGameId (multiplayer-game-id D2).
+         * @returns The valid game id.
+         * @throws NetworkError GameIdRequired, logged with console.error, when the id is invalid or missing.
+         */
+        private requireGameId;
         /**
          * Replaces the list with a full listing.
          * @param listings Every listed room.
@@ -24324,6 +24460,13 @@ declare namespace TOOLKIT {
         requestTimeoutMs?: number;
         /** Most unsent submissions kept on the device; default 50 (the oldest is dropped). */
         maximumPendingSubmissions?: number;
+        /**
+         * The game's id (per-game-voice-leaderboards D6), the same one its network sessions send: lowercase letters and
+         * digits joined by single dashes, at most 64 characters, e.g. "bt-mario-kart". When valid, every request adds
+         * gameId=<id>, so the server shows the boards of this game plus the shared ones. An invalid id is logged once
+         * with console.error and not sent; an empty string counts as none. Default: none.
+         */
+        gameId?: string;
     }
     /** What a game passes at a key stage: its scores and the run's facts; the client adds the rest of the envelope. */
     interface LeaderboardSubmission {
@@ -24407,6 +24550,16 @@ declare namespace TOOLKIT {
         private static readonly NO_FETCH_MESSAGE;
         /** Message of a queued submission. */
         private static readonly QUEUED_MESSAGE;
+        /** The query parameter that names the caller's game (the server reads ?gameId=). */
+        private static readonly GAME_ID_PARAMETER;
+        /** Longest valid game id, in characters (TOOLKIT.NETWORK_GAME_ID_MAX_LENGTH in 09-NetworkProtocol.ts). */
+        private static readonly GAME_ID_MAX_LENGTH;
+        /**
+         * A game id: lowercase ASCII letters and digits in runs joined by single dashes. A private copy of
+         * NetworkProtocol.normalizeGameId's rule (09-NetworkProtocol.ts), because this file references nothing else in
+         * the toolkit and the ESM leaderboardclient module must load without Babylon (D7; per-game-voice-leaderboards D6).
+         */
+        private static readonly GAME_ID_PATTERN;
         /** The server's HTTP(S) address. */
         private readonly endpoint;
         /** The server's auth token, or an empty string to send none (setAuthToken changes it). */
@@ -24421,6 +24574,8 @@ declare namespace TOOLKIT {
         private readonly requestTimeoutMs;
         /** Most unsent submissions kept. */
         private readonly maximumPendingSubmissions;
+        /** The valid game id every request names, or an empty string to name none. */
+        private readonly clientGameId;
         /** The identity as last written, used when the storage is missing or throws. */
         private memoryPlayer;
         /** The unsent submissions as last written, used when the storage is missing or throws. */
@@ -24431,11 +24586,13 @@ declare namespace TOOLKIT {
         private flushInFlight;
         /**
          * Creates a client for one game server. Nothing is sent until a method is called.
-         * @param options The server URL, auth token, build version, storage, fetch and limits.
+         * @param options The server URL, auth token, build version, storage, fetch, limits and game id.
          */
         constructor(options: TOOLKIT.LeaderboardClientOptions);
         /** The server's HTTP(S) address (ws:// → http://, wss:// → https://). */
         get httpEndpoint(): string;
+        /** The game id every request names, or an empty string when the options gave none or an invalid one. */
+        get gameId(): string;
         /** Unsent submissions waiting on this device. */
         get pendingCount(): number;
         /**
@@ -24560,8 +24717,8 @@ declare namespace TOOLKIT {
          */
         private send;
         /**
-         * The full URL of a route.
-         * @param path The route after API_PATH.
+         * The full URL of a route, with gameId=<id> added when the client has a game id (per-game-voice-leaderboards D6).
+         * @param path The route after API_PATH, with or without a query string.
          * @returns The URL.
          */
         private routeUrl;
@@ -24698,6 +24855,20 @@ declare namespace TOOLKIT {
          * @returns "?name=value&…", or an empty string.
          */
         private static queryString;
+        /**
+         * The options' game id when it is valid. An invalid one is logged once with console.error and dropped, because the
+         * client never throws.
+         * @param rawGameId The options' gameId, or undefined.
+         * @returns The game id, or an empty string when none was given (undefined, null or "") or it is invalid.
+         */
+        private static acceptGameId;
+        /**
+         * Checks a game id with NetworkProtocol.normalizeGameId's rule (09-NetworkProtocol.ts): lowercase ASCII letters
+         * and digits joined by single dashes, at most GAME_ID_MAX_LENGTH characters, nothing fixed up.
+         * @param rawGameId The candidate id.
+         * @returns True when it is a valid game id.
+         */
+        private static isValidGameId;
         /**
          * window.localStorage when the page has one and it can be reached.
          * @returns The storage, or null.
